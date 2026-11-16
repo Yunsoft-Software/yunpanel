@@ -1,6 +1,8 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { test, expect, apiContext } from './support.js';
+import { test, expect, apiContext, RUN_DIR } from './support.js';
 import { createOwnedFixture, cleanupOwnedFixture, readOnlyHostProbe } from './owned-fixture.js';
 
 const accepted = (result, status = 200) => { expect(result.status, result.body?.error?.code).toBe(status); return result.data; };
@@ -59,8 +61,74 @@ async function restoreSnapshot(fixture, repositoryId, snapshotId, healthPath = '
   return accepted(await fixture.call('POST', fixture.endpoint('/backup-operations'), { kind: 'restore', ...input, expectedPreviewDigest: preview.previewDigest, confirmation: preview.confirmation }), 202);
 }
 
+// PRIVATE draft: a real client interruption, not a backend crash or historical receipt conflict.
+let interruptionHold=false,interruptionUncertain=false;
+const interruptionSha=value=>createHash('sha256').update(value).digest('hex');
+const interruptionIdentity=f=>Object.fromEntries(['key','runId','nonce','serverId','websiteId','applicationId','domainId','unixUser','documentRoot','hostname'].map(key=>[key,f.ledger[key]]));
+function interruptionTuple(s){return[s.dev,s.ino,s.mode,s.uid,s.gid,s.nlink,s.size,s.mtimeMs,s.ctimeMs];}
+function interruptionReadCheckpoint(file,sha256){
+ const before=fs.lstatSync(file);const fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);
+ try{const first=fs.fstatSync(fd);expect(first.isFile()).toBe(true);expect(first.mode&0o777).toBe(0o600);expect(first.uid).toBe(process.getuid());expect(first.nlink).toBe(1);expect(first.size).toBeGreaterThan(0);expect(first.size).toBeLessThan(65536);expect(interruptionTuple(before)).toEqual(interruptionTuple(first));
+  const buffer=Buffer.alloc(65536),length=fs.readSync(fd,buffer,0,buffer.length,0),bytes=buffer.subarray(0,length);expect(length).toBe(first.size);expect(interruptionTuple(fs.fstatSync(fd))).toEqual(interruptionTuple(first));expect(interruptionTuple(fs.lstatSync(file))).toEqual(interruptionTuple(first));expect(interruptionSha(bytes)).toBe(sha256);return JSON.parse(bytes.toString('utf8'));
+ }finally{fs.closeSync(fd);}
+}
+function interruptionCheckpoint(f,data){
+ const bytes=Buffer.from(JSON.stringify({version:1,identity:interruptionIdentity(f),...data}));expect(bytes.length).toBeLessThan(65536);
+ const file=path.join(RUN_DIR,'t883-client-checkpoint-'+f.ledger.nonce+'-'+randomBytes(6).toString('hex')+'.json');const fd=fs.openSync(file,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|fs.constants.O_NOFOLLOW,0o600);
+ try{fs.writeFileSync(fd,bytes);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}
+ const sha256=interruptionSha(bytes);interruptionReadCheckpoint(file,sha256);f.record('client-interruption.checkpoint',{sha256,websiteId:f.ledger.websiteId,domainId:f.ledger.domainId,contextClosed:false});return{file,sha256};
+}
+async function interruptionMutation(f,method,endpoint,data,status=200){
+ expect(interruptionUncertain,'UNKNOWN_KEEP forbids another mutation').toBe(false);interruptionUncertain=true;const reply=await f.call(method,endpoint,data);const result=accepted(reply,status);if(status!==202)interruptionUncertain=false;return result;
+}
+function interruptionJobBinding(job,expected,terminal=false){
+ expect(Object.fromEntries(['id','serverId','type','operation','resourceType','resourceId','createdAt'].map(key=>[key,job?.[key]]))).toEqual(expected);
+ if(terminal)expect(job.status).toBe('succeeded');return job;
+}
+async function interruptionDomainJob(f,action){
+ const acceptedJob=await interruptionMutation(f,'POST',domainPath(f)+'/'+action,{},202),id=acceptedJob?.id;expect(id).toMatch(/^[a-f0-9-]{36}$/i);expect(Number.isFinite(Date.parse(acceptedJob.createdAt))).toBe(true);
+ const expected=Object.freeze({id,serverId:f.ledger.serverId,type:'domain.'+action,operation:'domain.'+action,resourceType:'domain',resourceId:f.ledger.domainId,createdAt:acceptedJob.createdAt});interruptionJobBinding(acceptedJob,expected);
+ const terminal=await f.waitJob(id,120000);interruptionJobBinding(terminal,expected,true);interruptionUncertain=false;f.record('client-interruption.job',{...expected,status:terminal.status});return expected;
+}
+async function interruptionDomain(f){
+ const value=accepted(await f.call('GET',domainPath(f)));expect(value.id).toBe(f.ledger.domainId);expect(value.serverId).toBe(f.ledger.serverId);expect(value.websiteId).toBe(f.ledger.websiteId);expect(value.primaryDomain).toBe(f.ledger.hostname);return value;
+}
+async function interruptionWebsite(f){
+ const value=accepted(await f.call('GET',f.endpoint()));expect(value.id).toBe(f.ledger.websiteId);expect(value.applicationId).toBe(f.ledger.applicationId);expect(value.serverId).toBe(f.ledger.serverId);expect(value.unixUser).toBe(f.ledger.unixUser);expect(value.documentRoot).toBe(f.ledger.documentRoot);return value;
+}
+async function interruptionConfig(f){const value=readOnlyHostProbe(f,'nginx-config');expect(value.regular).toBe(true);expect(value.symlink).toBe(false);expect(value.uid).toBe(0);expect(value.mode&0o022).toBe(0);expect(value.sha256).toMatch(/^[a-f0-9]{64}$/);return value;}
+async function interruptionUpload(f,name,content){
+ expect(accepted(await f.call('GET',f.endpoint('/files'))).entries.some(entry=>entry.name===name)).toBe(false);expect(interruptionUncertain).toBe(false);interruptionUncertain=true;await uploadOwned(f,name,content);const read=await f.readText(name);expect(read.sha256).toBe(interruptionSha(content));interruptionUncertain=false;return{name,sha256:read.sha256};
+}
+async function interruptionDelete(f,file){
+ const read=await f.readText(file.name);expect(read.sha256).toBe(file.sha256);expect(interruptionUncertain).toBe(false);interruptionUncertain=true;await f.deleteFile(file.name);expect(accepted(await f.call('GET',f.endpoint('/files'))).entries.some(entry=>entry.name===file.name)).toBe(false);interruptionUncertain=false;
+}
+async function interruptionRebind(current,old){
+ const identity=interruptionIdentity(old);expect(old.ledger.ready).toBe(true);expect(old.ledger.provisioningId).toBe(old.ledger.operationId);
+ const fresh=await createOwnedFixture(current,{key:identity.key,runtime:old.ledger.runtime,cleanupOnly:true});expect(interruptionIdentity(fresh)).toEqual(identity);await interruptionWebsite(fresh);return fresh;
+}
+async function interruptionPublish(f,original){
+ const before=await interruptionDomain(f),settings={...original,indexFiles:original.indexFiles??null,errorPages:original.errorPages??null,...(before.targetType==='php'?{staticAssetCacheSeconds:original.staticAssetCacheSeconds??null}:{})};
+ const input={changes:{nginxSettings:settings}},preview=await interruptionMutation(f,'POST',domainPath(f)+'/update-preview',input);
+ await interruptionMutation(f,'PATCH',domainPath(f),{...input,previewDigest:preview.previewDigest,confirmation:preview.confirmation});await interruptionDomainJob(f,'stage');await interruptionDomainJob(f,'activate');
+ const after=await interruptionDomain(f);expect(after.nginxSettings).toEqual(settings);expect(after.state).toBe('active');expect(after.appliedRevision).toBe(after.desiredRevision);return after;
+}
+async function interruptionOwnerContext(){try{return await apiContext();}catch{throw new Error('Fresh normal Owner context could not be verified; protected details withheld');}}
+async function interruptionPhpProbe(f){
+ const php=accepted(await f.call('GET',f.endpoint('/php-tools/config')));expect(php.phpVersion).toMatch(/^\d+\.\d+$/);const uid=readOnlyHostProbe(f,'owned-site-files').uid;expect(uid).toBeGreaterThan(0);const marker='T883-CLIENT-'+f.ledger.nonce,name='yp-client-'+randomBytes(6).toString('hex')+'.php';
+ const content='<?php header("Content-Type: application/json");header("Cache-Control: no-store");echo json_encode(["marker"=>'+JSON.stringify(marker)+',"version"=>PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION,"uid"=>function_exists("posix_geteuid")?posix_geteuid():-1,"sapi"=>PHP_SAPI]);';
+ return{...(await interruptionUpload(f,name,content)),uid,marker,version:php.phpVersion};
+}
+async function interruptionFirstPhp(f,proof){const first=await f.http('/'+proof.name);expect(first.status,'The first dynamic sibling reply must succeed without retry').toBe(200);expect(first.headers['cache-control']).toContain('no-store');expect(JSON.parse(first.body)).toEqual({marker:proof.marker,version:proof.version,uid:proof.uid,sapi:'fpm-fcgi'});f.record('client-interruption.first-php',{verified:true,version:proof.version,uid:proof.uid,sapi:'fpm-fcgi',firstHttpStatus:first.status});}
+function interruptionDomainStamp(value){return Object.fromEntries(['id','websiteId','serverId','state','desiredRevision','stagedRevision','appliedRevision','stagedChecksum','appliedChecksum','updatedAt'].map(key=>[key,value[key]]));}
+async function interruptionVerify(f,checkpoint){
+ expect(interruptionIdentity(f)).toEqual(checkpoint.identity);await interruptionWebsite(f);const current=await interruptionDomain(f);expect(interruptionDomainStamp(current)).toEqual(checkpoint.domain);expect(current.nginxSettings).toEqual(checkpoint.stagedSettings);expect((await interruptionConfig(f)).sha256).toBe(checkpoint.activeSha256);
+ const job=accepted(await f.call('GET','/api/panel/jobs/'+checkpoint.stageJob.id));interruptionJobBinding(job,checkpoint.stageJob,true);
+ for(const file of checkpoint.files)expect((await f.readText(file.name)).sha256).toBe(file.sha256);return current;
+}
+
 test.describe('T887 real owned DNS and hosting restore', () => {
-  let actor, fixture, projectName, key;
+  let actor, fixture, projectName, key, protectedFixture, protectedKey;
   async function site() {
     if (!fixture) {
       key = 't887-dns-hosting-' + projectName;
@@ -72,15 +140,13 @@ test.describe('T887 real owned DNS and hosting restore', () => {
   }
   test.beforeAll(async ({}, info) => { projectName = (info.project.name.startsWith('firefox') ? 'ff' : 'cr') + '-w' + info.workerIndex; actor = await apiContext(); });
   test.afterAll(async () => {
-    try {
-      if (key) {
-        const ledger = fixture ? await fixture.cleanup() : await cleanupOwnedFixture(actor, { key });
-        const absent = readOnlyHostProbe({ ledger }, 'lifecycle-absence');
-        expect(absent.unixUserExists).toBe(false); expect(absent.unixGroupExists).toBe(false);
-        expect(absent.roots.every(value => !value.exists)).toBe(true); expect(absent.nginxFiles.every(value => !value.exists)).toBe(true);
-        expect(absent.fpmFiles).toEqual([]); expect(absent.sockets).toEqual([]); expect(absent.mounts).toEqual([]);
-      }
-    } finally { await actor?.api.dispose(); }
+    if(interruptionHold){await actor?.api.dispose();throw new Error('UNKNOWN_KEEP: current client-interruption checkpoint was not fully reconciled; no cleanup mutations');}
+    const failures=[];
+    for(const cleanupKey of [protectedKey,key].filter(Boolean))try{
+      const current=[protectedFixture,fixture].find(value=>value?.ledger.key===cleanupKey),ledger=current?await current.cleanup():await cleanupOwnedFixture(actor,{key:cleanupKey});
+      const absent=readOnlyHostProbe({ledger},'lifecycle-absence');expect(absent.unixUserExists).toBe(false);expect(absent.unixGroupExists).toBe(false);expect(absent.roots.length).toBeGreaterThanOrEqual(4);expect(absent.roots.every(value=>!value.exists)).toBe(true);expect(absent.nginxFiles.every(value=>!value.exists)).toBe(true);expect(absent.fpmFiles).toEqual([]);expect(absent.sockets).toEqual([]);expect(absent.mounts).toEqual([]);
+    }catch(error){failures.push({key:cleanupKey,errorKind:error.name});}
+    await actor?.api.dispose();expect(failures,'Every exact owned Website must be cleaned normally').toEqual([]);
   });
 
   test('@mutation reconciles only the current owned ledger DNS hosting and health artifacts', async () => {
@@ -245,4 +311,25 @@ test.describe('T887 real owned DNS and hosting restore', () => {
     }
     if (failure) throw failure;
   });
+  test('@mutation closes the current DNS hosting client after acknowledged staging then reconciles the exact checkpoint in a fresh Owner context', async()=>{
+    test.setTimeout(300000);interruptionHold=true;let f=await site();await interruptionWebsite(f);
+    protectedKey='t883-dns-protect-'+projectName;protectedFixture=await createOwnedFixture(actor,{key:protectedKey,runtime:'php'});const proof=await interruptionPhpProbe(protectedFixture);await interruptionFirstPhp(protectedFixture,proof);
+    const before=await interruptionDomain(f),initial=await interruptionConfig(f);expect(before.state).toBe('active');expect(before.appliedRevision).toBe(before.desiredRevision);expect(before.appliedChecksum).toBe(initial.sha256);
+    const uid=readOnlyHostProbe(f,'owned-site-files').uid;expect(uid).toBeGreaterThan(0);const suffix=randomBytes(6).toString('hex'),owner='_ypclient_'+suffix,value='T883-CLIENT-DNS-'+f.ledger.nonce;
+    expect((await zone(f)).rrsets.some(rrset=>recordMatches(f,owner,rrset))).toBe(false);const file=await interruptionUpload(f,'yp-client-'+suffix+'.html','<p>'+value+'</p>');
+    const zoneBefore=await zone(f);await interruptionMutation(f,'POST',domainPath(f)+'/dns/records',{owner,type:'TXT',ttl:300,values:[value],expectedSerial:zoneBefore.serial});
+    const input={changes:{nginxSettings:{...before.nginxSettings,clientMaxBodySizeMb:before.nginxSettings.clientMaxBodySizeMb===17?18:17}}},preview=await interruptionMutation(f,'POST',domainPath(f)+'/update-preview',input);
+    await interruptionMutation(f,'PATCH',domainPath(f),{...input,previewDigest:preview.previewDigest,confirmation:preview.confirmation});const stageJob=await interruptionDomainJob(f,'stage'),staged=await interruptionDomain(f);
+    expect(staged.state).toBe('staged');expect(staged.desiredRevision).toBeGreaterThan(staged.appliedRevision);expect(staged.stagedRevision).toBe(staged.desiredRevision);expect((await interruptionConfig(f)).sha256).toBe(initial.sha256);
+    const currentZone=await zone(f);expect(currentZone.rrsets.find(rrset=>recordMatches(f,owner,rrset)).records.map(row=>row.value)).toEqual([value]);
+    const saved=interruptionCheckpoint(f,{domain:interruptionDomainStamp(staged),stagedSettings:staged.nginxSettings,originalSettings:before.nginxSettings,activeSha256:initial.sha256,stageJob,files:[file],txtOwner:owner,txtValue:value,zoneSerial:currentZone.serial,unixUid:uid,protectedIdentity:interruptionIdentity(protectedFixture)});
+    await actor.api.dispose();actor=null;actor=await interruptionOwnerContext();fixture=await interruptionRebind(actor,f);f=fixture;protectedFixture=await interruptionRebind(actor,protectedFixture);
+    const checkpoint=interruptionReadCheckpoint(saved.file,saved.sha256);await interruptionVerify(f,checkpoint);expect(interruptionIdentity(protectedFixture)).toEqual(checkpoint.protectedIdentity);expect(readOnlyHostProbe(f,'owned-site-files').uid).toBe(checkpoint.unixUid);
+    const resumedZone=await zone(f);expect(resumedZone.serial).toBe(checkpoint.zoneSerial);expect(resumedZone.rrsets.find(rrset=>recordMatches(f,checkpoint.txtOwner,rrset)).records.map(row=>row.value)).toEqual([checkpoint.txtValue]);await interruptionFirstPhp(protectedFixture,proof);
+    await interruptionPublish(f,checkpoint.originalSettings);expect((await interruptionConfig(f)).sha256).toBe(checkpoint.activeSha256);await interruptionFirstPhp(protectedFixture,proof);
+    const removalZone=await zone(f);expect(removalZone.rrsets.find(rrset=>recordMatches(f,checkpoint.txtOwner,rrset)).records.map(row=>row.value)).toEqual([checkpoint.txtValue]);await interruptionMutation(f,'POST',domainPath(f)+'/dns/records/delete',{owner:checkpoint.txtOwner,type:'TXT',expectedSerial:removalZone.serial});
+    expect((await zone(f)).rrsets.some(rrset=>recordMatches(f,checkpoint.txtOwner,rrset))).toBe(false);await interruptionDelete(f,file);await interruptionDelete(protectedFixture,proof);expect((await f.http('/')).status).toBe(200);await interruptionWebsite(f);
+    f.record('client-interruption.current-dns-hosting',{verified:true,checkpointSha256:saved.sha256,initiatingContextDisposed:true,freshContextRebound:true,backendProcessCrash:false,historicalReceiptConflict:false,originalActiveSha256:checkpoint.activeSha256});interruptionHold=false;
+  });
+
 });

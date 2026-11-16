@@ -1709,3 +1709,59 @@
     ℹ duration_ms 223.661625
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T915 · Doğrulama: test — hosting customer and reseller sessions derive live site scope from attached owners
+- **Bağımlı:** —
+- **Dosyalar:** —
+- **Kaynak:** QA · 2026-11-16 14:01
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    Başarısız testler:
+    - hosting customer and reseller sessions derive live site scope from attached ownership without legacy grants
+    
+    iles without allocating a localhost port (0.326291ms)
+    ✔ rejects shell fragments, unsafe entry files, ports and health URLs (0.59525ms)
+    ✔ normalizes complete Node deployment specs (1.477416ms)
+    ✔ normalizes fixed Node process actions against a managed release (2.633583ms)
+    ✔ Passenger release snapshots carry exact site, runtime and routing revisions without a port (5.497041ms)
+    ✔ Passenger release snapshots reject systemd ports, arbitrary commands and public secrets (0.672625ms)
+    ✔ Passenger snapshots reject missing or ambiguous authorities and unsupported revisions (1.012458ms)
+    ✔ proxy hosts canonicalize DNS, IDN, IPv4 and IPv6 without accepting URLs (49.683958ms)
+    ✔ proxy hosts reject schemes, paths, credentials and config control characters (0.859583ms)
+    ✔ normalizePythonRuntimeConfig applies canonical defaults (0.839834ms)
+    ✔ normalizePythonRuntimeConfig accepts valid custom options (0.539708ms)
+    ✔ normalizePythonRuntimeConfig rejects unsupported versions or app servers (1.454542ms)
+    ✔ normalizePythonRuntimeConfig rejects invalid entry points or workers (0.126875ms)
+    ✔ normalizePythonRuntimeConfig enforces port requirements when requested (0.188208ms)
+    ✔ normalizePythonApplicationSpec normalizes complete spec (3.073292ms)
+    ✔ normalizePythonApplicationSpec rejects invalid fields (0.351416ms)
+    ✔ normalizes python rollback, restart, and status specs (0.277209ms)
+    ✔ a redirect target keeps the URL and defaults to a permanent redirect that keeps the path (2.759417ms)
+    ✔ redirect URLs that could break out of the nginx directive or mislead are refused (0.640042ms)
+    ✔ redirect Domains accept only settings that apply to a redirect response (0.926791ms)
+    ✔ tenant constants and role classification predicates (2.250542ms)
+    ✔ assertTenantIdentifier and isValidTenantIdentifier (0.373458ms)
+    ✔ normalizeResellerAccount validates reseller models and enforces no nesting (0.244167ms)
+    ✔ normalizeCustomerAccount validates customer under reseller and direct Owner customer (0.161417ms)
+    ✔ normalizeHostingAccount delegates and verifies expectedKind (0.127875ms)
+    ✔ normalizeWebsiteOwnership validates website-to-customer ownership projection (0.22025ms)
+    ✔ createTenantContext builds accurate tenant context for all roles (0.169ms)
+    ✔ resolveEntityTenantScope maps all entity types to their tenant scope (0.253708ms)
+    ✔ assertTenantAccess enforces boundaries across Owner, Reseller, Customer, and legacy SM (0.488458ms)
+    ✔ filterByTenantBoundary filters resources according to actor tenant boundary (0.330708ms)
+    ✔ resolveEntityTenantScope handles application, database, mail_alias, job variations and lookup errors (0.232125ms)
+    ✔ assertTenantAccess negative scenarios: cross-tenant data leakage prevention (0.323042ms)
+    ✔ filterByTenantBoundary negative scenarios: prevents cross-tenant data leakage in collections (0.535917ms)
+    ✔ tenant context creation and account normalization security edge cases (0.512291ms)
+    ℹ tests 72
+    ℹ suites 0
+    ℹ pass 72
+    ℹ fail 0
+    ℹ cancelled 0
+    ℹ skipped 0
+    ℹ todo 0
+    ℹ duration_ms 443.752
+
+- **Kabul:** Izole Gate09 kesintisi icin Root bounded-disposition incelemesi; bu entegrasyon taskacceptance veya Primary combinedPASS degildir. Gate09 FAILED hamkanit korunur; unchanged auth-store25/25 ve Gate10 8745PASS/0cancel makineuykusu sonrasinda gercekten gecmistir. Auth asla flaky degildir/T908-T889 nedeni cozuldu iddiasi yoktur.
+
+- **Entegrasyon kanit siniri:** Yukaridaki72PASS otomatik QA tail'i ilkfailurestack veya birlesik kabul degildir. Actual auth-store164 timeout30157524ms/120000 ve Sleep05:36:48→Wake13:59:29 zaman cizelgesi SourceGate09'a aittir. Powerproof699664a310147cb692f4cee516c6a59fd7e85285b31c20b93c795ec4498067f6; bagimsizdisposition c6d19cfc21839fe9cb6e60373551dae77c85b839121fa2bb196dda7597b70417; Gate10 33b2641461b47b5fd2d1b573b3f49fcc6e68c5baf70d98eab298bb5c99e72a15. Source/Primary artifact ayrimi ve eskihamFAILED korunur; Primary tasks/verified degistirilmez.

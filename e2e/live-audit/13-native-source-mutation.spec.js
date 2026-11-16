@@ -18,6 +18,8 @@ export const openAcceptances=[
  ...(process.env.YUNPANEL_AUDIT_MANAGED_REPAIR==='1'?[]:[{id:'13.02',oldCommit:'ba33f4a8^',title:'managed phpMyAdmin repair stages actual templates and verifies the native gateway',assertions:['repair job succeeded and configuration applied, HTTP/FPM/gateway sockets healthy, transaction receipt'],reason:'Managed repair changes a shared server service. It is executable only in a separately exclusive server window after effect review.',requiredChannel:'Explicit managed repair flag and server-global plus all test-slot locks'}]),
 ];
 let primary,owner,state,stateFile,secretsFile,uploadedStatic,primaryKey,staticKey;
+let phase2Uncertain=false;const phase2Jobs=new Map();
+let orphanFixture,orphanKey,orphanRecovery;const orphanAdvancedActions=new Set();
 const manifest=()=>state;
 function saveManifest(value){state=value;fs.writeFileSync(stateFile,JSON.stringify(value,null,2),{mode:0o600});}
 function owned(){expect(primary?.ledger.websiteId,'The current run must own its disposable PHP site').toBe(state?.fixture.websiteId);return state;}
@@ -26,6 +28,48 @@ function check(r,label,status=200){record(label,{status:r.status,code:r.body?.er
 async function apiCall(api,csrf,method,endpoint,data){
  let response;for(let attempt=0;;attempt++){try{response=await api.fetch(endpoint,{method,data,headers:{Origin:ORIGIN,'x-csrf-token':csrf,Connection:'close'},timeout:120000,maxRedirects:0});}catch(error){if(method==='GET'&&attempt<3){await new Promise(r=>setTimeout(r,700));continue;}throw error;}if(method==='GET'&&[502,503,504].includes(response.status())&&attempt<3){await new Promise(r=>setTimeout(r,700));continue;}break;}
  const body=await response.json().catch(()=>({}));return{status:response.status(),body,data:body.data??body};
+}
+async function phase2Read(api,csrf,method,endpoint){expect(method).toBe('GET');try{return await apiCall(api,csrf,method,endpoint);}catch{throw new Error('Phase2 authoritative GET failed; protected transport details withheld');}}
+async function phase2OwnerContext(){try{return await apiContext();}catch{throw new Error('A new normal Owner context could not be verified; protected transport details withheld');}}
+async function phase2OwnedEffect(label,action){expect(phase2Uncertain,'No new owned effect follows an uncertain outcome').toBe(false);phase2Uncertain=true;try{const result=await action();phase2Uncertain=false;return result;}catch(error){record('phase2.owned-effect-unverified',{label,state:'UNKNOWN_KEEP',noRetry:true});throw new Error('Phase2 owned effect was not verified; protected transport details withheld');}}
+async function phase2Post(c,endpoint,data,label,status=200,verify=null){
+ expect(phase2Uncertain,'No new mutation follows an uncertain phase2 outcome').toBe(false);phase2Uncertain=true;
+ let reply;try{reply=await apiCall(c.api,c.csrf,'POST',endpoint,data);}catch(error){record('phase2.mutation-unknown',{label,state:'UNKNOWN_KEEP',noPostRetry:true});throw new Error('Phase2 mutation response is uncertain; protected transport details withheld');}
+ if(reply.status!==status)record('phase2.mutation-hold',{label,status:reply.status,code:reply.body?.error?.code??null,noPostRetry:true});
+ const result=check(reply,label,status);if(verify)verify(result);if(status!==202)phase2Uncertain=false;return result;
+}
+function phase2JobIntent(preview,actionId,options=null){
+ const m=owned(),identity=m.fixture;
+ if(!preview||!['php.fpm.update','wp.toolkit'].includes(actionId)||preview.serverId!==m.serverId||preview.websiteId!==identity.websiteId||preview.applicationId!==identity.applicationId||preview.unixUser!==identity.unixUser
+  ||!Number.isSafeInteger(preview.websiteRevision)||preview.websiteRevision<1||typeof preview.previewDigest!=='string'||!/^([a-f0-9]{64})$/.test(preview.previewDigest))throw new Error('The initial own phase2 preview intent could not be verified');
+ if(actionId==='wp.toolkit'&&(!options||Object.keys(options).length!==1||options.action!=='core.update'||!preview.options||Object.keys(preview.options).length!==1||preview.options.action!==options.action))throw new Error('The initial own WordPress core update intent could not be verified');
+ if(actionId==='php.fpm.update'&&options!==null)throw new Error('The initial own PHP configuration intent could not be verified');
+ const result=Object.freeze({version:1,websiteId:identity.websiteId,applicationId:identity.applicationId,unixUser:identity.unixUser,actionId,websiteRevision:preview.websiteRevision,previewDigest:preview.previewDigest,completed:true,sideEffects:true});
+ return Object.freeze({serverId:m.serverId,type:'website.php.action',operation:'website.php.action',resourceType:'application',resourceId:identity.applicationId,result});
+}
+function phase2JobBinding(job,expected,{terminal=false}={}){
+ const keys=['id','serverId','type','operation','resourceType','resourceId','createdAt'];
+ if(!job||keys.some(key=>job[key]!==expected[key]))throw new Error('The exact phase2 job binding could not be verified');
+ if(terminal&&job.status!==expected.status)throw new Error('The exact phase2 job did not reach its required terminal status');
+ if(!terminal&&!['queued','running','succeeded'].includes(job.status))throw new Error('The accepted phase2 job is not queued running or verified succeeded');
+ const resultRequired=terminal||job.status==='succeeded';
+ if(resultRequired&&(job.result===null||typeof job.result!=='object'||Array.isArray(job.result)||job.error!==null))throw new Error('The terminal phase2 job requires its actual complete result; keep owned resources');
+ if(job.result!==null){
+  const fields=['version','websiteId','applicationId','unixUser','actionId','websiteRevision','previewDigest','completed','sideEffects'];
+  if(!job.result||typeof job.result!=='object'||Array.isArray(job.result)||Object.keys(job.result).length!==fields.length||fields.some(key=>!Object.hasOwn(job.result,key)||job.result[key]!==expected.result[key]))throw new Error('The exact complete phase2 job result does not match its initial own intent');
+ }
+ return job;
+}
+function phase2JobTerminal(job,expected){
+ phase2JobBinding(job,expected,{terminal:true});record('phase2.job-terminal',{jobId:expected.id,serverId:expected.serverId,resourceType:expected.resourceType,resourceId:expected.resourceId,operation:expected.operation,status:job.status});phase2Jobs.delete(expected.id);return job;
+}
+async function phase2Job(c,accepted,intent,timeout=120000){
+ const id=accepted?.id;
+ if(typeof id!=='string'||!/^([a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})$/i.test(id)||!intent||!Object.isFrozen(intent)||!Object.isFrozen(intent.result)||!['php.fpm.update','wp.toolkit'].includes(intent.result.actionId)||!Number.isFinite(Date.parse(accepted.createdAt)))throw new Error('The accepted phase2 job identity or initial intent is unavailable; keep owned resources');
+ const expected=Object.freeze({...intent,id,createdAt:accepted.createdAt,status:'succeeded'});
+ phase2Jobs.set(id,expected);try{phase2JobBinding(accepted,expected);}catch(error){phase2Uncertain=true;throw error;}phase2Uncertain=false;
+ let job;try{job=await waitJob(c.api,id,timeout);}catch{phase2Uncertain=true;record('phase2.job-read-unverified',{jobId:id,noPostRetry:true});throw new Error('The known phase2 job could not be read; protected transport details withheld');}
+ try{return phase2JobTerminal(job,expected);}catch(error){phase2Uncertain=true;throw error;}
 }
 function secrets(){return JSON.parse(fs.readFileSync(secretsFile,'utf8'));}
 function saveSecrets(value){fs.writeFileSync(secretsFile,JSON.stringify(value),{mode:0o600});}
@@ -49,6 +93,9 @@ test.beforeAll(async({},info)=>{
 test.afterAll(async()=>{
  test.setTimeout(360000);
  const failures=[];
+ try{for(const [id,expected] of [...phase2Jobs]){const job=await waitJob(owner.api,id,120000);phase2JobTerminal(job,expected);}}catch{phase2Uncertain=true;}
+ if(phase2Uncertain){record('phase2.cleanup-hold',{state:'UNKNOWN_KEEP',noNewCleanupMutation:true});await owner?.api.dispose();throw new Error('Phase2 mutation outcome is uncertain; exact owned resources retained without replay');}
+ if(owner&&orphanKey){try{if(orphanRecovery)await orphanRecovery(owner,'removed');const ledger=orphanFixture?await orphanFixture.cleanup():await cleanupOwnedFixture(owner,{key:orphanKey});if(orphanFixture)verifyOwnedAbsence(orphanFixture);else{const physical=readOnlyHostProbe({ledger},'lifecycle-absence');expect(physical.unixUserExists).toBe(false);expect(physical.unixGroupExists).toBe(false);expect(physical.roots.length).toBeGreaterThanOrEqual(4);expect(physical.roots.every(value=>!value.exists)).toBe(true);expect(physical.fpmFiles).toEqual([]);expect(physical.sockets).toEqual([]);expect(physical.mounts).toEqual([]);expect(physical.nginxFiles.every(value=>!value.exists)).toBe(true);}}catch(error){failures.push('orphan normal cleanup failed; exact journal retained');}if(phase2Uncertain){record('phase2.cleanup-hold',{state:'UNKNOWN_KEEP',noNewCleanupMutation:true});await owner.api.dispose();throw new Error('Orphan mutation outcome is uncertain; no cleanup replay');}}
  if(owner&&state?.fixture.mailboxIds)for(const id of state.fixture.mailboxIds){try{await removeMailbox(owner,id);}catch(e){failures.push('mailbox '+id+': '+String(e.message).split('\n')[0]);}}
  if(owner&&state?.fixture.websiteId){try{await recordOwnedSnapshotInventory();}catch(e){const current=manifest();current.fixture.repositorySnapshotInventory={status:'unknown_keep',snapshots:[]};saveManifest(current);failures.push('snapshot inventory: '+String(e.message).split('\n')[0]);}}
  if(uploadedStatic){try{await uploadedStatic.cleanup();verifyOwnedAbsence(uploadedStatic);}catch(e){failures.push('static cleanup: '+String(e.message).split('\n')[0]);}}
@@ -240,6 +287,60 @@ async function upload(c,m,name,source){return check(await apiCall(c.api,c.csrf,'
 
 async function remove(c,m,name){check(await apiCall(c.api,c.csrf,'DELETE','/api/panel/websites/'+m.fixture.websiteId+'/files',{path:name,confirmation:'delete:'+m.fixture.websiteId+':'+name}),'native.file.remove');}
 
+test('@mutation source resumes one detached owned Domain from its unfinished journal in a new Owner context',async()=>{
+ test.setTimeout(300000);const m=owned(),marker='T883-ORPHAN-'+m.runId;
+ orphanKey='t883-orphan-'+randomUUID().slice(0,8);try{orphanFixture=await createOwnedFixture(owner,{key:orphanKey,runtime:'static'});}catch(error){if(['owned_fixture_creation_unconfirmed','owned_fixture_transport'].includes(error?.code))phase2Uncertain=true;throw error;}const f=orphanFixture,t=f.ledger;
+ expect(t.websiteId).not.toBe(m.fixture.websiteId);expect(t.applicationId).not.toBe(m.fixture.applicationId);expect(t.domainId).not.toBe(m.fixture.domainId);
+ state.fixture.createdWebsiteIds.push(t.websiteId);state.fixture.createdDomainIds.push(t.domainId);saveManifest(state);
+ await phase2OwnedEffect('orphan.index-upload',()=>f.upload('index.html',marker));const first=await f.http('/');expect(first.status).toBe(200);expect(first.body).toBe(marker);
+ const contentSha256=createHash('sha256').update((await f.readText('index.html')).content).digest('hex');expect(contentSha256).toBe(createHash('sha256').update(marker).digest('hex'));
+ const ownUid=readOnlyHostProbe(f,'owned-site-files').uid;expect(ownUid).toBeGreaterThan(0);
+ const initialNginx=readOnlyHostProbe(f,'nginx-config');expect(initialNginx.exists&&initialNginx.regular&&!initialNginx.symlink).toBe(true);expect(initialNginx.sha256).toMatch(/^[a-f0-9]{64}$/);
+ const initialWebsite=check(await phase2Read(owner.api,owner.csrf,'GET',f.endpoint()),'orphan.website-before');expect(initialWebsite.id).toBe(t.websiteId);expect(initialWebsite.applicationId).toBe(t.applicationId);expect(initialWebsite.unixUser).toBe(t.unixUser);
+ const siblingUid=readOnlyHostProbe(primary,'owned-site-files').uid,siblingConfig=check(await phase2Read(owner.api,owner.csrf,'GET',primary.endpoint('/php-tools/config')),'orphan.sibling-config');expect(siblingUid).toBeGreaterThan(0);
+ const siblingName='orphan-sibling-'+t.nonce+'.php',siblingProof='ORPHAN-SIBLING-'+t.runId;
+ await phase2OwnedEffect('orphan.sibling-upload',()=>primary.upload(siblingName,'<?php header("Content-Type: application/json");header("Cache-Control: no-store");echo json_encode(["proof"=>'+JSON.stringify(siblingProof)+',"version"=>PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION,"uid"=>function_exists("posix_geteuid")?posix_geteuid():-1,"sapi"=>PHP_SAPI]);'));
+ const sibling=async phase=>{const r=await primary.http('/'+siblingName);record('orphan.sibling-first-response',{phase,status:r.status});expect(r.status).toBe(200);expect(r.headers['cache-control']).toContain('no-store');expect(JSON.parse(r.body)).toEqual({proof:siblingProof,version:siblingConfig.phpVersion,uid:siblingUid,sapi:'fpm-fcgi'});};
+ await sibling('before-detachment');let initiator,resumer;
+ const domainRoot='/api/panel/domains/'+t.domainId;
+ try{
+  initiator=await phase2OwnerContext();const session=check(await phase2Read(initiator.api,initiator.csrf,'GET','/api/auth/session'),'orphan.initiator-session');expect(session.user.role).toBe('owner');
+  const preview=check(await phase2Read(initiator.api,initiator.csrf,'GET',domainRoot+'/removal'),'orphan.preview').preview;expect(preview.readyToStart).toBe(true);
+  const created=(await phase2Post(initiator,domainRoot+'/removal',{previewDigest:preview.previewDigest,confirmation:preview.confirmation},'orphan.start',201,result=>{const op=result.operation;expect(Boolean(op&&op.domainId===t.domainId&&op.serverId===t.serverId&&op.plan?.websiteId===t.websiteId&&op.plan?.applicationId===t.applicationId)).toBe(true);})).operation;
+  expect(created.domainId).toBe(t.domainId);expect(created.serverId).toBe(t.serverId);expect(created.plan.websiteId).toBe(t.websiteId);expect(created.plan.applicationId).toBe(t.applicationId);expect(created.checksum).toMatch(/^[a-f0-9]{64}$/);expect(created.checksum).toBe(initialNginx.sha256);
+  expect(created.id).toMatch(/^[A-Za-z0-9._:-]{1,128}$/);const ownedDnsZoneIds=[...created.plan.dnsZoneIds];expect(new Set(ownedDnsZoneIds).size).toBe(ownedDnsZoneIds.length);
+  const expected={id:created.id,checksum:created.checksum,domainRevision:created.domainRevision,createdAt:created.createdAt};
+  const scope=op=>{expect(op.id).toBe(expected.id);expect(op.domainId).toBe(t.domainId);expect(op.serverId).toBe(t.serverId);expect(op.primaryDomain).toBe(t.hostname);expect(op.plan.websiteId).toBe(t.websiteId);expect(op.plan.applicationId).toBe(t.applicationId);expect(op.checksum).toBe(expected.checksum);expect(op.domainRevision).toBe(expected.domainRevision);expect(op.createdAt).toBe(expected.createdAt);};
+  orphanRecovery=async(c,goal)=>{
+   const deadline=Date.now()+180000;
+   for(let n=0;n<40&&Date.now()<deadline;n++){
+    const op=check(await phase2Read(c.api,c.csrf,'GET',domainRoot+'/removal-operations/'+expected.id),'orphan.same-journal').operation;scope(op);
+    if(goal==='detached'&&op.steps.find(step=>step.kind==='website_binding')?.status==='succeeded'){expect(op.status).not.toBe('removed');expect(op.steps.find(step=>step.kind==='metadata_finalization')?.status).not.toBe('succeeded');return op;}
+    if(op.status==='removed'){expect(goal).toBe('removed');return op;}
+    expect(['failed','blocked']).not.toContain(op.status);const step=op.steps.find(value=>value.status!=='succeeded');expect(step).toBeTruthy();expect(step.kind).not.toBe('routing_suspend');expect(op.actions.stepContinuationConfirmation).toBeTruthy();
+    const action=op.id+':'+step.id+':'+op.updatedAt;expect(orphanAdvancedActions.has(action),'A known typed continuation is never replayed, including cleanup').toBe(false);orphanAdvancedActions.add(action);record('orphan.typed-intent',{operationId:op.id,stepId:step.id,expectedUpdatedAt:op.updatedAt});
+    const advanced=(await phase2Post(c,domainRoot+'/removal-operations/'+expected.id+'/continue',{expectedUpdatedAt:op.updatedAt,stepId:step.id,checksum:op.checksum,confirmation:op.actions.stepContinuationConfirmation},'orphan.continue',200,result=>{scope(result.operation);expect(result.operation.updatedAt).not.toBe(op.updatedAt);})).operation;scope(advanced);
+    record('orphan.typed-phase',{operationId:expected.id,stepId:step.id,status:advanced.status,updatedAt:advanced.updatedAt});
+   }
+   throw new Error('The exact owned Domain journal did not reach the required phase');
+  };
+  const detached=await orphanRecovery(initiator,'detached');const actualDomain=check(await phase2Read(initiator.api,initiator.csrf,'GET',domainRoot),'orphan.detached-domain');expect(actualDomain.id).toBe(t.domainId);expect(actualDomain.serverId).toBe(t.serverId);expect(actualDomain.websiteId).toBeNull();
+  const intent={websiteId:t.websiteId,applicationId:t.applicationId,domainId:t.domainId,serverId:t.serverId,operationId:expected.id,checksum:expected.checksum,updatedAt:detached.updatedAt,unixUid:ownUid,contentSha256,originalNginxSha256:initialNginx.sha256,unfinished:true,detachmentAcknowledged:true,metadataFinalizationPending:true,backendProcessCrash:false};f.record('orphan.detached-checkpoint',intent);record('orphan.detached-checkpoint',intent);
+  await sibling('after-detachment');await initiator.api.dispose();initiator=null;
+  resumer=await phase2OwnerContext();const resumedSession=check(await phase2Read(resumer.api,resumer.csrf,'GET','/api/auth/session'),'orphan.resumer-session');expect(resumedSession.user.role).toBe('owner');
+  const beforeResume=check(await phase2Read(resumer.api,resumer.csrf,'GET',domainRoot+'/removal-operations/'+expected.id),'orphan.resumer-checkpoint').operation;scope(beforeResume);expect(beforeResume.updatedAt).toBe(intent.updatedAt);expect(beforeResume.status).not.toBe('removed');expect(beforeResume.steps.find(step=>step.kind==='website_binding').status).toBe('succeeded');
+  const done=await orphanRecovery(resumer,'removed');expect(done.status).toBe('removed');
+  expect((await phase2Read(resumer.api,resumer.csrf,'GET',domainRoot)).status).toBe(404);expect(done.steps.find(step=>step.kind==='metadata_finalization').status).toBe('succeeded');
+  for(const id of ownedDnsZoneIds)expect((await phase2Read(resumer.api,resumer.csrf,'GET','/api/panel/dns-zones/'+id)).status).toBe(404);const survivingZones=check(await phase2Read(resumer.api,resumer.csrf,'GET','/api/panel/dns-zones'),'orphan.dns-zone-absence');expect(survivingZones.filter(zone=>zone.webDomainId===t.domainId)).toEqual([]);
+  const website=check(await phase2Read(resumer.api,resumer.csrf,'GET',f.endpoint()),'orphan.website-after');expect(website.id).toBe(t.websiteId);expect(website.applicationId).toBe(t.applicationId);expect(website.unixUser).toBe(initialWebsite.unixUser);
+  const application=check(await phase2Read(resumer.api,resumer.csrf,'GET','/api/panel/applications/'+t.applicationId),'orphan.application-after');expect(application.id).toBe(t.applicationId);expect(application.serverId).toBe(t.serverId);
+  expect(readOnlyHostProbe(f,'owned-site-files').uid).toBe(ownUid);expect(createHash('sha256').update((await f.readText('index.html')).content).digest('hex')).toBe(contentSha256);expect(readOnlyHostProbe(f,'nginx-config').exists).toBe(false);
+  const routing=await resumer.api.get('http://'+t.hostname+'/',{maxRedirects:0,maxRetries:0,headers:{Connection:'close'}});const ownMarkerServed=(await routing.text()).includes(marker);record('orphan.routing-after-removal',{status:routing.status(),ownMarkerServed});expect(ownMarkerServed).toBe(false);
+  await sibling('after-recovery');await phase2OwnedEffect('orphan.normal-website-cleanup',()=>f.cleanup());verifyOwnedAbsence(f);await sibling('after-normal-cleanup');await phase2OwnedEffect('orphan.sibling-delete',()=>primary.deleteFile(siblingName));
+  record('orphan.current-owned-workflow-recovery',{verified:true,...intent,newOwnerContext:true,sameJournal:true,normalCleanup:true,historicalWebsite404OrphanCauseProved:false,ownedDnsZoneCount:ownedDnsZoneIds.length});
+ }finally{await initiator?.api.dispose();await resumer?.api.dispose();}
+});
+
 test('@mutation source one database form creates real schema, binding, grants and an application query',async({liveApi,page})=>{
  test.setTimeout(180000);const m=owned();await ready(page,'/databases');await main(page).getByRole('button',{name:'Veritabanı oluştur',exact:true}).first().click();
  const d=page.getByRole('dialog');await expect(d).toBeVisible();await d.locator('select').filter({has:page.locator('option[value="'+m.fixture.websiteId+'"]')}).selectOption(m.fixture.websiteId);await d.getByLabel('Veritabanı adı',{exact:true}).fill(m.fixture.databaseName);
@@ -298,15 +399,31 @@ test('@mutation source SQL import uploads a real SQL file through phpMyAdmin, ve
  }
 });
 
-test('@mutation source PHP settings change the actual FPM runtime and persist at the installed version',async({liveApi})=>{
+test('@mutation source PHP settings switch to a different installed FPM version and restore the original runtime',async({liveApi})=>{
  test.setTimeout(120000);const m=owned(),root='/api/panel/websites/'+m.fixture.websiteId+'/php-tools/config';
- const before=check(await apiCall(liveApi.api,liveApi.csrf,'GET',root),'php.config.read');const target=before.phpVersion;
+ const before=check(await phase2Read(liveApi.api,liveApi.csrf,'GET',root),'php.config.read'),target=process.env.YUNPANEL_AUDIT_PHP_TARGET_VERSION;
+ const prerequisite=typeof target==='string'&&/^\d+\.\d+$/.test(target)&&target!==before.phpVersion&&Array.isArray(before.availablePhpVersions)&&before.availablePhpVersions.includes(target);
+ record('php.version-switch.prerequisite',{state:prerequisite?'READY':'HOLD',currentVersion:before.phpVersion,targetVersion:typeof target==='string'&&/^\d+\.\d+$/.test(target)?target:null,availableVersions:before.availablePhpVersions});
+ expect(prerequisite,'HOLD: a different explicitly selected installed PHP runtime is required').toBe(true);
+ const original={phpVersion:before.phpVersion,maxChildren:before.fpm.maxChildren,memoryLimitMb:before.fpm.memoryLimitMb,maxExecutionSeconds:before.fpm.maxExecutionSeconds};
+ const uid=readOnlyHostProbe(primary,'owned-site-files').uid;expect(uid).toBeGreaterThan(0);
  const config={phpVersion:target,maxChildren:before.fpm.maxChildren===10?11:10,memoryLimitMb:256,maxExecutionSeconds:31};
- const preview=check(await apiCall(liveApi.api,liveApi.csrf,'POST',root+'/preview',config),'php.config.preview');
- const queued=check(await apiCall(liveApi.api,liveApi.csrf,'POST',root,{config,expectedRevision:preview.websiteRevision,previewDigest:preview.previewDigest,confirmation:preview.confirmation}),'php.config.queue',202);
- const job=await waitJob(liveApi.api,queued.job.id);record('php.native.finished',{status:job.status,code:job.error?.code});expect(job.status).toBe('succeeded');
- const after=check(await apiCall(liveApi.api,liveApi.csrf,'GET',root),'php.config.persisted');expect(after.phpVersion).toBe(target);expect(after.fpm.maxChildren).toBe(config.maxChildren);expect(after.fpm.memoryLimitMb).toBe(256);expect(after.fpm.maxExecutionSeconds).toBe(31);
- const name='php-runtime-proof.php';try{await upload(liveApi,m,name,'<?php header("Content-Type: application/json");echo json_encode(["version"=>PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION,"memory"=>ini_get("memory_limit"),"seconds"=>ini_get("max_execution_time")]);');const http=await liveApi.api.get('http://'+m.fixture.hostname+'/'+name);expect(http.status()).toBe(200);const actual=await http.json();expect(actual.version).toBe(target);expect(actual.memory).toBe('256M');expect(actual.seconds).toBe('31');record('php.actual-http-runtime',{verified:true,...actual});}finally{await remove(liveApi,m,name);}
+ const name='php-runtime-proof.php';await phase2OwnedEffect('php.runtime-proof-upload',()=>upload(liveApi,m,name,'<?php header("Content-Type: application/json");header("Cache-Control: no-store");echo json_encode(["proof"=>'+JSON.stringify('PHP-SWITCH-'+m.runId)+',"version"=>PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION,"uid"=>function_exists("posix_geteuid")?posix_geteuid():-1,"sapi"=>PHP_SAPI,"memory"=>ini_get("memory_limit"),"seconds"=>ini_get("max_execution_time")]);'));
+ const verify=async expected=>{const reply=await primary.http('/'+name);expect(reply.status,'The first actual FPM reply must succeed').toBe(200);expect(reply.headers['cache-control']).toContain('no-store');expect(JSON.parse(reply.body)).toEqual({proof:'PHP-SWITCH-'+m.runId,version:expected.phpVersion,uid,sapi:'fpm-fcgi',memory:expected.memoryLimitMb+'M',seconds:String(expected.maxExecutionSeconds)});};
+ let applied=false,primaryError;
+ try{
+  await verify(original);const preview=await phase2Post(liveApi,root+'/preview',config,'php.config.preview');const intent=phase2JobIntent(preview,'php.fpm.update');
+  const queued=await phase2Post(liveApi,root,{config,expectedRevision:preview.websiteRevision,previewDigest:preview.previewDigest,confirmation:preview.confirmation},'php.config.queue',202);
+  const job=await phase2Job(liveApi,queued.job,intent);record('php.native.finished',{status:job.status,code:job.error?.code});expect(job.status).toBe('succeeded');applied=true;
+  const after=check(await phase2Read(liveApi.api,liveApi.csrf,'GET',root),'php.config.persisted');expect(after.phpVersion).toBe(target);expect(after.fpm.maxChildren).toBe(config.maxChildren);expect(after.fpm.memoryLimitMb).toBe(256);expect(after.fpm.maxExecutionSeconds).toBe(31);
+  await verify(config);record('php.actual-http-runtime',{verified:true,beforeVersion:original.phpVersion,afterVersion:target,versionChanged:true,uid,sapi:'fpm-fcgi'});
+ }catch(error){primaryError=error;throw error;}
+ finally{
+  try{
+   if(applied&&!phase2Uncertain){const preview=await phase2Post(liveApi,root+'/preview',original,'php.config.restore-preview');const intent=phase2JobIntent(preview,'php.fpm.update');const queued=await phase2Post(liveApi,root,{config:original,expectedRevision:preview.websiteRevision,previewDigest:preview.previewDigest,confirmation:preview.confirmation},'php.config.restore-queue',202);expect((await phase2Job(liveApi,queued.job,intent)).status).toBe('succeeded');const current=check(await phase2Read(liveApi.api,liveApi.csrf,'GET',root),'php.config.restore-read');expect(current.phpVersion).toBe(original.phpVersion);expect(current.fpm.maxChildren).toBe(original.maxChildren);expect(current.fpm.memoryLimitMb).toBe(original.memoryLimitMb);expect(current.fpm.maxExecutionSeconds).toBe(original.maxExecutionSeconds);await verify(original);record('php.version-switch.restored',{verified:true,phpVersion:original.phpVersion});}
+   if(!phase2Uncertain&&phase2Jobs.size===0)await phase2OwnedEffect('php.runtime-proof-delete',()=>remove(liveApi,m,name));
+  }catch(error){record('php.version-switch.cleanup-failed',{firstFailurePreserved:Boolean(primaryError),state:phase2Uncertain?'UNKNOWN_KEEP':'FAILED'});if(!primaryError)throw error;}
+ }
 });
 
 async function browserLogin(browser,installed,username,password,phase='initial'){
@@ -685,16 +802,26 @@ test('@mutation source WordPress refuses CLI success when a plugin breaks actual
  } finally {await remove(liveApi,m,pluginPath);}
 });
 
-test('@mutation source WordPress core update verifies real checksums, inventory and HTTP through the current worker', async ({ liveApi }) => {
+test('@mutation source WordPress core update changes 7.1.3 to 7.1.4 through the current worker and preserves SQL content and administrator login', async ({liveApi,browser})=>{
  test.setTimeout(240000);const m=owned(),root='/api/panel/websites/'+m.fixture.websiteId+'/wordpress',options={action:'core.update'};
- const before=check(await apiCall(liveApi.api,liveApi.csrf,'GET',root),'wordpress.core.before');expect(before.installed).toBe(true);
- const preview=check(await apiCall(liveApi.api,liveApi.csrf,'POST',root+'/preview',{options}),'wordpress.core.preview');
- const queued=check(await apiCall(liveApi.api,liveApi.csrf,'POST',root+'/actions',{options,requestId:randomUUID(),expectedWebsiteRevision:preview.websiteRevision,
-  previewDigest:preview.previewDigest,confirmation:preview.confirmation}),'wordpress.core.queue',202);
- const job=await waitJob(liveApi.api,queued.job.id,180000);record('wordpress.core.native',{status:job.status,code:job.error?.code});expect(job.status).toBe('succeeded');
- const after=check(await apiCall(liveApi.api,liveApi.csrf,'GET',root),'wordpress.core.after');expect(after.installed).toBe(true);
- const actual=await liveApi.api.get('http://'+m.fixture.hostname+'/');expect(actual.status()).toBe(200);
- const checksum=check(await apiCall(liveApi.api,liveApi.csrf,'POST','/api/panel/websites/'+m.fixture.websiteId+'/wp-cli/run',{command:'core',args:['verify-checksums','--skip-plugins','--skip-themes','--skip-packages'],timeout:120000}),'wordpress.core.actual-checksums');expect(checksum.success).toBe(true);expect(checksum.exitCode).toBe(0);record('wordpress.core.result',{verified:true,beforeVersion:before.coreVersion,afterVersion:after.coreVersion,versionChanged:before.coreVersion!==after.coreVersion});
+ expect(m.fixture.binding?.id,'The fresh owned installation must use its actual dedicated DB').toBeTruthy();
+ const tool=async(label,args,command='core')=>{const r=await phase2Post(liveApi,'/api/panel/websites/'+m.fixture.websiteId+'/wp-cli/run',{command,args,timeout:120000},label,200,value=>expect(typeof value.success==='boolean'&&Number.isSafeInteger(value.exitCode)&&typeof value.stdout==='string').toBe(true));expect(r.success).toBe(true);expect(r.exitCode).toBe(0);return r;};
+ const sql=async phase=>{const r=await tool('wordpress.core.sql-'+phase,['query','SELECT value FROM yp_native_proof WHERE id=1','--skip-column-names','--skip-plugins','--skip-themes','--skip-packages'],'db');expect(Boolean(r.stdout.trim())).toBe(true);return createHash('sha256').update(r.stdout.trim()).digest('hex');};
+ const sqlBefore=await sql('before');
+ const latest=check(await phase2Read(liveApi.api,liveApi.csrf,'GET',root),'wordpress.core.preparation-before');expect(latest.installed).toBe(true);expect(latest.coreVersion).toBe('7.1.4');
+ await tool('wordpress.core.older-owned-preparation',['download','--version=7.1.3','--force','--skip-content','--locale=tr_TR']);
+ await tool('wordpress.core.older-checksums',['verify-checksums','--version=7.1.3','--locale=tr_TR','--skip-plugins','--skip-themes','--skip-packages']);
+ const before=check(await phase2Read(liveApi.api,liveApi.csrf,'GET',root),'wordpress.core.before');expect(before.installed).toBe(true);expect(before.coreVersion).toBe('7.1.3');expect(await sql('prepared')).toBe(sqlBefore);
+ const preparedReply=await primary.http('/');expect(preparedReply.status,'The first actual older installation HTTP reply must work').toBe(200);
+ await browserLogin(browser,before,'t886_admin',secrets().wpAdminPassword,'before-core-upgrade');
+ const preview=await phase2Post(liveApi,root+'/preview',{options},'wordpress.core.preview');const intent=phase2JobIntent(preview,'wp.toolkit',options);
+ const queued=await phase2Post(liveApi,root+'/actions',{options,requestId:randomUUID(),expectedWebsiteRevision:preview.websiteRevision,previewDigest:preview.previewDigest,confirmation:preview.confirmation},'wordpress.core.queue',202);
+ const job=await phase2Job(liveApi,queued.job,intent,180000);record('wordpress.core.native',{status:job.status,code:job.error?.code});expect(job.status).toBe('succeeded');
+ const after=check(await phase2Read(liveApi.api,liveApi.csrf,'GET',root),'wordpress.core.after');expect(after.installed).toBe(true);expect(after.coreVersion).toBe('7.1.4');expect(after.coreVersion).not.toBe(before.coreVersion);expect(await sql('after')).toBe(sqlBefore);
+ const actual=await primary.http('/');expect(actual.status,'The first upgraded installation HTTP reply must work').toBe(200);
+ await tool('wordpress.core.actual-checksums',['verify-checksums','--version=7.1.4','--locale=tr_TR','--skip-plugins','--skip-themes','--skip-packages']);
+ await browserLogin(browser,after,'t886_admin',secrets().wpAdminPassword,'after-core-upgrade');
+ record('wordpress.core.result',{verified:true,beforeVersion:before.coreVersion,afterVersion:after.coreVersion,versionChanged:true,sqlSha256:sqlBefore,freshAdminVerified:true});
 });
 
 test('@mutation source WordPress removal removes actual core files and prefix tables, preserves other content, then restores the owned installation', async ({ liveApi }) => {

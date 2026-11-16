@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import https from 'node:https';
+import dns from 'node:dns/promises';
 import path from 'node:path';
 import { randomBytes, createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -17,6 +19,130 @@ const actors = [];
 const terminals = [];
 const ttydPages = [];
 const pendingActions = [];
+// Prospective test-local policy. These are real normal HTTPS requests, never server-concurrency evidence.
+let phase4Active = false, phase4Hold = false, phase4Closed = false, phase4CompletedCases = 0, phase4Prefix;
+const phase4Inflight = new Set(), phase4Rows = [], phase4Channels = [];
+const phase4Sha = value => createHash('sha256').update(value).digest('hex');
+function phase4Artifact(id, suffix) { return path.join(RUN_DIR, phase4Prefix + '-' + id + '-' + suffix + '.json'); }
+function phase4Durable(id, suffix, value) {
+  expect(fs.realpathSync(RUN_DIR)).toBe(RUN_DIR); const dir = fs.lstatSync(RUN_DIR);
+  expect(dir.isDirectory() && dir.uid === process.getuid() && (dir.mode & 0o777) === 0o700).toBe(true);
+  const fd = fs.openSync(phase4Artifact(id, suffix), fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW, 0o600);
+  try { const before = fs.fstatSync(fd), bytes = Buffer.from(JSON.stringify(value));
+    expect(before.isFile() && before.uid === process.getuid() && before.nlink === 1 && (before.mode & 0o777) === 0o600).toBe(true); expect(bytes.length).toBeLessThan(16384);
+    let offset = 0; while (offset < bytes.length) offset += fs.writeSync(fd, bytes, offset, bytes.length - offset); fs.fsyncSync(fd); expect(fs.fstatSync(fd).size).toBe(bytes.length);
+  } finally { fs.closeSync(fd); }
+  const parent = fs.openSync(RUN_DIR, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
+  try { const current = fs.fstatSync(parent); expect([current.dev, current.ino, current.uid, current.mode]).toEqual([dir.dev, dir.ino, dir.uid, dir.mode]); fs.fsyncSync(parent); } finally { fs.closeSync(parent); }
+}
+function phase4Keep(reason) {
+  phase4Hold = true; phase4Active = false; phase4Closed = true;
+  if (state && !state.phase4Safety) { state.phase4Safety = { outcome: 'UNKNOWN_KEEP', reason, noReplay: true, automaticCleanup: false }; }
+  try { if (!fs.existsSync(phase4Artifact('suite', 'KEEP'))) phase4Durable('suite', 'KEEP', { version: 1, outcome: 'UNKNOWN_KEEP', reason, at: new Date().toISOString(), automaticCleanup: false, noRetry: true }); if (state) save(); } catch { /* The in-memory sticky closure remains authoritative on publication uncertainty. */ }
+}
+function phase4Gate() {
+  expect(phase4Active && !phase4Hold && !phase4Closed, 'Closed or UNKNOWN_KEEP case cannot forward another mutation').toBe(true);
+  expect(fs.existsSync(phase4Artifact('suite', 'KEEP'))).toBe(false);
+}
+function phase4Observe(promise) {
+  phase4Inflight.add(promise); promise.then(() => phase4Inflight.delete(promise), () => phase4Inflight.delete(promise)); promise.catch(() => {}); return promise;
+}
+function phase4Guard(actor) {
+  const actual = actor.api;
+  actor.api = new Proxy(actual, { get(target, key) { const value = Reflect.get(target, key, target); if (typeof value !== 'function') return value;
+    if (!['fetch', 'post', 'put', 'patch', 'delete'].includes(key)) return value.bind(target);
+    return (...args) => {
+      const method = key === 'fetch' ? String(args[1]?.method ?? 'GET').toUpperCase() : String(key).toUpperCase();
+      if (['GET', 'HEAD'].includes(method)) return value.apply(target, args); phase4Gate();
+      expect(phase4Inflight.size, 'Join the focused pair before another mutation').toBe(0);
+      const row = { id: randomBytes(12).toString('hex'), method, route: String(args[0]).split('?')[0], responseKnown: false }; phase4Rows.push(row);
+      let forwarded; try { forwarded = value.apply(target, args); } catch { phase4Keep('mutation-forward-unknown'); throw new Error('UNKNOWN_KEEP: mutation dispatch uncertain'); }
+      return phase4Observe(Promise.resolve(forwarded).then(async response => {
+        try { row.status = response.status(); if ([200, 201, 202].includes(row.status)) { const body = await response.json(); expect(body && typeof body === 'object' && !Array.isArray(body)).toBeTruthy(); }
+          row.responseKnown = true; return response;
+        } catch { phase4Keep('accepted-mutation-response-unknown'); throw new Error('UNKNOWN_KEEP: accepted mutation response unreadable'); }
+      }, () => { phase4Keep('mutation-response-unknown'); throw new Error('UNKNOWN_KEEP: mutation response uncertain'); }));
+    };
+  } }); return actor;
+}
+function phase4Socket(socket) {
+  expect(socket.encrypted && socket.authorized === true && socket.remotePort === 443).toBe(true);
+  expect(String(socket.remoteAddress).replace(/^::ffff:/, '')).toBe('157.180.11.28');
+  return { localAddress: socket.localAddress, localPort: socket.localPort, localFamily: socket.localFamily,
+    remoteAddress: socket.remoteAddress, remotePort: socket.remotePort, remoteFamily: socket.remoteFamily };
+}
+async function phase4OwnerPair(actor, site, capability, preview) {
+  phase4Gate(); expect(Object.keys(auditNetworkOptions())).toEqual([]); const identityKeys = ['websiteId', 'applicationId', 'domainId', 'serverId', 'unixUser', 'documentRoot', 'nonce', 'hostname', 'provisioningId', 'operationId'];
+  const fixtureIdentity = Object.fromEntries(identityKeys.map(k => [k, site[k]])); const origin = new URL(ORIGIN);
+  expect(origin.protocol).toBe('https:'); expect(origin.port === '' || origin.port === '443').toBe(true); expect(origin.username + origin.password).toBe('');
+  const addresses = await dns.lookup(origin.hostname, { all: true }); expect(addresses.length > 0 && addresses.every(v => v.address === '157.180.11.28')).toBe(true);
+  const jar = await actor.api.storageState(); const cookiePath = '/api/';
+  const cookies = jar.cookies.filter(c => (origin.hostname === c.domain || c.domain.startsWith('.') && (origin.hostname === c.domain.slice(1) || origin.hostname.endsWith(c.domain))) && (cookiePath === c.path || cookiePath.startsWith(c.path.endsWith('/') ? c.path : c.path + '/')) && (!c.secure || origin.protocol === 'https:') && (c.expires === -1 || c.expires * 1000 > Date.now())).sort((a, b) => b.path.length - a.path.length);
+  const sessionCookie = cookies.filter(c => c.name === '__Host-yunpanel_session'); expect(sessionCookie.length).toBe(1);
+  expect(sessionCookie[0].domain).toBe(origin.hostname); expect(sessionCookie[0].secure).toBe(true); expect(sessionCookie[0].path).toBe('/');
+  expect(cookies.every(c => !/[\r\n;]/.test(c.name + c.value))).toBe(true); expect(actor.session.user.role).toBe('owner'); expect(UUID.test(actor.session.id ?? '')).toBe(true); expect(typeof actor.csrf === 'string' && actor.csrf.length > 0).toBe(true);
+  const cookie = cookies.map(c => c.name + '=' + c.value).join('; '), sessionHash = phase4Sha(actor.session.id), pairId = randomBytes(12).toString('hex');
+  const lanes = ['ttyd', 'website-removal'].map(kind => ({ kind, agent: new https.Agent({ keepAlive: true, maxSockets: 1 }), socket: null, free: false, postCount: 0, known: false }));
+  const channels = { lanes, close() { for (const lane of lanes) lane.agent.destroy(); }, proof: { policy: 'normal-owner-dual-persistent-http1', sessionIdSha256: sessionHash, sameOwner: true, sameSession: true, serverConcurrencyClaimed: false, lanes: [] } }; phase4Channels.push(channels);
+  function send(lane, method, route, bytes, beforeForward = () => {}) {
+    const started = performance.now(); let request, settled = false, timer;
+    const row = { kind: lane.kind, method, route, startedAt: new Date().toISOString(), responseKnown: false, totalDeadlineMs: 90000 };
+    const promise = new Promise((resolve, reject) => {
+      const fail = reason => { if (settled) return; settled = true; clearTimeout(timer); if (method === 'POST') phase4Keep(reason); request?.destroy(); reject(new Error('UNKNOWN_KEEP: focused transport ' + reason)); };
+      timer = setTimeout(() => fail('total-deadline'), 90000);
+      try { beforeForward(); request = https.request(new URL(route, ORIGIN), { method, agent: lane.agent,
+        headers: { Origin: ORIGIN, Cookie: cookie, 'x-csrf-token': actor.csrf, ...(bytes ? { 'Content-Type': 'application/json', 'Content-Length': bytes.length } : {}) } }, response => {
+        try { expect(response.httpVersion).toBe('1.1'); expect(Object.hasOwn(response.headers, 'set-cookie')).toBe(false); row.socket = phase4Socket(request.socket); row.reusedSocket = request.reusedSocket === true;
+          if (method === 'POST') { expect(request.socket === lane.socket).toBe(true); expect(row.reusedSocket).toBe(true); }
+          else { lane.socket = request.socket; }
+        } catch { response.resume(); fail('socket-session-precondition'); return; }
+        const chunks = []; let size = 0;
+        response.on('data', chunk => { size += chunk.length; if (size > 2097152) fail('response-size'); else chunks.push(chunk); });
+        response.on('aborted', () => fail('response-aborted')); response.on('error', () => fail('response-error'));
+        response.on('end', () => { if (settled) return;
+          try { expect(performance.now() - started).toBeLessThanOrEqual(90000); const body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks))); expect(body && typeof body === 'object' && !Array.isArray(body)).toBeTruthy();
+            if (method === 'GET') { expect(response.statusCode).toBe(200); expect(body.data.id === actor.session.id).toBe(true); expect(body.data.user.id).toBe(actor.session.user.id); expect(body.data.user.role).toBe('owner'); expect(body.data.csrfToken === actor.csrf).toBe(true); }
+            else if (lane.kind === 'ttyd') { expect([201, 401, 409]).toContain(response.statusCode);
+              if (response.statusCode === 201) { expect(body.data.sessionId).toMatch(UUID); expect(body.data.protocol).toBe('yunpanel-ttyd-v1'); expect(body.data.basePath).toBe('/tools/ttyd/' + body.data.sessionId + '/'); expect(body.data.target).toEqual({ scope: 'site', serverId: site.serverId, websiteId: site.websiteId, user: site.unixUser, cwd: site.documentRoot }); }
+              else expect(body.error.code).toBe(response.statusCode === 401 ? 'terminal_capability_invalid' : 'terminal_website_removing');
+            } else { expect(response.statusCode).toBe(201); expect(body.data.id).toMatch(/^ws-rem-[a-f0-9-]{36}$/i); expect(body.data.websiteId).toBe(site.websiteId); expect(body.data.serverId).toBe(site.serverId); expect(body.data.applicationId).toBe(site.applicationId); expect(body.data.plan.applicationId).toBe(site.applicationId); expect(body.data.plan.domainIds).toEqual([site.domainId]); }
+            row.status = response.statusCode; row.completedAt = new Date().toISOString(); row.elapsedMs = performance.now() - started; row.responseBytes = size;
+            if (method === 'POST') phase4Durable(pairId + '-' + lane.kind, 'response', { version: 1, ...row, responseKnown: true, websiteId: site.websiteId, noRetry: true });
+            row.responseKnown = true; if (method === 'POST') lane.known = true; settled = true; clearTimeout(timer);
+            channels.proof.lanes.push({ ...row }); resolve({ status: response.statusCode, data: body.data ?? body, body });
+          } catch { fail('response-identity-or-publication'); }
+        });
+      }); request.on('error', () => fail('request-error'));
+      request.on('socket', socket => { const address = () => { if (String(socket.remoteAddress).replace(/^::ffff:/, '') !== '157.180.11.28' || socket.remotePort !== 443) fail('connected-target'); };
+        if (socket.connecting) socket.once('connect', address); else address();
+      });
+      request.end(bytes); row.forwardedAt = new Date().toISOString();
+      } catch { fail('request-dispatch'); }
+    });
+    if (method === 'POST') return phase4Observe(promise); promise.catch(() => {}); return promise;
+  }
+  for (const lane of lanes) {
+    let freeTimer; const free = new Promise((resolve, reject) => { freeTimer = setTimeout(() => reject(new Error('Prewarm socket did not become free within the normal request budget')), 90000);
+      lane.agent.once('free', socket => { try { expect(socket === lane.socket).toBe(true); expect(socket.destroyed).toBe(false); lane.free = true; clearTimeout(freeTimer); resolve(); } catch { clearTimeout(freeTimer); reject(new Error('Prewarm socket identity changed')); } }); }); free.catch(() => {});
+    try { await Promise.all([send(lane, 'GET', '/api/auth/session'), free]); } finally { clearTimeout(freeTimer); }
+  }
+  expect(lanes[0].socket !== lanes[1].socket).toBe(true); expect(phase4Socket(lanes[0].socket)).not.toEqual(phase4Socket(lanes[1].socket));
+  const afterJar = await actor.api.storageState(); expect(JSON.stringify(afterJar.cookies) === JSON.stringify(jar.cookies)).toBe(true);
+  const bodies = { ttyd: Buffer.from(JSON.stringify({ capability: capability.capability })), 'website-removal': Buffer.from(JSON.stringify({ previewDigest: preview.previewDigest, confirmation: preview.confirmation })) };
+  const routes = { ttyd: '/api/panel/terminal/ttyd-sessions', 'website-removal': '/api/panel/websites/' + site.websiteId + '/removal' };
+  // Both credential-free intents are stable before the final gate or first POST. No request/body/token is serialized here.
+  for (const lane of lanes) phase4Durable(pairId + '-' + lane.kind, 'intent', { version: 1, kind: lane.kind, method: 'POST', route: routes[lane.kind], websiteId: site.websiteId, applicationId: site.applicationId, domainId: site.domainId, serverId: site.serverId, sessionIdSha256: sessionHash, totalDeadlineMs: 90000, noRetry: true, preparedAt: new Date().toISOString() });
+  channels.finalGate = () => { phase4Gate(); expect(phase4Inflight.size).toBe(0); expect(phase4Rows.every(v => v.responseKnown)).toBe(true); expect(pendingActions.some(v => v.proof.outcome === 'UNKNOWN_KEEP')).toBe(false);
+    expect(Object.fromEntries(identityKeys.map(k => [k, site[k]]))).toEqual(fixtureIdentity); expect(capability.target).toEqual({ scope: 'site', serverId: site.serverId, websiteId: site.websiteId, user: site.unixUser, cwd: site.documentRoot });
+    expect(preview.plan.domainIds).toEqual([site.domainId]); expect(preview.plan.systemUser).toBe(site.unixUser);
+    expect(capability.expiresAt).toBeGreaterThan(Date.now()); expect(state.sites.b.websiteId).toBe(site.websiteId); expect(state.sites.b.applicationId).toBe(site.applicationId); expect(state.sites.b.serverId).toBe(site.serverId);
+    expect(actor === owner).toBe(true); expect(actor.csrf === actor.session.csrfToken).toBe(true); for (const lane of lanes) { expect(lane.postCount).toBe(0); expect(lane.free && !lane.socket.destroyed).toBe(true); expect(Object.values(lane.agent.freeSockets).flat().includes(lane.socket)).toBe(true); phase4Socket(lane.socket); }
+  };
+  channels.dispatch = kind => { const lane = lanes.find(value => value.kind === kind); expect(lane.postCount).toBe(0); lane.postCount++;
+    return send(lane, 'POST', routes[kind], bodies[kind], () => { expect(phase4Active && !phase4Hold && !phase4Closed).toBe(true); expect(capability.expiresAt).toBeGreaterThan(Date.now()); }); };
+  return channels;
+}
+
 const HELPER = path.resolve('.local/reinstall-20261011/host.py');
 const HELPER_SHA = 'd69ac81f74b24aefa379a3556e6b72966acab8ffb3be55774cd4673b1be11fa7';
 export const openAcceptances = [
@@ -409,7 +535,7 @@ async function cleanupAccounts() {
   return failures;
 }
 async function login(key, browser) {
-  const api = safeApi(await request.newContext({ baseURL: ORIGIN, ignoreHTTPSErrors: false, storageState: { cookies: [], origins: [] }, extraHTTPHeaders: { Origin: ORIGIN }, ...auditNetworkOptions() }));
+  const api = phase4Guard({ api: safeApi(await request.newContext({ baseURL: ORIGIN, ignoreHTTPSErrors: false, storageState: { cookies: [], origins: [] }, extraHTTPHeaders: { Origin: ORIGIN }, ...auditNetworkOptions() })) }).api;
   const actor = { key, api }; actors.push(actor);
   expect((await api.post('/api/auth/login', { data: credentials[key] })).status()).toBe(200);
   const session = await api.get('/api/auth/session'); expect(session.status()).toBe(200); const data = (await session.json()).data;
@@ -481,27 +607,58 @@ async function ensureTopology(page, via = 'api') {
 
 test.describe('Owned reseller customer site isolation and revocation', () => {
   test.beforeAll(async ({}, info) => {
-    owner = await apiContext(); const nonce = randomBytes(5).toString('hex');
+    phase4Prefix = 'native20-phase4-' + info.project.name.replace(/[^a-z0-9]/gi, '').slice(0, 12).toLowerCase() + '-w' + info.workerIndex;
+    expect(fs.existsSync(phase4Artifact('suite', 'STARTED'))).toBe(false); expect(fs.existsSync(phase4Artifact('suite', 'KEEP'))).toBe(false);
+    phase4Durable('suite', 'STARTED', { version: 1, policy: 'normal-owner-dual-persistent-http1', at: new Date().toISOString(), automaticRetry: false });
+    owner = phase4Guard(await apiContext()); const nonce = randomBytes(5).toString('hex');
     const project = info.project.name.replace(/[^a-z0-9]/gi, '').slice(0, 12).toLowerCase();
     statePath = path.join(RUN_DIR, 'tenant-sites-' + project + '-w' + info.workerIndex + '.json'); expect(fs.existsSync(statePath), 'Each project requires a fresh run').toBe(false);
     state = { nonce, fixturePrefix: 't888-' + project + '-' + info.workerIndex, accounts: {}, sites: {}, events: [], project: info.project.name, baselineUserIds: [] };
     credentials = Object.fromEntries(keys.map(key => [key, { username: 'ypaudit-t888-' + nonce + '-' + key, password: randomBytes(30).toString('base64url') }]));
     fs.writeFileSync(path.join(RUN_DIR, 'tenant-credentials-' + project + '-w' + info.workerIndex + '.json'), JSON.stringify(credentials), { mode: 0o600 });
     state.baselineUserIds = ok(await call(owner, 'GET', '/api/panel/users?limit=100'), 'Read account baseline').users.map(u => u.id); save();
-    record('source-proof', { sourceSha256: createHash('sha256').update(fs.readFileSync(new URL(import.meta.url))).digest('hex') });
+    record('source-proof', { sourceSha256: createHash('sha256').update(fs.readFileSync(new URL(import.meta.url))).digest('hex'), pendingOpenPipeline: 'dual-owner-persistent-http1-posts' });
+  });
+  test.beforeEach(() => { expect(phase4Hold || phase4Closed).toBe(false); expect(phase4Inflight.size).toBe(0); phase4Active = true; });
+  test.afterEach(async ({ context }, info) => {
+    // Synchronous closure precedes any await; old GET continuations cannot forward a POST.
+    phase4Active = false;
+    if (info.status !== 'passed' || info.expectedStatus !== 'passed' || phase4Inflight.size || phase4Rows.some(v => !v.responseKnown) || pendingActions.some(v => v.proof.outcome === 'UNKNOWN_KEEP')) {
+      phase4Keep('case-failed-timeout-or-unknown');
+      const closing = [context.close(), ...actors.filter(v => v.context).map(v => v.context.close())];
+      await Promise.allSettled(closing); // Natural browser closure is not asserted to cancel a backend mutation.
+    } else phase4CompletedCases++;
   });
   test.afterAll(async () => {
-    test.setTimeout(360000); if (!owner || !state) return;
-    const unknown = await settlePendingActions();
+    test.setTimeout(360000);
+    const complete = phase4CompletedCases === 3 && !phase4Hold && phase4Inflight.size === 0 && phase4Rows.every(v => v.responseKnown) && pendingActions.every(v => v.proof.outcome === 'KNOWN');
+    phase4Active = false; phase4Closed = true; if (!complete) phase4Keep('suite-incomplete');
+    try {
+    if (!owner || !state) return;
+    await Promise.allSettled([...phase4Inflight]); const unknown = await settlePendingActions();
+    for (const channels of phase4Channels) channels.close();
     for (const page of ttydPages) await page.close();
     for (const actor of actors) { await actor.context?.close(); await actor.api.dispose(); }
-    if (unknown.length) {
-      record('cleanup-final', { failures: [{ code: 'pending_terminal_mutation_unknown' }], allOwnedSitesAndAccountsRemoved: false, outcome: 'UNKNOWN_KEEP', noReplay: true });
-      await owner.api.dispose();
-      throw new Error('Pending terminal outcome is unknown; owned resources are kept for authoritative review without mutation replay');
+    if (!complete || phase4Hold || unknown.length) {
+      record('cleanup-final', { failures: [{ code: 'phase4_case_or_response_unknown' }], allOwnedSitesAndAccountsRemoved: false, outcome: 'UNKNOWN_KEEP', noReplay: true });
+      await owner.api.dispose(); throw new Error('UNKNOWN_KEEP: failed or uncertain cases retain owned resources; no afterAll mutation is permitted');
     }
-    const failures = [...await cleanupSites(), ...await cleanupAccounts()]; record('cleanup-final', { failures, allOwnedSitesAndAccountsRemoved: failures.length === 0 });
-    await owner.api.dispose(); expect(failures, 'All recorded owned tenant resources must be removed').toEqual([]);
+    // The complete third case already performed every normal removal/account cleanup. afterAll is read-only.
+    for (const key of siteKeys) { const t = owned(key).ledger;
+      for (const [resource, id] of [['websites', t.websiteId], ['applications', t.applicationId], ['domains', t.domainId]]) expect((await call(owner, 'GET', '/api/panel/' + resource + '/' + id)).status).toBe(404);
+      assertPhysicalGone(readOnlyHostProbe({ ledger: t }, 'lifecycle-absence'), t);
+    }
+    const users = ok(await call(owner, 'GET', '/api/panel/users?limit=100'), 'Read final owned-login absence').users;
+    for (const key of keys) { expect((await call(owner, 'GET', ACCOUNTS + '/' + state.accounts[key].id)).status).toBe(404); expect(users.some(u => u.id === state.accounts[key].id)).toBe(false); }
+    expect(state.baselineUserIds.every(id => users.some(u => u.id === id))).toBe(true);
+    record('cleanup-final', { failures: [], allOwnedSitesAndAccountsRemoved: true, readOnlyAfterAll: true, actualFocusedTransport: phase4Channels.map(v => v.proof), clientSocketReuseIsNotServerConcurrency: true });
+    await owner.api.dispose(); phase4Durable('suite', 'COMPLETE', { version: 1, cases: 3, outcome: 'ORDINARY_FULL_RUN_COMPLETE', strongAcceptanceUnchanged: true, at: new Date().toISOString() });
+    } catch {
+      phase4Keep('afterall-readonly-or-publication-uncertain');
+      for (const channels of phase4Channels) channels.close();
+      try { await owner?.api.dispose(); } catch { /* Closed dispatch remains sticky. */ }
+      throw new Error('UNKNOWN_KEEP: final readonly evidence or publication is incomplete');
+    }
   });
 
   test('@mutation tenant normal UI creates three distinct real sites for two reseller customers and a direct customer', async ({ page }) => {
@@ -589,7 +746,7 @@ test.describe('Owned reseller customer site isolation and revocation', () => {
     expect(revokePath.startsWith(fs.realpathSync('.local') + path.sep)).toBe(true);
     const revokeStat = fs.lstatSync(revokePath);
     expect(revokeStat.isFile() && !revokeStat.isSymbolicLink() && revokeStat.size <= 1024 * 1024 && (revokeStat.mode & 0o777) === 0o600).toBe(true);
-    const auxiliary = await apiContext(revokePath);
+    const auxiliary = phase4Guard(await apiContext(revokePath));
     expect(auxiliary.session.user.role).toBe('owner'); expect(auxiliary.session.user.id).toBe(owner.session.user.id);
     expect(auxiliary.session.id).not.toBe(owner.session.id);
     auxiliary.key = 'owner-revoke';
@@ -660,46 +817,62 @@ test.describe('Owned reseller customer site isolation and revocation', () => {
         expect(removalPreview.website.applicationId).toBe(t.applicationId); expect(removalPreview.website.serverId).toBe(t.serverId);
         expect(removalPreview.plan.applicationId).toBe(t.applicationId); expect(removalPreview.plan.systemUser).toBe(t.unixUser);
         expect(removalPreview.previewDigest).toMatch(/^[a-f0-9]{64}$/); expect(typeof removalPreview.confirmation === 'string' && removalPreview.confirmation.length > 0).toBe(true);
-        cancellation = { websiteId: t.websiteId, capabilityStatus: null, ttydPosts: 0, ttydStartedAt: null,
-          capabilityIssuedAt: null, capabilityResponseAt: null, removalResponseAt: null, ttydPendingAtRemovalResponse: false, nodePendingAtRemovalResponse: false };
+        cancellation = { websiteId: t.websiteId, capabilityStatus: null, ttydPosts: 0, removalPosts: 0, capabilityPosts: 0, ttydStartedAt: null,
+          capabilityIssuedAt: null, capabilityResponseAt: null, removalResponseAt: null, ttydPendingAtRemovalResponse: false, nodePendingAtRemovalResponse: false,
+          pipeline: 'dual-owner-persistent-http1-posts', clientDispatchOrder: ['ttyd', 'website-removal'], sameTurnClientDispatch: false, serverConcurrencyClaimed: false };
         overlapStartAt = new Date().toISOString();
         nodeStart = trackPendingAction('node-ui', t.websiteId, pendingNode.start());
-        cancellation.removalStartedAt = new Date().toISOString();
-        const removalRequest = call(owner, 'POST', f.endpoint('/removal'), {
-          previewDigest: removalPreview.previewDigest, confirmation: removalPreview.confirmation,
-        }).then(value => {
+        cancellation.capabilityRequestedAt = new Date().toISOString();
+        const capabilityRequest = trackPendingAction('capability', t.websiteId,
+          call(owner, 'POST', '/api/panel/terminal/capabilities', { scope: 'site', websiteId: t.websiteId }));
+        cancellation.capabilityPosts = 1; capabilityRequest.catch(() => {});
+        record('T883-ttyd-first-capability-requested', { websiteId: t.websiteId, pipeline: cancellation.pipeline,
+          capabilityPosts: cancellation.capabilityPosts, ttydPosts: cancellation.ttydPosts, removalPosts: cancellation.removalPosts,
+          capabilityRequestedAt: cancellation.capabilityRequestedAt, sameTurnClientDispatch: false, serverConcurrencyClaimed: false, noFallback: true, noPostRetry: true });
+        const capabilityReply = await capabilityRequest; cancellation.capabilityStatus = capabilityReply.status;
+        cancellation.capabilityResponseAt = new Date().toISOString();
+        cancellation.capabilityIssuedAt = capabilityReply.status === 201 ? cancellation.capabilityResponseAt : null;
+        record('T883-ttyd-first-capability-prepared', { websiteId: t.websiteId, pipeline: cancellation.pipeline,
+          capabilityStatus: cancellation.capabilityStatus, capabilityPosts: cancellation.capabilityPosts,
+          ttydPosts: cancellation.ttydPosts, removalPosts: cancellation.removalPosts,
+          capabilityRequestedAt: cancellation.capabilityRequestedAt, capabilityResponseAt: cancellation.capabilityResponseAt,
+          sameTurnClientDispatch: false, serverConcurrencyClaimed: false, noFallback: true, noPostRetry: true });
+        const raceCapability = ok(capabilityReply, 'Issue one fresh same-Website capability before concurrent intents', [201]);
+        expect(raceCapability.protocol).toBe('yunpanel-terminal-v1');
+        expect(raceCapability.target).toEqual({ scope: 'site', serverId: t.serverId, websiteId: t.websiteId, user: t.unixUser, cwd: t.documentRoot });
+        expect(Number.isSafeInteger(raceCapability.expiresAt)).toBe(true); expect(raceCapability.expiresAt).toBeGreaterThan(Date.now());
+        cancellation.capabilityExpiresAt = raceCapability.expiresAt;
+        const priorEffectUnknown = pendingActions.some(value => value.proof.websiteId === t.websiteId
+          && value.proof.outcome === 'UNKNOWN_KEEP');
+        if (priorEffectUnknown) throw new Error('An own pending response is unverified; no further terminal mutation is allowed');
+        const channels = await phase4OwnerPair(owner, t, raceCapability, removalPreview);
+        channels.finalGate();
+        // Both normal POST request+end calls occur synchronously; no await, ledger write or fsync between them.
+        cancellation.ttydStartedAt = new Date().toISOString();
+        const ttydRequest = channels.dispatch('ttyd');
+        cancellation.ttydPosts = 1; cancellation.removalStartedAt = new Date().toISOString();
+        const removalRequest = channels.dispatch('website-removal');
+        cancellation.removalPosts = 1; cancellation.sameTurnClientDispatch = true;
+        pendingTtyd = trackPendingAction('ttyd', t.websiteId, ttydRequest.then(value => { pendingTtydFinished = true; return value; }))
+          .catch(error => { record('T898-pending-ttyd-transport-unknown', { websiteId: t.websiteId, outcome: 'UNKNOWN_KEEP', noPostRetry: true }); throw error; });
+        pendingTtyd.catch(() => {});
+        pendingRemoval = trackPendingAction('website-removal', t.websiteId, removalRequest.then(value => {
           cancellation.removalResponseAt = new Date().toISOString();
           cancellation.ttydPendingAtRemovalResponse = Boolean(pendingTtyd) && !pendingTtydFinished;
           cancellation.nodePendingAtRemovalResponse = pendingNode.proof.readyAt === null;
           return value;
-        });
-        pendingRemoval = trackPendingAction('website-removal', t.websiteId, removalRequest);
+        }));
         pendingRemoval.catch(() => {});
-        cancellation.capabilityRequestedAt = new Date().toISOString();
-        const capabilityRequest = trackPendingAction('capability', t.websiteId,
-          call(owner, 'POST', '/api/panel/terminal/capabilities', { scope: 'site', websiteId: t.websiteId }));
-        capabilityRequest.catch(() => {});
-        // The only await is the real business dependency: a fresh capability response.
-        const capabilityReply = await capabilityRequest; cancellation.capabilityStatus = capabilityReply.status;
-        cancellation.capabilityResponseAt = new Date().toISOString();
-        cancellation.capabilityIssuedAt = capabilityReply.status === 201 ? cancellation.capabilityResponseAt : null;
-        const priorEffectUnknown = pendingActions.some(value => value.proof.websiteId === t.websiteId
-          && value.proof.outcome === 'UNKNOWN_KEEP');
-        if (priorEffectUnknown) throw new Error('An own pending response is unverified; no further terminal mutation is allowed');
-        if (capabilityReply.status === 201) {
-          cancellation.ttydStartedAt = new Date().toISOString();
-          const ttydRequest = call(owner, 'POST', '/api/panel/terminal/ttyd-sessions', { capability: capabilityReply.data.capability })
-            .then(value => { pendingTtydFinished = true; return value; });
-          pendingTtyd = trackPendingAction('ttyd', t.websiteId, ttydRequest)
-            .catch(error => { record('T898-pending-ttyd-transport-unknown', { websiteId: t.websiteId, outcome: 'UNKNOWN_KEEP', noPostRetry: true }); throw error; });
-          pendingTtyd.catch(() => {});
-        }
-        cancellation.ttydPosts = pendingTtyd ? 1 : 0;
         record('T898-pending-open-attempts-started', { websiteId: t.websiteId, overlapStartAt, nodeUiClicks: 1,
-          ttydPosts: cancellation.ttydPosts, removalPosts: 1, capabilityPosts: 1, removalChannel, outcome: 'PENDING',
+          ttydPosts: cancellation.ttydPosts, removalPosts: cancellation.removalPosts, capabilityPosts: cancellation.capabilityPosts, removalChannel, outcome: 'PENDING',
           removalStartedAt: cancellation.removalStartedAt, capabilityRequestedAt: cancellation.capabilityRequestedAt,
           capabilityResponseAt: cancellation.capabilityResponseAt, capabilityIssuedAt: cancellation.capabilityIssuedAt, ttydStartedAt: cancellation.ttydStartedAt,
-          pipeline: 'removal-capability-ttyd', timingClock: 'client_wall_clock', noArtificialDelay: true, noPreissuedCapabilityFallback: true });
+          capabilityExpiresAt: cancellation.capabilityExpiresAt, pipeline: cancellation.pipeline, clientDispatchOrder: cancellation.clientDispatchOrder,
+          sameTurnClientDispatch: cancellation.sameTurnClientDispatch, serverConcurrencyClaimed: false,
+          timingClock: 'client_wall_clock', noArtificialDelay: true, freshCapabilityBeforeDispatch: true, noPreissuedCapabilityFallback: true });
+        await Promise.all([pendingTtyd, pendingRemoval]);
+        record('T883-dual-persistent-owner-sockets', { websiteId: t.websiteId, ...channels.proof, noPostRetry: true, agentDestroyIsNotBackendCancellation: true });
+        channels.close();
       }
       let operation;
       if (key === 'b') {
@@ -728,7 +901,7 @@ test.describe('Owned reseller customer site isolation and revocation', () => {
         cancellation = { ...cancellation, operationId: operation.id, snapshot,
           snapshotSha256: createHash('sha256').update(JSON.stringify(snapshot)).digest('hex'),
           candidateLeaseIds: candidates.map(value => value.leaseId) };
-        record('T883-pre-spawn-fence-snapshot', { websiteId: t.websiteId, operationId: operation.id,
+        record('T883-pre-spawn-fence-snapshot', { websiteId: t.websiteId, operationId: operation.id, pipeline: cancellation.pipeline,
           snapshotSha256: cancellation.snapshotSha256, snapshot, candidateLeaseIds: cancellation.candidateLeaseIds });
         await nodeStart;
         cancellation.ownerStatusBefore = (await call(owner, 'GET', '/api/auth/session')).status;
@@ -840,7 +1013,9 @@ test.describe('Owned reseller customer site isolation and revocation', () => {
             removalPosts: cancellation.removalPosts, capabilityPosts: cancellation.capabilityPosts, responseStatus: cancellation.responseStatus,
             removalStartedAt: cancellation.removalStartedAt, capabilityRequestedAt: cancellation.capabilityRequestedAt,
             capabilityResponseAt: cancellation.capabilityResponseAt, capabilityIssuedAt: cancellation.capabilityIssuedAt, ttydStartedAt: cancellation.ttydStartedAt,
-            removalResponseAt: cancellation.removalResponseAt, timingClock: 'client_wall_clock',
+            removalResponseAt: cancellation.removalResponseAt, capabilityExpiresAt: cancellation.capabilityExpiresAt,
+            pipeline: cancellation.pipeline, clientDispatchOrder: cancellation.clientDispatchOrder, sameTurnClientDispatch: cancellation.sameTurnClientDispatch,
+            serverConcurrencyClaimed: false, freshCapabilityBeforeDispatch: true, timingClock: 'client_wall_clock',
             responseCode: cancellation.responseCode, ownerStatusBefore: cancellation.ownerStatusBefore, ownerStatusAfter: cancellation.ownerStatusAfter,
             closures: cancellation.closures, sameApiGeneration: cancellation.sameApiGeneration, knownOsAbsent: cancellation.knownOsAbsent,
             physicalAbsent: state.sites[key].physicalAbsent, rootAndOtherWebsiteFirstOutputPreserved: true,

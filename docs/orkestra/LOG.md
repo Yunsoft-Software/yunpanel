@@ -266,3 +266,15 @@
 - 2026-11-15 01:27 orchestrator: verify 29d02d9a..96794af0: failed, yeniden açılan -, bulgu ['T912']
 - 2026-11-15 01:52 orchestrator: verify 29d02d9a..cce5574d: ok, yeniden açılan -, bulgu -
 - 2026-11-15 02:52 orchestrator: verify cce5574d..e3240345: ok, yeniden açılan -, bulgu -
+
+## 16 Kasim - ISOLATED Source P0 history; NOT Primary combined acceptance
+
+- 2026-11-15 20:38 orchestrator: verify e3240345..07205737: ok, yeniden açılan -, bulgu -
+- 2026-11-15 23:32 orchestrator: verify 07205737..0616c0d8: ok, yeniden açılan -, bulgu -
+- 2026-11-16 01:21 orchestrator: verify 0616c0d8..5b50329a: failed, yeniden açılan -, bulgu ['T914']
+- 2026-11-16 02:00 orchestrator: verify 0616c0d8..9a99080b: ok, yeniden açılan -, bulgu -
+- 2026-11-16 02:16 orchestrator: verify 9a99080b..ce7092bf: ok, yeniden açılan -, bulgu -
+- 2026-11-16 14:01 orchestrator: verify ce7092bf..67b0dde4: failed, yeniden açılan -, bulgu ['T915']
+- 2026-11-16 14:11 orchestrator: verify ce7092bf..1bd992ef: ok, yeniden açılan -, bulgu -
+
+- Private integration candidate only: Source9e gates exclude Primary license03c; Primary tasks/verified unchanged, new combined gate OPEN.

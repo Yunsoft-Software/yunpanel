@@ -387,11 +387,38 @@ else:
    except (OSError,PermissionError):pass
   result['processes']=rows
  include='/etc/yunpanel/passenger-env/'+app+'.conf'
- try:
-  with open(include) as handle:first=handle.readline().strip()
-  hit=re.fullmatch(r'# YunPanel Passenger environment ([a-f0-9-]{36}) revision ([0-9]+)',first)
-  result['environmentIncludeApplicationId']=hit[1] if hit else None;result['environmentIncludeRevision']=int(hit[2]) if hit else None
- except FileNotFoundError:result['environmentIncludeApplicationId']=None;result['environmentIncludeRevision']=None
+ if p['name']=='lifecycle-absence':
+  result['environmentIncludeApplicationId']=None;result['environmentIncludeRevision']=None
+  # Exact generated application include only; marker absence alone never proves file absence.
+  parent=''
+  for part in '/etc/yunpanel/passenger-env'.split('/')[1:]:
+   parent+='/'+part
+   if not os.path.lexists(parent):break
+   m=os.lstat(parent);assert stat.S_ISDIR(m.st_mode) and not stat.S_ISLNK(m.st_mode) and m.st_uid==0 and not(stat.S_IMODE(m.st_mode)&0o022) and os.path.realpath(parent)==parent
+  exists=os.path.lexists(include)
+  include_meta={'path':include,'exists':exists,'parentTrustVerified':True}
+  if exists:
+   before=os.lstat(include)
+   include_meta.update({'regular':stat.S_ISREG(before.st_mode),'symlink':stat.S_ISLNK(before.st_mode),'uid':before.st_uid,'gid':before.st_gid,'mode':stat.S_IMODE(before.st_mode),'bytes':before.st_size,'device':before.st_dev,'inode':before.st_ino,'nlink':before.st_nlink,'sha256':None,'stableRead':False})
+   if stat.S_ISREG(before.st_mode):
+    assert before.st_uid==0 and before.st_nlink==1 and not(stat.S_IMODE(before.st_mode)&0o022) and before.st_size<=1048576 and os.path.realpath(include)==include
+    identity=lambda m:(m.st_dev,m.st_ino,m.st_mode,m.st_uid,m.st_gid,m.st_nlink,m.st_size,m.st_mtime_ns,m.st_ctime_ns)
+    fd=os.open(include,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+    with os.fdopen(fd,'rb') as handle:
+     opened=os.fstat(handle.fileno());assert identity(opened)==identity(before)
+     content=handle.read(1048577);assert len(content)<=1048576 and len(content)==opened.st_size
+     assert identity(os.fstat(handle.fileno()))==identity(opened)
+    assert identity(os.lstat(include))==identity(opened)
+    include_meta.update({'sha256':hashlib.sha256(content).hexdigest(),'stableRead':True})
+    first=content.split(b'\n',1)[0].strip();hit=re.fullmatch(rb'# YunPanel Passenger environment ([a-f0-9-]{36}) revision ([0-9]+)',first)
+    result['environmentIncludeApplicationId']=hit[1].decode('ascii') if hit else None;result['environmentIncludeRevision']=int(hit[2]) if hit else None
+  result['passengerEnvironmentInclude']=include_meta
+ else:
+  try:
+   with open(include) as handle:first=handle.readline().strip()
+   hit=re.fullmatch(r'# YunPanel Passenger environment ([a-f0-9-]{36}) revision ([0-9]+)',first)
+   result['environmentIncludeApplicationId']=hit[1] if hit else None;result['environmentIncludeRevision']=int(hit[2]) if hit else None
+  except FileNotFoundError:result['environmentIncludeApplicationId']=None;result['environmentIncludeRevision']=None
  print(json.dumps(result))`;
   const command = 'python3 -c ' + "'" + code.replaceAll("'", "'\\''") + "' '" + payload + "'";
   try {
