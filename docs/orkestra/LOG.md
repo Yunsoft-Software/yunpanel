@@ -282,3 +282,14 @@
 - 2026-11-16 18:39 orchestrator: verify e3240345..092bc784: ok, yeniden açılan -, bulgu -
 - 2026-11-17 03:20 orchestrator: recover: geri alınan ['T883', 'T913'], kilit ['sunucu-28-1', 'sunucu-28-2', 'sunucu-28-3', 'sunucu-28-genel'], sahipsiz değişiklik (yedeklendi, dokunulmadı) 0
 - 2026-11-17 04:23 orchestrator: verify 092bc784..3395d81d: failed, yeniden açılan -, bulgu ['T918']
+
+## 17 Kasim toparlanma — T889 acik
+
+- Recover sonrasi aktif claim yokken gunluk 17-11-2026 dali 3395d81d noktasindan acildi; T883/T913 ve dort .28 kilidi normal yolla geri alindi.
+- 17 Kasim salt okunur .28 sonucu: 1601/common93/PHP84 yok; 6 site/7 uygulama/0 aktif is; API ve korunan yp-wp HTTPS 200. Kanit: .local/p0-20261117/recovery-readonly-root-02/result.json SHA6ce28002ad7b6caec784abff150d12f9666a0535905e6931e0636a27d1ad577e. Ilk dar okuyucu 2MiB sinirinda durdu; gercek job registry 6202061B, ikinci okuyucu onceki Physical09 64MiB siniriyla dogruladi. Ilk FAIL korunur.
+- Quick verify test kosusu 45 dakikada bitmedi ve dokuz basarisiz testle T918 acildi; kabul acik. Ayni donemde yerel yuk340/swap7.3GB olculdu; nedensellik henuz kanitlanmadi. Tam test gecmis sayilmaz.
+- Telemetri icin kaynakta kanitli10 sensor alaniyla sinirli semantik kontrol PRIVATE hazirlaniyor; bagimsiz nihai kaynak/girdi ve gercek PHP kabul kapilari acik. Eski f6/69 UNKNOWN KEEP degismez. T889 acik;1602/PHP84/GC etkisi yok.
+
+- 17 Kasim gercek telemetri kontrolu P10 ile iki baseline ve Tx22de gecti;7diger kayit bytekorumasi korundu. Yeni HTTPSistemcisi varsayilanHostportu301 uretiyordu; sabit28/SNI/sertifika/nofollow ile3gercekistek karsilastirmasi ed446589 bunu daraltti. Tx23 tekHTTPSsinifi duzeltmesiyle bagimsizkaynak/girdi incelemesinden gecti.
+- 17 Kasim03:38UTC gunceldurum: common101+12PHP84gercekkurulu, dortvarsayilanmanual83;FPM84calisiyor, API/Web/FPM83PIDdegismedi/API+korunanHTTPS200/6site7uygulama0aktifis. Tx23sonkanitinda APTnin guvenli bosauxfilesdizinini dosya sayma hatasinda durdu; b139/d162 UNKNOWN aynen korunur,INSTALL_VERIFIED yok. Kanit390051a12ccea37cef79793d321522e9c85c1660ae884edb3709f5e8c2743bc3. Ayri, yalniz geri donus yetkili yeni kanit ve yeni calisma dizini plani937fcbe3 hazirlaniyor; eskiislem tekraroynatilmaz veya basarili yazilmaz. Native84kabul veT889acik.
+- Yerelyuk06:45Istanbul2.37/1.79/13.04 olculdu; ilkT918kosusundaki340yuk ile aynikosuldegil. Degismeyen tamkomutlar/APIrunnerconcurrency2 ve120sn siniri korunarak butunhamcikti tutulan yeni tamdogrulama hazirlaniyor; sonucu henuz yok.
