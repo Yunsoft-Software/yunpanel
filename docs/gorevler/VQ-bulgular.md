@@ -1834,3 +1834,59 @@
     Source9e ve Primary28ec bu dilimde değiştirilmez. Eski07/08/401/compare HOLD ve nativeC1FAILED korunur; 14:05 kesin writer UNKNOWN. GC inode/FD/hash/once-only guardları gevşetilmez; 10repo26snapshot/18durable receipts KEEP. T889 açık. Kaynak uygunluğu ve ilgili/full combined gate gereklidir; matching yeni paket/.28 gerçek GET inode korunum+GC sonucu Root tarafından ayrı doğrulanmadan runtime kabulü yok. Push/main/force/reset yok.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T918 · Doğrulama: test — site admin provisioning creates site_manager role and never leaks password in resp
+- **Bağımlı:** —
+- **Dosyalar:** —
+- **Kaynak:** QA · 2026-11-17 04:23
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    Başarısız testler:
+    - site admin provisioning creates site_manager role and never leaks password in response
+    - AI-triggered durable service.restart interrupted by process kill at host mutation boundary reconciles inspect-first without duplicate side-effects
+    - real HTTP conversation storage preserves migration, paging, limits and failed bytes without a model
+    - real HTTP conversations enforce native auth, license and ownership before provider access
+    - auth and user lifecycle dual-write into the bounded common audit model
+    - failed anonymous login records only generic failure metadata
+    - local CLI issues setup tokens and recovers an account without passwords in argv/output
+    - real store setup/login/session/logout flow works over HTTP
+    - non-owner user cannot set recovery email
+    
+    sword command-line arguments (55367.7625ms)
+    ✔ live terminal authenticator accepts site management sessions and returns current Website grants (87.202416ms)
+    ✔ all management paths reject anonymous and bootstrap-bearer requests before the handler (4587.02775ms)
+    ✔ authenticated owner reaches handlers through request.auth without injected credentials (1052.667208ms)
+    ✔ mutation requires both exact origin and the session CSRF token (1576.979625ms)
+    ✔ login sets a host-only secure HttpOnly cookie without exposing it in JSON (521.055416ms)
+    ✔ login refuses cross-origin, missing-origin and wrong-content-type requests (609.243208ms)
+    ✔ login rate limiting receives only authenticated single-hop client IP metadata (977.784167ms)
+    ✔ auth body parser rejects malformed, non-object and oversized JSON (1002.983083ms)
+    ✔ session listing and logout use the same backend-verified session (1274.757458ms)
+    ✔ session-bound Website and ttyd gateways fail closed without an authorizer (1416.486791ms)
+    ✔ session-bound phpMyAdmin delegates exact panel session context to its authorizer (330.528917ms)
+    ✔ site manager phpMyAdmin gateway receives the current Website grants (444.084417ms)
+    ✔ site manager elFinder gateway receives current Website grants and target state (370.693917ms)
+    ✔ session-bound ttyd gateway delegates exact Owner session context to its authorizer (264.460709ms)
+    ✔ read-only role cannot enter protected tool gateways (324.431709ms)
+    ✔ read-only role reaches only its explicitly declared inventory surface (359.333916ms)
+    ✔ retired legacy agent routes require owner session and reject bearer transport tokens (1064.991459ms)
+    ✔ production development endpoints stay closed and public health contains no inventory (415.705208ms)
+    ✔ duplicate session cookies are rejected (159.097166ms)
+    ✔ insecure or noncanonical production origins cannot start the API (27.318167ms)
+    ✖ real store setup/login/session/logout flow works over HTTP (124709.980291ms)
+    ✔ createAuthMailer with custom transport sends mail with proper envelope and headers (9.864458ms)
+    ✔ createAuthMailer reports isAvailable false when SMTP port is unreachable (54.333ms)
+    ✔ createAuthMailer communicates with SMTP server mock (1088.260291ms)
+    ✔ email validation strictly rejects invalid formats and normalizes valid addresses (303.756333ms)
+    ✔ owner can configure recovery email during setup and manage it afterwards (19434.826459ms)
+    ✖ non-owner user cannot set recovery email (120626.811209ms)
+    ✔ password reset request generates 15-minute token hashed with SHA-256 and sends email (15387.02425ms)
+    ✔ new reset request supersedes previous reset token (single-use replacement) (24188.336875ms)
+    ✔ anti-enumeration: non-existent account returns { sent: true } without sending email when SMTP is up (66341.714417ms)
+    ✔ fail-closed: when SMTP is unavailable, requestPasswordReset throws 503 smtp_unavailable for all accounts (35519.830708ms)
+    ✔ expired reset token is rejected (34452.16225ms)
+    
+    
+    TIMEOUT: `npm test` 45 dakikada bitmedi; süreç grubu durduruldu.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.

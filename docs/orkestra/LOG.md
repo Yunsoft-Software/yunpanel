@@ -280,3 +280,5 @@
 - Private integration candidate only: Source9e gates exclude Primary license03c; Primary tasks/verified unchanged, new combined gate OPEN.
 - 2026-11-16 17:19 orchestrator: verify e3240345..687c562b: failed, yeniden açılan -, bulgu ['T916']
 - 2026-11-16 18:39 orchestrator: verify e3240345..092bc784: ok, yeniden açılan -, bulgu -
+- 2026-11-17 03:20 orchestrator: recover: geri alınan ['T883', 'T913'], kilit ['sunucu-28-1', 'sunucu-28-2', 'sunucu-28-3', 'sunucu-28-genel'], sahipsiz değişiklik (yedeklendi, dokunulmadı) 0
+- 2026-11-17 04:23 orchestrator: verify 092bc784..3395d81d: failed, yeniden açılan -, bulgu ['T918']
