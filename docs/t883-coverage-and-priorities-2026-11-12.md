@@ -1,8 +1,21 @@
 # T883 gerçek kapsam ve sonraki öncelikler — 12 Kasım 2026
 
-**Durum: gerçek test sonuçları ve öncelik planı tamamlandı. T883 genel kabulü açık.** Başarılı kaynak kontrolleri veya tek bir yeşil koşu tüm davranışların kabulü sayılmaz.
+## 18 Kasım 2026 itibarıyla
 
-## Kapsam ve sürüm
+**T883 ve T889 açık.** Aşağıdaki tablo 12 Kasım envanterinden sonra doğrulanan davranışları günceller. Ayrıntılı işlem kayıtları ve kabul sınırları [T883 ilerleme notunda](../tasks/reopen/T883.md) ve [T917 kabul kaydında](../tasks/done/T917.md) bulunur.
+
+| Konu | Doğrulanan sonuç |
+|---|---|
+| PHP 8.4 ve WordPress | .28 üzerinde `0.3.0-2026111601` ile PHP 8.4 kuruldu. İki ayrı Chromium koşusunda site PHP sürümü değiştirildi ve geri alındı. Aynı iki koşuda Türkçe WordPress kurulumu ile 7.1.3 → 7.1.4 çekirdek güncellemesi gerçek SQL içeriği ve yönetici girişiyle geçti. İki koşu da 5/5. Sunucunun dört varsayılan PHP alternatifi tekrar otomatik 8.3 oldu. |
+| Site silme ve API yeniden başlatma | 1601 üzerinde iki ayrı Chromium koşusu 3/3 geçti. Başlatan oturumun iptali, tarayıcının kapanması ve systemd ile gerçek API yeniden başlatıldıktan sonra aynı silme günlüğünün tamamlanması doğrulandı. |
+| DNS, hosting ve Node.js | .28 üzerindeki `0.3.0-2026111602` paketinde Native16 Chromium/Firefox 4+4, Native18 Chromium/Firefox 2+2 geçti. DNS ve Nginx ayarları iki kez geri yüklendi, gerçek HTTP 403 geri dönüşü doğrulandı. Node.js ortam değeri aynı yedekten iki kez geri yüklendi ve ayrı Passenger süreçlerinde okundu. |
+| Müşteri ve site sahipliği | 1602 üzerinde Owner iki müşteriye birer site açtı. Ayrı Unix kullanıcılarıyla çalışan iki site HTTP 200 verdi. Her müşteri kendi oturumunda yalnız kendi sitesini listeledi ve kendi uygulamasını okudu. Testin iki sitesi ve iki hesabı kaldırıldı. |
+| Yedek kayıtları ve fiziksel temizlik | 1602 üzerinde normal tarayıcıdan 8 liste ve 18 detay okuması sırasında işlem kayıt dosyasının inode’u ve SHA-256 değeri sabit kaldı. Sekiz tarihsel Native16/18 koşusunun 10 deposu/26 snapshot’ı, iki Native13 koşusunun 2 deposu/4 snapshot’ı, yeni dört Native16/18 koşusunun 6 deposu/14 snapshot’ı temizlendi. Son okumada 18 tarihsel ve 10 yeni geri yükleme makbuzu korundu. |
+| Tam kaynak kontrolü ve Postfix | Günlük dalın `acfafe2e` kaynak sürümünde görev denetimi, lint, test ve build geçti. 8.785 testte 8.784 başarı, sıfır hata, bir macOS Postfix atlaması kaydedildi. Aynı Postfix relay senaryosu .28 üzerinde gerçek araçlarla yapılandırma kopyasında geçti. |
+
+**Açık kabul sınırları** arasında T889’un aralıklı PHP-FPM hatası, terminal yarışında gereken iki bağımsız nedensel gözlem ve geçmiş işçi sahiplenme hatalarının kök nedeni var. Önceki kesintilerde kaydedilemeyen özgün işlem makbuzları ile desteklenmeyen çökme kanalları da açık. Aşağıdaki başlangıç matrisi, bulgular ve öncelikler **12 Kasım tarihindeki** durumu gösterir.
+
+## 12 Kasım 2026 kapsamı ve sürümü
 
 Kullanıcı önce T883 kapsam açığının gerçek `.28` sonuçlarıyla kapatılmasını, ardından site kopyalama ve kalan işler için öncelikli plan istedi. Bu dilim yeni özellik uygulaması veya dağıtım içermez. Yerel dal `12-11-2026`, taban ve son dağıtım referansı `a2fdc8c1`. Kurulu native paket `0.3.0-2026111001`; yeni testler yerel Playwright üzerinden bu gerçek pakete gider. Pinned sunucu okumasında API entry/PID ve WordPress toolkit, website restore, PHP-FPM yöneticisinin üç kaynak dosyası hash'i `a2fdc8c1` ile ayrıca eşleşti. Bu üç dosya kontrolü bütün ağacın hash eşitliği iddiası değildir. Tanılama API'sindeki eski build alanları kimlik kanıtı sayılmadı; T901'e kaydedildi.
 
