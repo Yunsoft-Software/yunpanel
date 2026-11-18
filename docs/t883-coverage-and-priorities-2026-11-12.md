@@ -2,7 +2,7 @@
 
 ## 18 Kasım 2026 itibarıyla
 
-**T883 ve T889 açık.** Aşağıdaki tablo 12 Kasım envanterinden sonra doğrulanan davranışları günceller. Ayrıntılı işlem kayıtları ve kabul sınırları [T883 ilerleme notunda](../tasks/reopen/T883.md) ve [T917 kabul kaydında](../tasks/done/T917.md) bulunur.
+**T883 açık.** T889, 19 Kasım’da üç gerçek PHP site kurulumu ve silmesiyle kapatıldı. [T889 kapanış kaydı](../tasks/done/T889.md). Aşağıdaki tablo 12 Kasım envanterinden sonra doğrulanan davranışları günceller. Ayrıntılı işlem kayıtları ve kabul sınırları [T883 ilerleme notunda](../tasks/reopen/T883.md) ve [T917 kabul kaydında](../tasks/done/T917.md) bulunur.
 
 | Konu | Doğrulanan sonuç |
 |---|---|
@@ -13,7 +13,7 @@
 | Yedek kayıtları ve fiziksel temizlik | 1602 üzerinde normal tarayıcıdan 8 liste ve 18 detay okuması sırasında işlem kayıt dosyasının inode’u ve SHA-256 değeri sabit kaldı. Sekiz tarihsel Native16/18 koşusunun 10 deposu/26 snapshot’ı, iki Native13 koşusunun 2 deposu/4 snapshot’ı, yeni dört Native16/18 koşusunun 6 deposu/14 snapshot’ı temizlendi. Son okumada 18 tarihsel ve 10 yeni geri yükleme makbuzu korundu. |
 | Tam kaynak kontrolü ve Postfix | Günlük dalın `acfafe2e` kaynak sürümünde görev denetimi, lint, test ve build geçti. 8.785 testte 8.784 başarı, sıfır hata, bir macOS Postfix atlaması kaydedildi. Aynı Postfix relay senaryosu .28 üzerinde gerçek araçlarla yapılandırma kopyasında geçti. |
 
-**Açık kabul sınırları** arasında T889’un aralıklı PHP-FPM hatası, terminal yarışında gereken iki bağımsız nedensel gözlem ve geçmiş işçi sahiplenme hatalarının kök nedeni var. Önceki kesintilerde kaydedilemeyen özgün işlem makbuzları ile desteklenmeyen çökme kanalları da açık. Aşağıdaki başlangıç matrisi, bulgular ve öncelikler **12 Kasım tarihindeki** durumu gösterir.
+**Açık kabul sınırları** arasında terminal yarışında gereken iki bağımsız nedensel gözlem ve geçmiş işçi sahiplenme hatalarının kök nedeni var. Önceki kesintilerde kaydedilemeyen özgün işlem makbuzları ile desteklenmeyen çökme kanalları da açık. Aşağıdaki başlangıç matrisi, bulgular ve öncelikler **12 Kasım tarihindeki** durumu gösterir.
 
 ## 12 Kasım 2026 kapsamı ve sürümü
 
