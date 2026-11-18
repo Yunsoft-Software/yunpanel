@@ -6,7 +6,7 @@ import https from 'node:https';
 import { checkServerIdentity } from 'node:tls';
 import dns from 'node:dns/promises';
 import { createHash, randomBytes } from 'node:crypto';
-import { test, expect, apiContext, manifest, privateJson, RUN_DIR, ORIGIN } from './support.js';
+import { test, expect, apiContext, manifest, main, ready, privateJson, RUN_DIR, ORIGIN } from './support.js';
 import { createOwnedFixture, cleanupOwnedFixture, readOnlyHostProbe } from './owned-fixture.js';
 import { readOwnedPhpReadiness } from './php-readiness-probe.js';
 import { createWebsitePathContract } from '../../packages/host-runtime/src/website-path-contract.js';
@@ -222,28 +222,31 @@ async function firstPhp(site, phase) {
   assertPhp(reply, site, challenge, phase);
 }
 
+async function provisionMember(entry, create) {
+  const fixture = await createOwnedFixture(actor, { key: entry.key, runtime: 'php', create });
+  entry.fixture = fixture;
+  fixture.record('readiness.source', { sourceSha256, helperSha256, probeSha256 });
+  const marker = 'T889-' + fixture.ledger.nonce, challenge = randomBytes(12).toString('hex');
+  const code = '<?php header("Content-Type: application/json");header("Cache-Control: no-store");echo json_encode(['
+    + '"marker"=>' + JSON.stringify(marker) + ',"challenge"=>(string)($_GET["challenge"]??""),'
+    + '"phpVersion"=>PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION,"uid"=>function_exists("posix_geteuid")?posix_geteuid():-1,"sapi"=>PHP_SAPI]);';
+  await fixture.upload('t889-readiness.php', code);
+  // Capture the first dynamic response before slower API/config/physical diagnostic reads.
+  const first = await fixture.http('/t889-readiness.php?challenge=' + challenge);
+  const config = accepted(await fixture.call('GET', fixture.endpoint('/php-tools/config')), 'Read actual configured PHP version');
+  const physical = readOnlyHostProbe(fixture, 'owned-site-files');
+  expect(physical.unixUserExists).toBe(true); expect(physical.uid).toBeGreaterThan(0);
+  const site = { fixture, marker, phpVersion: config.phpVersion, uid: physical.uid };
+  assertPhp(first, site, challenge, 'normal-provisioning-ready'); entry.site = site;
+  const observed = readOwnedPhpReadiness(fixture);
+  fixture.record('readiness.actual-observation', observed);
+  entry.readiness = observed;
+  return entry;
+}
+
 async function createMember(entry, gate) {
   try {
-    const fixture = await createOwnedFixture(actor, { key: entry.key, runtime: 'php',
-      create: (input, preview) => normalCreateAtBarrier(input, preview, gate, entry) });
-    entry.fixture = fixture;
-    fixture.record('readiness.source', { sourceSha256, helperSha256, probeSha256 });
-    const marker = 'T889-' + fixture.ledger.nonce, challenge = randomBytes(12).toString('hex');
-    const code = '<?php header("Content-Type: application/json");header("Cache-Control: no-store");echo json_encode(['
-      + '"marker"=>' + JSON.stringify(marker) + ',"challenge"=>(string)($_GET["challenge"]??""),'
-      + '"phpVersion"=>PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION,"uid"=>function_exists("posix_geteuid")?posix_geteuid():-1,"sapi"=>PHP_SAPI]);';
-    await fixture.upload('t889-readiness.php', code);
-    // Capture the first dynamic response before slower API/config/physical diagnostic reads.
-    const first = await fixture.http('/t889-readiness.php?challenge=' + challenge);
-    const config = accepted(await fixture.call('GET', fixture.endpoint('/php-tools/config')), 'Read actual configured PHP version');
-    const physical = readOnlyHostProbe(fixture, 'owned-site-files');
-    expect(physical.unixUserExists).toBe(true); expect(physical.uid).toBeGreaterThan(0);
-    const site = { fixture, marker, phpVersion: config.phpVersion, uid: physical.uid };
-    assertPhp(first, site, challenge, 'normal-provisioning-ready'); entry.site = site;
-    const observed = readOwnedPhpReadiness(fixture);
-    fixture.record('readiness.actual-observation', observed);
-    entry.readiness = observed;
-    return entry;
+    return await provisionMember(entry, (input, preview) => normalCreateAtBarrier(input, preview, gate, entry));
   } catch (error) { gate.cancel(); throw error; }
 }
 
@@ -345,4 +348,137 @@ test('@mutation source records actual PHP readiness across two bounded parallel 
   expect(proof.readinessAndDynamicHttpPassed).toBe(true);
   expect(proof.actualCausalOperationIds.length,
     'T889 mechanism remains OPEN unless a real initial INSPECT false becomes true; listener-only delay and all-first-true green runs do not prove its cause').toBeGreaterThan(0);
+});
+
+async function createFromPanel(page, input, rememberInput, row) {
+  let createPosts = 0;
+  const endpoint = ORIGIN + '/api/panel/sites';
+  const capture = async route => {
+    const request = route.request();
+    if (request.method() === 'POST') {
+      try {
+        createPosts += 1;
+        assert.equal(createPosts, 1);
+        const actual = request.postDataJSON().input;
+        rememberInput(actual);
+        assert.equal(actual.wwwMode, 'none');
+        assert.equal(actual.httpsMode, 'off');
+        assert.equal(actual.dns.mode, 'external');
+        assert.equal(actual.mail.mode, 'none');
+        assert.equal(actual.database.mode, 'none');
+        row.operationId = actual.operationId;
+        row.createPosts = createPosts;
+        privateJson('t889-ui-lifecycle.json', uiProof);
+      } catch (error) {
+        await route.abort();
+        throw error;
+      }
+    }
+    await route.continue();
+  };
+  await page.route(endpoint, capture);
+  try {
+    await ready(page, '/websites/new');
+    await page.getByLabel('Alan adı', { exact: true }).fill(input.primaryDomain);
+    await page.locator('label').filter({ hasText: 'www davranışı' }).locator('select').selectOption('none');
+    const next = main(page).getByRole('button', { name: 'Devam et', exact: true });
+    await next.click();
+    await page.getByLabel('Site türü', { exact: true }).selectOption('new_php');
+    await page.getByRole('checkbox', { name: /otomatik veritabanı oluştur/i }).uncheck();
+    await next.click();
+    await page.getByLabel('DNS yönetimi', { exact: true }).selectOption('external');
+    await page.getByLabel('Sertifika yönetimi', { exact: true }).selectOption('off');
+    await page.getByRole('checkbox', { name: /Otomatik E-Posta|E-posta ve Webmail/ }).uncheck();
+    const [response] = await Promise.all([
+      page.waitForResponse(reply => reply.request().method() === 'POST' && reply.url() === endpoint, { timeout: 180000 }),
+      main(page).getByRole('button', { name: 'Siteyi oluştur', exact: true }).click(),
+    ]);
+    const body = await response.json();
+    row.createStatus = response.status();
+    row.createError = safeCode(body?.error?.code);
+    row.ready = body.data?.provisioning?.ready ?? null;
+    privateJson('t889-ui-lifecycle.json', uiProof);
+    expect([200, 201]).toContain(row.createStatus);
+    const created = body.data;
+    expect(created.provisioning.operationId).toBe(row.operationId);
+    expect(created.website.name).toBe(input.primaryDomain);
+    row.websiteId = created.website.id;
+    try {
+      await expect(main(page).getByLabel('Site kurulum durumu')).toContainText(
+        'Kurulum planındaki zorunlu adımlar tamamlandı', { timeout: 120000 });
+      row.ready = true;
+    } catch (error) {
+      const journal = await actor.api.get('/api/panel/sites/provisioning/' + row.operationId);
+      const observed = (await journal.json()).data;
+      row.journalStatus = journal.status();
+      if (observed?.operationId === row.operationId && observed.websiteId === row.websiteId) {
+        row.journalReady = observed.ready;
+        row.failedSteps = (observed.steps ?? []).filter(step => ['failed', 'blocked'].includes(step.state))
+          .map(step => ({ id: safeCode(step.id), state: step.state, error: safeCode(step.error) }));
+      }
+      throw error;
+    }
+    return created;
+  } finally {
+    privateJson('t889-ui-lifecycle.json', uiProof);
+    await page.unroute(endpoint, capture);
+  }
+}
+
+async function removeFromPanel(page, entry, row) {
+  const fixture = entry.fixture;
+  await ready(page, fixture.route('settings'));
+  await main(page).getByRole('button', { name: 'Siteyi sil…', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Siteyi kalıcı olarak sil' });
+  await dialog.getByRole('textbox').fill(fixture.ledger.hostname);
+  const endpoint = ORIGIN + fixture.endpoint('/removal');
+  const [response] = await Promise.all([
+    page.waitForResponse(reply => reply.request().method() === 'POST' && reply.url() === endpoint, { timeout: 60000 }),
+    dialog.getByRole('button', { name: 'Silme işlemini başlat', exact: true }).click(),
+  ]);
+  const body = await response.json();
+  row.removalStatus = response.status();
+  row.removalError = safeCode(body?.error?.code);
+  privateJson('t889-ui-lifecycle.json', uiProof);
+  expect([200, 201, 202]).toContain(row.removalStatus);
+  const receipt = body.data.operation ?? body.data;
+  expect(receipt.websiteId).toBe(fixture.ledger.websiteId);
+  expect(receipt.id).toMatch(/^ws-rem-[a-f0-9-]{36}$/i);
+  row.removalId = receipt.id;
+  await expect.poll(async () => {
+    const response = await actor.api.get('/api/panel/website-removal-operations/' + receipt.id);
+    expect(response.status()).toBe(200);
+    const value = (await response.json()).data;
+    expect(value.websiteId).toBe(fixture.ledger.websiteId);
+    expect(['queued', 'running', 'pending', 'removed']).toContain(value.status);
+    return value.status;
+  }, { timeout: 120000, intervals: [500, 1000] }).toBe('removed');
+  for (const [resource, field] of [['websites', 'websiteId'], ['domains', 'domainId'], ['applications', 'applicationId']]) {
+    expect((await actor.api.get('/api/panel/' + resource + '/' + fixture.ledger[field])).status()).toBe(404);
+  }
+  const ledger = await fixture.cleanup();
+  absence(ledger);
+  entry.removed = true;
+  row.physicalAbsence = true;
+  await originalPreserved('ui-removal-' + entry.key);
+}
+
+const uiProof = { sourceSha256, helperSha256, probeSha256, sites: [] };
+
+test('@mutation T889 creates and removes new PHP sites through the panel', async ({ page }) => {
+  test.setTimeout(720000);
+  try {
+    for (const suffix of ['first', 'second', 'third']) {
+      const entry = { key: 't889-ui-' + suffix, fixture: null, removed: false };
+      const row = { key: entry.key };
+      uiProof.sites.push(row);
+      entries.push(entry);
+      await provisionMember(entry, (input, _preview, rememberInput) => createFromPanel(page, input, rememberInput, row));
+      row.firstDynamicHttpPassed = true;
+      row.readiness = entry.readiness.readiness;
+      await removeFromPanel(page, entry, row);
+    }
+  } finally {
+    privateJson('t889-ui-lifecycle.json', uiProof);
+  }
 });

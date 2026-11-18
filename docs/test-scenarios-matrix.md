@@ -158,6 +158,10 @@ Test yardımcı temizliği T891 diliminde düzeltilecek; PHP protokol kaynak dü
 
 İki yeni native23 koşusunda sekiz PHP fixture'ı ilk dinamik nonce/UID/SAPI/no-store yanıtı ve fiziksel temizliğiyle geçti; native13 T900PHP/SQL akışları da geçti. Bunlar güncel regresyon kanıtıdır. Eski run1794490934 kaydı ilk `php_fpm_apply_unverified` için reason/config/socket/UMask gözlemi saklamamış; sonraki yeşil koşular tek başına tarihsel aralıklı bulguyu kapatmaz.
 
+18 Kasım ek senaryosu [Native24] üzerinden üç ayrı PHP sitesini arayüzden açar ve siler. Her site için ilk dinamik HTTP yanıtı, PHP sürümü ve sitenin Unix kullanıcısı, silme işleminin tamamlanması ve kaynakların fiziksel yokluğu doğrulanır. Aynı testte panelin yeni siteyi hazır göstermesi ve özgün PHP sitesinin her silmeden sonra yanıt vermesi gerekir.
+
+[Native24]: ../e2e/live-audit/24-native-php-readiness-mutation.spec.js
+
 | Senaryo | Gerçek kaynak ve sınır | Kabul |
 |---|---|---|
 | T889-OBSERVATION | Mevcut manager/handler gerçek inspect sonuçları; ilk pool activation ve UMask sonrası faz ayrı; ilk/son satisfied/reason/listener ve gerçek attempts/elapsed | Kontrol edilmeyen alan null, uydurma false yok; serbest stderr/config/parola/çıktı evidence'e giremez; mevcut final başarısızlıklar yutulmaz; UI geliştirme notu eklenmez |
