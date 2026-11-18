@@ -1,3 +1,4 @@
+import { localExecutorFaultLine } from './local-claim-failure-diagnostic.js';
 import { createApiKeyActorAuthorizer } from './api-key-actor.js';
 import { createApiKeyStore } from './api-key-store.js';
 import { createAutomationHandler } from './automation-http.js';
@@ -284,10 +285,7 @@ if (dnsZoneRetentionDaysRaw !== null
 const terminalGenerationBoundary = captureTerminalGenerationBoundary();
 
 function reportLocalExecutorFault(error) {
-  const code = typeof error?.code === 'string' ? error.code : 'local_executor_fault';
-  const phase = typeof error?.phase === 'string' ? error.phase : 'unknown';
-  const jobId = typeof error?.jobId === 'string' ? error.jobId : 'none';
-  console.error(`[yunpanel-api] local executor fault code=${code} phase=${phase} job=${jobId}`);
+  console.error(localExecutorFaultLine(error));
 }
 
 function reportPhpMyAdminHandoffFault(error) {

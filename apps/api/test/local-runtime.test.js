@@ -1,6 +1,17 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
+import { createApplicationRegistry } from '../src/application-registry.js';
+import { createApplicationRuntimeBindingRegistry } from '../src/application-runtime-binding-registry.js';
+import { createCertificateRegistry } from '../src/certificate-registry.js';
+import { createDomainRegistry } from '../src/domain-registry.js';
+import { createDurableJobRegistry } from '../src/durable-job-registry.js';
+import { createJobRegistry } from '../src/job-registry.js';
 import { startLocalRuntime, LocalRuntimeError } from '../src/local-runtime.js';
+import { createServerRegistry } from '../src/server-registry.js';
+import { createWebsiteRegistry } from '../src/website-registry.js';
 
 const serverId = 'server-1';
 const hostname = 'host-1.example.local';
@@ -86,6 +97,63 @@ async function startWith(fx, extra = {}) {
     ...extra,
   });
 }
+
+test('file-backed local runtime reports start, stop and a durable claim failure accurately', { timeout: 10_000 }, async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-runtime-claim-'));
+  const jobStore = path.join(directory, 'jobs.json');
+  const lockPath = path.join(directory, 'local-executor.lock');
+  let runtime;
+  t.after(async () => {
+    try {
+      await runtime?.stop();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  const registry = createServerRegistry({ filePath: path.join(directory, 'servers.json') });
+  const server = await registry.createLocalServer({ hostname });
+  const jobRegistry = createDurableJobRegistry({ filePath: jobStore, registryFactory: createJobRegistry });
+  await jobRegistry.init();
+  const reported = [];
+  const options = {
+    serverId: server.id,
+    hostname,
+    runtimeVersion: '0.3.0',
+    lockPath,
+    registry,
+    jobRegistry,
+    domainRegistry: createDomainRegistry(),
+    certificateRegistry: createCertificateRegistry(),
+    applicationRegistry: createApplicationRegistry(),
+    websiteRegistry: createWebsiteRegistry(),
+    runtimeBindingRegistry: createApplicationRuntimeBindingRegistry(),
+    onError: error => reported.push(error),
+  };
+
+  runtime = await startLocalRuntime(options);
+  assert.equal(runtime.running(), true);
+  assert.equal(runtime.failure(), null);
+  await runtime.stop();
+  assert.equal(runtime.running(), false);
+  assert.equal(runtime.failure(), null);
+
+  const damagedBytes = '{invalid job store\n';
+  await writeFile(jobStore, damagedBytes, { flag: 'wx', mode: 0o600 });
+  runtime = await startLocalRuntime(options);
+  for (let attempt = 0; reported.length === 0 && attempt < 200; attempt += 1) {
+    await delay(25);
+  }
+  assert.equal(reported.length, 1);
+  assert.equal(reported[0].failureBoundary, 'select_queued');
+  assert.equal(reported[0].causeClass, 'DurableJobRegistryError');
+  assert.equal(reported[0].causeCode, 'durable_job_recovery_failed');
+  assert.equal(runtime.running(), false);
+  assert.deepEqual(runtime.failure(), { code: 'local_claim_unconfirmed', phase: 'claim', jobId: null });
+  await runtime.stop();
+  assert.equal(await readFile(jobStore, 'utf8'), damagedBytes);
+  await assert.rejects(readFile(lockPath), { code: 'ENOENT' });
+});
 
 test('local runtime acquires ownership, refreshes the bound server and then starts the executor', async () => {
   const fx = fixture();

@@ -1,3 +1,4 @@
+import { claimFailureDiagnostic, safeClaimFailureFields } from './local-claim-failure-diagnostic.js';
 import { safeLocalOperationError as safeExecutionError } from './local-execution-error.js';
 
 const FAULTS = Object.freeze({
@@ -94,9 +95,9 @@ export function createLocalJobExecutor({
   let epoch = 0;
   let fault = null;
 
-  function halt(phase, jobId = null) {
+  function halt(phase, jobId = null, diagnostic = null) {
     const [code, message] = FAULTS[phase];
-    fault = Object.freeze({ code, message, phase, jobId });
+    fault = Object.freeze({ code, message, phase, jobId, ...safeClaimFailureFields(diagnostic) });
     stopped = true;
     epoch += 1;
     if (timer) { clearTimeout(timer); timer = null; }
@@ -108,8 +109,8 @@ export function createLocalJobExecutor({
     let queued;
     try {
       queued = await jobRegistry.listJobs({ serverId, status: 'queued' });
-    } catch {
-      throw halt('claim');
+    } catch (error) {
+      throw halt('claim', null, claimFailureDiagnostic(error, 'select_queued'));
     }
     if (!Array.isArray(queued)) throw halt('claim');
     const next = queued[0] ?? null;
@@ -126,7 +127,7 @@ export function createLocalJobExecutor({
     const expectedJobId = await selectNextJob();
     let claim;
     try { claim = await jobRegistry.claimNext(serverId); }
-    catch { throw halt('claim'); }
+    catch (error) { throw halt('claim', null, claimFailureDiagnostic(error, 'claim_next')); }
     if (claim === null) {
       if (expectedJobId) throw halt('claim', expectedJobId);
       return { claimed: false, job: null, reconciliation: null };

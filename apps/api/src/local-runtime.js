@@ -1,3 +1,4 @@
+import { safeClaimFailureFields } from './local-claim-failure-diagnostic.js';
 import { acquireLocalExecutionLock, LocalExecutionLockError } from './local-execution-lock.js';
 import { createLocalHostOperations } from './local-host-operations.js';
 import { createLocalJobExecutor } from './local-job-executor.js';
@@ -121,7 +122,7 @@ function normalizeExecutorFault(error) {
   const jobId = typeof error?.jobId === 'string' && JOB_ID_PATTERN.test(error.jobId)
     ? error.jobId.toLowerCase()
     : null;
-  return { code, phase, jobId };
+  return { code, phase, jobId, ...(phase === 'claim' ? safeClaimFailureFields(error) : {}) };
 }
 
 function safeFaultError(metadata, message) {
@@ -130,6 +131,7 @@ function safeFaultError(metadata, message) {
     code: metadata.code,
     phase: metadata.phase,
     jobId: metadata.jobId,
+    ...(metadata.phase === 'claim' ? safeClaimFailureFields(metadata) : {}),
   });
 }
 
@@ -271,8 +273,8 @@ export async function startLocalRuntime({
 
   function reportFault(metadata, message) {
     if (fault) return;
-    fault = Object.freeze({ ...metadata });
-    const safeError = safeFaultError(fault, message);
+    fault = Object.freeze({ code: metadata.code, phase: metadata.phase, jobId: metadata.jobId });
+    const safeError = safeFaultError({ ...fault, ...safeClaimFailureFields(metadata) }, message);
     try { onError(safeError); } catch {}
     try { jobRegistry.abortLiveReconciliation?.({ serverId }); } catch {}
     void closeResources().catch(() => {});
@@ -377,6 +379,7 @@ export async function startLocalRuntime({
       hostname: normalizedHostname,
       runtimeVersion: normalizedVersion,
       operations: Array.isArray(hostOperations.operations) ? [...hostOperations.operations] : [],
+      running: () => !stopped && fault === null,
       failure: () => fault ? { ...fault } : null,
       async stop() {
         await closeResources();
