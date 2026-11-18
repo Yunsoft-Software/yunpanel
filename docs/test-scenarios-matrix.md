@@ -373,3 +373,11 @@ Bu ek izole Source9e kaynak/gecmis kayitlarini tasir; Primary lisans03c ile birl
 
 
 Private combined Guard02 integration: source/local real-FS preparation only; old Native20 C1 remains FAILED (1pass/2unexpected), no new Native20 run or causal acceptance claimed. Strong pending-cancellation gate remains OPEN. Primary/Source live trees unchanged.
+
+## 19 Kasım 2026 — T920 iş yürütücüsü durma bilgisi
+
+| Senaryo | Beklenen sonuç |
+|---|---|
+| Gerçek geçici kuyruk dosyası okunamıyor | Sunucu günlüğü kuyruk okuma aşamasını ve izin verilen hata türünü gösterir. İş çalışmaz ve yürütücü durmuş görünür. |
+| Geçici gerçek kuyrukta başka süreç dosya kilidini tutuyor | Sahiplenme hatasında güvenli aşama ve kilit kodu kayda geçer. Belirsiz hiçbir iş tekrar çalışmaz. |
+| Normal başlatma ve durdurma | Yerel çalışma durumu gerçek süreç yaşam döngüsüyle eşleşir. Yönetim durumunda mevcut hata alanları korunur. |

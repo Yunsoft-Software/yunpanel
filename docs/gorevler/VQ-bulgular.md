@@ -1950,3 +1950,13 @@
     ℹ duration_ms 254.317667
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T920 · İş yürütücüsü durduğunda durum ve durma nedeni eksik görünüyor
+- **Bağımlı:** T881, T892, T898, T899, T913
+- **Dosyalar:** `apps/api/src/local-claim-failure-diagnostic.js`, `apps/api/src/local-job-executor.js`, `apps/api/src/local-runtime.js`, `apps/api/src/index.js`, `apps/api/test/local-claim-failure-diagnostic.test.js`, `apps/api/test/local-claim-failure-diagnostic-durable.test.js`, `apps/api/test/fixtures/local-claim-failure-diagnostic-lock-owner.mjs`, `apps/api/test/local-runtime.test.js`
+- **Kaynak:** QA · 2026-11-19 00:10
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    16 ve 17 Kasım .28 kayıtlarında yürütücü local_claim_unconfirmed ile durmuş ve mevcut kayıt, sıranın okunmasıyla iş sahiplenmenin hangisinin hata verdiğini ayırt etmiyor. Kimliksiz iş hatasında yalnız güvenli sınıf/kod ve işlem aşamasını servis günlüğüne yaz. Gerçek yerel yürütücü durduğunda durum sorgusu running=false göstermeli. İşi tekrar yürütme ve hata sonrası durma davranışı korunur. Geçici gerçek iş deposu ve gerçek işlem kilidiyle regresyonu doğrula. Tarihsel neden ayrıca açık kalır.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
