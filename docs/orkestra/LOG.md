@@ -299,3 +299,7 @@
 - 2026-11-18 15:50 orchestrator: verify 092bc784..6f28a020: failed, yeniden açılan -, bulgu ['T919']
 - T918/T919 — Tam koşu 8785 testte 8777 geçti, 7 başarısız, 1 platform atlaması. Yedi hata iki korumalı dizin test dosyasında toplandı. macOS sistem LibreSSL 3.3.6 passwd -6 desteklemiyor. Aynı iki dosya kurulu OpenSSL 3.6.3 ile 11/11 geçti. Tam koşu tekrarının ham çıktısı ayrı saklanır.
 - 2026-11-18 15:53 orchestrator: verify 092bc784..44dccb3e: ok, yeniden açılan -, bulgu -
+- 2026-11-18 15:59 orchestrator: verify 44dccb3e..a9ce52f7: ok, yeniden açılan -, bulgu -
+- 2026-11-18 16:02 orchestrator: verify a9ce52f7..a9ce52f7: ok, yeniden açılan -, bulgu -
+- T883, 18 Kasım — .28 canlı okumasında 6 site, 7 uygulama, sıfır aktif iş ve API/HTTPS 200 doğrulandı. PHP 8.4 geri dönüşünün ilk adımı 12 paketi kaldırdı ve php-common 2:93ubuntu2 sürümünü geri getirdi. needrestart ve sosreport otomatik sistem güncellemeleri korundu. Yeni kurulumdan önce 66 boş PHP maintainer işaretinin temizliği ve dört AUTO seçiminin doğrulanması bekleniyor. .local/p0-20261118/restore02-readback/result.json
+- Yerel API hizmeti ayaktayken iş yürütücüsü 17 Kasım 20.39 TRT’de claim aşamasında durmuş. Yedi saniye arayla alınan iki server kaydında son görülme aynı. Tetikleyici alttaki hata günlükte yok. .local/p0-20261118/executor-current/result.json. T889 açık.
