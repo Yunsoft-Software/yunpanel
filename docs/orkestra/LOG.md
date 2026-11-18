@@ -303,3 +303,4 @@
 - 2026-11-18 16:02 orchestrator: verify a9ce52f7..a9ce52f7: ok, yeniden açılan -, bulgu -
 - T883, 18 Kasım — .28 canlı okumasında 6 site, 7 uygulama, sıfır aktif iş ve API/HTTPS 200 doğrulandı. PHP 8.4 geri dönüşünün ilk adımı 12 paketi kaldırdı ve php-common 2:93ubuntu2 sürümünü geri getirdi. needrestart ve sosreport otomatik sistem güncellemeleri korundu. Yeni kurulumdan önce 66 boş PHP maintainer işaretinin temizliği ve dört AUTO seçiminin doğrulanması bekleniyor. .local/p0-20261118/restore02-readback/result.json
 - Yerel API hizmeti ayaktayken iş yürütücüsü 17 Kasım 20.39 TRT’de claim aşamasında durmuş. Yedi saniye arayla alınan iki server kaydında son görülme aynı. Tetikleyici alttaki hata günlükte yok. .local/p0-20261118/executor-current/result.json. T889 açık.
+- 2026-11-18 16:27 orchestrator: verify a9ce52f7..d3af3f0d: ok, yeniden açılan -, bulgu -
