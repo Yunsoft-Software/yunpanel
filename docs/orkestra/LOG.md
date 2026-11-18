@@ -296,3 +296,5 @@
 - 2026-11-18 15:47 orchestrator: recover: geri alınan ['T883', 'T913', 'T918'], kilit ['sunucu-28-1', 'sunucu-28-2', 'sunucu-28-3', 'sunucu-28-genel'], sahipsiz değişiklik (yedeklendi, dokunulmadı) 0
 
 - 18 Kasım — Kesintiden kalan üç iş orkestra ile geri alındı. 17 Kasım dalının 89d7a5fa sürümünden günlük 18-11-2026 dalı açıldı. T889 incelemede kalıyor.
+- 2026-11-18 15:50 orchestrator: verify 092bc784..6f28a020: failed, yeniden açılan -, bulgu ['T919']
+- T918/T919 — Tam koşu 8785 testte 8777 geçti, 7 başarısız, 1 platform atlaması. Yedi hata iki korumalı dizin test dosyasında toplandı. macOS sistem LibreSSL 3.3.6 passwd -6 desteklemiyor. Aynı iki dosya kurulu OpenSSL 3.6.3 ile 11/11 geçti. Tam koşu tekrarının ham çıktısı ayrı saklanır.
