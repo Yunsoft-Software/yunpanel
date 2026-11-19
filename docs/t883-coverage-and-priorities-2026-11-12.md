@@ -2,7 +2,9 @@
 
 ## 19 Kasım 2026 güncellemesi
 
-Native19 ve Native22, Chromium ve Firefox’ta toplam 36/36 geçti. `.28` artık `0.3.0-2026111901` paketinde. Bu pakette iş kuyruğu ve normal site terminali gerçek akışla doğrulandı. Test siteleri temizlendi. [T883 güncel kanıtı](../tasks/reopen/T883.md) ve [T920 kabulü](../tasks/done/T920.md).
+Native19 ve Native22, Chromium ve Firefox’ta toplam 36/36 geçti. `0.3.0-2026111901` paketinde iş kuyruğu ve normal site terminali gerçek akışla doğrulandı. Test siteleri temizlendi. [T883 güncel kanıtı](../tasks/reopen/T883.md) ve [T920 kabulü](../tasks/done/T920.md).
+
+Akşam `.28` test sunucusuna `0.3.0-2026111904` kuruldu. Yeni PHP hedefinde panelden WordPress staging, ayrı veritabanı, HTTP, yönetici girişi ve test kaynaklarının fiziksel temizliği geçti. Bu dilim T921’i kapattı. Statik site kopyasının ilk dilimi T922’de, genel WordPress veri senkronizasyonu ve T883’ün tarihsel kabul açıkları kendi kapsamlarında devam ediyor. [T921 kabulü](../tasks/done/T921.md) ve [T922](gorevler/site-copy.md).
 
 ## 18 Kasım 2026 itibarıyla
 
