@@ -1,5 +1,9 @@
 # T883 gerçek kapsam ve sonraki öncelikler — 12 Kasım 2026
 
+## 19 Kasım 2026 güncellemesi
+
+Native19 ve Native22, Chromium ve Firefox’ta toplam 36/36 geçti. `.28` artık `0.3.0-2026111901` paketinde. Bu pakette iş kuyruğu ve normal site terminali gerçek akışla doğrulandı. Test siteleri temizlendi. [T883 güncel kanıtı](../tasks/reopen/T883.md) ve [T920 kabulü](../tasks/done/T920.md).
+
 ## 18 Kasım 2026 itibarıyla
 
 **T883 açık.** T889, 19 Kasım’da üç gerçek PHP site kurulumu ve silmesiyle kapatıldı. [T889 kapanış kaydı](../tasks/done/T889.md). Aşağıdaki tablo 12 Kasım envanterinden sonra doğrulanan davranışları günceller. Ayrıntılı işlem kayıtları ve kabul sınırları [T883 ilerleme notunda](../tasks/reopen/T883.md) ve [T917 kabul kaydında](../tasks/done/T917.md) bulunur.
