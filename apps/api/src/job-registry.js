@@ -7,6 +7,7 @@ import path from 'node:path';
 import {
   createOperationEnvelope,
   DOCKER_COMPOSE_OPERATIONS,
+  isWebsiteCopyOperation,
   MANAGED_SERVICE_ACTIONS,
   MANAGED_SERVICE_IDS,
   MANAGED_NODE_RUNTIME_MAJORS,
@@ -97,6 +98,7 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.WEBSITE_PHP_ACTION,
   OPERATIONS.WEBSITE_BACKUP_ACTION,
   OPERATIONS.WEBSITE_STATIC_COPY,
+  OPERATIONS.WEBSITE_PHP_COPY,
 ]);
 for (const op of DOCKER_COMPOSE_OPERATIONS) ASYNC_OPERATIONS.add(op);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -119,6 +121,9 @@ const MANAGED_SERVICE_CONFIGURATION_STATUS_SET = new Set([
 ]);
 const MAX_ARTIFACT_FILES = 100_000;
 const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024 * 1024;
+const MAX_COPY_FILE_BYTES = 16 * 1024 * 1024;
+const MAX_PHP_COPY_DATABASE_BYTES = 16 * 1024 * 1024;
+const MAX_PHP_COPY_TABLES = 256;
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{16,200}$/;
 export const RETRYABLE_PREFLIGHT_AUTH_FAILURES = Object.freeze(new Set([
   'website_provisioning_job_authorization_unavailable',
@@ -267,7 +272,7 @@ function publicJob(job) {
     ...(job.availableAt ? { availableAt: job.availableAt } : {}),
     ...(job.manualRetry ? { manualRetry: job.manualRetry } : {}),
     ...(typeof job.retryExhausted === 'boolean' ? { retryExhausted: job.retryExhausted } : {}),
-    ...(job.operation === OPERATIONS.WEBSITE_STATIC_COPY && job.status === 'failed'
+    ...(isWebsiteCopyOperation(job.operation) && job.status === 'failed'
       ? { permanentError: true, manualRetryAllowed: false } : {}),
     result: job.result == null ? null : structuredClone(job.result),
     error: job.error == null ? null : structuredClone(job.error),
@@ -275,18 +280,25 @@ function publicJob(job) {
   return result;
 }
 
-function staticCopyResultCounts(result) {
+function websiteCopyResultCounts(operation, result) {
   if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
   const { filesCopied, bytesCopied } = result;
+  if (operation === OPERATIONS.WEBSITE_PHP_COPY) {
+    const { tablesCopied, databaseBytes } = result;
+    if (filesCopied !== 1 || !Number.isSafeInteger(bytesCopied) || bytesCopied < 1 || bytesCopied > MAX_COPY_FILE_BYTES
+      || !Number.isSafeInteger(tablesCopied) || tablesCopied < 1 || tablesCopied > MAX_PHP_COPY_TABLES
+      || !Number.isSafeInteger(databaseBytes) || databaseBytes < 1 || databaseBytes > MAX_PHP_COPY_DATABASE_BYTES) return null;
+    return { filesCopied, bytesCopied, tablesCopied, databaseBytes };
+  }
   if (!Number.isSafeInteger(filesCopied) || filesCopied < 0 || filesCopied > 20_000
     || !Number.isSafeInteger(bytesCopied) || bytesCopied < 0 || bytesCopied > 256 * 1024 * 1024
-    || bytesCopied > filesCopied * 16 * 1024 * 1024) return null;
+    || bytesCopied > filesCopied * MAX_COPY_FILE_BYTES) return null;
   return { filesCopied, bytesCopied };
 }
 
 function publicResult(operation, result) {
   if (result === null || result === undefined) return null;
-  if (operation === OPERATIONS.WEBSITE_STATIC_COPY) return staticCopyResultCounts(result);
+  if (isWebsiteCopyOperation(operation)) return websiteCopyResultCounts(operation, result);
   if (operation === OPERATIONS.SSL_ISSUE || operation === OPERATIONS.SSL_RENEW) {
     const output = {};
     for (const field of ['certName', 'validFrom', 'validTo', 'fingerprint256', 'status']) {
@@ -1188,11 +1200,11 @@ function sanitizeRoundcubeConfigResult(job, result) {
 }
 
 function sanitizeResult(job, result) {
-  if (job.operation === OPERATIONS.WEBSITE_STATIC_COPY) {
-    const counts = staticCopyResultCounts(result);
+  if (isWebsiteCopyOperation(job.operation)) {
+    const counts = websiteCopyResultCounts(job.operation, result);
     if (!counts || result.sourceWebsiteId !== job.payload?.websiteId || result.targetWebsiteId !== job.payload?.targetWebsiteId
       || result.digest !== job.payload?.previewDigest) {
-      throw new JobRegistryError('invalid_job_result', 'Website static copy result does not match the queued operation');
+      throw new JobRegistryError('invalid_job_result', 'Website copy result does not match the queued operation');
     }
     return counts;
   }
@@ -1400,17 +1412,17 @@ export function createJobRegistry({
         throw new JobRegistryError('invalid_idempotency_key', 'Job idempotency key is invalid');
       }
       const privateAuthorization = normalizeJobAuthorization(authorization, { optional: true });
-      const staticCopy = operation === OPERATIONS.WEBSITE_STATIC_COPY;
-      if (staticCopy) {
+      const websiteCopy = isWebsiteCopyOperation(operation);
+      if (websiteCopy) {
         if (resourceType !== 'application' || resourceId !== payload.applicationId) {
-          throw new JobRegistryError('invalid_resource_id', 'Website static copy resource must match its source Application');
+          throw new JobRegistryError('invalid_resource_id', 'Website copy resource must match its source Application');
         }
         if (privateAuthorization?.kind !== 'panel' || privateAuthorization.role !== 'owner'
           || privateAuthorization.websiteId !== payload.websiteId || privateAuthorization.sessionId !== payload.actorSessionId
           || privateAuthorization.actorId !== payload.actorUserId || privateAuthorization.userId !== payload.actorUserId
           || (privateAuthorization.scope != null && privateAuthorization.scope !== 'website')
           || (privateAuthorization.serverId != null && privateAuthorization.serverId !== serverId)) {
-          throw new JobRegistryError('job_authorization_required', 'Website static copy requires its authenticated source Owner', 403);
+          throw new JobRegistryError('job_authorization_required', 'Website copy requires its authenticated source Owner', 403);
         }
       }
 
@@ -1434,8 +1446,8 @@ export function createJobRegistry({
             409,
           );
         }
-        if (staticCopy && existing.status === 'failed') {
-          if (manual === true || manualRetry === true) throw new JobRegistryError('job_not_retryable', 'A failed static copy cannot be replayed', 409);
+        if (websiteCopy && existing.status === 'failed') {
+          if (manual === true || manualRetry === true) throw new JobRegistryError('job_not_retryable', 'A failed website copy cannot be replayed', 409);
           return enqueueResult(existing, false);
         }
         let changed = false;
@@ -1725,8 +1737,8 @@ export function createJobRegistry({
 
       const job = state.jobs.find((candidate) => candidate.id === jobId && (!serverId || candidate.serverId === serverId));
       if (!job) throw new JobRegistryError('job_not_found', 'Job not found', 404);
-      if (job.operation === OPERATIONS.WEBSITE_STATIC_COPY) {
-        throw new JobRegistryError('job_not_retryable', 'A failed static copy cannot be replayed', 409);
+      if (isWebsiteCopyOperation(job.operation)) {
+        throw new JobRegistryError('job_not_retryable', 'A failed website copy cannot be replayed', 409);
       }
       if (job.status !== 'failed') {
         throw new JobRegistryError('job_not_retryable', 'Only failed jobs may be manually retried', 409);

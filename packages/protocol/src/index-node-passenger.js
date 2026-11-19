@@ -20,6 +20,10 @@ const APP_NODE_PASSENGER_MIGRATE = 'app.node.passenger-migrate';
 const WEBSITE_PHP_ACTION = 'website.php.action';
 const WEBSITE_BACKUP_ACTION = 'website.backup.action';
 const WEBSITE_STATIC_COPY = 'website.static.copy';
+const WEBSITE_PHP_COPY = 'website.php.copy';
+const LOCAL_OPERATIONS = new Set([
+  APP_NODE_PASSENGER_MIGRATE, WEBSITE_PHP_ACTION, WEBSITE_BACKUP_ACTION, WEBSITE_STATIC_COPY, WEBSITE_PHP_COPY,
+]);
 const SAFE_ABSOLUTE_PATH = /^\/[A-Za-z0-9._/-]+$/;
 const PHP_SOCKET_PATTERN = /^\/run\/php\/yunpanel-yunapp-[a-f0-9]{12}\.sock$/;
 const DOMAIN_FIELDS = new Set([
@@ -62,10 +66,15 @@ export const OPERATIONS = Object.freeze({
   WEBSITE_PHP_ACTION,
   WEBSITE_BACKUP_ACTION,
   WEBSITE_STATIC_COPY,
+  WEBSITE_PHP_COPY,
 });
 
 export function isKnownOperation(operation) {
-  return isDockerKnownOperation(operation) || [APP_NODE_PASSENGER_MIGRATE, WEBSITE_PHP_ACTION, WEBSITE_BACKUP_ACTION, WEBSITE_STATIC_COPY].includes(operation);
+  return isDockerKnownOperation(operation) || LOCAL_OPERATIONS.has(operation);
+}
+
+export function isWebsiteCopyOperation(operation) {
+  return operation === WEBSITE_STATIC_COPY || operation === WEBSITE_PHP_COPY;
 }
 
 function validateSafeAbsolutePath(value, field, errors) {
@@ -375,7 +384,7 @@ function validatePhpDomainStage(value) {
 }
 
 export function validateOperationEnvelope(value) {
-  if (value?.operation === WEBSITE_STATIC_COPY) {
+  if (isWebsiteCopyOperation(value?.operation)) {
     const errors = [];
     const payload = value.payload;
     const identities = ['websiteId', 'applicationId', 'targetWebsiteId', 'targetApplicationId', 'actorSessionId', 'actorUserId'];
@@ -383,14 +392,15 @@ export function validateOperationEnvelope(value) {
     if (typeof value.id !== 'string' || value.id.length < 8 || value.id.length > 128) errors.push('id is invalid');
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)
       || Object.keys(payload).length !== fields.length || fields.some((field) => !Object.hasOwn(payload, field))) {
-      errors.push('Website static copy payload contains unsupported arguments');
+      errors.push('Website copy payload contains unsupported arguments');
     } else {
       if (identities.some((field) => typeof payload[field] !== 'string' || !SESSION_ID.test(payload[field]))
-        || payload.websiteId === payload.targetWebsiteId || payload.applicationId === payload.targetApplicationId) {
-        errors.push('Website static copy identities are invalid');
+        || payload.websiteId.toLowerCase() === payload.targetWebsiteId.toLowerCase()
+        || payload.applicationId.toLowerCase() === payload.targetApplicationId.toLowerCase()) {
+        errors.push('Website copy identities are invalid');
       }
-      if (payload.actorRole !== 'owner') errors.push('Website static copy requires an Owner');
-      if (typeof payload.previewDigest !== 'string' || !SHA256.test(payload.previewDigest)) errors.push('Website static copy preview digest is invalid');
+      if (payload.actorRole !== 'owner') errors.push('Website copy requires an Owner');
+      if (typeof payload.previewDigest !== 'string' || !SHA256.test(payload.previewDigest)) errors.push('Website copy preview digest is invalid');
     }
     if (value.protocolVersion !== AGENT_PROTOCOL_VERSION) errors.push('protocolVersion is invalid');
     return { ok: errors.length === 0, errors };
@@ -448,7 +458,7 @@ export function validateOperationEnvelope(value) {
 export function createOperationEnvelope({ id, operation, payload = {} }) {
   const specialDomainStage = operation === DOCKER_OPERATIONS.DOMAIN_STAGE
     && ['passenger', 'php', 'python'].includes(payload?.targetType);
-  if (![APP_NODE_PASSENGER_MIGRATE, WEBSITE_PHP_ACTION, WEBSITE_BACKUP_ACTION, WEBSITE_STATIC_COPY].includes(operation) && !specialDomainStage) {
+  if (!LOCAL_OPERATIONS.has(operation) && !specialDomainStage) {
     return createDockerOperationEnvelope({ id, operation, payload });
   }
   const envelope = { id, operation, payload, protocolVersion: AGENT_PROTOCOL_VERSION };

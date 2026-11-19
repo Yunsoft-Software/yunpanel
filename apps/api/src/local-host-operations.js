@@ -28,7 +28,7 @@ import {
   createStaticRollbackManager,
   createSystemPackageManager,
 } from '@yunpanel/host-runtime';
-import { createOperationEnvelope, OPERATIONS } from '@yunpanel/protocol';
+import { createOperationEnvelope, isWebsiteCopyOperation, OPERATIONS } from '@yunpanel/protocol';
 import { reloadCertificateNginx } from './certificate-nginx-reload.js';
 import { createMailboxAccessGuard } from '../../../packages/host-runtime/src/mailbox-access-guard.js';
 import { normalizeGitDeploymentCredential } from '@yunpanel/shared';
@@ -193,6 +193,7 @@ export function createLocalHostOperations({
   websitePhpToolOperation = null,
   websiteBackupOperation = null,
   websiteStaticCopyOperation = null,
+  websitePhpCopyOperation = null,
   loadManagedMailConfiguration = null,
   loadCertificateMailReload = null,
   loadManagedMailRollbackConfiguration = null,
@@ -243,6 +244,7 @@ export function createLocalHostOperations({
   }
   if (websiteBackupOperation !== null && typeof websiteBackupOperation?.execute !== 'function') throw new Error('websiteBackupOperation must provide execute()');
   if (websiteStaticCopyOperation !== null && typeof websiteStaticCopyOperation?.execute !== 'function') throw new Error('websiteStaticCopyOperation must provide execute()');
+  if (websitePhpCopyOperation !== null && typeof websitePhpCopyOperation?.execute !== 'function') throw new Error('websitePhpCopyOperation must provide execute()');
   if (!cloudflareDnsManager || typeof cloudflareDnsManager.applyRecord !== 'function') {
     throw new Error('cloudflareDnsManager must provide applyRecord()');
   }
@@ -924,6 +926,7 @@ export function createLocalHostOperations({
   }
   if (websiteBackupOperation) handlers.set(OPERATIONS.WEBSITE_BACKUP_ACTION, (payload, execution) => websiteBackupOperation.execute(payload, execution));
   if (websiteStaticCopyOperation) handlers.set(OPERATIONS.WEBSITE_STATIC_COPY, (payload, execution) => websiteStaticCopyOperation.execute(payload, execution));
+  if (websitePhpCopyOperation) handlers.set(OPERATIONS.WEBSITE_PHP_COPY, (payload, execution) => websitePhpCopyOperation.execute(payload, execution));
 
   if (passengerReleaseOperation) for (const operation of LOCAL_PASSENGER_RELEASE_OPERATIONS) {
     handlers.set(operation, (payload, execution, authority) => {
@@ -950,16 +953,16 @@ export function createLocalHostOperations({
         error.code = 'invalid_local_operation_payload';
         throw error;
       }
-      if (operation === OPERATIONS.WEBSITE_STATIC_COPY) {
+      if (isWebsiteCopyOperation(operation)) {
         try { createOperationEnvelope({ id: execution?.jobId, operation, payload }); }
-        catch { throw Object.assign(new Error('Website static copy payload is invalid'), { code: 'invalid_local_operation_payload' }); }
+        catch { throw Object.assign(new Error('Website copy payload is invalid'), { code: 'invalid_local_operation_payload' }); }
         const authority = execution.authorization;
         if (execution.resourceType !== 'application' || execution.resourceId !== payload.applicationId
           || authority?.kind !== 'panel' || authority.role !== payload.actorRole || authority.websiteId !== payload.websiteId
           || authority.sessionId !== payload.actorSessionId || authority.userId !== payload.actorUserId
           || (authority.scope != null && authority.scope !== 'website')
           || (authority.serverId != null && authority.serverId !== execution.serverId)) {
-          throw Object.assign(new Error('Website static copy execution identity is invalid'), { code: 'panel_job_actor_forbidden' });
+          throw Object.assign(new Error('Website copy execution identity is invalid'), { code: 'panel_job_actor_forbidden' });
         }
       }
       const authorizedExecution = await authorizeExecution(operation, execution);
