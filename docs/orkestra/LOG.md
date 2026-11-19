@@ -317,3 +317,5 @@
 - 19 Kasım 2026. T889 kapanışından sonra günlük dal 18-11-2026 üzerindeki 02a98720 kaydından açıldı.
 - 2026-11-19 00:21 orchestrator: verify a1919da3..6445679d: ok, yeniden açılan -, bulgu -
 - 2026-11-19 22:02 orchestrator: verify 6445679d..e0022e9d: ok, yeniden açılan -, bulgu -
+
+- 2026-11-20: `20-11-2026` etkin dalı `19-11-2026` üzerinden açıldı. T935 doğrulaması devam ediyor.
