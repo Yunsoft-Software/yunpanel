@@ -29,3 +29,15 @@
 - **Dosyalar:** `apps/web/src/workspace/StaticSiteCopyDialog.jsx`, `apps/web/src/workspace/SiteDetailPage.jsx`, `apps/web/src/workspace/job-presentation.js`
 - **İş:** Owner’ın uygun statik site ekranına ortak panel bileşenleriyle kopya formunu ekle. Hedef seçimi sonrası önizleme yapılır ve aynı istek kimliğiyle iş başlatılır. Sayfa yenilemede veya yanıt kesilirse aynı iş okunur. Uygulama, posta, veritabanı veya DNS kopyalanmaz. Sunucunun hata yanıtı görünür kalır.
 - **Kabul:** Lint ve web build geçer. Kopyalama modalı yalnız uygun sitelerde açılır ve aynı istek işine döner. Bu koşulların gerçek tarayıcı ve host kabulü T925 API bütünleşmesiyle birlikte yapılır.
+
+### T927 · PHP sitesi için MariaDB kopyalama motoru
+- **Bağımlı:** T925
+- **Dosyalar:** `packages/host-runtime/src/site-database-copy-manager.js`, `packages/host-runtime/test/site-database-copy-manager.test.js`
+- **İş:** Aynı yerel MariaDB üzerinde iki ayrı şema ve iki kayıtlı yerel kullanıcı için sınırlı aktarım hazırla. Sunucu envanteri desteklenmeyen nesneleri ve dolu hedefi aktarım öncesinde reddetsin. Tek InnoDB tutarlı veri anlık görüntüsünü yalnız kaynak kullanıcısıyla al ve yalnız hedef kullanıcısıyla içe aktar. Şema oluşturma, silme, root ile veri içe aktarma, bağlantı bilgisi sızıntısı ve otomatik tekrar olmamalı. Sonuç tablo ve aktarım bilgisiyle sınırlı olsun. Bu motoru çağıracak yetki, ortak kilit ve kalıcı iş ayrı görevde uygulanır.
+- **Kabul:** Ayrı test MariaDB örneğinde iki kullanıcı ve iki şemayla gerçek şema, satır ve binary içerik aktarılır. Hedef yazımı kaynak veriyi değiştirmez. Dolu veya desteklenmeyen şemada aktarım başlamaz. Hedef kullanıcı kaynağa erişemez. Geçerli yerel ortam ve doğrulama komutu kaydedilir.
+
+### T928 · PHP kopyasında hazır site ve veritabanı kimliği
+- **Bağımlı:** T921, T925
+- **Dosyalar:** `apps/api/src/php-site-copy-plan.js`, `apps/api/test/php-site-copy-plan.test.js`
+- **İş:** Aynı yerel sunucudaki ayrı ve etkin iki PHP sitesi için değişmez kopya girdisi oluştur. P1b’nin sabitlenmiş kök ve sahiplik denetimlerini, normal PHP kurulumunun beklenen hedef dosyası ve binding/credential registry’leriyle birleştir. İlk dilim web kökünde tek giriş dosyası ve site ev dizininde desteklenen özel bağlantı biçimi kullanan opt-in uygulamadır. İki ayrı scope ve schema, binding/credential revizyonları ve dosya hash’i bağlansın. Özel bağlantı değerleri plan veya sonuçlara girmez. Plan dosya/veritabanı yazmaz.
+- **Kabul:** İki ayrı kimlik, etkin PHP yayını, ideal kaynak ve resmî başlangıç dosyalı hedefte plan oluşur. Dolu/yanlış hedef, ortak kök, paylaşılan site ya da kullanıcı, yönetilen alt kök, yanlış binding, çoklu veritabanı, değişen dosya ve bayat revizyon reddedilir. Gerçek dosya ağacı ve kalıcı registry kanıtı, sonraki gerçek DB/paket kabulünden ayrı kaydedilir.
