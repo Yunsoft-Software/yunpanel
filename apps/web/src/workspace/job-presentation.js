@@ -26,7 +26,7 @@ const OPERATION_LABELS = Object.freeze({
   'database.create':'Veritabanı oluştur', 'database.delete':'Veritabanını sil',
   'database.credential.apply':'Veritabanı erişimini uygula', 'database.credential.delete':'Veritabanı kullanıcısını kaldır',
   'website.php.action':'Site bakım işlemi', 'website.backup.action':'Site yedekleme işlemi',
-  'website.static.copy':'Statik siteyi kopyala',
+  'website.static.copy':'Statik siteyi kopyala', 'website.php.copy':'PHP sitesini kopyala',
   'database.inspect':'Veritabanını kontrol et', 'dns.record.apply':'DNS kaydını uygula',
   'mail.config.apply':'Posta ayarlarını uygula', 'mail.config.rollback':'Önceki posta ayarlarına dön',
   'system.upgrade':'Sunucuyu güncelle', 'system.service.control':'Sunucu hizmetini yönet',
@@ -225,7 +225,7 @@ export function jobStageProgress(job) {
 // automatic retry budget is exhausted, provided the system maximum retry limit is not reached.
 export function jobSupportsManualRetry(job, { canManage = false } = {}) {
   if (!canManage || !job || typeof job !== 'object') return false;
-  if ((job.operation ?? job.type) === 'website.static.copy') return false;
+  if (['website.static.copy', 'website.php.copy'].includes(job.operation ?? job.type)) return false;
   if (job.status !== 'failed' && job.canRetry !== true) return false;
   const attempts = Number.isSafeInteger(job.attempts) ? job.attempts : 0;
   const maxAttempts = Number.isSafeInteger(job.maxAttempts) ? job.maxAttempts : 10;

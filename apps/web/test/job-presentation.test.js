@@ -74,6 +74,15 @@ test('operation labels explain familiar tasks while unknown future operations re
  assert.equal(jobOperationLabel({operation:'unsafe\noperation'}),'İşlem');
 });
 
+test('site copy jobs keep their runtime label and never offer a generic retry', () => {
+  for (const [operation, label] of [['website.static.copy', 'Statik siteyi kopyala'], ['website.php.copy', 'PHP sitesini kopyala']]) {
+    const job = { operation, status: 'failed', attempts: 1, canRetry: true, manualRetryAllowed: true };
+    assert.equal(jobOperationLabel(job), label);
+    assert.equal(jobSupportsManualRetry(job, { canManage: true }), false);
+    assert.equal(canTriggerManualRetry({ type: operation, status: 'failed' }, { canManage: true }), false);
+  }
+});
+
 for (const [status, stage] of [
   ['saving', 'Kaydediliyor'], ['queued', 'Kuyrukta'], ['running', 'Sunucuda çalışıyor'],
   ['applying', 'Uygulanıyor'], ['verifying', 'Doğrulanıyor'], ['partial', 'Kısmi başarılı'],

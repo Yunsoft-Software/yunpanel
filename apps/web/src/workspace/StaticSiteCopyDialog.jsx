@@ -9,60 +9,90 @@ import { newerJob } from './job-tracking.js';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
-const COPY_OPERATION = 'website.static.copy';
-const NO_REQUEST = 'static_copy_request_not_found';
-const requestMissing = (error) => error?.status === 404 && error.code === NO_REQUEST;
+const MAX_PHP_FILE_BYTES = 16 * 1024 * 1024;
+const COPY_MODES = Object.freeze({
+  static: Object.freeze({ slug: 'static-copy', operation: 'website.static.copy', requestParam: 'staticCopyRequest',
+    missingCode: 'static_copy_request_not_found', title: 'Statik siteyi kopyala', submitLabel: 'Dosyaları kopyala',
+    intro: 'Yalnız statik web dosyaları kopyalanır. Yeni oluşturulmuş veya boş bir hedef site seçin.',
+    noTargets: 'Bu sunucuda seçilebilir statik hedef site bulunamadı.' }),
+  php: Object.freeze({ slug: 'php-copy', operation: 'website.php.copy', requestParam: 'phpCopyRequest',
+    missingCode: 'php_copy_request_not_found', title: 'PHP sitesini kopyala', submitLabel: 'Siteyi kopyala',
+    intro: 'Kopyalama için kaynak sitenin giriş dosyasını ve veritabanı bağlantısını hazırlayın. Boş bir veritabanı bağlı yeni bir PHP sitesi seçin.',
+    noTargets: 'Bu sunucuda seçilebilir PHP hedefi bulunamadı.' }),
+});
+const requestMissing = (error, mode) => Boolean(mode) && error?.status === 404 && error.code === mode.missingCode;
 
-export const STATIC_COPY_REQUEST_PARAM = 'staticCopyRequest';
-
-export function staticCopyRequestId(params, websiteId) {
-  const value = params.get(STATIC_COPY_REQUEST_PARAM);
+export function siteCopyRequest(params, { id: websiteId, runtimeType }) {
+  const param = COPY_MODES[runtimeType]?.requestParam;
+  if (!param || !UUID.test(websiteId ?? '')) return null;
+  const value = params.get(param);
   const prefix = `${websiteId}:`;
-  if (!UUID.test(websiteId ?? '') || !value?.startsWith(prefix)) return null;
-  const requestId = value.slice(prefix.length);
-  return UUID.test(requestId) ? requestId : null;
+  if (!value?.startsWith(prefix)) return null;
+  const id = value.slice(prefix.length);
+  return UUID.test(id) ? { param, value, id } : null;
 }
 
-export function staticCopyRequestView(requestId, editingId, lookup) {
+export function siteCopyRequestView(requestId, editingId, lookup, runtimeType) {
   if (!requestId) return 'form';
-  if (lookup?.requestId === requestId && requestMissing(lookup.error)) {
+  if (lookup?.requestId === requestId && requestMissing(lookup.error, COPY_MODES[runtimeType])) {
     return editingId === requestId ? 'form' : 'missing';
   }
   return 'tracking';
 }
 
 function copySiteOptions(website, websites, applications, domains) {
+  const { serverId, runtimeType } = website;
   const parentDomains = new Set(domains.map((item) => item.parentDomainId).filter(Boolean));
   const excluded = new Set(domains.filter((item) => item.parentDomainId || parentDomains.has(item.id)).map((item) => item.websiteId));
-  const eligibleApps = new Set(applications.filter((item) => item.serverId === website.serverId && item.type === 'static'
-    && item.repositoryUrl === null && item.state === 'active' && item.currentReleaseId).map((item) => item.id));
-  return websites.filter((item) => item.serverId === website.serverId && item.runtimeType === 'static'
-    && eligibleApps.has(item.applicationId) && !excluded.has(item.id));
+  const eligibleApps = new Set(applications.filter((item) => item.serverId === serverId && item.type === runtimeType
+    && (runtimeType === 'php' || (item.repositoryUrl === null && item.state === 'active' && item.currentReleaseId))).map((item) => item.id));
+  const domainsByWebsite = new Map();
+  if (runtimeType === 'php') {
+    for (const domain of domains) {
+      const sites = domainsByWebsite.get(domain.websiteId) ?? [];
+      sites.push(domain);
+      domainsByWebsite.set(domain.websiteId, sites);
+    }
+  }
+  return websites.filter((item) => {
+    if (item.serverId !== serverId || item.runtimeType !== runtimeType || !eligibleApps.has(item.applicationId) || excluded.has(item.id)) return false;
+    if (runtimeType !== 'php') return true;
+    const bound = domainsByWebsite.get(item.id) ?? [];
+    const [domain] = bound;
+    return bound.length === 1 && domain.serverId === serverId && domain.targetType === 'php'
+      && domain.target?.applicationId === item.applicationId && domain.state === 'active'
+      && domain.appliedRevision === domain.desiredRevision && !domain.nginxSettings?.documentRoot;
+  });
 }
 
-function copyPlan(value, targetWebsiteId) {
+function copyPlan(value, targetWebsiteId, php) {
   if (value?.targetWebsiteId !== targetWebsiteId || !Number.isSafeInteger(value.files) || value.files < 0
     || !Number.isSafeInteger(value.bytes) || value.bytes < 0 || !SHA256.test(value.previewDigest ?? '')
-    || typeof value.confirmation !== 'string' || !value.confirmation) {
+    || typeof value.confirmation !== 'string' || !value.confirmation
+    || (php && (value.files !== 1 || value.bytes < 1 || value.bytes > MAX_PHP_FILE_BYTES
+      || !Number.isSafeInteger(value.tables) || value.tables < 1 || value.tables > 256))) {
     throw new Error('Kopyalama önizlemesi doğrulanamadı.');
   }
-  return { targetWebsiteId, files: value.files, bytes: value.bytes, previewDigest: value.previewDigest, confirmation: value.confirmation };
+  return { targetWebsiteId, files: value.files, bytes: value.bytes, previewDigest: value.previewDigest,
+    confirmation: value.confirmation, ...(php ? { tables: value.tables } : {}) };
 }
 
-function scopedJob(value, serverId, applicationId) {
+function scopedJob(value, operation, serverId, applicationId) {
   const job = jobFromResponse(value);
-  if (job.operation !== COPY_OPERATION || job.serverId !== serverId || job.resourceType !== 'application' || job.resourceId !== applicationId) {
+  if (job.operation !== operation || job.serverId !== serverId || job.resourceType !== 'application' || job.resourceId !== applicationId) {
     throw new Error('Kopyalama işi bu siteyle eşleşmiyor.');
   }
   return job;
 }
 
-export default function StaticSiteCopyDialog({ website }) {
+export default function SiteCopyDialog({ website }) {
   const { applications, websites, domains, updateJob } = useWorkspace();
   const [params, setParams] = useSearchParams();
-  const { id: websiteId, applicationId, serverId } = website;
-  const requestId = staticCopyRequestId(params, websiteId);
-  const root = `/websites/${encodeURIComponent(websiteId)}/static-copy`;
+  const { id: websiteId, applicationId, serverId, runtimeType } = website;
+  const mode = COPY_MODES[runtimeType];
+  const php = runtimeType === 'php';
+  const requestId = siteCopyRequest(params, website)?.id ?? null;
+  const root = `/websites/${encodeURIComponent(websiteId)}/${mode.slug}`;
   const generation = sessionVersion();
   const [open, setOpen] = useState(Boolean(requestId));
   const [targetId, setTargetId] = useState('');
@@ -83,7 +113,7 @@ export default function StaticSiteCopyDialog({ website }) {
   const readyPlan = preview?.targetWebsiteId === target?.id ? preview : null;
   const job = result?.requestId === requestId ? result.job : null;
   const finished = job !== null && !jobActive(job);
-  const view = staticCopyRequestView(requestId, editingId, lookup);
+  const view = siteCopyRequestView(requestId, editingId, lookup, runtimeType);
   const editing = view === 'form' && Boolean(requestId);
   const lookupError = lookup?.requestId === requestId ? lookup.error : null;
 
@@ -96,8 +126,8 @@ export default function StaticSiteCopyDialog({ website }) {
   function storeRequest(id) {
     setParams((previous) => {
       const next = new URLSearchParams(previous);
-      if (id) next.set(STATIC_COPY_REQUEST_PARAM, `${websiteId}:${id}`);
-      else if (staticCopyRequestId(previous, websiteId)) next.delete(STATIC_COPY_REQUEST_PARAM);
+      if (id) next.set(mode.requestParam, `${websiteId}:${id}`);
+      else if (siteCopyRequest(previous, website)) next.delete(mode.requestParam);
       return next;
     }, { replace: true });
   }
@@ -124,7 +154,7 @@ export default function StaticSiteCopyDialog({ website }) {
       try {
         const value = await panelRequest(`${root}/requests/${encodeURIComponent(requestId)}`, { signal: controller.signal });
         if (!active()) return;
-        const current = scopedJob(value, serverId, applicationId);
+        const current = scopedJob(value, mode.operation, serverId, applicationId);
         recordJob(requestId, current);
         setLookup(null);
         setSubmissionError(null);
@@ -135,12 +165,12 @@ export default function StaticSiteCopyDialog({ website }) {
         if ([401, 403, 404].includes(error.status)) setResult(null);
         setLookup({ requestId, error });
         failures += 1;
-        if (failures < 3 && !requestMissing(error) && ![401, 403].includes(error.status)) timer = setTimeout(read, 1800);
+        if (failures < 3 && !requestMissing(error, mode) && ![401, 403].includes(error.status)) timer = setTimeout(read, 1800);
       }
     }
     void read();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [requestId, editing, finished, busy, root, serverId, applicationId, generation, refresh, updateJob]);
+  }, [requestId, editing, finished, busy, root, mode, serverId, applicationId, generation, refresh, updateJob]);
 
   async function submit(event) {
     event.preventDefault();
@@ -152,7 +182,7 @@ export default function StaticSiteCopyDialog({ website }) {
     try {
       if (!readyPlan) {
         const value = await panelRequest(`${root}/preview`, { method: 'POST', body: { targetWebsiteId: target.id }, signal: scope.controller.signal });
-        if (isCurrent(scope)) setPreview(copyPlan(value, target.id));
+        if (isCurrent(scope)) setPreview(copyPlan(value, target.id, php));
         return;
       }
       const id = requestId ?? crypto.randomUUID();
@@ -162,7 +192,7 @@ export default function StaticSiteCopyDialog({ website }) {
       const { targetWebsiteId, previewDigest, confirmation } = readyPlan;
       const value = await panelRequest(`${root}/requests`, { method: 'POST',
         body: { targetWebsiteId, requestId: id, previewDigest, confirmation }, signal: scope.controller.signal });
-      if (isCurrent(scope)) recordJob(id, scopedJob(value, serverId, applicationId));
+      if (isCurrent(scope)) recordJob(id, scopedJob(value, mode.operation, serverId, applicationId));
     } catch (error) {
       if (isCurrent(scope) && error.name !== 'AbortError') {
         setSubmissionError(error);
@@ -194,12 +224,13 @@ export default function StaticSiteCopyDialog({ website }) {
   if (!eligible && !requestId) return null;
   return <>
     <Button icon={requestId ? 'jobs' : 'folder'} onClick={() => setOpen(true)}>{requestId ? 'Kopyalama durumu' : 'Siteyi kopyala'}</Button>
-    {open && <Modal title="Statik siteyi kopyala" busy={Boolean(busy)} onClose={closeDialog}>
+    {open && <Modal title={mode.title} busy={Boolean(busy)} onClose={closeDialog}>
       {view !== 'form' ? <>
         {job ? <div role="status"><Badge state={job.status} /></div> : !submissionError && !lookupError && <div role="status" className="ws-loading"><span className="ws-spinner" />Kopyalama durumu bekleniyor…</div>}
         <ErrorNotice error={job?.error?.message ?? (submissionError ?? lookupError)?.message} />
         {job?.status === 'succeeded' && <KeyValues items={[
           ['Kopyalanan dosya', job.result?.filesCopied], ['Kopyalanan boyut', formatBytes(job.result?.bytesCopied)],
+          ...(php ? [['Kopyalanan tablo', job.result?.tablesCopied], ['Veritabanı boyutu', formatBytes(job.result?.databaseBytes)]] : []),
         ]} />}
         <footer className="ws-modal-footer">
           <Button disabled={Boolean(busy)} onClick={closeDialog}>Kapat</Button>
@@ -207,17 +238,18 @@ export default function StaticSiteCopyDialog({ website }) {
           {eligible && view === 'missing' && <Button variant="primary" onClick={reopenPreview}>Önizlemeye dön</Button>}
         </footer>
       </> : <form onSubmit={submit}>
-        <p className="ws-muted">Yalnız statik web dosyaları kopyalanır. Yeni oluşturulmuş veya boş bir hedef site seçin.</p>
+        <p className="ws-muted">{mode.intro}</p>
         {targets.length ? <label>Hedef site<select required value={targetId} disabled={Boolean(busy)} onChange={(event) => {
           setTargetId(event.target.value); setPreview(null); setSubmissionError(null);
         }}><option value="">Site seçin</option>{targets.map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}</select></label>
-          : <p className="ws-muted">Bu sunucuda seçilebilir statik hedef site bulunamadı.</p>}
+          : <p className="ws-muted">{mode.noTargets}</p>}
         {readyPlan && <KeyValues items={[
           ['Hedef site', target.name], ['Dosya sayısı', readyPlan.files], ['Toplam boyut', formatBytes(readyPlan.bytes)],
+          ...(php ? [['Tablo sayısı', readyPlan.tables]] : []),
         ]} />}
         <ErrorNotice error={submissionError?.message} />
         <footer className="ws-modal-footer"><Button disabled={Boolean(busy)} onClick={closeDialog}>Vazgeç</Button>
-          <Button type="submit" variant="primary" disabled={!eligible || !target || Boolean(busy)}>{busy ? 'İşleniyor…' : readyPlan ? 'Dosyaları kopyala' : 'Önizle'}</Button>
+          <Button type="submit" variant="primary" disabled={!eligible || !target || Boolean(busy)}>{busy ? 'İşleniyor…' : readyPlan ? mode.submitLabel : 'Önizle'}</Button>
         </footer>
       </form>}
     </Modal>}
