@@ -11,6 +11,7 @@ const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-
 const SHA256 = /^[a-f0-9]{64}$/;
 const COPY_OPERATION = 'website.static.copy';
 const NO_REQUEST = 'static_copy_request_not_found';
+const requestMissing = (error) => error?.status === 404 && error.code === NO_REQUEST;
 
 export const STATIC_COPY_REQUEST_PARAM = 'staticCopyRequest';
 
@@ -20,6 +21,14 @@ export function staticCopyRequestId(params, websiteId) {
   if (!UUID.test(websiteId ?? '') || !value?.startsWith(prefix)) return null;
   const requestId = value.slice(prefix.length);
   return UUID.test(requestId) ? requestId : null;
+}
+
+export function staticCopyRequestView(requestId, editingId, lookup) {
+  if (!requestId) return 'form';
+  if (lookup?.requestId === requestId && requestMissing(lookup.error)) {
+    return editingId === requestId ? 'form' : 'missing';
+  }
+  return 'tracking';
 }
 
 function copySiteOptions(website, websites, applications, domains) {
@@ -59,13 +68,13 @@ export default function StaticSiteCopyDialog({ website }) {
   const [targetId, setTargetId] = useState('');
   const [preview, setPreview] = useState(null);
   const [submissionError, setSubmissionError] = useState(null);
-  const [lookupError, setLookupError] = useState(null);
+  const [lookup, setLookup] = useState(null);
+  const [editingId, setEditingId] = useState(null);
   const [busy, setBusy] = useState(null);
   const [result, setResult] = useState(null);
   const [refresh, setRefresh] = useState(0);
   const life = useRef(null);
   const mutation = useRef(false);
-  const rejected = useRef(null);
 
   const sites = copySiteOptions(website, websites.items, applications.items, domains.items);
   const eligible = sites.some((site) => site.id === websiteId);
@@ -74,6 +83,9 @@ export default function StaticSiteCopyDialog({ website }) {
   const readyPlan = preview?.targetWebsiteId === target?.id ? preview : null;
   const job = result?.requestId === requestId ? result.job : null;
   const finished = job !== null && !jobActive(job);
+  const view = staticCopyRequestView(requestId, editingId, lookup);
+  const editing = view === 'form' && Boolean(requestId);
+  const lookupError = lookup?.requestId === requestId ? lookup.error : null;
 
   useEffect(() => {
     const scope = { controller: new AbortController(), generation };
@@ -101,7 +113,7 @@ export default function StaticSiteCopyDialog({ website }) {
   }
 
   useEffect(() => {
-    if (!requestId || finished || busy === 'submit') return;
+    if (!requestId || editing || finished || busy === 'submit') return;
     const scope = life.current;
     const controller = new AbortController();
     let timer;
@@ -114,54 +126,45 @@ export default function StaticSiteCopyDialog({ website }) {
         if (!active()) return;
         const current = scopedJob(value, serverId, applicationId);
         recordJob(requestId, current);
-        setLookupError(null);
+        setLookup(null);
         setSubmissionError(null);
-        rejected.current = null;
         failures = 0;
         if (jobActive(current)) timer = setTimeout(read, 1800);
       } catch (error) {
         if (!active() || error.name === 'AbortError') return;
-        if (error.status === 404 && error.code === NO_REQUEST && rejected.current === requestId) {
-          rejected.current = null;
-          setPreview(null);
-          setLookupError(null);
-          storeRequest(null);
-          return;
-        }
         if ([401, 403, 404].includes(error.status)) setResult(null);
-        setLookupError(error);
+        setLookup({ requestId, error });
         failures += 1;
-        if (failures < 3 && ![401, 403].includes(error.status)) timer = setTimeout(read, 1800);
+        if (failures < 3 && !requestMissing(error) && ![401, 403].includes(error.status)) timer = setTimeout(read, 1800);
       }
     }
     void read();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [requestId, finished, busy, root, serverId, applicationId, generation, refresh, updateJob]);
+  }, [requestId, editing, finished, busy, root, serverId, applicationId, generation, refresh, updateJob]);
 
   async function submit(event) {
     event.preventDefault();
     const scope = life.current;
-    if (!eligible || !target || requestId || mutation.current || !isCurrent(scope)) return;
+    if (!eligible || !target || view !== 'form' || mutation.current || !isCurrent(scope)) return;
     mutation.current = true;
     setBusy(readyPlan ? 'submit' : 'preview');
     setSubmissionError(null);
-    setLookupError(null);
-    let id;
     try {
       if (!readyPlan) {
         const value = await panelRequest(`${root}/preview`, { method: 'POST', body: { targetWebsiteId: target.id }, signal: scope.controller.signal });
         if (isCurrent(scope)) setPreview(copyPlan(value, target.id));
         return;
       }
-      id = crypto.randomUUID();
-      storeRequest(id);
+      const id = requestId ?? crypto.randomUUID();
+      if (!requestId) storeRequest(id);
+      setEditingId(null);
+      setLookup(null);
       const { targetWebsiteId, previewDigest, confirmation } = readyPlan;
       const value = await panelRequest(`${root}/requests`, { method: 'POST',
         body: { targetWebsiteId, requestId: id, previewDigest, confirmation }, signal: scope.controller.signal });
       if (isCurrent(scope)) recordJob(id, scopedJob(value, serverId, applicationId));
     } catch (error) {
       if (isCurrent(scope) && error.name !== 'AbortError') {
-        if (id && [400, 401, 403, 404, 409, 422].includes(error.status)) rejected.current = id;
         setSubmissionError(error);
       }
     } finally {
@@ -172,21 +175,27 @@ export default function StaticSiteCopyDialog({ website }) {
 
   function closeDialog() {
     setOpen(false);
-    if (!requestId || finished) {
+    if (!requestId || finished || editing) {
       if (finished) storeRequest(null);
+      setEditingId(null);
       setTargetId('');
       setPreview(null);
       setSubmissionError(null);
-      setLookupError(null);
+      setLookup(null);
       setResult(null);
     }
+  }
+
+  function reopenPreview() {
+    setPreview(null);
+    setEditingId(requestId);
   }
 
   if (!eligible && !requestId) return null;
   return <>
     <Button icon={requestId ? 'jobs' : 'folder'} onClick={() => setOpen(true)}>{requestId ? 'Kopyalama durumu' : 'Siteyi kopyala'}</Button>
     {open && <Modal title="Statik siteyi kopyala" busy={Boolean(busy)} onClose={closeDialog}>
-      {requestId ? <>
+      {view !== 'form' ? <>
         {job ? <div role="status"><Badge state={job.status} /></div> : !submissionError && !lookupError && <div role="status" className="ws-loading"><span className="ws-spinner" />Kopyalama durumu bekleniyor…</div>}
         <ErrorNotice error={job?.error?.message ?? (submissionError ?? lookupError)?.message} />
         {job?.status === 'succeeded' && <KeyValues items={[
@@ -194,7 +203,8 @@ export default function StaticSiteCopyDialog({ website }) {
         ]} />}
         <footer className="ws-modal-footer">
           <Button disabled={Boolean(busy)} onClick={closeDialog}>Kapat</Button>
-          {!finished && (submissionError || lookupError) && <Button icon="refresh" onClick={() => { setLookupError(null); setRefresh((value) => value + 1); }}>Durumu yenile</Button>}
+          {!finished && (submissionError || lookupError) && <Button icon="refresh" onClick={() => { setLookup(null); setRefresh((value) => value + 1); }}>Durumu yenile</Button>}
+          {eligible && view === 'missing' && <Button variant="primary" onClick={reopenPreview}>Önizlemeye dön</Button>}
         </footer>
       </> : <form onSubmit={submit}>
         <p className="ws-muted">Yalnız statik web dosyaları kopyalanır. Yeni oluşturulmuş veya boş bir hedef site seçin.</p>
