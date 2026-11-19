@@ -40,6 +40,7 @@ test('every durable async queue operation has a local host execution path', asyn
     ...localWebsitePhp,
     ...operationNames(localSource, /export const LOCAL_WEBSITE_BACKUP_OPERATIONS = Object\.freeze\(\[([\s\S]*?)\]\);/),
     ...operationNames(localSource, /if \(websiteStaticCopyOperation\) handlers\.set\(([^,]+),/),
+    ...operationNames(localSource, /if \(websitePhpCopyOperation\) handlers\.set\(([^,]+),/),
   ]);
 
   assert.deepEqual([...executable].sort(), [...queued].sort());

@@ -36,6 +36,7 @@ const recoverySources = [
   'job-running-php-tool-recovery.js',
   'website-backup-operation-service.js',
   'website-static-copy-service.js',
+  'php-site-copy-service.js',
   'application-passenger-migration-reconciliation.js',
   'passenger-release-recovery.js',
   'passenger-release-reconciliation.js',

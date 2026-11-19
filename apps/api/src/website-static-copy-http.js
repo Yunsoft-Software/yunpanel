@@ -1,7 +1,7 @@
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 
-export function mountWebsiteStaticCopyRoutes(app, { service }) {
-  const root = '/api/websites/:websiteId/static-copy';
+export function mountWebsiteStaticCopyRoutes(app, { service, php = false }) {
+  const root = `/api/websites/:websiteId/${php ? 'php-copy' : 'static-copy'}`;
   const route = (action, status, getInput) => async (request, response, next) => {
     try {
       const actor = { sessionId: request.auth?.id, userId: request.auth?.user?.id, role: request.auth?.user?.role };

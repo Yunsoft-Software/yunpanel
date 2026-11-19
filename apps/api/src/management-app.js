@@ -421,6 +421,7 @@ export function createApp(allOptions = {}) {
   elFinderHandoffService = null,
   siteFileManager = null,
   websiteStaticCopyService = null,
+  websitePhpCopyService = null,
   databaseInventoryProvider = null,
   databaseHealthProvider = null,
   dnsReadinessService = null,
@@ -1378,6 +1379,7 @@ export function createApp(allOptions = {}) {
     });
   }
   if (websiteStaticCopyService) mountWebsiteStaticCopyRoutes(app, { service: websiteStaticCopyService });
+  if (websitePhpCopyService) mountWebsiteStaticCopyRoutes(app, { service: websitePhpCopyService, php: true });
   mountDatabaseRoutes(app, {
     registry: localRegistry,
     jobRegistry,

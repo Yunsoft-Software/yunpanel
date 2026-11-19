@@ -11,6 +11,7 @@
     "./passenger-environment-manager": "./src/passenger-environment-manager.js",
     "./php-site-bootstrap-manager": "./src/php-site-bootstrap-manager.js",
     "./php-site-container-manager": "./src/php-site-container-manager.js",
+    "./site-database-copy-manager": "./src/site-database-copy-manager.js",
     "./powerdns-authoritative-manager": "./src/powerdns-authoritative-manager.js",
     "./powerdns-authoritative-secure-manager": "./src/powerdns-authoritative-secure-manager.js",
     "./powerdns-authoritative-durable-manager": "./src/powerdns-authoritative-durable-manager.js",

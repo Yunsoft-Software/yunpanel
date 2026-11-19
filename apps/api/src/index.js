@@ -140,6 +140,11 @@ import { createWebsitePhpToolsService } from './website-php-tools-service.js';
 import { createStaticSiteCopyPlanner } from './static-site-copy-plan.js';
 import { createStaticSiteCopyTransfer } from './static-site-copy-transfer.js';
 import { createWebsiteStaticCopyService } from './website-static-copy-service.js';
+import { createPhpSiteCopyConnection } from './php-site-copy-connection.js';
+import { createPhpSiteCopyPlanner } from './php-site-copy-plan.js';
+import { createPhpSiteCopyTransfer } from './php-site-copy-transfer.js';
+import { createPhpSiteCopyService } from './php-site-copy-service.js';
+import { createSiteDatabaseCopyManager } from '@yunpanel/host-runtime/site-database-copy-manager';
 import { createLocalWebsitePhpToolOperation } from './local-website-php-tool-operation.js';
 import { createWebsitePhpToolActionService } from './website-php-tool-action-service.js';
 import { createSiteMutationLock } from './site-mutation-lock.js';
@@ -775,17 +780,18 @@ const jobRegistry = createDomainStageTargetJobRegistry({
   siteMutationLock,
 });
 let websiteStaticCopyService = null;
+const authorizeWebsiteCopyActor = async (actor, websiteId) => {
+  const session = authStore.getSessionById(actor.sessionId);
+  const website = await websiteRegistry.getWebsite(websiteId);
+  return session?.user.role === 'owner' && website?.serverId === localServerId
+    && Boolean(await authorizeWebsitePhpActor(actor, websiteId));
+};
 if (localServerId) {
   const planner = createStaticSiteCopyPlanner({ localServerId, websiteRegistry, applicationRegistry, domainRegistry,
     websiteProvisioningRegistry: websiteProvisioningRuntime.registry, siteFileManager });
   const transfer = createStaticSiteCopyTransfer({ planner, siteFileManager, siteMutationLock });
   websiteStaticCopyService = createWebsiteStaticCopyService({ localServerId, planner, transfer, domainRegistry,
-    jobRegistry, durableJobRegistry, authorizeActor: async (actor, websiteId) => {
-      const session = authStore.getSessionById(actor.sessionId);
-      const website = await websiteRegistry.getWebsite(websiteId);
-      return session?.user.role === 'owner' && website?.serverId === localServerId
-        && Boolean(await authorizeWebsitePhpActor(actor, websiteId));
-    } });
+    jobRegistry, durableJobRegistry, authorizeActor: authorizeWebsiteCopyActor });
 }
 localWebsiteCronOperation = createLocalWebsiteCronOperation({
   websiteCronRegistry,
@@ -997,6 +1003,17 @@ if (domainRemovalRuntime) await domainRemovalRuntime.init();
 const websiteRemovalOperationRegistry = createWebsiteRemovalOperationRegistry({
   filePath: websiteRemovalOperationStorePath,
 });
+let websitePhpCopyService = null;
+if (localServerId) {
+  const connection = createPhpSiteCopyConnection({ databaseCredentialRegistry });
+  const planner = createPhpSiteCopyPlanner({ localServerId, websiteRegistry, applicationRegistry, domainRegistry,
+    websiteProvisioningRegistry: websiteProvisioningRuntime.registry, databaseBindingRegistry, databaseCredentialRegistry,
+    siteFileManager, inspectContract: connection.inspect });
+  const transfer = createPhpSiteCopyTransfer({ planner, siteFileManager, siteMutationLock, connection, domainRegistry,
+    databaseCopyManager: createSiteDatabaseCopyManager(), removalRegistry: websiteRemovalOperationRegistry });
+  websitePhpCopyService = createPhpSiteCopyService({ localServerId, transfer, jobRegistry, durableJobRegistry,
+    authorizeActor: authorizeWebsiteCopyActor });
+}
 const websiteRemovalCleanupAdapters = localServerId
   ? createWebsiteRemovalCleanupAdapters({
     websiteRegistry,
@@ -1393,6 +1410,7 @@ const listener = createAuthenticatedApi({
       elFinderHandoffService: elFinderHandoffRuntime ? elFinderHandoffService : null,
       siteFileManager,
       websiteStaticCopyService,
+      websitePhpCopyService,
       databaseInventoryProvider: () => databaseManager.inspect(),
       databaseManager,
       databaseHealthProvider: () => databaseManager.inspectSecurityBaseline(),
@@ -1482,6 +1500,7 @@ const localRuntime = await startConfiguredLocalRuntime({
   recoverRunningJobs: async () => {
     await websiteBackupOperationService?.recoverStartup();
     await websiteStaticCopyService?.recoverStartup();
+    await websitePhpCopyService?.recoverStartup();
   },
   onWebsitePhpToolReceiptRecorded: async (payload) => { if (payload.actionId === 'wp.toolkit') await wordpressToolkitService?.releaseSecret(payload); },
   createOperations: (options) => dockerComposeRuntime.extendLocalOperations(createLocalHostOperations({
@@ -1492,6 +1511,7 @@ const localRuntime = await startConfiguredLocalRuntime({
     websitePhpToolOperation: localWebsitePhpToolOperation,
     websiteBackupOperation: websiteBackupOperationService,
     websiteStaticCopyOperation: websiteStaticCopyService,
+    websitePhpCopyOperation: websitePhpCopyService,
     passengerReleaseOperation:createLocalPassengerReleaseOperation({applicationRegistry,websiteRegistry,domainRegistry,certificateRegistry,
       applicationEnvironmentRegistry,runtimeBindingRegistry,provisioningRegistry:websiteProvisioningRuntime.registry,siteMutationLock,localServerId,
       loadGitCredential: applicationId => applicationEnvironmentRegistry.materializeDeploymentCredential(applicationId)}),
