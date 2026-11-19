@@ -70,7 +70,7 @@
 - **Bağımlı:** T925, T930, T931, T932
 - **Dosyalar:** `apps/api/src/php-site-copy-service.js`, `apps/api/src/website-static-copy-http.js`, `apps/api/src/index.js`, `apps/api/src/management-app.js`, `apps/api/src/local-execution-error.js`, `apps/api/test/job-recovery-operation-parity.test.js`, `apps/api/test/local-operation-queue-parity.test.js`, `packages/host-runtime/package.json`
 - **İş:** Owner iki siteye güncel erişimle önizleme, onay ve aynı istekle iş takibi yapabilsin. PHP işinin başlatılması ve süreç kesintisi uzlaştırması mevcut yerel yürütücüye bağlansın. Yarım veya doğrulanmamış hedef kullanıcıya gösterilsin. Statik kopya rotaları ve WordPress staging korunur.
-- **Kabul:** Yerel kuyruk ve yeniden başlatma eşleme doğrulamaları, bağımsız kaynak incelemesi ve tam kaynak kontrolü geçer. Gerçek panel API, aynı iş ve host davranışı T934’te doğrulanır.
+- **Kabul:** Yerel kuyruk, panel rota ve yeniden başlatma eşleme doğrulamaları ile bağımsız kaynak incelemesi geçer. Tam kaynak kapısı, gerçek panel API, aynı iş ve host davranışı T935’te birlikte doğrulanır.
 
 ### T934 · PHP ve MariaDB kopyasını panelde aç
 - **Bağımlı:** T926, T932
