@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { isInfrastructureDatabase } from '@yunpanel/shared';
+import { createDatabaseMetadataMutation } from './database-binding-http.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
@@ -152,6 +153,8 @@ export function mountWebsiteDatabaseDeleteRoutes(app, {
   jobRegistry,
   databaseInventoryProvider,
   ensureDatabaseIdle,
+  withApplicationLock = null,
+  authorizeActor = null,
 } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function') {
     throw new Error('Express application is required');
@@ -167,6 +170,8 @@ export function mountWebsiteDatabaseDeleteRoutes(app, {
     || typeof ensureDatabaseIdle !== 'function') {
     throw new Error('Website database delete route dependencies are invalid');
   }
+
+  const mutate = createDatabaseMetadataMutation({ withApplicationLock, authorizeActor });
 
   async function resolveScope({ serverId, websiteId, bindingId, expectedBindingRevision = null }) {
     const server = await registry.getServer(serverId);
@@ -392,34 +397,17 @@ export function mountWebsiteDatabaseDeleteRoutes(app, {
     } });
   }));
 
-  app.post(`${prefix}/delete-finalize`, requirePanelRouteAccess, asyncRoute(async (request, response) => {
-    emptyQuery(request.query);
-    const body = exactBody(request.body, DELETE_FINALIZE_FIELDS, 'website_database_delete_finalize_input_invalid');
-    if (typeof body.deleteJobId !== 'string' || !JOB_ID_PATTERN.test(body.deleteJobId)
-      || typeof body.confirmation !== 'string') {
-      throw new WebsiteDatabaseDeleteHttpError(
-        'website_database_delete_finalize_input_invalid',
-        'Website database delete finalization request is invalid',
-      );
-    }
-
-    const server = await registry.getServer(request.params.serverId);
-    if (!server) throw new WebsiteDatabaseDeleteHttpError('server_not_found', 'Server not found', 404);
-    const website = await websiteRegistry.getWebsite(request.params.websiteId);
-    if (!website || website.serverId !== server.id) {
-      throw new WebsiteDatabaseDeleteHttpError('website_not_found', 'Website not found', 404);
-    }
-
+  async function finalizeDelete(bindingId, body, { serverId, websiteId, applicationId }) {
     let binding;
     let credential;
     let job;
     let inventory;
     try {
       [binding, credential, job, inventory] = await Promise.all([
-        databaseBindingRegistry.getBinding(request.params.bindingId),
-        databaseCredentialRegistry.getForBinding(request.params.bindingId),
+        databaseBindingRegistry.getBinding(bindingId),
+        databaseCredentialRegistry.getForBinding(bindingId),
         jobRegistry.getJob(body.deleteJobId),
-        databaseInventoryProvider(server.id),
+        databaseInventoryProvider(serverId),
       ]);
     } catch {
       throw new WebsiteDatabaseDeleteHttpError(
@@ -432,12 +420,12 @@ export function mountWebsiteDatabaseDeleteRoutes(app, {
     const payload = job?.payload;
     const result = job?.result;
     if (!job || job.status !== 'succeeded' || job.operation !== OPERATIONS.DATABASE_DELETE
-      || job.serverId !== server.id || job.resourceType !== 'database'
+      || job.serverId !== serverId || job.resourceType !== 'database'
       || !payload || typeof payload !== 'object' || Array.isArray(payload)
       || !validDatabaseName(payload.name)
       || job.resourceId !== payload.name
-      || payload.websiteId !== website.id
-      || payload.databaseBindingId !== request.params.bindingId
+      || payload.websiteId !== websiteId
+      || payload.databaseBindingId !== bindingId
       || payload.expectedBindingRevision !== body.expectedBindingRevision
       || typeof payload.backupId !== 'string' || !JOB_ID_PATTERN.test(payload.backupId)
       || typeof payload.expectedBackupSha256 !== 'string' || !SHA256_PATTERN.test(payload.expectedBackupSha256)
@@ -450,8 +438,8 @@ export function mountWebsiteDatabaseDeleteRoutes(app, {
       );
     }
 
-    if (binding && (binding.id !== request.params.bindingId || binding.serverId !== server.id
-      || binding.websiteId !== website.id || binding.applicationId !== website.applicationId
+    if (binding && (binding.id !== bindingId || binding.serverId !== serverId
+      || binding.websiteId !== websiteId || binding.applicationId !== applicationId
       || binding.databaseName !== payload.name || binding.revision !== body.expectedBindingRevision)) {
       throw new WebsiteDatabaseDeleteHttpError(
         'website_database_delete_binding_drift',
@@ -481,8 +469,7 @@ export function mountWebsiteDatabaseDeleteRoutes(app, {
       );
     }
 
-    const expectedConfirmation =
-      `finalize-website-database-delete:${request.params.bindingId}:${body.expectedBindingRevision}:${job.id}`;
+    const expectedConfirmation = `finalize-website-database-delete:${bindingId}:${body.expectedBindingRevision}:${job.id}`;
     if (body.confirmation !== expectedConfirmation) {
       throw new WebsiteDatabaseDeleteHttpError(
         'website_database_delete_finalize_confirmation_invalid',
@@ -491,29 +478,39 @@ export function mountWebsiteDatabaseDeleteRoutes(app, {
       );
     }
 
-    if (!binding) {
-      return response.json({ data: {
-        id: request.params.bindingId,
-        databaseName: payload.name,
-        unbound: true,
-        alreadyFinalized: true,
-        finalizedFromJobId: job.id,
-        backupId: payload.backupId,
-        backupSha256: payload.expectedBackupSha256,
-      }, sideEffects: { databaseChanged: false } });
-    }
-
-    const unbound = await databaseBindingRegistry.unbindDatabase(request.params.bindingId, {
+    const unbound = binding ? await databaseBindingRegistry.unbindDatabase(bindingId, {
       expectedRevision: body.expectedBindingRevision,
-      confirmation: `unbind-database:${request.params.bindingId}:${body.expectedBindingRevision}`,
-    });
-    return response.json({ data: {
+      confirmation: `unbind-database:${bindingId}:${body.expectedBindingRevision}`,
+    }) : { id: bindingId, databaseName: payload.name, unbound: true };
+    return {
       ...unbound,
-      alreadyFinalized: false,
+      alreadyFinalized: !binding,
       finalizedFromJobId: job.id,
       backupId: payload.backupId,
       backupSha256: payload.expectedBackupSha256,
-    }, sideEffects: { databaseChanged: false } });
+    };
+  }
+
+  app.post(`${prefix}/delete-finalize`, requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    emptyQuery(request.query);
+    const body = exactBody(request.body, DELETE_FINALIZE_FIELDS, 'website_database_delete_finalize_input_invalid');
+    if (typeof body.deleteJobId !== 'string' || !JOB_ID_PATTERN.test(body.deleteJobId)
+      || typeof body.confirmation !== 'string') {
+      throw new WebsiteDatabaseDeleteHttpError(
+        'website_database_delete_finalize_input_invalid',
+        'Website database delete finalization request is invalid',
+      );
+    }
+    const result = await mutate(request, async () => {
+      const server = await registry.getServer(request.params.serverId);
+      if (!server) throw new WebsiteDatabaseDeleteHttpError('server_not_found', 'Server not found', 404);
+      const website = await websiteRegistry.getWebsite(request.params.websiteId);
+      if (!website || website.serverId !== server.id) {
+        throw new WebsiteDatabaseDeleteHttpError('website_not_found', 'Website not found', 404);
+      }
+      return { serverId: server.id, websiteId: website.id, applicationId: website.applicationId, unixUser: website.unixUser };
+    }, (scope) => finalizeDelete(request.params.bindingId, body, scope));
+    return response.json({ data: result, sideEffects: { databaseChanged: false } });
   }));
 
   return Object.freeze({ resolveScope, inspectPreview });

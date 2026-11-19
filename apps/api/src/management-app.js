@@ -1303,8 +1303,13 @@ export function createApp(allOptions = {}) {
   }
   mountManagedServiceRoutes(app, { registry: localRegistry, jobRegistry });
   mountNodeRuntimeRoutes(app, { registry: localRegistry, jobRegistry });
+  const databaseMetadataMutation = {
+    withApplicationLock: siteMutationLock?.withApplicationLock ?? null,
+    authorizeActor: options.authorizeWebsiteActor ?? null,
+  };
   if (databaseBindingRegistry) {
     mountDatabaseBindingRoutes(app, {
+      ...databaseMetadataMutation,
       registry: localRegistry,
       websiteRegistry,
       jobRegistry,
@@ -1327,6 +1332,7 @@ export function createApp(allOptions = {}) {
   if (databaseBindingRegistry && databaseCredentialRegistry && databaseInventoryProvider
     && typeof jobRegistry.getJob === 'function') {
     mountWebsiteDatabaseDeleteRoutes(app, {
+      ...databaseMetadataMutation,
       registry: localRegistry,
       websiteRegistry,
       databaseBindingRegistry,
@@ -1344,7 +1350,9 @@ export function createApp(allOptions = {}) {
       authorizeActor: options.authorizeWebsiteActor ?? null,
     });
     mountDatabaseCredentialRoutes(app, {
+      ...databaseMetadataMutation,
       registry: localRegistry,
+      websiteRegistry,
       databaseBindingRegistry,
       databaseCredentialRegistry,
       databaseCredentialApplyService: databaseCredentialApply,

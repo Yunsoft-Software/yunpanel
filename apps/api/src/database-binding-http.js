@@ -36,6 +36,38 @@ function asyncRoute(handler) {
   };
 }
 
+export function createDatabaseMetadataMutation({ withApplicationLock = null, authorizeActor = null } = {}) {
+  if (withApplicationLock !== null && typeof withApplicationLock !== 'function'
+    || authorizeActor !== null && typeof authorizeActor !== 'function') {
+    throw new Error('Database metadata mutation dependencies are invalid');
+  }
+  return async (request, resolve, action) => {
+    const initial = await resolve();
+    async function apply(scope) {
+      if (authorizeActor && !await authorizeActor({
+        sessionId: request.auth?.id, userId: request.auth?.user?.id, role: request.auth?.user?.role,
+      }, scope.websiteId)) {
+        throw new DatabaseBindingHttpError('site_scope_forbidden', 'Website access has changed', 403);
+      }
+      return action(scope);
+    }
+    if (!withApplicationLock) return apply(initial);
+    if (!initial.applicationId) {
+      throw new DatabaseBindingHttpError('database_metadata_scope_invalid', 'Database Application scope could not be verified', 409);
+    }
+    return withApplicationLock(initial.applicationId, async () => {
+      const current = await resolve();
+      if (current.serverId !== initial.serverId || current.websiteId !== initial.websiteId
+        || current.applicationId !== initial.applicationId || current.unixUser !== initial.unixUser
+        || current.bindingId !== initial.bindingId || current.bindingRevision !== initial.bindingRevision
+        || current.databaseName !== initial.databaseName) {
+        throw new DatabaseBindingHttpError('database_metadata_scope_changed', 'Database ownership changed; refresh and retry', 409);
+      }
+      return apply(current);
+    });
+  };
+}
+
 export function mountDatabaseBindingRoutes(app, {
   registry,
   websiteRegistry,
@@ -45,6 +77,8 @@ export function mountDatabaseBindingRoutes(app, {
   requireDatabaseName,
   ensureDatabaseIdle,
   latestDatabaseSnapshot,
+  withApplicationLock = null,
+  authorizeActor = null,
 } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function' || typeof app.delete !== 'function') {
     throw new Error('Express application is required');
@@ -62,6 +96,8 @@ export function mountDatabaseBindingRoutes(app, {
     || typeof latestDatabaseSnapshot !== 'function') {
     throw new Error('Database binding route dependencies are invalid');
   }
+
+  const mutate = createDatabaseMetadataMutation({ withApplicationLock, authorizeActor });
 
   async function server(serverId) {
     const found = await registry.getServer(serverId);
@@ -157,58 +193,65 @@ export function mountDatabaseBindingRoutes(app, {
 
   app.post('/api/servers/:serverId/databases/:name/bind', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
-    const current = await server(request.params.serverId);
     const name = requireDatabaseName(request.params.name);
     if (isInfrastructureDatabase(name)) {
       throw new DatabaseBindingHttpError('invalid_database_name', 'Database name is invalid', 400);
     }
     const body = exactBody(request.body, BIND_FIELDS, 'database_binding_input_invalid');
-    await ensureDatabaseIdle(jobRegistry, current.id);
-    const snapshot = await latestDatabaseSnapshot(jobRegistry, current.id);
-    if (!snapshot || !Array.isArray(snapshot.databases)) {
-      throw new DatabaseBindingHttpError(
-        'database_inventory_required',
-        'Refresh database inventory before binding a database',
-        409,
-      );
-    }
-    if (!snapshot.databases.some((database) => database.name === name)) {
-      throw new DatabaseBindingHttpError('database_not_found', 'Database was not found in the latest verified inventory', 404);
-    }
-    const binding = await databaseBindingRegistry.bindDatabase({
-      serverId: current.id,
-      databaseName: name,
-      websiteId: body.websiteId,
-      applicationId: body.applicationId,
-      confirmation: body.confirmation,
+    const binding = await mutate(request, async () => {
+      const current = await server(request.params.serverId);
+      const website = await websiteRegistry.getWebsite(body.websiteId);
+      if (!website) throw new DatabaseBindingHttpError('website_not_found', 'Website not found', 404);
+      if (website.serverId !== current.id) {
+        throw new DatabaseBindingHttpError('database_binding_website_server_mismatch', 'Website belongs to a different server', 409);
+      }
+      return { serverId: current.id, websiteId: website.id, applicationId: website.applicationId, unixUser: website.unixUser };
+    }, async (scope) => {
+      await ensureDatabaseIdle(jobRegistry, scope.serverId);
+      const snapshot = await latestDatabaseSnapshot(jobRegistry, scope.serverId);
+      if (!snapshot || !Array.isArray(snapshot.databases)) {
+        throw new DatabaseBindingHttpError('database_inventory_required', 'Refresh database inventory before binding a database', 409);
+      }
+      if (!snapshot.databases.some((database) => database.name === name)) {
+        throw new DatabaseBindingHttpError('database_not_found', 'Database was not found in the latest verified inventory', 404);
+      }
+      return databaseBindingRegistry.bindDatabase({
+        serverId: scope.serverId,
+        databaseName: name,
+        websiteId: scope.websiteId,
+        applicationId: body.applicationId ?? scope.applicationId,
+        confirmation: body.confirmation,
+      });
     });
     return response.status(201).json({ data: binding, sideEffects: { databaseChanged: false } });
   }));
 
   app.delete('/api/servers/:serverId/database-bindings/:bindingId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
-    const current = await server(request.params.serverId);
     const body = exactBody(request.body, UNBIND_FIELDS, 'database_unbind_input_invalid');
-    const binding = await databaseBindingRegistry.getBinding(request.params.bindingId);
-    if (!binding || binding.serverId !== current.id) {
-      throw new DatabaseBindingHttpError('database_binding_not_found', 'Database binding not found', 404);
-    }
-    await ensureDatabaseIdle(jobRegistry, current.id);
-    if (databaseCredentialRegistry) {
-      let credential;
-      try { credential = await databaseCredentialRegistry.getForBinding(binding.id); }
-      catch {
-        throw new DatabaseBindingHttpError('database_credential_state_unavailable', 'Database credential state could not be verified', 503);
+    const result = await mutate(request, async () => {
+      const current = await server(request.params.serverId);
+      const binding = await databaseBindingRegistry.getBinding(request.params.bindingId);
+      if (!binding || binding.serverId !== current.id) {
+        throw new DatabaseBindingHttpError('database_binding_not_found', 'Database binding not found', 404);
       }
-      if (credential) {
-        throw new DatabaseBindingHttpError(
-          'database_binding_credential_exists',
-          'Delete the managed database credential before unbinding the database',
-          409,
-        );
+      return { ...binding, bindingId: binding.id, bindingRevision: binding.revision };
+    }, async (scope) => {
+      await ensureDatabaseIdle(jobRegistry, scope.serverId);
+      if (databaseCredentialRegistry) {
+        let credential;
+        try { credential = await databaseCredentialRegistry.getForBinding(scope.bindingId); }
+        catch {
+          throw new DatabaseBindingHttpError('database_credential_state_unavailable', 'Database credential state could not be verified', 503);
+        }
+        if (credential) {
+          throw new DatabaseBindingHttpError(
+            'database_binding_credential_exists', 'Delete the managed database credential before unbinding the database', 409,
+          );
+        }
       }
-    }
-    const result = await databaseBindingRegistry.unbindDatabase(binding.id, body);
+      return databaseBindingRegistry.unbindDatabase(scope.bindingId, body);
+    });
     return response.json({ data: result, sideEffects: { databaseChanged: false } });
   }));
 }

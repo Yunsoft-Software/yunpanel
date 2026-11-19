@@ -1,3 +1,4 @@
+import { createDatabaseMetadataMutation } from './database-binding-http.js';
 import { databaseCredentialRegistryInternals } from './database-credential-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 
@@ -41,17 +42,21 @@ function asyncRoute(handler) {
 
 export function mountDatabaseCredentialRoutes(app, {
   registry,
+  websiteRegistry = null,
   databaseBindingRegistry,
   databaseCredentialRegistry,
   databaseCredentialApplyService,
   jobRegistry,
   ensureDatabaseIdle,
+  withApplicationLock = null,
+  authorizeActor = null,
 } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function'
     || typeof app.patch !== 'function' || typeof app.delete !== 'function') {
     throw new Error('Express application is required');
   }
   if (!registry || typeof registry.getServer !== 'function'
+    || (websiteRegistry !== null && typeof websiteRegistry.getWebsite !== 'function')
     || !databaseBindingRegistry || typeof databaseBindingRegistry.getBinding !== 'function'
     || !databaseCredentialRegistry || typeof databaseCredentialRegistry.createCredential !== 'function'
     || typeof databaseCredentialRegistry.getCredential !== 'function'
@@ -67,6 +72,8 @@ export function mountDatabaseCredentialRoutes(app, {
     || typeof ensureDatabaseIdle !== 'function') {
     throw new Error('Database credential route dependencies are invalid');
   }
+
+  const mutate = createDatabaseMetadataMutation({ withApplicationLock, authorizeActor });
 
   async function server(serverId) {
     const current = await registry.getServer(serverId);
@@ -96,6 +103,30 @@ export function mountDatabaseCredentialRoutes(app, {
     return Object.freeze({ server: current, credential: value, binding: currentBinding });
   }
 
+  async function mutateDesiredState(request, resolve, action) {
+    return mutate(request, async () => {
+      const state = await resolve();
+      const { binding: currentBinding, credential: currentCredential } = state;
+      if (currentCredential && (currentCredential.websiteId !== currentBinding.websiteId
+        || currentCredential.applicationId !== currentBinding.applicationId
+        || currentCredential.databaseName !== currentBinding.databaseName
+        || currentCredential.siteUnixUser !== currentBinding.unixUser)) {
+        throw new DatabaseCredentialHttpError('database_credential_binding_drift', 'Database credential does not match its binding', 409);
+      }
+      return { ...currentBinding, bindingId: currentBinding.id, bindingRevision: currentBinding.revision, state };
+    }, async ({ state }) => {
+      if (websiteRegistry) {
+        const website = await websiteRegistry.getWebsite(state.binding.websiteId);
+        if (!website || website.serverId !== state.binding.serverId || website.applicationId !== state.binding.applicationId
+          || website.unixUser !== state.binding.unixUser) {
+          throw new DatabaseCredentialHttpError('database_credential_binding_drift', 'Database binding no longer belongs to the Website', 409);
+        }
+      }
+      await ensureDatabaseIdle(jobRegistry, state.server.id);
+      return action(state);
+    });
+  }
+
   app.get('/api/servers/:serverId/database-bindings/:bindingId/credential-create-preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
     const state = await binding(request.params.serverId, request.params.bindingId);
@@ -123,14 +154,13 @@ export function mountDatabaseCredentialRoutes(app, {
 
   app.post('/api/servers/:serverId/database-bindings/:bindingId/credential', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
-    const state = await binding(request.params.serverId, request.params.bindingId);
     const body = exactBody(request.body, CREATE_FIELDS, 'database_credential_create_input_invalid');
-    await ensureDatabaseIdle(jobRegistry, state.server.id);
-    const created = await databaseCredentialRegistry.createCredential({
-      databaseBindingId: state.binding.id,
-      privileges: body.privileges,
-      confirmation: body.confirmation,
-    });
+    const created = await mutateDesiredState(request, () => binding(request.params.serverId, request.params.bindingId),
+      ({ binding: current }) => databaseCredentialRegistry.createCredential({
+        databaseBindingId: current.id,
+        privileges: body.privileges,
+        confirmation: body.confirmation,
+      }));
     return response.status(201).json({
       data: created,
       sideEffects: { databaseChanged: false, requiresApply: true },
@@ -139,10 +169,9 @@ export function mountDatabaseCredentialRoutes(app, {
 
   app.patch('/api/servers/:serverId/database-credentials/:credentialId/grants', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
-    const state = await credential(request.params.serverId, request.params.credentialId);
     const body = exactBody(request.body, GRANT_FIELDS, 'database_credential_grants_input_invalid');
-    await ensureDatabaseIdle(jobRegistry, state.server.id);
-    const updated = await databaseCredentialRegistry.setPrivileges(state.credential.id, body);
+    const updated = await mutateDesiredState(request, () => credential(request.params.serverId, request.params.credentialId),
+      ({ credential: current }) => databaseCredentialRegistry.setPrivileges(current.id, body));
     return response.json({
       data: updated,
       sideEffects: { databaseChanged: false, requiresApply: true },
@@ -151,10 +180,9 @@ export function mountDatabaseCredentialRoutes(app, {
 
   app.post('/api/servers/:serverId/database-credentials/:credentialId/password/rotate', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
-    const state = await credential(request.params.serverId, request.params.credentialId);
     const body = exactBody(request.body, REVISION_FIELDS, 'database_credential_rotate_input_invalid');
-    await ensureDatabaseIdle(jobRegistry, state.server.id);
-    const updated = await databaseCredentialRegistry.rotatePassword(state.credential.id, body);
+    const updated = await mutateDesiredState(request, () => credential(request.params.serverId, request.params.credentialId),
+      ({ credential: current }) => databaseCredentialRegistry.rotatePassword(current.id, body));
     return response.json({
       data: updated,
       sideEffects: { databaseChanged: false, requiresApply: true },
@@ -213,33 +241,37 @@ export function mountDatabaseCredentialRoutes(app, {
 
   app.delete('/api/servers/:serverId/database-credentials/:credentialId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
-    const state = await credential(request.params.serverId, request.params.credentialId);
     const body = exactBody(request.body, FINALIZE_FIELDS, 'database_credential_finalize_input_invalid');
-    if (!Number.isSafeInteger(body.expectedRevision) || body.expectedRevision < 1
-      || state.credential.revision !== body.expectedRevision) {
-      throw new DatabaseCredentialHttpError('database_credential_revision_conflict', 'Database credential changed; refresh and retry', 409);
-    }
-    await ensureDatabaseIdle(jobRegistry, state.server.id);
-    const job = await jobRegistry.getJob(body.deleteJobId);
-    if (!job || job.status !== 'succeeded' || job.operation !== 'database.credential.delete'
-      || job.serverId !== state.server.id || job.resourceType !== 'database'
-      || job.resourceId !== state.binding.databaseName
-      || job.result?.databaseCredentialId !== state.credential.id
-      || job.result?.databaseBindingId !== state.binding.id
-      || job.result?.credentialRevision !== state.credential.revision
-      || job.result?.bindingRevision !== state.binding.revision
-      || job.result?.deleted !== true || job.result?.sideEffects !== true) {
-      throw new DatabaseCredentialHttpError('database_credential_delete_evidence_missing', 'A matching successful database credential delete job is required', 409);
-    }
-    const expectedConfirmation = `finalize-database-credential-delete:${state.credential.id}:${state.credential.revision}:${job.id}`;
-    if (body.confirmation !== expectedConfirmation) {
-      throw new DatabaseCredentialHttpError('database_credential_confirmation_mismatch', 'Database credential delete finalization confirmation does not match', 409);
-    }
-    const deleted = await databaseCredentialRegistry.deleteCredential(state.credential.id, {
-      expectedRevision: state.credential.revision,
-      confirmation: `delete-database-credential:${state.credential.id}:${state.credential.revision}`,
+    const result = await mutateDesiredState(request, async () => {
+      const state = await credential(request.params.serverId, request.params.credentialId);
+      if (!Number.isSafeInteger(body.expectedRevision) || body.expectedRevision < 1
+        || state.credential.revision !== body.expectedRevision) {
+        throw new DatabaseCredentialHttpError('database_credential_revision_conflict', 'Database credential changed; refresh and retry', 409);
+      }
+      return state;
+    }, async (state) => {
+      const job = await jobRegistry.getJob(body.deleteJobId);
+      if (!job || job.status !== 'succeeded' || job.operation !== 'database.credential.delete'
+        || job.serverId !== state.server.id || job.resourceType !== 'database'
+        || job.resourceId !== state.binding.databaseName
+        || job.result?.databaseCredentialId !== state.credential.id
+        || job.result?.databaseBindingId !== state.binding.id
+        || job.result?.credentialRevision !== state.credential.revision
+        || job.result?.bindingRevision !== state.binding.revision
+        || job.result?.deleted !== true || job.result?.sideEffects !== true) {
+        throw new DatabaseCredentialHttpError('database_credential_delete_evidence_missing', 'A matching successful database credential delete job is required', 409);
+      }
+      const expectedConfirmation = `finalize-database-credential-delete:${state.credential.id}:${state.credential.revision}:${job.id}`;
+      if (body.confirmation !== expectedConfirmation) {
+        throw new DatabaseCredentialHttpError('database_credential_confirmation_mismatch', 'Database credential delete finalization confirmation does not match', 409);
+      }
+      const deleted = await databaseCredentialRegistry.deleteCredential(state.credential.id, {
+        expectedRevision: state.credential.revision,
+        confirmation: `delete-database-credential:${state.credential.id}:${state.credential.revision}`,
+      });
+      return { ...deleted, finalizedFromJobId: job.id };
     });
-    return response.json({ data: { ...deleted, finalizedFromJobId: job.id }, sideEffects: { databaseChanged: false } });
+    return response.json({ data: result, sideEffects: { databaseChanged: false } });
   }));
 }
 
