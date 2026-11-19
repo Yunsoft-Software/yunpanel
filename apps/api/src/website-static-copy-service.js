@@ -11,6 +11,8 @@ const exact = (value, fields) => value && typeof value === 'object' && !Array.is
   && Object.keys(value).length === fields.length && fields.every((field) => Object.hasOwn(value, field));
 const requestKey = (requestId) => `static-copy:${requestId}`;
 const confirmationFor = ({ source, target, digest }) => `static-copy:${source.websiteId}:${target.websiteId}:${digest}`;
+const activeDomain = (domain) => domain?.state === 'active' && Number.isSafeInteger(domain.appliedRevision)
+  && domain.appliedRevision > 0 && domain.appliedRevision === domain.desiredRevision;
 
 export function createWebsiteStaticCopyService({ localServerId, planner, transfer, jobRegistry, durableJobRegistry,
   authorizeActor, domainRegistry, healthInspector = createWebsiteHttpHealthInspector() } = {}) {
@@ -26,10 +28,22 @@ export function createWebsiteStaticCopyService({ localServerId, planner, transfe
     }
   }
 
+  async function publishedDomain(target) {
+    const candidates = (await domainRegistry.listDomains()).filter((domain) => domain.serverId === localServerId
+      && domain.websiteId === target.websiteId && !domain.parentDomainId && domain.targetType === 'static'
+      && domain.target?.root === target.documentRoot);
+    const [domain] = candidates;
+    if (candidates.length !== 1 || !activeDomain(domain)) {
+      throw fail('static_copy_target_domain_unverified', 'Hedef sitenin yayın adresi doğrulanamadı.');
+    }
+    return domain;
+  }
+
   async function preview(websiteId, input, actor) {
     if (!exact(input, ['targetWebsiteId'])) throw fail('static_copy_request_invalid', 'Bir hedef site seçin.', 400);
     await requireAccess(actor, websiteId, input.targetWebsiteId);
     const plan = await planner.preview({ sourceWebsiteId: websiteId, targetWebsiteId: input.targetWebsiteId });
+    await publishedDomain(plan.target);
     const files = plan.files.filter((entry) => entry.type === 'file');
     return { targetWebsiteId: plan.target.websiteId, files: files.length,
       bytes: files.reduce((size, file) => size + file.bytes, 0), previewDigest: plan.digest, confirmation: confirmationFor(plan) };
@@ -60,6 +74,7 @@ export function createWebsiteStaticCopyService({ localServerId, planner, transfe
     if (plan.digest !== input.previewDigest || confirmationFor(plan) !== input.confirmation) {
       throw fail('static_copy_preview_stale', 'Site değişti. Önizlemeyi yenileyin.');
     }
+    await publishedDomain(plan.target);
     await requireAccess(actor, plan.source.websiteId, plan.target.websiteId);
     const payload = { websiteId, applicationId: plan.source.applicationId, targetWebsiteId: plan.target.websiteId,
       targetApplicationId: plan.target.applicationId, actorSessionId: actor.sessionId, actorUserId: actor.userId,
@@ -89,14 +104,10 @@ export function createWebsiteStaticCopyService({ localServerId, planner, transfe
     const plan = await planner.preview({ sourceWebsiteId: payload.websiteId, targetWebsiteId: payload.targetWebsiteId });
     if (plan.digest !== payload.previewDigest || plan.source.applicationId !== payload.applicationId
       || plan.target.applicationId !== payload.targetApplicationId) throw fail('static_copy_preview_stale', 'Site değişti. Önizlemeyi yenileyin.');
-    const domains = (await domainRegistry.listDomains()).filter((domain) => domain.serverId === localServerId
-      && domain.websiteId === plan.target.websiteId && !domain.parentDomainId && domain.targetType === 'static'
-      && domain.target?.root === plan.target.documentRoot);
-    if (domains.length !== 1) throw fail('static_copy_target_domain_unverified', 'Hedef sitenin yayın adresi doğrulanamadı.');
-    const [domain] = domains;
+    const domain = await publishedDomain(plan.target);
     const result = await transfer.copy(plan, { authorize: (websiteId) => authorizeActor(actor, websiteId) });
     const current = await domainRegistry.getDomain(domain.id);
-    if (current?.websiteId !== domain.websiteId || current.primaryDomain !== domain.primaryDomain
+    if (!activeDomain(current) || current.websiteId !== domain.websiteId || current.primaryDomain !== domain.primaryDomain
       || current.desiredRevision !== domain.desiredRevision || current.appliedRevision !== domain.appliedRevision
       || (await healthInspector.inspect({ primaryDomain: domain.primaryDomain, healthPath: '/', timeoutSeconds: 30 }))?.satisfied !== true) {
       throw fail('static_copy_target_http_unverified', 'Dosyalar aktarıldı ancak hedef site doğrulanamadı.', 502);

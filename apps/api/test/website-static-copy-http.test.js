@@ -97,6 +97,12 @@ async function fixture(t) {
   }
   const route = `/api/panel/websites/${source.site.id}/static-copy`;
   const targetInput = { targetWebsiteId: request.targetWebsiteId };
+  async function applyTarget() {
+    const current = await domainRegistry.getDomain(target.domain.id);
+    const checksum = current.desiredRevision.toString(16).padStart(64, '0');
+    await domainRegistry.markStaged(current.id, { expectedRevision: current.desiredRevision, checksum, configName: `${current.primaryDomain}.conf` });
+    return domainRegistry.markApplied(current.id, { checksum });
+  }
   async function intent() {
     const preview = await call(`${route}/preview`, targetInput);
     assert.equal(preview.status, 200);
@@ -104,14 +110,16 @@ async function fixture(t) {
     const { previewDigest, confirmation } = preview.data;
     return { ...targetInput, requestId: randomUUID(), previewDigest, confirmation };
   }
-  return { ...data, call, send, service, jobs, route, targetInput, intent, newRegistry, createService, siteOrigin };
+  return { ...data, call, send, service, jobs, route, targetInput, intent, newRegistry, createService, siteOrigin, domainRegistry, applyTarget };
 }
 
 test('authenticated static copy validates preview and submits exactly one durable job', async (t) => {
-  const { source, target, server, call, send, jobs, service, route, targetInput, intent, siteOrigin } = await fixture(t);
+  const { source, target, server, call, send, jobs, service, route, targetInput, intent, siteOrigin, domainRegistry, applyTarget } = await fixture(t);
   assert.equal((await send(`${route}/preview`, { method: 'POST', body: targetInput })).status, 401);
   assert.equal((await call(`${route}/preview`, targetInput, { csrf: false })).status, 403);
   assert.equal((await call(`${route}/preview`, { targetWebsiteId: randomUUID() })).status, 403);
+  assert.equal((await call(`${route}/preview`, targetInput)).error.code, 'static_copy_target_domain_unverified');
+  await applyTarget();
   const request = await intent();
   const stale = await call(`${route}/requests`, { ...request, previewDigest: 'a'.repeat(64) });
   assert.equal(stale.status, 409);
@@ -123,7 +131,15 @@ test('authenticated static copy validates preview and submits exactly one durabl
   assert.equal((await call(`${route}/requests`, { ...request, previewDigest: 'a'.repeat(64) })).error.code, 'static_copy_request_conflict');
   const claimed = await jobs.claimNext(server.id);
   assert.equal(claimed.job.id, job.id);
-  const result = await service.execute(claimed.envelope.payload, { resourceType: 'application', resourceId: source.site.applicationId, serverId: server.id });
+  const update = { domainId: target.domain.id, changes: { canonicalRedirect: true } };
+  const { previewDigest } = await domainRegistry.previewDomainUpdate(update);
+  const { domain: draft } = await domainRegistry.updateDomain({ ...update, previewDigest });
+  assert.notEqual(draft.appliedRevision, draft.desiredRevision);
+  const execution = { resourceType: 'application', resourceId: source.site.applicationId, serverId: server.id };
+  await assert.rejects(service.execute(claimed.envelope.payload, execution), { code: 'static_copy_target_domain_unverified' });
+  assert.deepEqual(await fs.readdir(target.release), []);
+  await applyTarget();
+  const result = await service.execute(claimed.envelope.payload, execution);
   await jobs.complete({ serverId: server.id, jobId: job.id, status: 'succeeded', result });
   const observed = (await call(`${route}/requests/${request.requestId}`)).data.job;
   assert.deepEqual(observed.result, { filesCopied: 2, bytesCopied: result.bytesCopied });
@@ -139,7 +155,8 @@ test('authenticated static copy validates preview and submits exactly one durabl
 });
 
 test('startup resolves an interrupted copy without writing again or touching the target', async (t) => {
-  const { target, server, call, jobs, route, intent, newRegistry, createService } = await fixture(t);
+  const { target, server, call, jobs, route, intent, newRegistry, createService, applyTarget } = await fixture(t);
+  await applyTarget();
   const request = await intent();
   const job = (await call(`${route}/requests`, request)).data.job;
   assert.equal((await jobs.claimNext(server.id)).job.id, job.id);
