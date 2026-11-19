@@ -96,6 +96,7 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.CRON_REMOVE,
   OPERATIONS.WEBSITE_PHP_ACTION,
   OPERATIONS.WEBSITE_BACKUP_ACTION,
+  OPERATIONS.WEBSITE_STATIC_COPY,
 ]);
 for (const op of DOCKER_COMPOSE_OPERATIONS) ASYNC_OPERATIONS.add(op);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -266,6 +267,8 @@ function publicJob(job) {
     ...(job.availableAt ? { availableAt: job.availableAt } : {}),
     ...(job.manualRetry ? { manualRetry: job.manualRetry } : {}),
     ...(typeof job.retryExhausted === 'boolean' ? { retryExhausted: job.retryExhausted } : {}),
+    ...(job.operation === OPERATIONS.WEBSITE_STATIC_COPY && job.status === 'failed'
+      ? { permanentError: true, manualRetryAllowed: false } : {}),
     result: job.result == null ? null : structuredClone(job.result),
     error: job.error == null ? null : structuredClone(job.error),
   });
@@ -1175,6 +1178,16 @@ function sanitizeRoundcubeConfigResult(job, result) {
 }
 
 function sanitizeResult(job, result) {
+  if (job.operation === OPERATIONS.WEBSITE_STATIC_COPY) {
+    if (!result || result.sourceWebsiteId !== job.payload?.websiteId || result.targetWebsiteId !== job.payload?.targetWebsiteId
+      || result.digest !== job.payload?.previewDigest || !Number.isSafeInteger(result.filesCopied)
+      || result.filesCopied < 0 || result.filesCopied > 20_000 || !Number.isSafeInteger(result.bytesCopied)
+      || result.bytesCopied < 0 || result.bytesCopied > 256 * 1024 * 1024
+      || result.bytesCopied > result.filesCopied * 16 * 1024 * 1024) {
+      throw new JobRegistryError('invalid_job_result', 'Website static copy result does not match the queued operation');
+    }
+    return { filesCopied: result.filesCopied, bytesCopied: result.bytesCopied };
+  }
   if (job.operation === OPERATIONS.WEBSITE_BACKUP_ACTION) {
     if (!result || result.version !== 1 || result.operationId !== job.payload?.operationId || result.websiteId !== job.payload?.websiteId
       || !UUID_PATTERN.test(result.repositoryId ?? '') || !['backup', 'restore', 'check', 'plan'].includes(result.kind)
@@ -1379,6 +1392,19 @@ export function createJobRegistry({
         throw new JobRegistryError('invalid_idempotency_key', 'Job idempotency key is invalid');
       }
       const privateAuthorization = normalizeJobAuthorization(authorization, { optional: true });
+      const staticCopy = operation === OPERATIONS.WEBSITE_STATIC_COPY;
+      if (staticCopy) {
+        if (resourceType !== 'application' || resourceId !== payload.applicationId) {
+          throw new JobRegistryError('invalid_resource_id', 'Website static copy resource must match its source Application');
+        }
+        if (privateAuthorization?.kind !== 'panel' || privateAuthorization.role !== 'owner'
+          || privateAuthorization.websiteId !== payload.websiteId || privateAuthorization.sessionId !== payload.actorSessionId
+          || privateAuthorization.actorId !== payload.actorUserId || privateAuthorization.userId !== payload.actorUserId
+          || (privateAuthorization.scope != null && privateAuthorization.scope !== 'website')
+          || (privateAuthorization.serverId != null && privateAuthorization.serverId !== serverId)) {
+          throw new JobRegistryError('job_authorization_required', 'Website static copy requires its authenticated source Owner', 403);
+        }
+      }
 
       const requestDigest = idempotencyKey === null ? null : idempotencyDigest({
         serverId, type, operation, payload, resourceType, resourceId,
@@ -1399,6 +1425,10 @@ export function createJobRegistry({
             'Job idempotency key is already bound to a different private authorization scope',
             409,
           );
+        }
+        if (staticCopy && existing.status === 'failed') {
+          if (manual === true || manualRetry === true) throw new JobRegistryError('job_not_retryable', 'A failed static copy cannot be replayed', 409);
+          return enqueueResult(existing, false);
         }
         let changed = false;
         if (!existingAuthorization && privateAuthorization) {
@@ -1687,6 +1717,9 @@ export function createJobRegistry({
 
       const job = state.jobs.find((candidate) => candidate.id === jobId && (!serverId || candidate.serverId === serverId));
       if (!job) throw new JobRegistryError('job_not_found', 'Job not found', 404);
+      if (job.operation === OPERATIONS.WEBSITE_STATIC_COPY) {
+        throw new JobRegistryError('job_not_retryable', 'A failed static copy cannot be replayed', 409);
+      }
       if (job.status !== 'failed') {
         throw new JobRegistryError('job_not_retryable', 'Only failed jobs may be manually retried', 409);
       }

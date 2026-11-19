@@ -28,7 +28,7 @@ import {
   createStaticRollbackManager,
   createSystemPackageManager,
 } from '@yunpanel/host-runtime';
-import { OPERATIONS } from '@yunpanel/protocol';
+import { createOperationEnvelope, OPERATIONS } from '@yunpanel/protocol';
 import { reloadCertificateNginx } from './certificate-nginx-reload.js';
 import { createMailboxAccessGuard } from '../../../packages/host-runtime/src/mailbox-access-guard.js';
 import { normalizeGitDeploymentCredential } from '@yunpanel/shared';
@@ -192,6 +192,7 @@ export function createLocalHostOperations({
   websiteCronOperation = null,
   websitePhpToolOperation = null,
   websiteBackupOperation = null,
+  websiteStaticCopyOperation = null,
   loadManagedMailConfiguration = null,
   loadCertificateMailReload = null,
   loadManagedMailRollbackConfiguration = null,
@@ -241,6 +242,7 @@ export function createLocalHostOperations({
     throw new Error('websitePhpToolOperation must provide execute() when configured');
   }
   if (websiteBackupOperation !== null && typeof websiteBackupOperation?.execute !== 'function') throw new Error('websiteBackupOperation must provide execute()');
+  if (websiteStaticCopyOperation !== null && typeof websiteStaticCopyOperation?.execute !== 'function') throw new Error('websiteStaticCopyOperation must provide execute()');
   if (!cloudflareDnsManager || typeof cloudflareDnsManager.applyRecord !== 'function') {
     throw new Error('cloudflareDnsManager must provide applyRecord()');
   }
@@ -921,6 +923,7 @@ export function createLocalHostOperations({
     handlers.set(OPERATIONS.WEBSITE_PHP_ACTION, (payload, execution) => websitePhpToolOperation.execute(payload, execution));
   }
   if (websiteBackupOperation) handlers.set(OPERATIONS.WEBSITE_BACKUP_ACTION, (payload, execution) => websiteBackupOperation.execute(payload, execution));
+  if (websiteStaticCopyOperation) handlers.set(OPERATIONS.WEBSITE_STATIC_COPY, (payload, execution) => websiteStaticCopyOperation.execute(payload, execution));
 
   if (passengerReleaseOperation) for (const operation of LOCAL_PASSENGER_RELEASE_OPERATIONS) {
     handlers.set(operation, (payload, execution, authority) => {
@@ -946,6 +949,18 @@ export function createLocalHostOperations({
         const error = new Error('Local host operation payload must be an object');
         error.code = 'invalid_local_operation_payload';
         throw error;
+      }
+      if (operation === OPERATIONS.WEBSITE_STATIC_COPY) {
+        try { createOperationEnvelope({ id: execution?.jobId, operation, payload }); }
+        catch { throw Object.assign(new Error('Website static copy payload is invalid'), { code: 'invalid_local_operation_payload' }); }
+        const authority = execution.authorization;
+        if (execution.resourceType !== 'application' || execution.resourceId !== payload.applicationId
+          || authority?.kind !== 'panel' || authority.role !== payload.actorRole || authority.websiteId !== payload.websiteId
+          || authority.sessionId !== payload.actorSessionId || authority.userId !== payload.actorUserId
+          || (authority.scope != null && authority.scope !== 'website')
+          || (authority.serverId != null && authority.serverId !== execution.serverId)) {
+          throw Object.assign(new Error('Website static copy execution identity is invalid'), { code: 'panel_job_actor_forbidden' });
+        }
       }
       const authorizedExecution = await authorizeExecution(operation, execution);
       const passengerRelease = [OPERATIONS.APP_NODE_PASSENGER_DEPLOY, OPERATIONS.APP_NODE_PASSENGER_ROLLBACK].includes(operation);
