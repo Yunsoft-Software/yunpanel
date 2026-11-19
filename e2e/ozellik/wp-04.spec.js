@@ -88,8 +88,9 @@ test.describe('WP-04 WordPress klonlama, staging ve veri senkronizasyonu', () =>
     await expect(schemeSelect.locator('option[value="http"]')).toHaveCount(1);
 
     // Modal açıklama metnini doğrula
-    await expect(modal.locator('.ws-muted')).toContainText('Hedef site klasörü ve veritabanı boş olmalıdır');
-    await expect(modal.locator('.ws-muted')).toContainText('Staging indeksleme ve WP cron çalışmasını kapatır');
+    await expect(modal.locator('.ws-muted')).toContainText('Hedef PHP sitesinde kullanıcı dosyası bulunmamalı');
+    await expect(modal.locator('.ws-muted')).toContainText('Staging, arama motoru indekslemesini ve WordPress zamanlanmış görevlerini kapatır');
+    await expect(modal.locator('.ws-muted')).not.toContainText('Başlangıç dosyasını Dosya Yöneticisi ile kaldırın');
 
     // Modaldan güvenle çıkış yap (Vazgeç)
     const cancelBtn = modal.locator('button', { hasText: 'Vazgeç' });
@@ -244,7 +245,7 @@ test.describe('WP-04 WordPress klonlama, staging ve veri senkronizasyonu', () =>
 
     // Plesk'te "Clone" modalı açıldığında kullanıcı doğrudan "Create new subdomain" seçip
     // subdomain adını yazdığında Plesk alt alan adını, sanal hostu ve DB'yi kendisi tek tıkla açar.
-    // YunPanel'de ise kullanıcının önce çıkıp Web Siteleri ekranından ayrı bir PHP sitesi açması ve dosyalarını temizlemesi gerekir.
+    // YunPanel'de önce Web Siteleri ekranından ayrı bir PHP sitesi açılır.
     await page.goto(`/websites/${encodeURIComponent(sourceDomainName)}/wordpress`);
     await page.locator('button', { hasText: 'Klonla / staging' }).click();
     const modal = page.locator('.ws-modal, [role="dialog"]').filter({ hasText: /Staging oluştur|WordPress klonla/ });

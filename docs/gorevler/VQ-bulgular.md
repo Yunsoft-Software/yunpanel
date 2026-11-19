@@ -1962,8 +1962,8 @@
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
 
 ### T921 · WordPress klonlamada yeni PHP hedefi varsayılan index.php nedeniyle reddediliyor
-- **Bağımlı:** T804, T868, T881, T884
-- **Dosyalar:** `apps/api/src/wordpress-clone-service.js`, `apps/api/src/wordpress-toolkit-service.js`, `apps/api/src/management-app.js`, `apps/api/src/site-file-worker.js`, `apps/api/test/site-file-worker.test.js`, `apps/web/src/workspace/SiteWordPressPanel.jsx`
+- **Bağımlı:** T208, T804, T868, T881, T884
+- **Dosyalar:** `apps/api/src/wordpress-clone-service.js`, `apps/api/src/wordpress-toolkit-service.js`, `apps/api/src/management-app.js`, `apps/api/src/site-file-worker.js`, `apps/api/test/site-file-worker.test.js`, `apps/web/src/workspace/SiteWordPressPanel.jsx`, `e2e/ozellik/wp-04.spec.js`
 - **Kaynak:** QA · 2026-11-19 04:02
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
