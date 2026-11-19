@@ -17,3 +17,9 @@
 - **Dosyalar:** `packages/protocol/src/index-node-passenger.js`, `apps/api/src/job-registry.js`, `apps/api/src/local-host-operations.js`, `apps/api/test/static-site-copy-job.test.js`
 - **İş:** `website.static.copy` yerel iş türünü mevcut protokol, iş kaydı ve host yürütücü bağlantısına ekle. Payload kaynak/hedef Website ve Application kimlikleri, yetkili Owner oturumu ve plan özetiyle sınırlı olur. Public sonuçta yol, kullanıcı veya hedef kimliği yayımlanmaz. Kısmi hedefe genel yeniden deneme ile ikinci yazma başlamaz. HTTP ve kullanıcı arayüzü bu dilimde değişmez.
 - **Kabul:** Gerçek geçici iş deposunda geçerli istek kaydolur ve aynı kimlikle okunur. Uyuşmayan kimlik, eksik yetki, geçersiz sonuç ve genel yeniden deneme reddedilir. Odak testleri ve lint geçer.
+
+### T925 · Statik kopyayı panel API üzerinden başlat ve izle
+- **Bağımlı:** T881, T892, T898, T913, T920, T922, T923, T924
+- **Dosyalar:** `apps/api/src/website-static-copy-service.js`, `apps/api/src/website-static-copy-http.js`, `apps/api/src/index.js`, `apps/api/src/management-app.js`, `apps/api/src/local-execution-error.js`, `apps/api/test/website-static-copy-http.test.js`
+- **İş:** Owner için iki gerçek siteye bağlı önizleme, kalıcı istek açma ve aynı isteği okuma rotalarını bağla. Kopyalamadan önce iki yetkiyi ve plan özetini, sonrasında hedef HTTP sonucunu doğrula. Kayıp yanıtta aynı istek aynı işi döndürür. API başlangıcında yalnız yarım kalmış statik kopya işini sonuç belirsizliğiyle uzlaştır, dosya yazmayı yeniden başlatma. Mevcut DNS, DB ve kaynak site kimliği korunur.
+- **Kabul:** Gerçek normal HTTP istemcisi, geçici kalıcı kayıt ve dosya ağacında önizleme, 202 ve aynı GET sonucu, iki uç yetki reddi, bozulmuş plan, farklı içerikle aynı istek kimliği ve yarım işin yerinde uzlaştırılması doğrulanır. Odak testleri ve lint geçer. Tarayıcı ve Linux host kabulü sonraki dilimdedir.
