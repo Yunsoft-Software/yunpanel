@@ -53,3 +53,27 @@
 - **Dosyalar:** `apps/api/src/database-binding-http.js`, `apps/api/src/database-credential-http.js`, `apps/api/src/website-database-delete-http.js`, `apps/api/src/management-app.js`, `apps/api/test/database-binding-http.test.js`, `apps/api/test/database-credential-http.test.js`, `apps/api/test/website-database-delete-http.test.js`
 - **İş:** Doğrudan binding, credential ve DB silme onayı üstveri yazımlarını mevcut Application kilidinden geçir. Yetki kapsamı, güncel kayıt ve revizyon kilit altında yeniden kontrol edilsin. Kuyrukta zaten sıralanan native işler, phpMyAdmin'in salt okunur kontrolü ve site bağlantıları korunur. Uygulama kilidi farklı sitelerin bağımsız üstveri işlemlerine engel oluşturmaz.
 - **Kabul:** İlgili yönetim rotalarının mevcut testleri geçer. Gerçek geçici kilit ve kalıcı registry kullanan normal HTTP akışında aynı uygulamanın üstveri yazımı kilit tutulurken reddedilir, başkasına ait uygulama yazımı kendi scope içinde çalışır, kilit bırakıldığında eski akış başarılı olur. Dosya, kaynak ve kapsam dışı sunucu davranışı değişmez.
+
+### T931 · PHP dosyası ve MariaDB kopyasının yürütme sırası
+- **Bağımlı:** T927, T928, T929, T930
+- **Dosyalar:** `apps/api/src/php-site-copy-transfer.js`
+- **İş:** İki Application kilidini sabit sırayla al. Kaynak ve hedef site, bekleyen silme, dosya, yetki ve DB planını yazım öncesi tekrar doğrula. Hedef kendi DB hesabıyla veriyi aldıktan sonra özel bağlantıyı oluştur. Tek PHP giriş dosyasını başlangıç dosyasının hash’iyle koşullu olarak en son yayınla. İş sırasında kaynak dosyalar salt okunur. Hedef HTTP ve kaynak/hedef dosya içerikleri readback ile doğrulansın. Kısmi yazım durumu otomatik yinelenmesin ve mevcut veri korunarak raporlansın.
+- **Kabul:** Gerçek Linux ve MariaDB entegrasyonunda hedef yeni PHP yayını ve kendi DB bağlantısıyla yanıt verir. İki uçta dosya ve DB kapsamı korunur, uyuşmayan veya dolu hedef yazımdan önce reddedilir. Paket ve tarayıcı kabulü T933/T934 ile ortak kanıt kullanır.
+
+### T932 · PHP kopyası için kalıcı yerel iş ve sonuç
+- **Bağımlı:** T924, T925
+- **Dosyalar:** `packages/protocol/src/index-node-passenger.js`, `apps/api/src/job-registry.js`, `apps/api/src/local-host-operations.js`, `apps/api/test/php-site-copy-job.test.js`
+- **İş:** `website.php.copy` yerel işini ekle. Statik kopyanın doğrulanmış kaynak/hedef kimliği, Owner ve digest envelope sınırlarını ortak kullan. Sonuçtaki dosya, tablo ve bayt sayıları sınırlandırılsın ve hiçbir sır taşımasın. Veritabanı veya dosya yazımı belirsiz iş genel retry ile yeniden başlamasın. Taşıma ve HTTP ayrıdır.
+- **Kabul:** Gerçek geçici iş kaydında işlem kabul, kaynak, salt yerel yürütme, kalıcı iş kimliği ve public sonuç kapsamı; yetkisiz/yanlış şema sonucu reddi ve genel retry yasağı doğrulanır. Mevcut statik kopya ve kuyruk regresyonu geçer.
+
+### T933 · PHP ve MariaDB kopyasını panel API’sine bağla
+- **Bağımlı:** T925, T930, T931, T932
+- **Dosyalar:** `apps/api/src/php-site-copy-service.js`, `apps/api/src/website-static-copy-http.js`, `apps/api/src/index.js`, `apps/api/src/management-app.js`, `apps/api/src/local-execution-error.js`, `apps/api/test/job-recovery-operation-parity.test.js`, `apps/api/test/local-operation-queue-parity.test.js`, `packages/host-runtime/package.json`
+- **İş:** Owner iki siteye güncel erişimle önizleme, onay ve aynı istekle iş takibi yapabilsin. PHP işinin başlatılması ve süreç kesintisi uzlaştırması mevcut yerel yürütücüye bağlansın. Yarım veya doğrulanmamış hedef kullanıcıya gösterilsin. Statik kopya rotaları ve WordPress staging korunur.
+- **Kabul:** Gerçek panel API ve kalıcı iş üzerinden önizleme, 202, aynı istek, iki schema ve dosya kapsamı. Başarılı iş hostta doğrulanır. Kısmi iş otomatik yeniden başlamaz ve önizleme geçersizliği yazım yapmaz. Paket ve tarayıcı kabulü T934 ile birlikte.
+
+### T934 · PHP ve MariaDB kopyasını panelde aç ve gerçek tarayıcı testi yap
+- **Bağımlı:** T926, T933
+- **Dosyalar:** `apps/web/src/workspace/StaticSiteCopyDialog.jsx`, `apps/web/src/workspace/SiteDetailPage.jsx`, `apps/web/src/workspace/job-presentation.js`, `apps/web/test/static-site-copy-dialog.test.js`
+- **İş:** Kopyalama formunu statik ve desteklenen PHP sitesi için ortak kullan. PHP’de kaynak uygulama ve boş hedef koşullarını, dosya ve tablo sayısını ve aynı isteğin sonucunu göster. Uygulama hazırlama biçimi ve PHP bağlantı dosyası alanları kullanım notunda açık olsun. Kaynak, hedef ve diğer site türleri ayrımı korunur.
+- **Kabul:** Lint ve web build geçer. `.28` gerçek paketle iki geçici PHP sitesi üzerinden panel önizlemesi, iş kimliği ve reload sonrası takip, hedef SQL okuma/yazma, kaynak SQL/HTTP korunumu, DB kullanıcı sınırı, dolu hedef reddi ve fiziksel test temizliği doğrulanır.
