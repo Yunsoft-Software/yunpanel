@@ -1229,6 +1229,7 @@ export function createApp(allOptions = {}) {
     if (typeof options.onWebsiteBackupRuntime === 'function') options.onWebsiteBackupRuntime(resolvedWebsiteBackupOperationService);
     if (websitePhpToolsService && siteFileManager && options.authorizeWebsiteActor && siteMutationLock && resolvedWebsiteBackupService && resolvedWebsiteRestoreService) {
       wordpressToolkitService = createWordPressToolkitService({ tools: websitePhpToolsService, jobRegistry, domainRegistry,
+        websiteProvisioningRegistry: websiteProvisioningRuntime?.registry,
         authorizeActor: options.authorizeWebsiteActor, siteMutationLock, siteFileManager,
         databaseBindingRegistry, databaseCredentialRegistry, secretStore: options.operationSecretStore, databaseManager: options.databaseManager,
         resticRepositoryRegistry: resolvedResticRepositoryRegistry, websiteBackupService: resolvedWebsiteBackupService, websiteRestoreService: resolvedWebsiteRestoreService });

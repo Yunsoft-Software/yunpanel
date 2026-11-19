@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import {
-  chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat,
+  chmod, link, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat,
 } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -157,7 +157,7 @@ function decodedContent(value, maxBytes = MAX_TRANSFER_BYTES) {
   return content;
 }
 
-async function atomicWrite(absolute, content, mode, dependencies) {
+async function atomicWrite(absolute, content, mode, dependencies, { createOnly = false, verify = null } = {}) {
   const temporary = `${absolute}.yunpanel-${randomBytes(12).toString('hex')}.tmp`;
   let handle;
   try {
@@ -165,10 +165,41 @@ async function atomicWrite(absolute, content, mode, dependencies) {
     await handle.writeFile(content);
     await handle.sync();
     await handle.close();
-    await dependencies.rename(temporary, absolute);
+    if (createOnly) {
+      await dependencies.link(temporary, absolute);
+      await dependencies.rm(temporary);
+    } else {
+      if (verify) await verify();
+      await dependencies.rename(temporary, absolute);
+    }
   } catch (error) {
     try { await dependencies.rm(temporary, { force: true }); } catch {}
     throw error;
+  }
+}
+
+async function verifyUploadReplacement(entry, expectedSha256, dependencies) {
+  if (!entry) fail('site_file_changed', 'Destination file no longer exists', 409);
+  const handle = await dependencies.open(entry.absolute, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+  try {
+    const info = await handle.stat();
+    regularFile({ info });
+    const uid = (dependencies.getuid ?? process.getuid.bind(process))();
+    if (info.ino !== entry.info.ino || info.dev !== entry.info.dev || info.uid !== uid || info.uid !== entry.info.uid
+      || info.gid !== entry.info.gid || info.nlink !== 1) {
+      fail('site_file_changed', 'Destination file identity has changed', 409);
+    }
+    const buffer = Buffer.alloc(info.size + 1);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    if (bytesRead !== info.size || createHash('sha256').update(buffer.subarray(0, bytesRead)).digest('hex') !== expectedSha256) {
+      fail('site_file_changed', 'Destination file contents have changed', 409);
+    }
+    const current = await dependencies.lstat(entry.absolute);
+    if (current.ino !== info.ino || current.dev !== info.dev || current.ctimeMs !== info.ctimeMs) {
+      fail('site_file_changed', 'Destination file identity has changed', 409);
+    }
+  } finally {
+    await handle.close();
   }
 }
 
@@ -233,7 +264,7 @@ function mapSystemError(error) {
 }
 
 export async function executeSiteFileOperation(request, dependencies = {
-  chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat,
+  chmod, link, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat,
 }) {
   if (!request || typeof request !== 'object' || Array.isArray(request)
     || typeof request.operation !== 'string' || !OPERATIONS.has(request.operation)) {
@@ -338,15 +369,27 @@ export async function executeSiteFileOperation(request, dependencies = {
     }
 
     if (request.operation === 'upload') {
-      if (!exactRequest(request, ['operation', 'root', 'path', 'content'])) fail('site_file_request_invalid', 'Upload request fields are invalid');
+      const conditional = Object.hasOwn(request, 'expectedSha256');
+      const fields = ['operation', 'root', 'path', 'content'];
+      if (conditional) fields.push('expectedSha256');
+      if (!exactRequest(request, fields) || (conditional && request.expectedSha256 !== null
+        && (typeof request.expectedSha256 !== 'string' || !SHA256_PATTERN.test(request.expectedSha256)))) {
+        fail('site_file_request_invalid', 'Upload request fields are invalid');
+      }
       const itemPath = relativePath(request.path);
       const target = await destination(root, itemPath, dependencies);
       let existing = null;
       try { existing = await walk(root, itemPath, dependencies); }
       catch (error) { if (error.code !== 'site_file_not_found') throw error; }
       if (existing) regularFile(existing);
+      const createOnly = conditional && request.expectedSha256 === null;
+      if (createOnly && existing) fail('site_file_exists', 'Destination already exists', 409);
+      if (conditional && !createOnly && !existing) fail('site_file_changed', 'Destination file no longer exists', 409);
       const content = decodedContent(request.content);
-      await atomicWrite(target.absolute, content, safeMode(existing?.info) ?? modes.file, dependencies);
+      await atomicWrite(target.absolute, content, safeMode(existing?.info) ?? modes.file, dependencies, {
+        createOnly,
+        verify: conditional && !createOnly ? () => verifyUploadReplacement(existing, request.expectedSha256, dependencies) : null,
+      });
       return Object.freeze({ file: metadata(await dependencies.stat(target.absolute), itemPath), created: !existing });
     }
 

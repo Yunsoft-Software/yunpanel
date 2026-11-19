@@ -5,6 +5,7 @@ import { WebsitePhpToolsServiceError } from './website-php-tools-service.js';
 import { createWordPressCloneService } from './wordpress-clone-service.js';
 import { jobPublicView } from './job-registry.js';
 import { createWebsiteHttpHealthInspector } from '@yunpanel/host-runtime/website-http-health-inspector';
+import { createPhpSiteBootstrapManager, phpSiteBootstrapManagerInternals } from '@yunpanel/host-runtime/php-site-bootstrap-manager';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const ACTIONS = new Set(['install', 'clone', 'staging', 'remove', 'password', 'core.update', 'plugin.install', 'plugin.update', 'plugin.activate', 'plugin.deactivate', 'plugin.remove', 'theme.install', 'theme.update', 'theme.activate', 'theme.remove']);
@@ -52,6 +53,7 @@ export function normalizeWordPressActionOptions(input) {
 
 export function createWordPressToolkitService({ tools, jobRegistry, authorizeActor, siteMutationLock, siteFileManager,
   domainRegistry,
+  websiteProvisioningRegistry = null,
   databaseBindingRegistry, databaseCredentialRegistry, secretStore, databaseManager = null,
   resticRepositoryRegistry, websiteBackupService, websiteRestoreService,
   healthInspector = createWebsiteHttpHealthInspector(),
@@ -136,7 +138,31 @@ export function createWordPressToolkitService({ tools, jobRegistry, authorizeAct
       cloneAvailable: typeof databaseManager?.inspectDatabaseTables === 'function', administrators, databases: bindings.map(binding => ({ id: binding.id, name: binding.databaseName })),
       loginPath: '/wp-login.php', inspectedAt: new Date().toISOString() };
   }
-  const clones = createWordPressCloneService({ context, config, run, actor, siteFileManager: files, databaseBindingRegistry, databaseCredentialRegistry, databaseManager, healthInspector, siteMutationLock, jobRegistry });
+  const phpBootstrap = typeof websiteProvisioningRegistry?.getLatestForWebsite === 'function'
+    ? createPhpSiteBootstrapManager() : null;
+  async function inspectTargetBootstrap(current) {
+    if (!phpBootstrap || current.relativeRoot || current.cwd !== current.publicPath
+      || current.website.documentRoot !== current.publicPath) return null;
+    const operation = await websiteProvisioningRegistry.getLatestForWebsite(current.website.id);
+    if (operation?.ready !== true || operation.websiteId !== current.website.id) return null;
+    const step = operation.steps.find(candidate => candidate.id === 'php_bootstrap');
+    const intent = step?.intent;
+    if (step?.state !== 'succeeded' || !['pending', 'not_required'].includes(step.compensation.state) || intent?.adapter !== 'php-bootstrap'
+      || intent.websiteId !== current.website.id || intent.applicationId !== current.application.id
+      || intent.unixUser !== current.unixUser || intent.documentRoot !== current.publicPath) return null;
+    const identity = { websiteId: intent.websiteId, applicationId: intent.applicationId,
+      unixUser: intent.unixUser, documentRoot: intent.documentRoot };
+    try {
+      const verified = await phpBootstrap.inspect(identity, { operationId: operation.operationId });
+      if (!verified.satisfied || verified.releaseId !== operation.operationId
+        || verified.indexSha256 !== phpSiteBootstrapManagerInternals.bootstrapIndexSha256) return null;
+      return { releaseId: verified.releaseId, sha256: verified.indexSha256 };
+    } catch {
+      return null;
+    }
+  }
+  const clones = createWordPressCloneService({ context, config, run, actor, inspectTargetBootstrap, siteFileManager: files,
+    databaseBindingRegistry, databaseCredentialRegistry, databaseManager, healthInspector, siteMutationLock, jobRegistry });
   async function preview(websiteId, input, owner = null) {
     const options = normalizeWordPressActionOptions(input);
     const current = await context(websiteId), saved = await config(current);

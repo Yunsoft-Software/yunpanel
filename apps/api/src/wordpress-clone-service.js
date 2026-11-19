@@ -8,9 +8,10 @@ const MAX_FILE = 16 * 1024 * 1024;
 const MAX_ENTRIES = 20000;
 
 // Orchestration uses the existing site-user filesystem worker and WP-CLI.
-// A clone writes only a separately authorized empty Website and empty DB.
+// A clone writes only a separately authorized untouched Website and empty DB.
 export function createWordPressCloneService({ context, config, run, actor, siteFileManager,
-  databaseBindingRegistry, databaseCredentialRegistry, databaseManager, healthInspector, siteMutationLock, jobRegistry } = {}) {
+  databaseBindingRegistry, databaseCredentialRegistry, databaseManager, healthInspector, siteMutationLock, jobRegistry,
+  inspectTargetBootstrap = null } = {}) {
   async function manifest(websiteId) {
     const result = await siteFileManager.execute(websiteId, { operation: 'manifest', path: '', exclude: ['wp-config.php'] });
     if (!Array.isArray(result.entries) || result.entries.length > MAX_ENTRIES
@@ -26,7 +27,14 @@ export function createWordPressCloneService({ context, config, run, actor, siteF
       || source.unixUser === target.unixUser || source.website.serverId !== target.website.serverId) throw fail('wordpress_clone_target_invalid', 'Klon ayrı bir PHP sitesine ve Unix kullanıcısına kurulmalıdır');
     const saved = await config(source), destination = await config(target);
     if (!saved.present) throw fail('wordpress_not_configured', 'Kaynak WordPress yapılandırması bulunamadı');
-    if (destination.present || destination.entries.length) throw fail('wordpress_clone_target_not_empty', 'Hedef site klasörü boş olmalıdır. Mevcut dosyalar üzerine yazılmaz.');
+    let bootstrap = null;
+    if (!destination.present && destination.entries.length === 1
+      && destination.entries[0].name === 'index.php' && destination.entries[0].type === 'file') {
+      bootstrap = await inspectTargetBootstrap?.(target) ?? null;
+    }
+    if (destination.present || (destination.entries.length && !bootstrap)) {
+      throw fail('wordpress_clone_target_not_empty', 'Hedef site klasörü boş olmalıdır. Mevcut dosyalar üzerine yazılmaz.');
+    }
     if (options.scheme === 'https' && (target.domain.httpsMode !== 'managed' || !target.domain.certificateId)) throw fail('wordpress_https_unavailable', 'Hedef siteye önce SSL sertifikası bağlayın');
     const binding = await databaseBindingRegistry.getBinding(options.databaseBindingId);
     if (!binding || binding.websiteId !== target.website.id || binding.serverId !== source.website.serverId
@@ -46,12 +54,15 @@ export function createWordPressCloneService({ context, config, run, actor, siteF
     if (!['http:', 'https:'].includes(url.protocol) || !source.domains.flatMap(domain => [domain.primaryDomain, ...(domain.aliases ?? [])]).includes(url.hostname)
       || url.username || url.password || url.port || url.search || url.hash || !['', '/'].includes(url.pathname)) throw fail('wordpress_url_unverified', 'Klonlama kök dizine kurulmuş yerel WordPress gerektirir');
     const files = await manifest(websiteId);
+    if (bootstrap && !files.some(entry => entry.type === 'file' && entry.path === 'index.php')) {
+      throw fail('wordpress_clone_files_invalid', 'Kaynak WordPress giriş dosyası doğrulanamadı');
+    }
     return { targetWebsiteId: target.website.id, targetApplicationId: target.application.id, targetUnixUser: target.unixUser,
       targetWebsiteRevision: target.website.revision, targetDomainId: target.domain.id, targetDomainRevision: target.domain.desiredRevision ?? 1,
       targetCertificateId: target.domain.certificateId ?? null, targetDomain: target.primaryDomain,
       bindingId: binding.id, bindingRevision: binding.revision, credentialId: credential.id, credentialRevision: credential.revision,
       prefix: saved.prefix, tables: tables.map(table => table.name).sort(), sourceUrl: sourceUrl.replace(/\/$/, ''), files,
-      sourceConfigSha256: saved.configSha256 };
+      sourceConfigSha256: saved.configSha256, ...(bootstrap ? { bootstrap } : {}) };
   }
   async function execute(websiteId, options, owner, plan, execution) {
     return siteMutationLock.withSiteLock({ websiteId: plan.targetWebsiteId, applicationId: plan.targetApplicationId }, async () => {
@@ -74,7 +85,8 @@ export function createWordPressCloneService({ context, config, run, actor, siteF
           else {
             const file = await siteFileManager.execute(websiteId, { operation: 'download', path: entry.path });
             if (hash(Buffer.from(file.content, 'base64')) !== entry.sha256) throw fail('wordpress_clone_source_changed', 'Kaynak dosya aktarım sırasında değişti');
-            await siteFileManager.execute(plan.targetWebsiteId, { operation: 'upload', path: entry.path, content: file.content });
+            await siteFileManager.execute(plan.targetWebsiteId, { operation: 'upload', path: entry.path, content: file.content,
+              ...(plan.bootstrap ? { expectedSha256: entry.path === 'index.php' ? plan.bootstrap.sha256 : null } : {}) });
             const copied = await siteFileManager.execute(plan.targetWebsiteId, { operation: 'download', path: entry.path });
             if (hash(Buffer.from(copied.content, 'base64')) !== entry.sha256) throw fail('wordpress_clone_copy_unverified', 'Hedef dosyanın içeriği doğrulanamadı');
           }
@@ -109,7 +121,9 @@ export function createWordPressCloneService({ context, config, run, actor, siteF
       } catch (error) {
         // Do not destroy partially imported data or replay the import after an
         // ambiguous interruption. The durable job preserves the exact target.
-        throw fail(error instanceof WebsitePhpToolsServiceError ? error.code : failurePhase, 'Klon tamamlanamadı. Kaynak korunuyor; hedefteki kısmi dosya/veri ve aynı işlem kaydı incelenmelidir.', error.status ?? 502);
+        const code = error instanceof WebsitePhpToolsServiceError ? error.code
+          : ['site_file_changed', 'site_file_exists'].includes(error.code) ? 'wordpress_clone_preview_stale' : failurePhase;
+        throw fail(code, 'Klon tamamlanamadı. Kaynak korunuyor; hedefteki kısmi dosya/veri ve aynı işlem kaydı incelenmelidir.', error.status ?? 502);
       }
     });
   }

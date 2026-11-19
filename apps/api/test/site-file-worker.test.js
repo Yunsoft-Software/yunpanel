@@ -29,6 +29,7 @@ async function createFixture(t) {
   const openedPaths = new Map();
   const deps = {
     chmod: (p, mode) => fs.chmod(toReal(p), mode),
+    link: (oldP, newP) => fs.link(toReal(oldP), toReal(newP)),
     lstat: (p) => fs.lstat(toReal(p)),
     mkdir: (p, options) => fs.mkdir(toReal(p), options),
     open: async (p, flags, mode) => {
@@ -160,6 +161,50 @@ test('site-file-worker: mkdir, upload, download, and delete', async (t) => {
     path: 'subfolder',
   }, deps);
   assert.equal(deletedDir.deleted, true);
+});
+
+test('site-file-worker: conditional upload replaces only the expected regular file and preserves binary bytes', async (t) => {
+  const { tempDir, deps } = await createFixture(t);
+  const pathOnDisk = path.join(tempDir, 'index.php');
+  const original = Buffer.from('<?php echo "Website ready";');
+  const contents = Buffer.from([0, 255, 128, 67]);
+  await fs.writeFile(pathOnDisk, original, { mode: 0o640 });
+  const request = { operation: 'upload', root: FAKE_ROOT, path: 'index.php', content: contents.toString('base64'),
+    expectedSha256: createHash('sha256').update(original).digest('hex') };
+  const replacement = await executeSiteFileOperation(request, deps);
+  assert.equal(replacement.created, false);
+  assert.deepEqual(await fs.readFile(pathOnDisk), contents);
+  assert.equal(replacement.file.mode, '0640');
+
+  await assert.rejects(executeSiteFileOperation(request, deps), { code: 'site_file_changed' });
+  assert.deepEqual(await fs.readFile(pathOnDisk), contents);
+  assert.deepEqual(await fs.readdir(tempDir), ['index.php']);
+  await fs.unlink(pathOnDisk);
+  await assert.rejects(executeSiteFileOperation(request, deps), { code: 'site_file_changed' });
+  assert.deepEqual(await fs.readdir(tempDir), []);
+});
+
+test('site-file-worker: conditional binary creation preserves existing files and refuses links or oversized replacements', async (t) => {
+  const { tempDir, deps } = await createFixture(t);
+  const file = path.join(tempDir, 'payload.bin');
+  const original = Buffer.from([128, 67, 1, 0]);
+  const request = { operation: 'upload', root: FAKE_ROOT, path: 'payload.bin', content: original.toString('base64'), expectedSha256: null };
+  const created = await executeSiteFileOperation(request, deps);
+  assert.equal(created.created, true);
+  await assert.rejects(executeSiteFileOperation({ ...request, content: '' }, deps), { code: 'site_file_exists' });
+  assert.deepEqual(await fs.readFile(file), original);
+
+  const expectedSha256 = createHash('sha256').update(original).digest('hex');
+  await fs.symlink('payload.bin', path.join(tempDir, 'link.bin'));
+  await assert.rejects(executeSiteFileOperation({ ...request, path: 'link.bin', expectedSha256 }, deps), { code: 'site_file_symlink_rejected' });
+  await fs.link(file, path.join(tempDir, 'hardlink.bin'));
+  await assert.rejects(executeSiteFileOperation({ ...request, expectedSha256 }, deps), { code: 'site_file_changed' });
+  assert.deepEqual(await fs.readFile(file), original);
+  const maxBytes = siteFileWorkerInternals.maxTransferBytes;
+  await fs.truncate(file, maxBytes + 1);
+  await assert.rejects(executeSiteFileOperation({ ...request, expectedSha256 }, deps), { code: 'site_file_too_large' });
+  assert.equal((await fs.stat(file)).size, maxBytes + 1);
+  assert.deepEqual((await fs.readdir(tempDir)).sort(), ['hardlink.bin', 'link.bin', 'payload.bin']);
 });
 
 test('site-file-worker: batch_delete multiple files and directories', async (t) => {
