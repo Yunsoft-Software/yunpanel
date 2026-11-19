@@ -6,7 +6,7 @@ import { apiContext, manifest, ORIGIN, privateJson, ready, RUN_DIR } from './run
 import { cleanupOwnedFixture, createOwnedFixture, readOnlyHostProbe } from './owned-fixture.js';
 
 const UUID = /^[a-f0-9-]{36}$/;
-const SHA = /^[a-f0-9]{64}$/;
+const COMMIT_SHA = /^[a-f0-9]{40}$/;
 const digest = (value) => createHash('sha256').update(value).digest('hex');
 
 function requireStatus(reply, status) {
@@ -124,7 +124,7 @@ test('@mutation copies a PHP site and its MariaDB rows with the target account',
   let phase = 'deployment';
   let failure;
   try {
-    expect(proof.sourceCommit).toMatch(SHA);
+    expect(proof.sourceCommit).toMatch(COMMIT_SHA);
     const diagnostic = await actor.api.get('/api/panel/system/diagnostics/version');
     const version = (await diagnostic.json()).data;
     expect(diagnostic.status()).toBe(200);
