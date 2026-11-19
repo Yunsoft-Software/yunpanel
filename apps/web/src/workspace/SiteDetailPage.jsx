@@ -22,6 +22,7 @@ import SiteAccessPanel from './SiteAccessPanel.jsx';
 import WebsiteSuspensionPanel from './WebsiteSuspensionPanel.jsx';
 import WebsiteRemovalPanel from './WebsiteRemovalPanel.jsx';
 import ProvisioningRecoveryPanel from './ProvisioningRecoveryPanel.jsx';
+import StaticSiteCopyDialog, { STATIC_COPY_REQUEST_PARAM, staticCopyRequestId } from './StaticSiteCopyDialog.jsx';
 import SiteNavigation from './ui/SiteNavigation.jsx';
 import { panelRequest } from '../api.js';
 
@@ -109,10 +110,14 @@ function SiteWorkspace({ websiteId, tab }) {
   const ssl = certificateState(domain, certificates.status === 'ready' ? certificates.items : null);
   const server = servers.items.find((item) => item.id === domain.serverId);
   const url = externalSiteUrl(domain);
+  const staticCopySite = isOwner && canManage && server?.executionMode === 'local'
+    && website?.serverId === server.id && website.runtimeType === 'static'
+    && application?.type === 'static' && application.serverId === server.id && website.applicationId === application.id;
   const scopedJobs = siteJobs(domain, application, jobs.items);
   const queryParts = [];
   if (application && params.get('application')) queryParts.push(`application=${encodeURIComponent(application.id)}`);
   if (params.get('returnTo')) queryParts.push(`returnTo=${encodeURIComponent(params.get('returnTo'))}`);
+  if (staticCopySite && staticCopyRequestId(params, website.id)) queryParts.push(`${STATIC_COPY_REQUEST_PARAM}=${encodeURIComponent(params.get(STATIC_COPY_REQUEST_PARAM))}`);
   const query = queryParts.length ? `?${queryParts.join('&')}` : '';
   const returnTo = safeReturnHref(params.get('returnTo') ?? params.get('from'), '/websites');
   const runtimeType = website?.runtimeType ?? application?.type;
@@ -178,7 +183,7 @@ function SiteWorkspace({ websiteId, tab }) {
   );
   return <>
     <nav className="ws-breadcrumb" aria-label="Site konumu"><Link to={returnTo}>{isReseller ? 'Sitelerim' : 'Web Siteleri'}</Link>{parentTrail(domain, domains.items).map((parent) => <Fragment key={parent.id}><span aria-hidden="true">/</span><Link to={siteHref(parent.id)}>{parent.primaryDomain}</Link></Fragment>)}<span aria-hidden="true">/</span><span>{domain.primaryDomain}</span></nav>
-    <PageHeading title={domain.primaryDomain} description={`${domain.parentDomainId ? 'Alt alan adı' : 'Web sitesi'} · ${server?.displayName ?? server?.name ?? server?.hostname ?? 'Sunucu bilgisi bekleniyor'}`} actions={<>{url && <a href={url} target="_blank" rel="noopener noreferrer" className="ws-button"><Icon name="external" />Siteyi aç</a>}{isOwner && <LinkButton to={`/websites/new?parent=${encodeURIComponent(domain.id)}`} icon="plus">Alt alan adı ekle</LinkButton>}<Button onClick={refreshAll} icon="refresh">Yenile</Button>{website && isOwner && canManage && tab !== 'settings' && <LinkButton to={siteHref(domain.id, 'settings')} icon="trash">Siteyi sil</LinkButton>}</>} />
+    <PageHeading title={domain.primaryDomain} description={`${domain.parentDomainId ? 'Alt alan adı' : 'Web sitesi'} · ${server?.displayName ?? server?.name ?? server?.hostname ?? 'Sunucu bilgisi bekleniyor'}`} actions={<>{url && <a href={url} target="_blank" rel="noopener noreferrer" className="ws-button"><Icon name="external" />Siteyi aç</a>}{staticCopySite && <StaticSiteCopyDialog key={`${website.id}:${application.id}`} website={website} />}{isOwner && <LinkButton to={`/websites/new?parent=${encodeURIComponent(domain.id)}`} icon="plus">Alt alan adı ekle</LinkButton>}<Button onClick={refreshAll} icon="refresh">Yenile</Button>{website && isOwner && canManage && tab !== 'settings' && <LinkButton to={siteHref(domain.id, 'settings')} icon="trash">Siteyi sil</LinkButton>}</>} />
     <div className="ws-site-meta"><Badge state={domain.state} /><Badge state={ssl.state}>{ssl.label}</Badge><span>{runtimeLabel}</span></div>
     <SiteNavigation tabs={tabs} activeTab={tab} domainId={domain.id} query={query} />
     <CollectionNotice resource={domains} label="Alan adı verisi" />
