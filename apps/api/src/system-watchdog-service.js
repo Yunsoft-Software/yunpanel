@@ -276,13 +276,19 @@ export function createSystemWatchdogService({
       queueReport.worker.fault = fault;
 
       if (fault) {
+        const claimDetail = fault.failureBoundary && fault.causeClass && fault.causeCode
+          ? `${fault.failureBoundary}/${fault.causeClass}/${fault.causeCode}`
+          : '';
+        const detail = fault.message || claimDetail;
         incidents.push({
           type: 'executor',
           targetId: 'local_executor',
           code: 'executor_faulted',
           critical: true,
           fault,
-          message: `Job executor entered fault state: ${fault.code || 'unknown'} (${fault.message || ''})`,
+          message: detail
+            ? `Job executor entered fault state: ${fault.code || 'unknown'} (${detail})`
+            : `Job executor entered fault state: ${fault.code || 'unknown'}`,
         });
       } else if (!isRunning) {
         incidents.push({

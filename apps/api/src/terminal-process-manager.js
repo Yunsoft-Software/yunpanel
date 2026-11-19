@@ -11,6 +11,38 @@ import {
 const DEFAULT_COLS = 120;
 const DEFAULT_ROWS = 30;
 const MAX_INPUT_BYTES = 16 * 1024;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const DRAIN_ERROR_BACKENDS = new Set(['node-pty', 'ttyd']);
+export const TERMINAL_DRAIN_FAILURE_CODES = Object.freeze(new Set([
+  'terminal_drain_unsupported',
+  'terminal_drain_identity_invalid',
+  'terminal_drain_identity_unavailable',
+  'terminal_drain_evidence_unavailable',
+  'terminal_drain_generation_unknown',
+  'terminal_drain_ownership_unknown',
+  'terminal_drain_pid_reused',
+  'terminal_drain_socket_unavailable',
+  'terminal_drain_socket_changed',
+  'terminal_drain_timeout',
+  'terminal_drain_limit',
+  'terminal_drain_unverified',
+  'terminal_website_removing',
+  'terminal_website_fence_conflict',
+]));
+
+export function formatTerminalDrainFailureLine({ backend, websiteId = null, error = null } = {}) {
+  const safeBackend = DRAIN_ERROR_BACKENDS.has(backend) ? backend : 'unknown';
+  const safeWebsite = typeof websiteId === 'string' && UUID_PATTERN.test(websiteId) ? websiteId : 'none';
+  let rawCode = null;
+  try {
+    const descriptor = error && typeof error === 'object' ? Object.getOwnPropertyDescriptor(error, 'code') : null;
+    rawCode = descriptor && Object.hasOwn(descriptor, 'value') ? descriptor.value : null;
+  } catch { rawCode = null; }
+  const safeCode = typeof rawCode === 'string' && TERMINAL_DRAIN_FAILURE_CODES.has(rawCode)
+    ? rawCode
+    : 'terminal_drain_unverified';
+  return `[yunpanel-api] terminal drain failed backend=${safeBackend} website=${safeWebsite} code=${safeCode}`;
+}
 
 // Only identities descended from this manager's actual child, and their proven
 // sessions, enter this inventory. A UID, executable name or a numeric PGID is
@@ -397,12 +429,22 @@ export function createTerminalProcessManager({
   setTimer = setTimeout,
   clearTimer = clearTimeout,
   killGraceMs = 2_000,
+  onDrainError = null,
 } = {}) {
   if (typeof spawnPty !== 'function' || typeof statFn !== 'function' || typeof realpathFn !== 'function'
     || typeof readPasswd !== 'function' || typeof getuid !== 'function' || typeof killProcessGroup !== 'function'
     || typeof setTimer !== 'function' || typeof clearTimer !== 'function'
+    || (onDrainError !== null && typeof onDrainError !== 'function')
     || !Number.isSafeInteger(killGraceMs) || killGraceMs < 0 || killGraceMs > 10_000) {
     throw new TypeError('Terminal process dependencies are invalid');
+  }
+
+  function reportDrainError(websiteId, error) {
+    const line = formatTerminalDrainFailureLine({ backend: 'node-pty', websiteId, error });
+    try {
+      if (onDrainError) onDrainError({ backend: 'node-pty', websiteId, line });
+      else console.error(line);
+    } catch {}
   }
 
   async function open({ target, cols, rows, onData, onExit, signal: abortSignal = null } = {}) {
@@ -435,9 +477,9 @@ export function createTerminalProcessManager({
           await initialization;
           if (!lifecycle) throw new TerminalProcessError('terminal_drain_evidence_unavailable', 'Terminal kapatılamadı', 503);
           return lifecycle.snapshot();
-        }, stop: () => { void drain().catch(() => {}); }, drain });
+        }, stop: () => { void drain().catch((error) => reportDrainError(websiteId, error)); }, drain });
     }
-    const abort = () => { cancelled = true; if (lease) void drain().catch(() => {}); };
+    const abort = () => { cancelled = true; if (lease) void drain().catch((error) => reportDrainError(websiteId, error)); };
     if (abortSignal?.aborted) abort();
     else abortSignal?.addEventListener('abort', abort, { once: true });
     try {
@@ -491,7 +533,7 @@ export function createTerminalProcessManager({
       dataSubscription?.dispose?.();
       exitSubscription?.dispose?.();
       childExitResolve();
-      if (lease) void drain().catch(() => {});
+      if (lease) void drain().catch((error) => reportDrainError(websiteId, error));
       onExit({ exitCode: Number.isInteger(event?.exitCode) ? event.exitCode : null, signal: Number.isInteger(event?.signal) ? event.signal : null });
     });
     if (lease) {
@@ -515,7 +557,7 @@ export function createTerminalProcessManager({
     function close() {
       if (closed) return false;
       closed = true;
-      if (lease) { void drain().catch(() => {}); return true; }
+      if (lease) { void drain().catch((error) => reportDrainError(websiteId, error)); return true; }
       signal('SIGHUP');
       if (!exited) {
         forceTimer = setTimer(() => { if (!exited) signal('SIGKILL'); }, killGraceMs);

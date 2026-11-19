@@ -273,8 +273,9 @@ export async function startLocalRuntime({
 
   function reportFault(metadata, message) {
     if (fault) return;
-    fault = Object.freeze({ code: metadata.code, phase: metadata.phase, jobId: metadata.jobId });
-    const safeError = safeFaultError({ ...fault, ...safeClaimFailureFields(metadata) }, message);
+    const claimDiagnostic = metadata.phase === 'claim' ? safeClaimFailureFields(metadata) : {};
+    fault = Object.freeze({ code: metadata.code, phase: metadata.phase, jobId: metadata.jobId, ...claimDiagnostic });
+    const safeError = safeFaultError(fault, message);
     try { onError(safeError); } catch {}
     try { jobRegistry.abortLiveReconciliation?.({ serverId }); } catch {}
     void closeResources().catch(() => {});

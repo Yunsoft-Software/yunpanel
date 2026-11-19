@@ -3,7 +3,13 @@ import { spawn } from 'node:child_process';
 import { chmod, chown, lstat, mkdir, readFile, realpath, rm, stat } from 'node:fs/promises';
 import { createTtydRuntimeManager } from '@yunpanel/host-runtime';
 import { resolveTerminalTarget } from './terminal-target-resolver.js';
-import { assertOwnedTerminalSupport, captureOwnedTerminalIdentity, createOwnedTerminalLifecycle, observeTerminalChild } from './terminal-process-manager.js';
+import {
+  assertOwnedTerminalSupport,
+  captureOwnedTerminalIdentity,
+  createOwnedTerminalLifecycle,
+  formatTerminalDrainFailureLine,
+  observeTerminalChild,
+} from './terminal-process-manager.js';
 
 const TTYD = '/usr/bin/ttyd';
 const GETENT = '/usr/bin/getent';
@@ -111,6 +117,7 @@ export function createTtydSessionManager({
   killGraceMs = DEFAULT_KILL_GRACE_MS,
   maxSessions = DEFAULT_MAX_SESSIONS,
   maxUserSessions = DEFAULT_MAX_USER_SESSIONS,
+  onDrainError = null,
 } = {}) {
   if (!runtimeManager || typeof runtimeManager.apply !== 'function'
     || typeof spawnProcess !== 'function'
@@ -121,6 +128,7 @@ export function createTtydSessionManager({
     || typeof getuid !== 'function' || typeof killProcessGroup !== 'function'
     || typeof randomId !== 'function' || typeof now !== 'function'
     || typeof setTimer !== 'function' || typeof clearTimer !== 'function'
+    || (onDrainError !== null && typeof onDrainError !== 'function')
     || (liveSessions !== null && typeof liveSessions?.register !== 'function')
     || !Number.isSafeInteger(startupMs) || startupMs < 5_000 || startupMs > 5 * 60_000
     || !Number.isSafeInteger(lifetimeMs) || lifetimeMs < 60_000 || lifetimeMs > 12 * 60 * 60_000
@@ -128,6 +136,14 @@ export function createTtydSessionManager({
     || !Number.isSafeInteger(maxSessions) || maxSessions < 1 || maxSessions > 100
     || !Number.isSafeInteger(maxUserSessions) || maxUserSessions < 1 || maxUserSessions > maxSessions) {
     throw new TypeError('ttyd session dependencies are invalid');
+  }
+
+  function reportDrainError(websiteId, error) {
+    const line = formatTerminalDrainFailureLine({ backend: 'ttyd', websiteId, error });
+    try {
+      if (onDrainError) onDrainError({ backend: 'ttyd', websiteId, line });
+      else console.error(line);
+    } catch {}
   }
 
   const sessions = new Map();
@@ -244,7 +260,11 @@ export function createTtydSessionManager({
     if (!record || record.closed) return false;
     record.closed = true;
     record.closeReason = reason;
-    if (record.lease) { void record.drain().catch(() => {}); return true; }
+    if (record.lease) {
+      const websiteId = record.target?.scope === 'site' ? record.target.websiteId : null;
+      void record.drain().catch((error) => reportDrainError(websiteId, error));
+      return true;
+    }
     signal(record, 'SIGHUP');
     record.killTimer = setTimer(() => {
       if (!record.exited) signal(record, 'SIGKILL');
@@ -407,7 +427,7 @@ export function createTtydSessionManager({
         onExit: () => {
           if (!record) return;
           record.exited = true; record.closed = true; cleanupRecord(record);
-          if (lease) void drain().catch(() => {});
+          if (lease) void drain().catch((error) => reportDrainError(websiteId, error));
         },
         onError: ({ spawnFailed }) => {
           cancelled = true;
@@ -486,7 +506,7 @@ export function createTtydSessionManager({
       completeOpen();
       pendingUnregister?.();
       if (!spawnAttempted) lease?.settleWithoutProcess();
-      else if (lease) void drain().catch(() => {});
+      else if (lease) void drain().catch((drainError) => reportDrainError(websiteId, drainError));
       if (error?.name === 'TerminalProcessError') throw new TtydSessionError(error.code, 'Terminal kapatılamadı', error.status);
       throw error;
     } finally { completeOpen(); }

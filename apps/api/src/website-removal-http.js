@@ -3,6 +3,7 @@ import { WebsiteRemovalRuntimeError } from './website-removal-runtime.js';
 import { WebsiteRemovalOperationRegistryError } from './website-removal-operation-registry.js';
 import { SiteMutationLockError } from './site-mutation-lock.js';
 import { ProcessStoreLockError } from './process-store-lock.js';
+import { TERMINAL_DRAIN_FAILURE_CODES, TerminalProcessError } from './terminal-process-manager.js';
 import { extractActorTenant } from './tenant-boundary.js';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -141,8 +142,19 @@ function asyncRoute(handler) {
   return async (request, response, next) => {
     try { return await handler(request, response); }
     catch (error) {
-      if (error instanceof WebsiteRemovalRuntimeError || error instanceof WebsiteRemovalOperationRegistryError || error instanceof SiteMutationLockError || error instanceof ProcessStoreLockError) {
-        return next(new WebsiteRemovalHttpError(error.code, error.message, error.status));
+      const isTerminalBoundaryError = error instanceof TerminalProcessError
+        || (error instanceof Error
+          && error.name === 'TerminalLifecycleError'
+          && TERMINAL_DRAIN_FAILURE_CODES.has(error.code));
+      if (error instanceof WebsiteRemovalRuntimeError
+        || error instanceof WebsiteRemovalOperationRegistryError
+        || error instanceof SiteMutationLockError
+        || error instanceof ProcessStoreLockError
+        || isTerminalBoundaryError) {
+        const status = Number.isInteger(error.status) && error.status >= 400 && error.status < 600
+          ? error.status
+          : 503;
+        return next(new WebsiteRemovalHttpError(error.code, error.message, status));
       }
       return next(error);
     }

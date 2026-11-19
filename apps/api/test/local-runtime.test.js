@@ -149,7 +149,14 @@ test('file-backed local runtime reports start, stop and a durable claim failure 
   assert.equal(reported[0].causeClass, 'DurableJobRegistryError');
   assert.equal(reported[0].causeCode, 'durable_job_recovery_failed');
   assert.equal(runtime.running(), false);
-  assert.deepEqual(runtime.failure(), { code: 'local_claim_unconfirmed', phase: 'claim', jobId: null });
+  assert.deepEqual(runtime.failure(), {
+    code: 'local_claim_unconfirmed',
+    phase: 'claim',
+    jobId: null,
+    failureBoundary: 'select_queued',
+    causeClass: 'DurableJobRegistryError',
+    causeCode: 'durable_job_recovery_failed',
+  });
   await runtime.stop();
   assert.equal(await readFile(jobStore, 'utf8'), damagedBytes);
   await assert.rejects(readFile(lockPath), { code: 'ENOENT' });
