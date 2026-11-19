@@ -228,16 +228,13 @@ ${inventorySql('target', identity.target)}`;
         throw new SiteDatabaseCopyError('site_database_copy_export_failed', 'The source database could not be exported');
       }
       if (!exported.length) throw new SiteDatabaseCopyError('site_database_copy_export_failed', 'The source database could not be exported');
-      if ((await inventory(identity)).digest !== state.digest) {
-        throw new SiteDatabaseCopyError('site_database_copy_inventory_stale', 'MariaDB inventory changed after export');
-      }
       if (authorizeBeforeImport && await authorizeBeforeImport() !== true) {
         throw new SiteDatabaseCopyError('site_database_copy_authorization_changed', 'The target is no longer authorized for copy');
       }
 
       const targetOptions = await writeOptions(directory, 'target', { ...identity.target, password: input.target.password });
-      if (await socketIdentity().catch(() => null) !== state.socket) {
-        throw new SiteDatabaseCopyError('site_database_copy_inventory_stale', 'The local MariaDB socket changed after export');
+      if ((await inventory(identity)).digest !== state.digest) {
+        throw new SiteDatabaseCopyError('site_database_copy_inventory_stale', 'MariaDB inventory changed after export');
       }
       try {
         importStarted = true;

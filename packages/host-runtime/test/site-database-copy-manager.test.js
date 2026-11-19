@@ -153,6 +153,23 @@ test('copies real isolated MariaDB tables and rows through their own users', {
     assert.equal(schemaTables(target), '0');
   });
 
+  await t.test('rejects a target occupied by its user during authorization before importing any table', async () => {
+    const preview = await manager.inspect({ source, target });
+    const readSource = () => query(`SELECT id, note, HEX(payload) FROM ${src}.items ORDER BY id;`);
+    const sourceBefore = readSource();
+    try {
+      const outcome = await manager.copy({ source, target, expectedInventorySha256: preview.inventorySha256,
+        authorizeBeforeImport: () => {
+          query('CREATE TABLE existing(id INT PRIMARY KEY) ENGINE=InnoDB; INSERT INTO existing VALUES (142);', asTarget);
+          return true;
+        } }).catch((error) => error);
+      assert.deepEqual({ code: outcome.code, tables: query('SHOW TABLES;', asTarget), marker: query('SELECT id FROM existing;', asTarget),
+        source: readSource() }, { code: 'site_database_copy_target_occupied', tables: 'existing', marker: '142', source: sourceBefore });
+    } finally {
+      query('DROP TABLE IF EXISTS existing, items;', asTarget);
+    }
+  });
+
   await t.test('preserves UTF-8, binary data and source identity while the target writes independently', async () => {
     query(`CREATE TABLE ${src}.related(id INT PRIMARY KEY, FOREIGN KEY(id) REFERENCES ${src}.items(id)) ENGINE=InnoDB;
       INSERT INTO ${src}.related VALUES (1);`);
