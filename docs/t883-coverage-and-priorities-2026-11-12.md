@@ -1,5 +1,13 @@
 # T883 gerçek kapsam ve sonraki öncelikler — 12 Kasım 2026
 
+## 20 Kasım 2026 güncellemesi
+
+Onaylı `0.3.0-2026111906` paketi (`c7422f91`) `.28` test sunucusuna kuruldu. T935’in PHP ve MariaDB kopya senaryosu Chromium ve Firefox’ta ayrı ayrı geçti. Her koşuda panel 202 döndürdü ve yenilemeden sonra aynı kalıcı iş başarılı görüldü. Hedef ayrı bir PHP-FPM kullanıcısı ve MariaDB hesabıyla Türkçe ve ikili içeriği okudu, yeni satır ekledi ve kaynak şemaya erişim reddedildi. Kaynak SQL, HTTP ve `index.php` hash’i korundu. Dolu hedef 409 döndürdü ve verisi korundu.
+
+Ortak formun statik kopya regresyonu Chromium’da geçti. Dört PHP sitesi ve iki statik test sitesi temizlendi. Dört geçici veritabanı, hesap ve yetki kaydının fiziksel yokluğu MariaDB üzerinden ayrıca doğrulandı. Son kontrolde beş mevcut site ve altı uygulama duruyordu. Panel ve mevcut WordPress HTTP 200 verdi, etkin veya kurtarılmakta olan iş ve silme sayıları sıfırdı. [T935 kabul kaydı](../tasks/done/T935.md).
+
+Yerel 8.832 testlik tam koşu `e0022e9d` üzerinde, 54/54 Linux odak testi kurulan `c7422f91` üzerinde yapıldı. Paket 1905 tabanının lisans yapılandırmasını devraldı. Değiştirilen 28 dosyanın 26’sı yerel kaynakla birebir eşleşti. `index.js` ve `management-app.js` için 1905 tabanı üzerine aynı PHP kopya değişikliği uygulanarak paket hash’leri yeniden doğrulandı.
+
 ## 19 Kasım 2026 güncellemesi
 
 Native19 ve Native22, Chromium ve Firefox’ta toplam 36/36 geçti. `0.3.0-2026111901` paketinde iş kuyruğu ve normal site terminali gerçek akışla doğrulandı. Test siteleri temizlendi. [T883 güncel kanıtı](../tasks/reopen/T883.md) ve [T920 kabulü](../tasks/done/T920.md).
