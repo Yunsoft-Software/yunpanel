@@ -5,7 +5,8 @@ import { WebsitePhpToolsServiceError } from './website-php-tools-service.js';
 import { createWordPressCloneService } from './wordpress-clone-service.js';
 import { jobPublicView } from './job-registry.js';
 import { createWebsiteHttpHealthInspector } from '@yunpanel/host-runtime/website-http-health-inspector';
-import { createPhpSiteBootstrapManager, phpSiteBootstrapManagerInternals } from '@yunpanel/host-runtime/php-site-bootstrap-manager';
+import { phpSiteBootstrapManagerInternals } from '@yunpanel/host-runtime/php-site-bootstrap-manager';
+import { createPhpSiteContainerManager } from '@yunpanel/host-runtime/php-site-container-manager';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const ACTIONS = new Set(['install', 'clone', 'staging', 'remove', 'password', 'core.update', 'plugin.install', 'plugin.update', 'plugin.activate', 'plugin.deactivate', 'plugin.remove', 'theme.install', 'theme.update', 'theme.activate', 'theme.remove']);
@@ -138,10 +139,10 @@ export function createWordPressToolkitService({ tools, jobRegistry, authorizeAct
       cloneAvailable: typeof databaseManager?.inspectDatabaseTables === 'function', administrators, databases: bindings.map(binding => ({ id: binding.id, name: binding.databaseName })),
       loginPath: '/wp-login.php', inspectedAt: new Date().toISOString() };
   }
-  const phpBootstrap = typeof websiteProvisioningRegistry?.getLatestForWebsite === 'function'
-    ? createPhpSiteBootstrapManager() : null;
+  const phpContainer = typeof websiteProvisioningRegistry?.getLatestForWebsite === 'function'
+    ? createPhpSiteContainerManager() : null;
   async function inspectTargetBootstrap(current) {
-    if (!phpBootstrap || current.relativeRoot || current.cwd !== current.publicPath
+    if (!phpContainer || current.relativeRoot || current.cwd !== current.publicPath
       || current.website.documentRoot !== current.publicPath) return null;
     const operation = await websiteProvisioningRegistry.getLatestForWebsite(current.website.id);
     if (operation?.ready !== true || operation.websiteId !== current.website.id) return null;
@@ -150,13 +151,22 @@ export function createWordPressToolkitService({ tools, jobRegistry, authorizeAct
     if (step?.state !== 'succeeded' || !['pending', 'not_required'].includes(step.compensation.state) || intent?.adapter !== 'php-bootstrap'
       || intent.websiteId !== current.website.id || intent.applicationId !== current.application.id
       || intent.unixUser !== current.unixUser || intent.documentRoot !== current.publicPath) return null;
+    const evidence = step.evidence;
+    const sha256 = phpSiteBootstrapManagerInternals.bootstrapIndexSha256;
+    if (evidence?.satisfied !== true || evidence.adapter !== 'php-bootstrap' || evidence.releaseId !== operation.operationId
+      || evidence.websiteId !== intent.websiteId || evidence.applicationId !== intent.applicationId
+      || evidence.unixUser !== intent.unixUser || evidence.documentRoot !== intent.documentRoot
+      || evidence.indexSha256 !== sha256) return null;
     const identity = { websiteId: intent.websiteId, applicationId: intent.applicationId,
       unixUser: intent.unixUser, documentRoot: intent.documentRoot };
     try {
-      const verified = await phpBootstrap.inspect(identity, { operationId: operation.operationId });
-      if (!verified.satisfied || verified.releaseId !== operation.operationId
-        || verified.indexSha256 !== phpSiteBootstrapManagerInternals.bootstrapIndexSha256) return null;
-      return { releaseId: verified.releaseId, sha256: verified.indexSha256 };
+      const container = await phpContainer.inspect(identity, { operationId: operation.operationId });
+      if (!container.satisfied || container.releaseId !== operation.operationId
+        || container.releaseUid !== evidence.unixUid || container.releaseGid !== evidence.unixGid) return null;
+      const index = await files.execute(current.website.id, { operation: 'read_text', path: 'index.php' });
+      if (index.file?.type !== 'file' || index.file.mode !== '0640' || index.file.uid !== container.releaseUid
+        || index.file.gid !== container.releaseGid || index.sha256 !== sha256) return null;
+      return { releaseId: container.releaseId, sha256 };
     } catch {
       return null;
     }
