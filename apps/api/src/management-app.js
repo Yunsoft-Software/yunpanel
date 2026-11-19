@@ -164,6 +164,7 @@ import { createLocalSiteCreator, mountSiteCreateRoutes } from './site-create-htt
 import { createTenantSiteService } from './tenant-site-service.js';
 import { mountTenantSiteRoutes } from './tenant-site-http.js';
 import { mountSiteFileRoutes, SiteFileHttpError } from './site-file-http.js';
+import { mountWebsiteStaticCopyRoutes } from './website-static-copy-http.js';
 import { SiteFileManagerError } from './site-file-manager.js';
 import { SiteFileWorkerError } from './site-file-worker.js';
 import { mountTerminalCapabilityRoutes } from './terminal-capability-http.js';
@@ -419,6 +420,7 @@ export function createApp(allOptions = {}) {
   phpMyAdminHandoffService = null,
   elFinderHandoffService = null,
   siteFileManager = null,
+  websiteStaticCopyService = null,
   databaseInventoryProvider = null,
   databaseHealthProvider = null,
   dnsReadinessService = null,
@@ -1367,6 +1369,7 @@ export function createApp(allOptions = {}) {
       siteFileManager,
     });
   }
+  if (websiteStaticCopyService) mountWebsiteStaticCopyRoutes(app, { service: websiteStaticCopyService });
   mountDatabaseRoutes(app, {
     registry: localRegistry,
     jobRegistry,
