@@ -69,7 +69,7 @@ test('@mutation source one browser confirmation survives browser closure and com
  const done=await verifyRemoved(f,id);f.record('browser-closed.completed',{operationId:id,status:done.status,clientContinuationRequests:0,apiRestartTested:false});
 });
 
-const RESTART_RUNTIME_SOURCE='33684e9bb5a8571c872c1abe76a28bdada217de6',RESTART_PACKAGE='0.3.0-2026111601';
+const RESTART_RUNTIME_SOURCE='c0358499898af0c7e58f2778999d248afc63f081',RESTART_PACKAGE='0.3.0-2026112001';
 function restartTuple(stat){return[stat.dev,stat.ino,stat.mode,stat.uid,stat.gid,stat.nlink,stat.size,stat.mtimeMs,stat.ctimeMs];}
 function restartReadJson(filename){
  const before=fs.lstatSync(filename),fd=fs.openSync(filename,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);
