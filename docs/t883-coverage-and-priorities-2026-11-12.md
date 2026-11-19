@@ -6,6 +6,8 @@ Native19 ve Native22, Chromium ve Firefox’ta toplam 36/36 geçti. `0.3.0-20261
 
 Akşam `.28` test sunucusuna `0.3.0-2026111904` kuruldu. Yeni PHP hedefinde panelden WordPress staging, ayrı veritabanı, HTTP, yönetici girişi ve test kaynaklarının fiziksel temizliği geçti. Bu dilim T921’i kapattı. Statik site kopyasının ilk dilimi T922’de, genel WordPress veri senkronizasyonu ve T883’ün tarihsel kabul açıkları kendi kapsamlarında devam ediyor. [T921 kabulü](../tasks/done/T921.md) ve [T922](gorevler/site-copy.md).
 
+Statik site kopyasında T922–T926 kaynak incelemeleri tamamlandı. Dosya planı, iki uçta yetki, ortak dosya kilidi, kalıcı iş, kesinti sonrası uzlaştırma ve aynı isteğin tarayıcıdan izlenmesi yerelde doğrulandı. Tam koşuda 8.814 toplam, 8.812 başarılı, sıfır hata ve iki platform atlaması var. Linux/amd64 `0.3.0-2026111905` (`d92a601f`) adayında 41/41 odak testi ve paket dosyalarının bütünlük kontrolü geçti. `.28` üzerinde bu adayla iki geçici site, panel formu, gerçek HTTP ve dosya içeriği kabulü kurulum onayından sonra yapılacak. Kurulu sürüm `1904`. [Statik kopya görevleri](gorevler/site-copy.md).
+
 ## 18 Kasım 2026 itibarıyla
 
 **T883 açık.** T889, 19 Kasım’da üç gerçek PHP site kurulumu ve silmesiyle kapatıldı. [T889 kapanış kaydı](../tasks/done/T889.md). Aşağıdaki tablo 12 Kasım envanterinden sonra doğrulanan davranışları günceller. Ayrıntılı işlem kayıtları ve kabul sınırları [T883 ilerleme notunda](../tasks/reopen/T883.md) ve [T917 kabul kaydında](../tasks/done/T917.md) bulunur.
