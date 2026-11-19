@@ -41,3 +41,9 @@
 - **Dosyalar:** `apps/api/src/php-site-copy-plan.js`, `apps/api/test/php-site-copy-plan.test.js`
 - **İş:** Aynı yerel sunucudaki ayrı ve etkin iki PHP sitesi için değişmez kopya girdisi oluştur. P1b’nin sabitlenmiş kök ve sahiplik denetimlerini, normal PHP kurulumunun beklenen hedef dosyası ve binding/credential registry’leriyle birleştir. İlk dilim web kökünde tek giriş dosyası ve site ev dizininde desteklenen özel bağlantı biçimi kullanan opt-in uygulamadır. İki ayrı scope ve schema, binding/credential revizyonları ve dosya hash’i bağlansın. Özel bağlantı değerleri plan veya sonuçlara girmez. Plan dosya/veritabanı yazmaz.
 - **Kabul:** İki ayrı kimlik, etkin PHP yayını, ideal kaynak ve resmî başlangıç dosyalı hedefte plan oluşur. Dolu/yanlış hedef, ortak kök, paylaşılan site ya da kullanıcı, yönetilen alt kök, yanlış binding, çoklu veritabanı, değişen dosya ve bayat revizyon reddedilir. Gerçek dosya ağacı ve kalıcı registry kanıtı, sonraki gerçek DB/paket kabulünden ayrı kaydedilir.
+
+### T929 · PHP kopyasında özel bağlantı dosyası
+- **Bağımlı:** T921
+- **Dosyalar:** `apps/api/src/php-site-copy-connection.js`, `apps/api/src/php-site-copy-connection-worker.js`, `apps/api/test/php-site-copy-connection.test.js`
+- **İş:** Kaynak bağlantı dosyasını kayıtlı binding ve kullanıcının güncel değerleriyle site Unix hesabı altında doğrula. Hedefte yalnız hedefin değerleriyle, web dışındaki site ev dizininde, yeniden yazılamayan özel bir dosya oluştur. Kimlik bilgileri yalnız worker stdin’inden geçer. Worker veya plan sonucunda yalnız bağlantı kimliği ve sürümü döner. Çakışan, yanlış sahipli, dış yol ya da link içeren mevcut dosya korunur.
+- **Kabul:** Gerçek dosya sisteminde özel dosya oluşturma ve okuma, doğru ve yanlış bağlantı eşleşmesi, eski içeriğin korunması, symlink/hardlink ile zayıf mod reddi ve web kökünden bağımsızlık doğrulanır. Linux site kullanıcısı ve PHP okuması bütünleşik canlı kabulde sınanır.
