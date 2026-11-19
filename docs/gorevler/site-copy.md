@@ -23,3 +23,9 @@
 - **Dosyalar:** `apps/api/src/website-static-copy-service.js`, `apps/api/src/website-static-copy-http.js`, `apps/api/src/index.js`, `apps/api/src/management-app.js`, `apps/api/src/local-execution-error.js`, `apps/api/test/website-static-copy-http.test.js`
 - **İş:** Owner için iki gerçek siteye bağlı önizleme, kalıcı istek açma ve aynı isteği okuma rotalarını bağla. Kopyalamadan önce iki yetkiyi ve plan özetini, sonrasında hedef HTTP sonucunu doğrula. Kayıp yanıtta aynı istek aynı işi döndürür. API başlangıcında yalnız yarım kalmış statik kopya işini sonuç belirsizliğiyle uzlaştır, dosya yazmayı yeniden başlatma. Mevcut DNS, DB ve kaynak site kimliği korunur.
 - **Kabul:** Gerçek normal HTTP istemcisi, geçici kalıcı kayıt ve dosya ağacında önizleme, 202 ve aynı GET sonucu, iki uç yetki reddi, bozulmuş plan, farklı içerikle aynı istek kimliği ve yarım işin yerinde uzlaştırılması doğrulanır. Odak testleri ve lint geçer. Tarayıcı ve Linux host kabulü sonraki dilimdedir.
+
+### T926 · Statik site kopyalama formu ve işlem takibi
+- **Bağımlı:** T922, T923
+- **Dosyalar:** `apps/web/src/workspace/StaticSiteCopyDialog.jsx`, `apps/web/src/workspace/SiteDetailPage.jsx`, `apps/web/src/workspace/job-presentation.js`
+- **İş:** Owner’ın uygun statik site ekranına ortak panel bileşenleriyle kopya formunu ekle. Hedef seçimi sonrası önizleme yapılır ve aynı istek kimliğiyle iş başlatılır. Sayfa yenilemede veya yanıt kesilirse aynı iş okunur. Uygulama, posta, veritabanı veya DNS kopyalanmaz. Sunucunun hata yanıtı görünür kalır.
+- **Kabul:** Lint ve web build geçer. Kopyalama modalı yalnız uygun sitelerde açılır ve aynı istek işine döner. Bu koşulların gerçek tarayıcı ve host kabulü T925 API bütünleşmesiyle birlikte yapılır.
