@@ -275,8 +275,18 @@ function publicJob(job) {
   return result;
 }
 
+function staticCopyResultCounts(result) {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
+  const { filesCopied, bytesCopied } = result;
+  if (!Number.isSafeInteger(filesCopied) || filesCopied < 0 || filesCopied > 20_000
+    || !Number.isSafeInteger(bytesCopied) || bytesCopied < 0 || bytesCopied > 256 * 1024 * 1024
+    || bytesCopied > filesCopied * 16 * 1024 * 1024) return null;
+  return { filesCopied, bytesCopied };
+}
+
 function publicResult(operation, result) {
   if (result === null || result === undefined) return null;
+  if (operation === OPERATIONS.WEBSITE_STATIC_COPY) return staticCopyResultCounts(result);
   if (operation === OPERATIONS.SSL_ISSUE || operation === OPERATIONS.SSL_RENEW) {
     const output = {};
     for (const field of ['certName', 'validFrom', 'validTo', 'fingerprint256', 'status']) {
@@ -1179,14 +1189,12 @@ function sanitizeRoundcubeConfigResult(job, result) {
 
 function sanitizeResult(job, result) {
   if (job.operation === OPERATIONS.WEBSITE_STATIC_COPY) {
-    if (!result || result.sourceWebsiteId !== job.payload?.websiteId || result.targetWebsiteId !== job.payload?.targetWebsiteId
-      || result.digest !== job.payload?.previewDigest || !Number.isSafeInteger(result.filesCopied)
-      || result.filesCopied < 0 || result.filesCopied > 20_000 || !Number.isSafeInteger(result.bytesCopied)
-      || result.bytesCopied < 0 || result.bytesCopied > 256 * 1024 * 1024
-      || result.bytesCopied > result.filesCopied * 16 * 1024 * 1024) {
+    const counts = staticCopyResultCounts(result);
+    if (!counts || result.sourceWebsiteId !== job.payload?.websiteId || result.targetWebsiteId !== job.payload?.targetWebsiteId
+      || result.digest !== job.payload?.previewDigest) {
       throw new JobRegistryError('invalid_job_result', 'Website static copy result does not match the queued operation');
     }
-    return { filesCopied: result.filesCopied, bytesCopied: result.bytesCopied };
+    return counts;
   }
   if (job.operation === OPERATIONS.WEBSITE_BACKUP_ACTION) {
     if (!result || result.version !== 1 || result.operationId !== job.payload?.operationId || result.websiteId !== job.payload?.websiteId

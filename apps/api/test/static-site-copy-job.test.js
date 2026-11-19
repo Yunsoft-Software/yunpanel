@@ -76,6 +76,21 @@ test('persists one authorized copy and only the validated result counts', async 
   assert.deepEqual(stored.jobs[0].result, counts);
 });
 
+test('projects static copy counts from a raw stored result without exposing other fields', async (t) => {
+  const { filePath, registry } = await diskJobStore(t);
+  const request = copyJob();
+  const queued = await registry.enqueue(request);
+  await registry.claimNext(request.serverId);
+  const counts = { filesCopied: 2, bytesCopied: 100 };
+  const result = { ...counts, sourceWebsiteId: request.payload.websiteId, targetWebsiteId: request.payload.targetWebsiteId,
+    digest: request.payload.previewDigest };
+  await registry.complete({ serverId: request.serverId, jobId: queued.id, status: 'succeeded', result });
+  const { jobs: [stored] } = JSON.parse(await fs.readFile(filePath, 'utf8'));
+  assert.deepEqual(jobPublicView({ ...stored, result: { ...result, rootPath: '/test/private-root', unixUser: 'test-owner' } }).result, counts);
+  assert.equal(jobPublicView({ ...stored, result: { ...counts, filesCopied: 0 } }).result, null);
+  assert.equal(jobPublicView({ ...stored, result: { ...counts, bytesCopied: -1 } }).result, null);
+});
+
 test('keeps a failed static copy terminal after duplicate submission and rejects generic retry', async (t) => {
   const { filePath, registry } = await diskJobStore(t);
   const request = copyJob();
