@@ -55,10 +55,10 @@
 - **Kabul:** İlgili yönetim rotalarının mevcut testleri geçer. Gerçek geçici kilit ve kalıcı registry kullanan normal HTTP akışında aynı uygulamanın üstveri yazımı kilit tutulurken reddedilir, başkasına ait uygulama yazımı kendi scope içinde çalışır, kilit bırakıldığında eski akış başarılı olur. Dosya, kaynak ve kapsam dışı sunucu davranışı değişmez.
 
 ### T931 · PHP dosyası ve MariaDB kopyasının yürütme sırası
-- **Bağımlı:** T927, T928, T929, T930
+- **Bağımlı:** T927, T928, T929
 - **Dosyalar:** `apps/api/src/php-site-copy-transfer.js`
 - **İş:** İki Application kilidini sabit sırayla al. Kaynak ve hedef site, bekleyen silme, dosya, yetki ve DB planını yazım öncesi tekrar doğrula. Hedef kendi DB hesabıyla veriyi aldıktan sonra özel bağlantıyı oluştur. Tek PHP giriş dosyasını başlangıç dosyasının hash’iyle koşullu olarak en son yayınla. İş sırasında kaynak dosyalar salt okunur. Hedef HTTP ve kaynak/hedef dosya içerikleri readback ile doğrulansın. Kısmi yazım durumu otomatik yinelenmesin ve mevcut veri korunarak raporlansın.
-- **Kabul:** Gerçek Linux ve MariaDB entegrasyonunda hedef yeni PHP yayını ve kendi DB bağlantısıyla yanıt verir. İki uçta dosya ve DB kapsamı korunur, uyuşmayan veya dolu hedef yazımdan önce reddedilir. Paket ve tarayıcı kabulü T933/T934 ile ortak kanıt kullanır.
+- **Kabul:** Kaynak incelemesi ve mevcut gerçek dosya, kilit ve MariaDB bileşen testleri geçer. Birleşimin hedef HTTP yanıtı, DB ve dosya kapsamı ile dolu hedef kabulü T934’te gerçek paketle ölçülür.
 
 ### T932 · PHP kopyası için kalıcı yerel iş ve sonuç
 - **Bağımlı:** T924, T925
@@ -70,7 +70,7 @@
 - **Bağımlı:** T925, T930, T931, T932
 - **Dosyalar:** `apps/api/src/php-site-copy-service.js`, `apps/api/src/website-static-copy-http.js`, `apps/api/src/index.js`, `apps/api/src/management-app.js`, `apps/api/src/local-execution-error.js`, `apps/api/test/job-recovery-operation-parity.test.js`, `apps/api/test/local-operation-queue-parity.test.js`, `packages/host-runtime/package.json`
 - **İş:** Owner iki siteye güncel erişimle önizleme, onay ve aynı istekle iş takibi yapabilsin. PHP işinin başlatılması ve süreç kesintisi uzlaştırması mevcut yerel yürütücüye bağlansın. Yarım veya doğrulanmamış hedef kullanıcıya gösterilsin. Statik kopya rotaları ve WordPress staging korunur.
-- **Kabul:** Gerçek panel API ve kalıcı iş üzerinden önizleme, 202, aynı istek, iki schema ve dosya kapsamı. Başarılı iş hostta doğrulanır. Kısmi iş otomatik yeniden başlamaz ve önizleme geçersizliği yazım yapmaz. Paket ve tarayıcı kabulü T934 ile birlikte.
+- **Kabul:** Yerel kuyruk ve yeniden başlatma eşleme doğrulamaları, bağımsız kaynak incelemesi ve tam kaynak kontrolü geçer. Gerçek panel API, aynı iş ve host davranışı T934’te doğrulanır.
 
 ### T934 · PHP ve MariaDB kopyasını panelde aç ve gerçek tarayıcı testi yap
 - **Bağımlı:** T926, T933
