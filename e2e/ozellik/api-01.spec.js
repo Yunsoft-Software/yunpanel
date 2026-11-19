@@ -1,8 +1,8 @@
 import { test, expect, request as apiRequest } from '@playwright/test';
 import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
 import { OWNER_USERNAME, OWNER_PASSWORD } from '../helpers.js';
+import { createTestHostProbe } from './test-host-probe.js';
 
 // Real panel scenarios: one-time key display and persistence, validation/CSRF,
 // and authenticated Customer/Reseller denial. Credentials remain in memory;
@@ -21,7 +21,7 @@ test.describe.serial('API-01 API keys through the real panel', () => {
   const ownedKeys = new Map();
   const accounts = [];
   let machine;
-  let sshAlias;
+  let hostProbe;
 
   const panelPath = '/api/panel/api-keys';
   const isResponse = (path, method) => (response) => new URL(response.url()).pathname === path
@@ -98,10 +98,11 @@ test.describe.serial('API-01 API keys through the real panel', () => {
   function persistedKey(id) {
     if (!/^[a-f0-9]{12}$/.test(id)) throw new Error('Unexpected key identity');
     // Only this test key's non-plaintext metadata is returned, never other keys.
-    const script = `import json,pathlib\ns=json.loads(pathlib.Path('/var/lib/yunpanel/control-plane/api-keys.json').read_text())\nr=next((r for r in s['keys'] if r['id']=='${id}'),None)\nprint(json.dumps({'exists':r is not None,'hash':r.get('hash') if r else None,'revoked':bool(r.get('revokedAt')) if r else False,'plaintextFields':any(k.lower() in ['token','secret','password'] for k in r) if r else False}))`;
-    const result = execFileSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', sshAlias,
-      `python3 - <<'PY'\n${script}\nPY`], { encoding: 'utf8', timeout: 20_000, stdio: ['ignore', 'pipe', 'pipe'] });
-    return JSON.parse(result);
+    const script = `import json,pathlib,sys
+s=json.loads(pathlib.Path('/var/lib/yunpanel/control-plane/api-keys.json').read_text())
+r=next((r for r in s['keys'] if r['id']==sys.argv[1]),None)
+print(json.dumps({'exists':r is not None,'hash':r.get('hash') if r else None,'revoked':bool(r.get('revokedAt')) if r else False,'plaintextFields':any(k.lower() in ['token','secret','password'] for k in r) if r else False}))`;
+    return hostProbe.runPythonJson(script, [id], { timeoutMs: 20_000 });
   }
 
   async function mutationHeaders(page) {
@@ -196,15 +197,8 @@ test.describe.serial('API-01 API keys through the real panel', () => {
   }
 
   test.beforeAll(async () => {
-    const config = Object.fromEntries(readFileSync('.local/test-server.env', 'utf8').split('\n')
-      .filter((line) => /^[A-Z_]+=/.test(line)).map((line) => {
-        const separator = line.indexOf('=');
-        return [line.slice(0, separator), line.slice(separator + 1).replace(/^['"]|['"]$/g, '')];
-      }));
-    sshAlias = config.YUNPANEL_TEST_SERVER_SSH_ALIAS;
-    const resolved = execFileSync('ssh', ['-G', sshAlias], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-    expect(resolved.match(/^hostname (.+)$/m)?.[1] === config.YUNPANEL_TEST_SERVER_HOST
-      && config.YUNPANEL_TEST_SERVER_HOST.endsWith('.28')).toBe(true);
+    hostProbe = createTestHostProbe();
+    expect(hostProbe.verifyTarget().verified).toBe(true);
     machine = await apiRequest.newContext({ baseURL, ignoreHTTPSErrors: false });
   });
 

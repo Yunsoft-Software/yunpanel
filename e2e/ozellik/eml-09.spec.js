@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { OWNER_USERNAME, OWNER_PASSWORD } from '../helpers.js';
+import { createTestHostProbe } from './test-host-probe.js';
 
 const owner = JSON.parse(readFileSync('.local/yunpanel-owner-password-only.json', 'utf8'));
 const origin = new URL(owner.url).origin;
@@ -12,19 +12,13 @@ test.describe.serial('EML-09 isolated DKIM and mail security', () => {
   test.setTimeout(360_000);
   const prefix = `teml09-acodex-${Date.now().toString(36)}`;
   const sites = [];
-  let context, page, sshAlias, foreignKeys, guardKey;
-  const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
+  let context, page, hostProbe, foreignKeys, guardKey;
   const section = (title) => page.locator('section').filter({ has: page.getByRole('heading', { name: title, exact: true }) });
   const modal = (title) => page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: title, exact: true }) });
 
   // Host inspection returns digests/permissions, never private key bytes.
   function hostRead(code, args = []) {
-    try {
-      return JSON.parse(execFileSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', sshAlias,
-        `python3 -c ${quote(code)} ${args.map(quote).join(' ')}`], {
-        encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30_000,
-      }));
-    } catch { throw new Error('Read-only test-host inspection failed'); }
+    return hostProbe.runPythonJson(code, args, { timeoutMs: 30_000 });
   }
 
   function keySnapshot(excluded = []) {
@@ -152,14 +146,8 @@ print(json.dumps(result))`, [JSON.stringify(excluded)]);
 
   test.beforeAll(async ({ browser }) => {
     test.setTimeout(600_000);
-    const config = Object.fromEntries(readFileSync('.local/test-server.env', 'utf8').split('\n')
-      .filter((line) => /^[A-Z_]+=/.test(line)).map((line) => {
-        const i = line.indexOf('='); return [line.slice(0, i), line.slice(i + 1).replace(/^['"]|['"]$/g, '')];
-      }));
-    sshAlias = config.YUNPANEL_TEST_SERVER_SSH_ALIAS;
-    const resolved = execFileSync('ssh', ['-G', sshAlias], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-    expect(resolved.match(/^hostname (.+)$/m)?.[1] === config.YUNPANEL_TEST_SERVER_HOST
-      && config.YUNPANEL_TEST_SERVER_HOST.endsWith('.28')).toBe(true);
+    hostProbe = createTestHostProbe();
+    expect(hostProbe.verifyTarget().verified).toBe(true);
     foreignKeys = keySnapshot();
     context = await browser.newContext({ baseURL: origin, ignoreHTTPSErrors: false });
     page = await context.newPage();
