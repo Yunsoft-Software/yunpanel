@@ -381,3 +381,11 @@ Private combined Guard02 integration: source/local real-FS preparation only; old
 | Gerçek geçici kuyruk dosyası okunamıyor | Sunucu günlüğü kuyruk okuma aşamasını ve izin verilen hata türünü gösterir. İş çalışmaz ve yürütücü durmuş görünür. |
 | Geçici gerçek kuyrukta başka süreç dosya kilidini tutuyor | Sahiplenme hatasında güvenli aşama ve kilit kodu kayda geçer. Belirsiz hiçbir iş tekrar çalışmaz. |
 | Normal başlatma ve durdurma | Yerel çalışma durumu gerçek süreç yaşam döngüsüyle eşleşir. Yönetim durumunda mevcut hata alanları korunur. |
+
+## 19 Kasım 2026 — WordPress klon hedefinin başlangıç dosyası
+
+| Senaryo | Beklenen sonuç |
+|---|---|
+| Yeni yönetilen PHP hedefi ve ayrı boş DB | Kanonik kökteki tek resmi PHP başlangıç dosyası canlı bootstrap makbuzu ve hash ile doğrulanır. Önizleme hedefi kabul eder. Klonun kendi ana sayfası ancak beklenen dosya hâlâ mevcutsa yazılır. |
+| Kullanıcı dosyası, özel belge kökü veya değişen hedef | Mevcut kullanıcı içeriği korunur. Önizleme sonrası yazılan yeni dosyanın üstüne klon içeriği yazılmaz. |
+| Gerçekten boş hedef | Mevcut normal akış ve önizleme biçimi korunur. Ayrı DB, site yetkisi ve kaynak bütünlüğü denetimleri uygulanır. |

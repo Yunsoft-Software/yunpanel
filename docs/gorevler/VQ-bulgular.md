@@ -1960,3 +1960,13 @@
     16 ve 17 Kasım .28 kayıtlarında yürütücü local_claim_unconfirmed ile durmuş ve mevcut kayıt, sıranın okunmasıyla iş sahiplenmenin hangisinin hata verdiğini ayırt etmiyor. Kimliksiz iş hatasında yalnız güvenli sınıf/kod ve işlem aşamasını servis günlüğüne yaz. Gerçek yerel yürütücü durduğunda durum sorgusu running=false göstermeli. İşi tekrar yürütme ve hata sonrası durma davranışı korunur. Geçici gerçek iş deposu ve gerçek işlem kilidiyle regresyonu doğrula. Tarihsel neden ayrıca açık kalır.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T921 · WordPress klonlamada yeni PHP hedefi varsayılan index.php nedeniyle reddediliyor
+- **Bağımlı:** T804, T868, T881, T884
+- **Dosyalar:** `apps/api/src/wordpress-clone-service.js`, `apps/api/src/wordpress-toolkit-service.js`, `apps/api/src/management-app.js`, `apps/api/src/site-file-worker.js`, `apps/api/test/site-file-worker.test.js`
+- **Kaynak:** QA · 2026-11-19 04:02
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    .28 0.3.0-2026111901 normal provision edilen geçici PHP hedefi, yalnızca üretim bootstrap index.php dosyası içerdiğinde bile wordpress_clone_target_not_empty 409 döndürüyor. Başlangıç dosyasını sadece bu geçici siteden kaldırınca normal hedef veritabanı kapsamı kontrolüne ilerledi. Hedefi normal panelden kaldırdık. Yalnız canlı bootstrap makbuzu ve içeriği eşleşen tek resmi index.php dosyasına izin ver. Site ve DB sınırlarını koru, var olan diğer dosyaya dokunma, önizleme ve yazma anında tekrar doğrula. İçe aktarma ve yeniden deneme sözleşmesi korunur. Gerçek boş hedef eski önizlemesi uyumlu kalır.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
