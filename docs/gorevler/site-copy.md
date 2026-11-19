@@ -72,8 +72,14 @@
 - **İş:** Owner iki siteye güncel erişimle önizleme, onay ve aynı istekle iş takibi yapabilsin. PHP işinin başlatılması ve süreç kesintisi uzlaştırması mevcut yerel yürütücüye bağlansın. Yarım veya doğrulanmamış hedef kullanıcıya gösterilsin. Statik kopya rotaları ve WordPress staging korunur.
 - **Kabul:** Yerel kuyruk ve yeniden başlatma eşleme doğrulamaları, bağımsız kaynak incelemesi ve tam kaynak kontrolü geçer. Gerçek panel API, aynı iş ve host davranışı T934’te doğrulanır.
 
-### T934 · PHP ve MariaDB kopyasını panelde aç ve gerçek tarayıcı testi yap
-- **Bağımlı:** T926, T933
-- **Dosyalar:** `apps/web/src/workspace/StaticSiteCopyDialog.jsx`, `apps/web/src/workspace/SiteDetailPage.jsx`, `apps/web/src/workspace/job-presentation.js`, `apps/web/test/static-site-copy-dialog.test.js`
+### T934 · PHP ve MariaDB kopyasını panelde aç
+- **Bağımlı:** T926, T932
+- **Dosyalar:** `apps/web/src/workspace/StaticSiteCopyDialog.jsx`, `apps/web/src/workspace/SiteDetailPage.jsx`, `apps/web/src/workspace/job-presentation.js`, `apps/web/test/job-presentation.test.js`, `docs/website-workspace.md`
 - **İş:** Kopyalama formunu statik ve desteklenen PHP sitesi için ortak kullan. PHP’de kaynak uygulama ve boş hedef koşullarını, dosya ve tablo sayısını ve aynı isteğin sonucunu göster. Uygulama hazırlama biçimi ve PHP bağlantı dosyası alanları kullanım notunda açık olsun. Kaynak, hedef ve diğer site türleri ayrımı korunur.
-- **Kabul:** Lint ve web build geçer. `.28` gerçek paketle iki geçici PHP sitesi üzerinden panel önizlemesi, iş kimliği ve reload sonrası takip, hedef SQL okuma/yazma, kaynak SQL/HTTP korunumu, DB kullanıcı sınırı, dolu hedef reddi ve fiziksel test temizliği doğrulanır.
+- **Kabul:** Lint, web build ve görev sunumu testi geçer. Gerçek tarayıcı kanıtı T935’te alınır.
+
+### T935 · PHP ve MariaDB kopyasını gerçek paket ve tarayıcıda doğrula
+- **Bağımlı:** T933, T934
+- **Dosyalar:** `e2e/live-audit/30-native-php-db-copy-mutation.spec.js`, `docs/t883-coverage-and-priorities-2026-11-12.md`
+- **İş:** Güncel kaynak ve Linux paketini doğrula. `.28` üzerinde iki sahipli geçici PHP sitesiyle normal panel kopya akışını çalıştır. Kopyayı tarayıcı reload sonrası aynı işten izle. Kaynak ve hedef DB kullanıcıları, SQL/HTTP sonucu, ilk yazım ve dosyaların etkisi ayrı ölçülsün. Test kaynaklarını normal panel üzerinden temizle.
+- **Kabul:** Tam kaynak kapısı geçer. `.28` paketi ve gerçek Chromium/Firefox koşularında hedef SQL okuma/yazma, kaynak SQL/HTTP korunumu, DB kullanıcı sınırı, dolu hedef reddi, aynı iş kimliği, iki site temizliği ve mevcut panel sağlığı doğrulanır.
