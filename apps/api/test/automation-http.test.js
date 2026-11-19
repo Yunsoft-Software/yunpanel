@@ -33,7 +33,11 @@ test('a valid key reaches the automation API and sees only its own scope', async
   const result = await f.call('/api/automation/whoami', { authorization: `Bearer ${f.token}` });
   assert.equal(result.status, 200);
   assert.deepEqual(result.body.data.scope, { parentDomain: 'st.example.test', portMin: 32000, portMax: 32999 });
-  assert.equal(JSON.stringify(result.body).includes(f.token.split('_')[2]), false);
+  // A base64url secret can itself contain underscores, including at its start.
+  const [, , ...secretParts] = f.token.split('_');
+  const secret = secretParts.join('_');
+  assert.equal(secret.length, 43);
+  assert.equal(JSON.stringify(result.body).includes(secret), false);
 });
 
 test('missing, wrong or revoked keys and browser requests are refused; a key never reaches panel routes', async (t) => {
