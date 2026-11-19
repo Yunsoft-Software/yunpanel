@@ -20,7 +20,7 @@
 
 ### T925 · Statik kopyayı panel API üzerinden başlat ve izle
 - **Bağımlı:** T881, T892, T898, T913, T920, T922, T923, T924
-- **Dosyalar:** `apps/api/src/website-static-copy-service.js`, `apps/api/src/website-static-copy-http.js`, `apps/api/src/index.js`, `apps/api/src/management-app.js`, `apps/api/src/local-execution-error.js`, `apps/api/test/website-static-copy-http.test.js`
+- **Dosyalar:** `apps/api/src/website-static-copy-service.js`, `apps/api/src/website-static-copy-http.js`, `apps/api/src/index.js`, `apps/api/src/management-app.js`, `apps/api/src/local-execution-error.js`, `apps/api/test/website-static-copy-http.test.js`, `apps/api/test/job-recovery-operation-parity.test.js`, `apps/api/test/local-operation-queue-parity.test.js`
 - **İş:** Owner için iki gerçek siteye bağlı önizleme, kalıcı istek açma ve aynı isteği okuma rotalarını bağla. Kopyalamadan önce iki yetkiyi ve plan özetini, sonrasında hedef HTTP sonucunu doğrula. Kayıp yanıtta aynı istek aynı işi döndürür. API başlangıcında yalnız yarım kalmış statik kopya işini sonuç belirsizliğiyle uzlaştır, dosya yazmayı yeniden başlatma. Mevcut DNS, DB ve kaynak site kimliği korunur.
 - **Kabul:** Gerçek normal HTTP istemcisi, geçici kalıcı kayıt ve dosya ağacında önizleme, 202 ve aynı GET sonucu, iki uç yetki reddi, bozulmuş plan, farklı içerikle aynı istek kimliği ve yarım işin yerinde uzlaştırılması doğrulanır. Odak testleri ve lint geçer. Tarayıcı ve Linux host kabulü sonraki dilimdedir.
 
