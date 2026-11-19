@@ -17,16 +17,10 @@ test.describe('DKR-02 Container oluşturma, başlatma, durdurma, yeniden oluştu
 
   const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
-  function readHostText(args) {
-    return hostProbe.runPythonJson(`import json,subprocess,sys
-r=subprocess.run(json.loads(sys.argv[1]),capture_output=True,text=True,timeout=20)
-print(json.dumps({'out':((r.stdout or '')+(r.stderr or '')).strip()}))`, [JSON.stringify(args)], { timeoutMs: 25_000 }).out;
-  }
-
   function waitForContainerState(filterName, expectedStatus, maxAttempts = 35, intervalMs = 2000) {
     const cmd = ['docker', 'ps', '-a', '--filter', `name=${filterName}`, '--format', '{{.Names}} {{.Status}}'];
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const output = readHostText(cmd);
+      const output = hostProbe.runArgvStdout(cmd);
       if (expectedStatus === 'absent' && (!output || !output.includes(filterName))) {
         return { success: true, output };
       }
@@ -38,7 +32,7 @@ print(json.dumps({'out':((r.stdout or '')+(r.stderr or '')).strip()}))`, [JSON.s
       }
       sleepSync(intervalMs);
     }
-    const finalCheck = readHostText(cmd);
+    const finalCheck = hostProbe.runArgvStdout(cmd);
     return { success: false, output: finalCheck };
   }
 
@@ -77,18 +71,21 @@ print(json.dumps({'out':((r.stdout or '')+(r.stderr or '')).strip()}))`, [JSON.s
   });
 
   test.afterAll(async ({ browser }) => {
+    const cleanupErrors = [];
     if (createdProjectId || projectName) {
       const context = await browser.newContext({ ignoreHTTPSErrors: true });
       const page = await context.newPage();
       try {
         await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
         await removeDockerProject(page, createdProjectId, projectName);
+        expect(hostProbe.runArgvStdout(['docker', 'ps', '-a', '--filter', `name=${projectName}`, '--format', '{{.Names}}'])).toBe('');
       } catch (err) {
-        console.warn('Docker cleanup notice:', err.message);
+        cleanupErrors.push(`Docker cleanup failed: ${err.message}`);
       } finally {
         await context.close().catch(() => {});
       }
     }
+    expect(cleanupErrors, 'DKR-02 owned container cleanup must succeed').toEqual([]);
   });
 
   test('hatalı girdi: geçersiz compose YAML dokümanı reddedilir', async ({ page }) => {
@@ -189,11 +186,11 @@ print(json.dumps({'out':((r.stdout or '')+(r.stderr or '')).strip()}))`, [JSON.s
     expect(startCheck.success, `Container Up durumuna geçmedi: ${startCheck.output}`).toBe(true);
 
     // Fiziksel Kanıt 2: Container HTTP portundan yanıt veriyor mu?
-    const httpOutput = readHostText(['curl', '-s', '-m', '5', `http://127.0.0.1:${hostPort}`]);
+    const httpOutput = hostProbe.runArgvStdout(['curl', '-sS', '-m', '5', `http://127.0.0.1:${hostPort}`]);
     expect(httpOutput).toContain('nginx');
 
     // Fiziksel Kanıt 3: Docker inspect ile container metadata kontrolü
-    const inspectOutput = readHostText(['docker', 'inspect', '--format', '{{.State.Running}} {{.Config.Image}}', `${projectName}-web-1`]);
+    const inspectOutput = hostProbe.runArgvStdout(['docker', 'inspect', '--format', '{{.State.Running}} {{.Config.Image}}', `${projectName}-web-1`]);
     expect(inspectOutput).toContain('true');
     expect(inspectOutput).toContain('nginx:alpine');
 

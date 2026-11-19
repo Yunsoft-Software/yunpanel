@@ -23,16 +23,10 @@ test.describe('DKR-05 Compose stack oluşturma/yükleme/güncelleme/up/stop/down
 
   const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
-  function readHostText(args) {
-    return hostProbe.runPythonJson(`import json,subprocess,sys
-r=subprocess.run(json.loads(sys.argv[1]),capture_output=True,text=True,timeout=20)
-print(json.dumps({'rc':r.returncode,'out':((r.stdout or '')+(r.stderr or '')).strip()}))`, [JSON.stringify(args)], { timeoutMs: 25_000 });
-  }
-
   function readComposePs(name) {
-    const primary = readHostText(['docker', 'compose', '-p', name, 'ps', '-a', '--format', '{{.Name}} {{.Service}} {{.Status}}']);
-    if (primary.rc === 0 && primary.out) return primary.out;
-    return readHostText(['docker', 'ps', '-a', '--filter', `name=${name}`, '--format', '{{.Names}} {{.Status}}']).out;
+    const composeOut = hostProbe.runArgvStdout(['docker', 'compose', '-p', name, 'ps', '-a', '--format', '{{.Name}} {{.Service}} {{.Status}}']);
+    if (composeOut) return composeOut;
+    return hostProbe.runArgvStdout(['docker', 'ps', '-a', '--filter', `name=${name}`, '--format', '{{.Names}} {{.Status}}']);
   }
 
   function waitForComposeState(name, expectedStatus, maxAttempts = 35, intervalMs = 2000) {
@@ -113,6 +107,7 @@ print(json.dumps({'rc':r.returncode,'out':((r.stdout or '')+(r.stderr or '')).st
   });
 
   test.afterAll(async ({ browser }) => {
+    const cleanupErrors = [];
     if (tempYmlPath && fs.existsSync(tempYmlPath)) {
       try {
         fs.unlinkSync(tempYmlPath);
@@ -124,12 +119,14 @@ print(json.dumps({'rc':r.returncode,'out':((r.stdout or '')+(r.stderr or '')).st
       try {
         await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
         await removeDockerProject(page, createdProjectId, projectName);
+        expect(readComposePs(projectName)).toBe('');
       } catch (err) {
-        console.warn('Docker cleanup notice:', err.message);
+        cleanupErrors.push(`Docker cleanup failed: ${err.message}`);
       } finally {
         await context.close().catch(() => {});
       }
     }
+    expect(cleanupErrors, 'DKR-05 owned stack cleanup must succeed').toEqual([]);
   });
 
   test('hatalı girdi: geçersiz compose YAML sözdizimi doğrulamada reddedilir', async ({ page }) => {
@@ -239,7 +236,7 @@ print(json.dumps({'rc':r.returncode,'out':((r.stdout or '')+(r.stderr or '')).st
     expect(upCheck1.success, `Stack Up durumuna geçmedi: ${upCheck1.output}`).toBe(true);
 
     // Fiziksel Kanıt 2: web1 portundan Nginx HTTP cevabı alınıyor mu?
-    const httpOutput1 = readHostText(['curl', '-s', '-m', '5', `http://127.0.0.1:${hostPort1}`]).out;
+    const httpOutput1 = hostProbe.runArgvStdout(['curl', '-sS', '-m', '5', `http://127.0.0.1:${hostPort1}`]);
     expect(httpOutput1).toContain('nginx');
 
     // 5. STACK GÜNCELLEME (Compose desired state güncelle: web2 servisi ekle)
@@ -302,11 +299,11 @@ print(json.dumps({'rc':r.returncode,'out':((r.stdout or '')+(r.stderr or '')).st
     expect(upCheck2.success, `Güncelleme sonrası servisler Up olmadı: ${upCheck2.output}`).toBe(true);
 
     // Fiziksel Kanıt 4: Yeni web2 portundan da HTTP 200/nginx cevabı alınıyor
-    const httpOutput2 = readHostText(['curl', '-s', '-m', '5', `http://127.0.0.1:${hostPort2}`]).out;
+    const httpOutput2 = hostProbe.runArgvStdout(['curl', '-sS', '-m', '5', `http://127.0.0.1:${hostPort2}`]);
     expect(httpOutput2).toContain('nginx');
 
     // Fiziksel Kanıt 5: docker compose ps ile compose servis listesi
-    const composePsOutput = readHostText(['docker', 'compose', '-p', projectName, 'ps', '--format', '{{.Service}} {{.Status}}']).out;
+    const composePsOutput = hostProbe.runArgvStdout(['docker', 'compose', '-p', projectName, 'ps', '--format', '{{.Service}} {{.Status}}']);
     expect(composePsOutput).toContain('web1');
     expect(composePsOutput).toContain('web2');
 

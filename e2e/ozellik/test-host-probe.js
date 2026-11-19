@@ -98,5 +98,16 @@ print(json.dumps({'allowedPresent':'${TARGET_HOST}' in addrs,'forbiddenPresent':
     return execPythonJson(code, args, options);
   };
 
-  return Object.freeze({ mode, targetHost: TARGET_HOST, verifyTarget, runPythonJson });
+  const runArgvStdout = (argv, { timeoutMs = 25_000 } = {}) => {
+    assert.ok(Array.isArray(argv) && argv.length > 0 && argv.every((part) => typeof part === 'string'), 'Host argv must be a non-empty string array');
+    const result = runPythonJson(`import json,subprocess,sys
+r=subprocess.run(json.loads(sys.argv[1]),capture_output=True,text=True,timeout=20)
+print(json.dumps({'rc':r.returncode,'stdout':(r.stdout or '').strip()}))`, [JSON.stringify(argv)], { timeoutMs });
+    if (result?.rc !== 0) {
+      throw new Error(`Read-only host probe command failed (exit ${result?.rc ?? 'unknown'})`);
+    }
+    return String(result.stdout ?? '');
+  };
+
+  return Object.freeze({ mode, targetHost: TARGET_HOST, verifyTarget, runPythonJson, runArgvStdout });
 }

@@ -16,14 +16,9 @@ test.describe('DKR-04 Domain reverse-proxy bağlantısı ve container log/termin
 
   let createdProjectId = null;
   let createdDomainId = null;
+  let createdWebsiteId = null;
   let fullSubdomain = '';
   let hostProbe;
-
-  function readHostText(args) {
-    return hostProbe.runPythonJson(`import json,subprocess,sys
-r=subprocess.run(json.loads(sys.argv[1]),capture_output=True,text=True,timeout=20)
-print(json.dumps({'out':((r.stdout or '')+(r.stderr or '')).strip()}))`, [JSON.stringify(args)], { timeoutMs: 25_000 }).out;
-  }
 
   function readNginxSiteConfig(hostname) {
     return hostProbe.runPythonJson(`import json,os,re,sys
@@ -51,55 +46,65 @@ print(json.dumps({'content':open(p,'r',encoding='utf-8',errors='replace').read()
 
   async function removeWebsiteById(page, domainId, domainName) {
     if (!domainId && !domainName) return;
-    try {
-      let targetDomainId = domainId;
-      if (!targetDomainId && domainName) {
-        await page.goto(`/websites?q=${encodeURIComponent(domainName)}`);
-        const siteLink = page.locator(`a[href^="/websites/"]:has-text("${domainName}")`).first();
-        if (await siteLink.isVisible({ timeout: 5000 }).catch(() => false)) {
-          const href = await siteLink.getAttribute('href');
-          const m = href ? href.match(/\/websites\/([^/?#]+)/) : null;
-          if (m) targetDomainId = m[1];
-        }
+    let targetDomainId = domainId;
+    if (!targetDomainId && domainName) {
+      await page.goto(`/websites?q=${encodeURIComponent(domainName)}`);
+      const siteLink = page.locator(`a[href^="/websites/"]:has-text("${domainName}")`).first();
+      if (await siteLink.isVisible({ timeout: 5000 }).catch(() => false)) {
+        const href = await siteLink.getAttribute('href');
+        const m = href ? href.match(/\/websites\/([^/?#]+)/) : null;
+        if (m) targetDomainId = m[1];
       }
-      if (!targetDomainId) return;
+    }
+    if (!targetDomainId) return;
 
-      const domainBefore = await page.request.get(`/api/panel/domains/${encodeURIComponent(targetDomainId)}`);
-      const targetWebsiteId = domainBefore.status() === 200
-        ? (await domainBefore.json().catch(() => null))?.data?.websiteId ?? null
-        : null;
-
+    const domainBefore = await page.request.get(`/api/panel/domains/${encodeURIComponent(targetDomainId)}`);
+    let targetWebsiteId = createdWebsiteId;
+    if (domainBefore.status() === 200) {
+      const domainData = (await domainBefore.json().catch(() => null))?.data;
+      targetWebsiteId = targetWebsiteId || domainData?.websiteId || null;
       await page.goto(`/websites/${encodeURIComponent(targetDomainId)}/settings`);
       const removalSection = page.locator('section').filter({ has: page.locator('h2, h3', { hasText: 'Siteyi sil' }) });
-      await removalSection.waitFor({ state: 'visible', timeout: 15000 }).catch(() => null);
-      if (await removalSection.isVisible().catch(() => false)) {
-        const deleteBtn = removalSection.locator('button', { hasText: 'Siteyi sil…' });
-        await deleteBtn.waitFor({ state: 'visible', timeout: 15000 }).catch(() => null);
-        if (await deleteBtn.isVisible().catch(() => false)) {
-          await deleteBtn.click();
-          const dialog = page.locator('dialog.ws-modal, [role="dialog"], .ws-modal').filter({ hasText: /Siteyi kalıcı olarak sil|Silme/i });
-          await dialog.waitFor({ state: 'visible', timeout: 15000 }).catch(() => null);
-          if (await dialog.isVisible().catch(() => false)) {
-            const confirmStr = await dialog.locator('label strong').textContent().catch(() => null);
-            const input = dialog.locator('input');
-            await input.fill(confirmStr || domainName);
-            const submitBtn = dialog.locator('button[type="submit"]');
-            await expect(submitBtn).toBeEnabled({ timeout: 10000 });
-            await submitBtn.click();
-            await expect(dialog).not.toBeVisible({ timeout: 20000 }).catch(() => {});
-            // Wait until both domain and website records are completely removed from API
-            for (let i = 0; i < 60; i++) {
-              await page.waitForTimeout(1000);
-              const domRes = await page.request.get(`/api/panel/domains/${encodeURIComponent(targetDomainId)}`);
-              const siteDone = !targetWebsiteId
-                || (await page.request.get(`/api/panel/websites/${encodeURIComponent(targetWebsiteId)}`)).status() === 404;
-              if (domRes.status() === 404 && siteDone) break;
-            }
-          }
+      await expect(removalSection).toBeVisible({ timeout: 15000 });
+      const deleteBtn = removalSection.locator('button', { hasText: 'Siteyi sil…' });
+      await expect(deleteBtn).toBeVisible({ timeout: 15000 });
+      await deleteBtn.click();
+      const dialog = page.locator('dialog.ws-modal, [role="dialog"], .ws-modal').filter({ hasText: /Siteyi kalıcı olarak sil|Silme/i });
+      await expect(dialog).toBeVisible({ timeout: 15000 });
+      const confirmStr = await dialog.locator('label strong').textContent().catch(() => null);
+      await dialog.locator('input').fill(confirmStr || domainName);
+      const submitBtn = dialog.locator('button[type="submit"]');
+      await expect(submitBtn).toBeEnabled({ timeout: 10000 });
+      await submitBtn.click();
+      await expect(dialog).not.toBeVisible({ timeout: 20000 });
+    } else {
+      expect(domainBefore.status()).toBe(404);
+    }
+
+    // Explicitly verify both Domain and Website return 404 before proceeding to Docker project removal.
+    await expect.poll(async () => {
+      const domRes = await page.request.get(`/api/panel/domains/${encodeURIComponent(targetDomainId)}`).catch(() => null);
+      if (domRes?.status() !== 404) return 'domain-present';
+      if (!targetWebsiteId) return 'removed';
+      const siteRes = await page.request.get(`/api/panel/websites/${encodeURIComponent(targetWebsiteId)}`).catch(() => null);
+      if (siteRes?.status() === 404) return 'removed';
+      const remRes = await page.request.get(`/api/panel/websites/${encodeURIComponent(targetWebsiteId)}/removal`).catch(() => null);
+      if (remRes?.status() === 200) {
+        const ops = (await remRes.json().catch(() => ({})))?.data?.operations ?? [];
+        const active = ops.find((op) => op.status !== 'removed');
+        if (['failed', 'blocked'].includes(active?.status)) {
+          throw new Error(`Owned DKR-04 website removal stopped: ${active.error?.code ?? active.status}`);
         }
       }
-    } catch (err) {
-      console.warn('Subdomain cleanup notice:', err.message);
+      return 'website-removing';
+    }, { timeout: 90_000, intervals: [1000, 2000] }).toBe('removed');
+
+    expect((await page.request.get(`/api/panel/domains/${encodeURIComponent(targetDomainId)}`)).status()).toBe(404);
+    if (targetWebsiteId) {
+      expect((await page.request.get(`/api/panel/websites/${encodeURIComponent(targetWebsiteId)}`)).status()).toBe(404);
+    }
+    if (domainName) {
+      expect(readNginxSiteConfig(domainName)).toBe('');
     }
   }
 
@@ -125,38 +130,37 @@ print(json.dumps({'content':open(p,'r',encoding='utf-8',errors='replace').read()
   });
 
   test.afterAll(async ({ browser }) => {
-    console.log('dkr-04 afterAll starting, createdDomainId:', createdDomainId, 'fullSubdomain:', fullSubdomain, 'createdProjectId:', createdProjectId, 'projectName:', projectName);
-    // 1. Önce bağlı web sitesini temizle
+    const cleanupErrors = [];
+    // 1. Önce bağlı web sitesini temizle ve 404/Nginx yokluğunu doğrula
     if (createdDomainId || fullSubdomain) {
-      console.log('dkr-04 afterAll: removing website...');
       const context = await browser.newContext({ ignoreHTTPSErrors: true });
       const page = await context.newPage();
       try {
         await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
         await removeWebsiteById(page, createdDomainId, fullSubdomain);
-        console.log('dkr-04 afterAll: website removed successfully');
       } catch (err) {
-        console.warn('Site clean-up notice:', err.message);
+        cleanupErrors.push(`Website cleanup failed: ${err.message}`);
       } finally {
         await context.close().catch(() => {});
       }
     }
 
-    // 2. Projeyi panel arayüzünden kaldır
+    // 2. Projeyi panel arayüzünden kaldır ve container/proje yokluğunu doğrula
     if (createdProjectId || projectName) {
-      console.log('dkr-04 afterAll: removing docker project...');
       const context = await browser.newContext({ ignoreHTTPSErrors: true });
       const page = await context.newPage();
       try {
         await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
         await removeDockerProject(page, createdProjectId, projectName);
-        console.log('dkr-04 afterAll: docker project removed successfully');
+        expect(hostProbe.runArgvStdout(['docker', 'ps', '-a', '--filter', `name=${projectName}`, '--format', '{{.Names}}'])).toBe('');
       } catch (err) {
-        console.warn('Docker project clean-up notice:', err.message);
+        cleanupErrors.push(`Docker project cleanup failed: ${err.message}`);
       } finally {
         await context.close().catch(() => {});
       }
     }
+
+    expect(cleanupErrors, 'DKR-04 owned website and Docker project cleanup must complete').toEqual([]);
   });
 
   test('mutlu yol: docker container oluştur, başlat, subdomain reverse-proxy bağla, nginx proxy_pass ve canlı http yanıtını doğrula, UI loglarını izle', async ({ page, request }) => {
@@ -216,15 +220,15 @@ print(json.dumps({'content':open(p,'r',encoding='utf-8',errors='replace').read()
     await confirmLifecycleAction(page, 'start');
 
     // Container'ın Up durumuna geçtiğini host üzerinden doğrula
-    await expect.poll(() => readHostText(['docker', 'ps', '--filter', `name=${projectName}`, '--format', '{{.Status}}']), {
+    await expect.poll(() => hostProbe.runArgvStdout(['docker', 'ps', '--filter', `name=${projectName}`, '--format', '{{.Status}}']), {
       timeout: 60000,
       intervals: [1500, 3000],
     }).toContain('Up');
 
     // Container'a HTTP isteği atarak log üret
-    const directHttp = readHostText(['curl', '-s', '-m', '5', `http://127.0.0.1:${hostPort}`]);
+    const directHttp = hostProbe.runArgvStdout(['curl', '-sS', '-m', '5', `http://127.0.0.1:${hostPort}`]);
     expect(directHttp).toContain('nginx');
-    readHostText(['curl', '-s', '-m', '5', `http://127.0.0.1:${hostPort}/test-log-access`]);
+    hostProbe.runArgvStdout(['curl', '-sS', '-m', '5', `http://127.0.0.1:${hostPort}/test-log-access`]);
 
     // 3. UI üzerinde Container loglarının aktığını doğrula
     await page.reload();
@@ -299,6 +303,10 @@ print(json.dumps({'content':open(p,'r',encoding='utf-8',errors='replace').read()
     const match = href ? href.match(/\/websites\/([^/?#]+)/) : null;
     expect(match).toBeTruthy();
     createdDomainId = match[1];
+    const createdDomainRes = await page.request.get(`/api/panel/domains/${encodeURIComponent(createdDomainId)}`);
+    expect(createdDomainRes.status()).toBe(200);
+    createdWebsiteId = (await createdDomainRes.json()).data?.websiteId ?? null;
+    expect(createdWebsiteId).toBeTruthy();
 
     // Fiziksel Sonuç Kanıtı 1: Nginx yapılandırma dosyasında proxy_pass direktifini doğrula
     await expect.poll(() => readNginxSiteConfig(fullSubdomain), {
@@ -307,7 +315,7 @@ print(json.dumps({'content':open(p,'r',encoding='utf-8',errors='replace').read()
     }).toContain(`proxy_pass http://127.0.0.1:${hostPort}`);
 
     // Fiziksel Sonuç Kanıtı 2: Canlı Nginx üzerinden Host başlığı ile container HTTP proxy yanıtını doğrula
-    const proxyHttpResponse = readHostText(['curl', '-s', '-m', '10', '-H', `Host: ${fullSubdomain}`, 'http://127.0.0.1']);
+    const proxyHttpResponse = hostProbe.runArgvStdout(['curl', '-sS', '-m', '10', '-H', `Host: ${fullSubdomain}`, 'http://127.0.0.1']);
     expect(proxyHttpResponse).toContain('nginx');
 
     // Fiziksel Sonuç Kanıtı 3: Sunucu IP'sine doğrudan HTTP isteği ile 200 OK yanıtı al
