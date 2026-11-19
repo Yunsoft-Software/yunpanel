@@ -1,6 +1,6 @@
-import { execSync } from 'node:child_process';
 import { test, expect } from '@playwright/test';
 import { OWNER_USERNAME, OWNER_PASSWORD, loginAs, removeDockerProject } from '../helpers.js';
+import { createTestHostProbe } from './test-host-probe.js';
 
 test.use({ trace: 'off' });
 
@@ -17,16 +17,20 @@ test.describe('DKR-04 Domain reverse-proxy bağlantısı ve container log/termin
   let createdProjectId = null;
   let createdDomainId = null;
   let fullSubdomain = '';
+  let hostProbe;
 
-  function runSsh(command) {
-    try {
-      return execSync(`ssh -o BatchMode=yes -o ConnectTimeout=10 yunpanel-test ${JSON.stringify(command)}`, {
-        encoding: 'utf8',
-        timeout: 25000,
-      }).trim();
-    } catch (err) {
-      return ((err.stdout || '') + (err.stderr || '')).trim();
-    }
+  function readHostText(args) {
+    return hostProbe.runPythonJson(`import json,subprocess,sys
+r=subprocess.run(json.loads(sys.argv[1]),capture_output=True,text=True,timeout=20)
+print(json.dumps({'out':((r.stdout or '')+(r.stderr or '')).strip()}))`, [JSON.stringify(args)], { timeoutMs: 25_000 }).out;
+  }
+
+  function readNginxSiteConfig(hostname) {
+    return hostProbe.runPythonJson(`import json,os,re,sys
+host=sys.argv[1]
+assert re.fullmatch(r'[a-z0-9.-]+',host) and '..' not in host
+p='/etc/nginx/sites-enabled/yunpanel-'+host+'.conf'
+print(json.dumps({'content':open(p,'r',encoding='utf-8',errors='replace').read() if os.path.isfile(p) else ''}))`, [hostname], { timeoutMs: 20_000 }).content;
   }
 
   async function confirmLifecycleAction(page, actionKey) {
@@ -60,6 +64,11 @@ test.describe('DKR-04 Domain reverse-proxy bağlantısı ve container log/termin
       }
       if (!targetDomainId) return;
 
+      const domainBefore = await page.request.get(`/api/panel/domains/${encodeURIComponent(targetDomainId)}`);
+      const targetWebsiteId = domainBefore.status() === 200
+        ? (await domainBefore.json().catch(() => null))?.data?.websiteId ?? null
+        : null;
+
       await page.goto(`/websites/${encodeURIComponent(targetDomainId)}/settings`);
       const removalSection = page.locator('section').filter({ has: page.locator('h2, h3', { hasText: 'Siteyi sil' }) });
       await removalSection.waitFor({ state: 'visible', timeout: 15000 }).catch(() => null);
@@ -78,14 +87,14 @@ test.describe('DKR-04 Domain reverse-proxy bağlantısı ve container log/termin
             await expect(submitBtn).toBeEnabled({ timeout: 10000 });
             await submitBtn.click();
             await expect(dialog).not.toBeVisible({ timeout: 20000 }).catch(() => {});
-            // Wait until domain is completely removed from API
-            for (let i = 0; i < 40; i++) {
+            // Wait until both domain and website records are completely removed from API
+            for (let i = 0; i < 60; i++) {
               await page.waitForTimeout(1000);
-              const res = await page.request.get(`/api/panel/domains/${encodeURIComponent(targetDomainId)}`);
-              if (res.status() === 404) break;
+              const domRes = await page.request.get(`/api/panel/domains/${encodeURIComponent(targetDomainId)}`);
+              const siteDone = !targetWebsiteId
+                || (await page.request.get(`/api/panel/websites/${encodeURIComponent(targetWebsiteId)}`)).status() === 404;
+              if (domRes.status() === 404 && siteDone) break;
             }
-            // Extra safety buffer for background metadata finalization
-            await page.waitForTimeout(4000);
           }
         }
       }
@@ -93,6 +102,11 @@ test.describe('DKR-04 Domain reverse-proxy bağlantısı ve container log/termin
       console.warn('Subdomain cleanup notice:', err.message);
     }
   }
+
+  test.beforeAll(() => {
+    hostProbe = createTestHostProbe();
+    expect(hostProbe.verifyTarget().verified).toBe(true);
+  });
 
   test.beforeEach(async ({ page }) => {
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -202,15 +216,15 @@ test.describe('DKR-04 Domain reverse-proxy bağlantısı ve container log/termin
     await confirmLifecycleAction(page, 'start');
 
     // Container'ın Up durumuna geçtiğini host üzerinden doğrula
-    await expect.poll(() => runSsh(`docker ps --filter "name=${projectName}" --format "{{.Status}}"`), {
+    await expect.poll(() => readHostText(['docker', 'ps', '--filter', `name=${projectName}`, '--format', '{{.Status}}']), {
       timeout: 60000,
       intervals: [1500, 3000],
     }).toContain('Up');
 
     // Container'a HTTP isteği atarak log üret
-    const directHttp = runSsh(`curl -s -m 5 http://127.0.0.1:${hostPort}`);
+    const directHttp = readHostText(['curl', '-s', '-m', '5', `http://127.0.0.1:${hostPort}`]);
     expect(directHttp).toContain('nginx');
-    runSsh(`curl -s -m 5 http://127.0.0.1:${hostPort}/test-log-access`);
+    readHostText(['curl', '-s', '-m', '5', `http://127.0.0.1:${hostPort}/test-log-access`]);
 
     // 3. UI üzerinde Container loglarının aktığını doğrula
     await page.reload();
@@ -287,13 +301,13 @@ test.describe('DKR-04 Domain reverse-proxy bağlantısı ve container log/termin
     createdDomainId = match[1];
 
     // Fiziksel Sonuç Kanıtı 1: Nginx yapılandırma dosyasında proxy_pass direktifini doğrula
-    await expect.poll(() => runSsh(`cat /etc/nginx/sites-enabled/yunpanel-${fullSubdomain}.conf 2>/dev/null`), {
+    await expect.poll(() => readNginxSiteConfig(fullSubdomain), {
       timeout: 35000,
       intervals: [1000, 2000],
     }).toContain(`proxy_pass http://127.0.0.1:${hostPort}`);
 
     // Fiziksel Sonuç Kanıtı 2: Canlı Nginx üzerinden Host başlığı ile container HTTP proxy yanıtını doğrula
-    const proxyHttpResponse = runSsh(`curl -s -m 10 -H "Host: ${fullSubdomain}" http://127.0.0.1`);
+    const proxyHttpResponse = readHostText(['curl', '-s', '-m', '10', '-H', `Host: ${fullSubdomain}`, 'http://127.0.0.1']);
     expect(proxyHttpResponse).toContain('nginx');
 
     // Fiziksel Sonuç Kanıtı 3: Sunucu IP'sine doğrudan HTTP isteği ile 200 OK yanıtı al

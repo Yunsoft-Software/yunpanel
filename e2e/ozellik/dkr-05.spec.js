@@ -1,9 +1,9 @@
-import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test, expect } from '@playwright/test';
 import { OWNER_USERNAME, OWNER_PASSWORD, loginAs, removeDockerProject } from '../helpers.js';
+import { createTestHostProbe } from './test-host-probe.js';
 
 test.use({ trace: 'off' });
 
@@ -19,21 +19,25 @@ test.describe('DKR-05 Compose stack oluşturma/yükleme/güncelleme/up/stop/down
 
   let tempYmlPath = null;
   let createdProjectId = null;
+  let hostProbe;
 
-  function runSsh(command) {
-    try {
-      return execSync(`ssh -o BatchMode=yes -o ConnectTimeout=10 yunpanel-test ${JSON.stringify(command)}`, {
-        encoding: 'utf8',
-        timeout: 25000,
-      }).trim();
-    } catch (err) {
-      return ((err.stdout || '') + (err.stderr || '')).trim();
-    }
+  const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+  function readHostText(args) {
+    return hostProbe.runPythonJson(`import json,subprocess,sys
+r=subprocess.run(json.loads(sys.argv[1]),capture_output=True,text=True,timeout=20)
+print(json.dumps({'rc':r.returncode,'out':((r.stdout or '')+(r.stderr or '')).strip()}))`, [JSON.stringify(args)], { timeoutMs: 25_000 });
+  }
+
+  function readComposePs(name) {
+    const primary = readHostText(['docker', 'compose', '-p', name, 'ps', '-a', '--format', '{{.Name}} {{.Service}} {{.Status}}']);
+    if (primary.rc === 0 && primary.out) return primary.out;
+    return readHostText(['docker', 'ps', '-a', '--filter', `name=${name}`, '--format', '{{.Names}} {{.Status}}']).out;
   }
 
   function waitForComposeState(name, expectedStatus, maxAttempts = 35, intervalMs = 2000) {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const output = runSsh(`docker compose -p ${name} ps -a --format "{{.Name}} {{.Service}} {{.Status}}" 2>/dev/null || docker ps -a --filter "name=${name}" --format "{{.Names}} {{.Status}}"`);
+      const output = readComposePs(name);
       if (expectedStatus === 'absent') {
         if (!output || (!output.includes(name) && !output.includes('web1') && !output.includes('web2'))) {
           return { success: true, output };
@@ -53,9 +57,9 @@ test.describe('DKR-05 Compose stack oluşturma/yükleme/güncelleme/up/stop/down
           return { success: true, output };
         }
       }
-      execSync(`sleep ${intervalMs / 1000}`);
+      sleepSync(intervalMs);
     }
-    const finalCheck = runSsh(`docker compose -p ${name} ps -a --format "{{.Name}} {{.Service}} {{.Status}}" 2>/dev/null || docker ps -a --filter "name=${name}" --format "{{.Names}} {{.Status}}"`);
+    const finalCheck = readComposePs(name);
     return { success: false, output: finalCheck };
   }
 
@@ -90,6 +94,11 @@ test.describe('DKR-05 Compose stack oluşturma/yükleme/güncelleme/up/stop/down
     await confirmBtn.click();
     await expect(modal).not.toBeVisible({ timeout: 15000 });
   }
+
+  test.beforeAll(() => {
+    hostProbe = createTestHostProbe();
+    expect(hostProbe.verifyTarget().verified).toBe(true);
+  });
 
   test.beforeEach(async ({ page }) => {
     try {
@@ -230,7 +239,7 @@ test.describe('DKR-05 Compose stack oluşturma/yükleme/güncelleme/up/stop/down
     expect(upCheck1.success, `Stack Up durumuna geçmedi: ${upCheck1.output}`).toBe(true);
 
     // Fiziksel Kanıt 2: web1 portundan Nginx HTTP cevabı alınıyor mu?
-    const httpOutput1 = runSsh(`curl -s -m 5 http://127.0.0.1:${hostPort1}`);
+    const httpOutput1 = readHostText(['curl', '-s', '-m', '5', `http://127.0.0.1:${hostPort1}`]).out;
     expect(httpOutput1).toContain('nginx');
 
     // 5. STACK GÜNCELLEME (Compose desired state güncelle: web2 servisi ekle)
@@ -293,11 +302,11 @@ test.describe('DKR-05 Compose stack oluşturma/yükleme/güncelleme/up/stop/down
     expect(upCheck2.success, `Güncelleme sonrası servisler Up olmadı: ${upCheck2.output}`).toBe(true);
 
     // Fiziksel Kanıt 4: Yeni web2 portundan da HTTP 200/nginx cevabı alınıyor
-    const httpOutput2 = runSsh(`curl -s -m 5 http://127.0.0.1:${hostPort2}`);
+    const httpOutput2 = readHostText(['curl', '-s', '-m', '5', `http://127.0.0.1:${hostPort2}`]).out;
     expect(httpOutput2).toContain('nginx');
 
     // Fiziksel Kanıt 5: docker compose ps ile compose servis listesi
-    const composePsOutput = runSsh(`docker compose -p ${projectName} ps --format "{{.Service}} {{.Status}}"`);
+    const composePsOutput = readHostText(['docker', 'compose', '-p', projectName, 'ps', '--format', '{{.Service}} {{.Status}}']).out;
     expect(composePsOutput).toContain('web1');
     expect(composePsOutput).toContain('web2');
 
