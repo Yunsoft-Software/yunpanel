@@ -117,23 +117,50 @@ print(json.dumps(result))`, [JSON.stringify(excluded)]);
     if (site.removed) return;
     expect(site.hostname.startsWith(prefix + '-')).toBe(true);
     const current = await page.request.get(`/api/panel/domains/${site.domainId}`);
-    if (current.status() === 404) { site.removed = true; return; }
-    expect(current.status()).toBe(200);
-    expect((await current.json()).data.primaryDomain).toBe(site.hostname);
-    // Removal pauses after each host job and waits for "Silme işlemine devam et", as for a user.
-    for (let round = 0; round < 25; round++) {
-      if ((await page.request.get(`/api/panel/domains/${site.domainId}`)).status() === 404) break;
-      await page.goto(`/websites/${site.domainId}/settings`);
-      const start = page.getByRole('button', { name: /^(Siteyi sil…|Silme işlemine devam et…)$/ });
-      try { await start.click({ timeout: 20_000 }); }
-      catch { await page.waitForTimeout(5_000); continue; }
-      const dialog = page.getByRole('dialog');
-      await dialog.locator('input').fill(site.hostname);
-      await dialog.getByRole('button', { name: /^(Silme işlemini başlat|Silme işlemine devam et)$/ }).click();
-      await page.waitForTimeout(8_000);
+    if (current.status() !== 404) {
+      expect(current.status()).toBe(200);
+      expect((await current.json()).data.primaryDomain).toBe(site.hostname);
+      // Removal pauses after each host job and waits for "Silme işlemine devam et", as for a user.
+      for (let round = 0; round < 25; round++) {
+        if ((await page.request.get(`/api/panel/domains/${site.domainId}`)).status() === 404) break;
+        await page.goto(`/websites/${site.domainId}/settings`);
+        const start = page.getByRole('button', { name: /^(Siteyi sil…|Silme işlemine devam et…)$/ });
+        try { await start.click({ timeout: 20_000 }); }
+        catch { await page.waitForTimeout(5_000); continue; }
+        const dialog = page.getByRole('dialog');
+        await dialog.locator('input').fill(site.hostname);
+        await dialog.getByRole('button', { name: /^(Silme işlemini başlat|Silme işlemine devam et)$/ }).click();
+        await page.waitForTimeout(8_000);
+      }
     }
     expect((await page.request.get(`/api/panel/domains/${site.domainId}`)).status()).toBe(404);
     if (site.mailDomainId) expect((await page.request.get(`/api/panel/mail-domains/${site.mailDomainId}`)).status()).toBe(404);
+    // Keep the Owner session alive until unix_identity_cleanup removes the Website record itself;
+    // logging out in afterAll while the final step is still running causes fail-closed actor_forbidden.
+    await expect.poll(async () => {
+      const siteRes = await page.request.get(`/api/panel/websites/${site.websiteId}`).catch(() => null);
+      if (siteRes?.status() === 404) return 'removed';
+      const remRes = await page.request.get(`/api/panel/websites/${site.websiteId}/removal`).catch(() => null);
+      if (remRes?.status() === 200) {
+        const ops = (await remRes.json().catch(() => ({})))?.data?.operations ?? [];
+        const active = ops.find((op) => op.status !== 'removed');
+        if (['failed', 'blocked'].includes(active?.status)) {
+          throw new Error(`Owned mail site removal stopped: ${active.error?.code ?? active.status}`);
+        }
+        if (active?.id && active.actions?.stepContinuationConfirmation) {
+          const nextStep = active.steps?.find((step) => step.status !== 'succeeded');
+          if (nextStep?.id) {
+            await call('POST', `/website-removal-operations/${active.id}/continue`, {
+              expectedUpdatedAt: active.updatedAt,
+              stepId: nextStep.id,
+              confirmation: active.actions.stepContinuationConfirmation,
+            }).catch(() => {});
+          }
+        }
+      }
+      return 'removing';
+    }, { timeout: 120_000, intervals: [1_000, 2_000, 3_000] }).toBe('removed');
+    expect((await page.request.get(`/api/panel/websites/${site.websiteId}`)).status()).toBe(404);
     site.removed = true;
   }
 
