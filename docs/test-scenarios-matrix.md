@@ -387,5 +387,6 @@ Private combined Guard02 integration: source/local real-FS preparation only; old
 | Senaryo | Beklenen sonuç |
 |---|---|
 | Yeni yönetilen PHP hedefi ve ayrı boş DB | Kanonik kökteki tek resmi PHP başlangıç dosyası canlı bootstrap makbuzu ve hash ile doğrulanır. Önizleme hedefi kabul eder. Klonun kendi ana sayfası ancak beklenen dosya hâlâ mevcutsa yazılır. |
+| WordPress ekranından yeni PHP hedefinde staging | Kullanıcı hedefi formdan seçer. Başlangıç dosyasına elle müdahale etmeden staging çalışır. Ayrı hedef veritabanı, HTTP yanıtı ve yeni hedef yönetici oturumu doğrulanır. |
 | Kullanıcı dosyası, özel belge kökü veya değişen hedef | Mevcut kullanıcı içeriği korunur. Önizleme sonrası yazılan yeni dosyanın üstüne klon içeriği yazılmaz. |
 | Gerçekten boş hedef | Mevcut normal akış ve önizleme biçimi korunur. Ayrı DB, site yetkisi ve kaynak bütünlüğü denetimleri uygulanır. |

@@ -176,7 +176,7 @@ export default function SiteWordPressPanel({ domainId, scope }) {
           </select></label>
           <label>İşlem<select value={clone.action} disabled={disabled} onChange={event => setClone(value => ({ ...value, action: event.target.value }))}><option value="staging">Staging</option><option value="clone">Klon</option></select></label>
           <label>Hedef protokol<select value={clone.scheme} disabled={disabled} onChange={event => setClone(value => ({ ...value, scheme: event.target.value }))}><option value="https">HTTPS</option><option value="http">HTTP</option></select></label>
-          <p className="ws-muted">Hedef site klasörü ve veritabanı boş olmalıdır. Başlangıç dosyasını Dosya Yöneticisi ile kaldırın. Kaynak korunur; ayrı hedef kullanıcısı ve DB parolası kullanılır. Staging indeksleme ve WP cron çalışmasını kapatır. Özel erişim korumasını ayrıca ayarlayın.</p>
+          <p className="ws-muted">Hedef PHP sitesinde kullanıcı dosyası bulunmamalı. Staging, arama motoru indekslemesini ve WordPress zamanlanmış görevlerini kapatır. Erişimi ayrıca kısıtlayabilirsiniz.</p>
         </> : dialog === 'password' ? <>
           <label>Yönetici hesabı<select required value={username} disabled={disabled} onChange={event => setUsername(event.target.value)}>{(status.administrators ?? []).map(name => <option key={name}>{name}</option>)}</select></label>
           <label>Yeni parola<input required type="password" minLength={16} maxLength={128} autoComplete="new-password" value={password} disabled={disabled} onChange={event => setPassword(event.target.value)} /></label>

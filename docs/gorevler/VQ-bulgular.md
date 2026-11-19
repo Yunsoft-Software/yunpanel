@@ -1963,10 +1963,10 @@
 
 ### T921 · WordPress klonlamada yeni PHP hedefi varsayılan index.php nedeniyle reddediliyor
 - **Bağımlı:** T804, T868, T881, T884
-- **Dosyalar:** `apps/api/src/wordpress-clone-service.js`, `apps/api/src/wordpress-toolkit-service.js`, `apps/api/src/management-app.js`, `apps/api/src/site-file-worker.js`, `apps/api/test/site-file-worker.test.js`
+- **Dosyalar:** `apps/api/src/wordpress-clone-service.js`, `apps/api/src/wordpress-toolkit-service.js`, `apps/api/src/management-app.js`, `apps/api/src/site-file-worker.js`, `apps/api/test/site-file-worker.test.js`, `apps/web/src/workspace/SiteWordPressPanel.jsx`
 - **Kaynak:** QA · 2026-11-19 04:02
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
-    .28 0.3.0-2026111901 normal provision edilen geçici PHP hedefi, yalnızca üretim bootstrap index.php dosyası içerdiğinde bile wordpress_clone_target_not_empty 409 döndürüyor. Başlangıç dosyasını sadece bu geçici siteden kaldırınca normal hedef veritabanı kapsamı kontrolüne ilerledi. Hedefi normal panelden kaldırdık. Yalnız canlı bootstrap makbuzu ve içeriği eşleşen tek resmi index.php dosyasına izin ver. Site ve DB sınırlarını koru, var olan diğer dosyaya dokunma, önizleme ve yazma anında tekrar doğrula. İçe aktarma ve yeniden deneme sözleşmesi korunur. Gerçek boş hedef eski önizlemesi uyumlu kalır.
+    .28 0.3.0-2026111901 normal provision edilen geçici PHP hedefi, yalnızca üretim bootstrap index.php dosyası içerdiğinde bile wordpress_clone_target_not_empty 409 döndürüyor. Başlangıç dosyasını sadece bu geçici siteden kaldırınca normal hedef veritabanı kapsamı kontrolüne ilerledi. Hedefi normal panelden kaldırdık. Yalnız canlı bootstrap makbuzu ve içeriği eşleşen tek resmi index.php dosyasına izin ver. Site ve DB sınırlarını koru, var olan diğer dosyaya dokunma, önizleme ve yazma anında tekrar doğrula. İçe aktarma ve yeniden deneme sözleşmesi korunur. Gerçek boş hedef eski önizlemesi uyumlu kalır. Klon formunda başlangıç dosyasını elle kaldırma talimatını güncelle.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
