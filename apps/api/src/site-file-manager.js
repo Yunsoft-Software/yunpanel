@@ -144,23 +144,69 @@ export function createSiteFileManager({
     finally { if (applicationLocks.get(applicationId) === current) applicationLocks.delete(applicationId); }
   }
 
-  async function execute(websiteId, operation) {
+  async function targetFor(websiteId) {
     if (getuid() !== 0) throw new SiteFileManagerError('site_files_root_runtime_required', 'Site files require the root panel service', 503);
-    const target = validateWebsite(await websiteRegistry.getWebsite(websiteId), localServerId);
-    return locked(target.applicationId, async () => {
-      const [root] = await Promise.all([
-        resolveRelease(target, { stat: statFn, realpath: realpathFn }),
-        readPasswd().then((contents) => parseManagedAccount(contents, target.user)),
-      ]);
-      try { return await runWorker({ user: target.user, request: { ...operation, root } }); }
-      catch (error) {
-        if (error instanceof SiteFileManagerError || error instanceof SiteFileWorkerError) throw error;
-        throw new SiteFileManagerError('site_file_worker_failed', 'Site file worker could not complete the request', 503);
-      }
-    });
+    return validateWebsite(await websiteRegistry.getWebsite(websiteId), localServerId);
   }
 
-  return Object.freeze({ execute });
+  async function inspectPinnedTarget(scope) {
+    const target = await targetFor(scope.websiteId);
+    if (target.applicationId !== scope.applicationId || target.current !== scope.documentRoot || target.user !== scope.unixUser) {
+      throw new SiteFileManagerError('site_file_copy_identity_changed', 'Website file identity changed during copying', 409);
+    }
+    const root = await resolveRelease(target, { stat: statFn, realpath: realpathFn });
+    if (root !== scope.releaseRoot) {
+      throw new SiteFileManagerError('site_file_copy_root_changed', 'Website file root changed during copying', 409);
+    }
+    const metadata = await statFn(root, { bigint: true });
+    if (!metadata.isDirectory() || String(metadata.dev) !== scope.rootDevice || String(metadata.ino) !== scope.rootInode) {
+      throw new SiteFileManagerError('site_file_copy_root_changed', 'Website file root changed during copying', 409);
+    }
+    return { target, root };
+  }
+
+  async function dispatch(target, operation, root) {
+    const [resolvedRoot] = await Promise.all([root, readPasswd().then((contents) => parseManagedAccount(contents, target.user))]);
+    try { return await runWorker({ user: target.user, request: { ...operation, root: resolvedRoot } }); }
+    catch (error) {
+      if (error instanceof SiteFileManagerError || error instanceof SiteFileWorkerError) throw error;
+      throw new SiteFileManagerError('site_file_worker_failed', 'Site file worker could not complete the request', 503);
+    }
+  }
+
+  async function execute(websiteId, operation) {
+    const target = await targetFor(websiteId);
+    return locked(target.applicationId, async () => dispatch(target, operation,
+      resolveRelease(target, { stat: statFn, realpath: realpathFn })));
+  }
+
+  async function withPinnedSites(sites, action) {
+    if (!Array.isArray(sites) || sites.length !== 2 || typeof action !== 'function' || sites.some((scope) =>
+      !UUID_PATTERN.test(scope?.websiteId ?? '') || !UUID_PATTERN.test(scope?.applicationId ?? '')
+      || scope.websiteId !== scope.websiteId.toLowerCase() || scope.applicationId !== scope.applicationId.toLowerCase())
+      || sites[0].applicationId === sites[1].applicationId || sites[0].websiteId === sites[1].websiteId) {
+      throw new SiteFileManagerError('site_file_copy_scope_invalid', 'Two distinct Website file identities are required', 400);
+    }
+    const scopes = sites.map((scope) => ({ ...scope })).sort((a, b) => a.applicationId.localeCompare(b.applicationId));
+    const [first, second] = scopes;
+    return locked(first.applicationId, () => locked(second.applicationId, async () => {
+      await Promise.all(scopes.map(inspectPinnedTarget));
+      let active = true;
+      try {
+        return await action(Object.freeze({
+          async execute(websiteId, operation) {
+            const scope = scopes.find((candidate) => candidate.websiteId === websiteId);
+            if (!active || !scope) throw new SiteFileManagerError('site_file_copy_scope_invalid', 'Website is outside this file operation', 409);
+            const { target, root } = await inspectPinnedTarget(scope);
+            if (!active) throw new SiteFileManagerError('site_file_copy_scope_invalid', 'Website is outside this file operation', 409);
+            return dispatch(target, operation, root);
+          },
+        }));
+      } finally { active = false; }
+    }));
+  }
+
+  return Object.freeze({ execute, withPinnedSites });
 }
 
 export const siteFileManagerInternals = Object.freeze({
