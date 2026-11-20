@@ -79,3 +79,9 @@ Sieve, mevcut yönlendirmeyle zincirde çalıştı. Kopyalı yönlendirme yerel 
 - **Dosyalar:** —
 - **İş:** Geçici Ubuntu'da iki ayrı PowerDNS işlem ve veri diziniyle mevcut mekanizmanın yerel provasını yap. Ağ veya .28 ayarı yok. Gerçek NOTIFY ve AXFR, yeni SOA seri numarası ve birincil kapalıyken ikincilden yetkili cevap ölçülür. Ayrı ağ kabulü açık kalır.
 - **Kabul:** Gerçek DNS sorgusu, ikincil kaynak dizini ve birincil işlem durumu birlikte kanıtlanır. Geçici kaynaklar temizlenir ve sonuç görev kaydına yazılır.
+
+### T947 · İsimli rclone hedefi için özel Restic yapılandırmasını aktar
+- **Bağımlı:** T937, T940
+- **Dosyalar:** `packages/host-runtime/src/restic-manager.js`, `packages/host-runtime/test/restic-manager-native.test.js`, `docs/local-migration-backup.md`
+- **İş:** Restic izinli süreç ortamında operatörün seçtiği tek isimli rclone hesabını kullanabilsin. Yalnız açık yönetici yapılandırmasına, özel dosyaya ve rclone deposuna bağlı kalsın. Kimlik bilgisi genel ortamdan veya kullanıcı isteğinden alınmaz, çıktıya girmez ve özel geçici dosya işlem sonunda silinir.
+- **Kabul:** Gerçek Restic/rclone ile ayarsız ilk ret, izinli özel yapılandırmayla isimli depo init, snapshot, tam okuma ve geri yükleme. Genel izinli veya symlink dosyayı reddet. İşlem sonrası geçici parola ve yapılandırma dosyaları kalmaz. Uzak ağ kanıtı ayrı kabulde.
