@@ -2,6 +2,8 @@
 
 9 Ekim 2026. 21 grup / 162 özellik ID'si eksiksiz korunur. Hedef Plesk Obsidian görev ve işlev eşdeğerliği; katalog/adapter varlığı veya önceki Tamamlandı etiketi kabul değildir. 10 Ekim kullanıcı [plan.md](../plan.md) uygulamasını onayladı; geliştirme sürüyor.
 
+20 Kasım 2026. [Linux hosting pilotu](../plan.md#20-kasım-2026--onaylanan-linux-hosting-pilotu-ve-plesk-geçişi) için kurtarma, taşıma ve posta hazırlığının yerel kanıtı [görev kaydında](gorevler/linux-hosting-pilot.md#20-kasım-yerel-ubuntu-kanıtı). Bağımsız ortam ve canlı geçiş sonuçları [kabul listesinde](../todo.md#linux-hosting-pilotu-ve-plesk-geçişi).
+
 Durum: **Kritik açık** = bu tur doğrulanan hata; **Kısmi / kabul açık** = bazı kaynak yolları incelendi, tüm görev doğrulanmadı; **İnceleme/kabul açık** = bu tur eksiksiz kontrol edilmedi; **Sonraki faz** = sade reseller ilk sürümünde ertelenmiş; **Ayrı hat** = OS/vendor/koşullu bağımlılık. Hiçbiri otomatik tamamlandı değildir.
 
 İlk sürüm Owner → isteğe bağlı tek Reseller → Customer → mevcut Website; site işlemleri paket/abonelik şartına bağlanmaz. Alt bayi zinciri, reseller paket motoru, add-on/sync/lock/customization/overselling, otomatik expiry/fatura, branding, customer↔reseller dönüşümü/toplu transfer/login-as şimdi uygulanmaz. Gerçek disk/CPU/RAM/site limitleri korunur. Tam Plesk hedefinde bu özellikler kaybolmaz.
@@ -144,8 +146,8 @@ Her ID için uygulamada gerçek kaynak+mount edilmiş endpoint, kullanıcı akı
 | --- | --- | --- |
 | EML-01 | Mailbox oluşturma/düzenleme/silme, parola ve kota. | İnceleme/kabul açık |
 | EML-02 | Alias, forwarding ve yerel kopya tercihleri. | İnceleme/kabul açık |
-| EML-03 | Otomatik yanıt/tatil mesajları. | İnceleme/kabul açık |
-| EML-04 | Spam filtre, allow/deny list ve antivirüs politikası. | İnceleme/kabul açık |
+| EML-03 | Otomatik yanıt/tatil mesajları. | Kısmi / kabul açık |
+| EML-04 | Spam filtre, allow/deny list ve antivirüs politikası. | Kısmi / kabul açık |
 | EML-05 | Mailing list ve üyelik yönetimi; OS/eklenti matrisi. | İnceleme/kabul açık |
 | EML-06 | Domain mail aç/kapat, harici mail ve bulunmayan alıcı politikası. | İnceleme/kabul açık |
 | EML-07 | Webmail, mail istemci ayarları ve otomatik yapılandırma. | İnceleme/kabul açık |
@@ -249,9 +251,9 @@ Her ID için uygulamada gerçek kaynak+mount edilmiş endpoint, kullanıcı akı
 | --- | --- | --- |
 | MIG-01 | Plesk'ten müşteri/reseller/paket/abonelik kaynaklarını içe aktarma. | İnceleme/kabul açık |
 | MIG-02 | Desteklenen diğer hosting panellerinden taşıma. | İnceleme/kabul açık |
-| MIG-03 | Site/mail/DB/DNS/SSL/kullanıcı verisi ve IP eşleme. | İnceleme/kabul açık |
-| MIG-04 | Ön kontrol, tekrar senkronizasyon ve taşıma sonrası doğrulama. | İnceleme/kabul açık |
-| MIG-05 | Site/mail import; kısıtlar ve veri kaybı uyarısı. | İnceleme/kabul açık |
+| MIG-03 | Site/mail/DB/DNS/SSL/kullanıcı verisi ve IP eşleme. | Kısmi / kabul açık |
+| MIG-04 | Ön kontrol, tekrar senkronizasyon ve taşıma sonrası doğrulama. | Kısmi / kabul açık |
+| MIG-05 | Site/mail import; kısıtlar ve veri kaybı uyarısı. | Kısmi / kabul açık |
 | MIG-06 | Panel güncellemesi/OS migration/rollback ve kurtarma. | İnceleme/kabul açık |
 
 ## 20 — Arayüz, marka ve hesap deneyimi [S01, S26]

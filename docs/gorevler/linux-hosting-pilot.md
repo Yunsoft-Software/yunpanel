@@ -8,6 +8,10 @@
 - **Taşıma.** Yerel PHP 8.3 ve MariaDB 10.11 ile Plesk hazırlama komutu aynı baytları kopyaladı. PHP gerçek HTTP yanıtı verdi. Operatör SQL dökümünü yalnız hedef veritabanına yetkili hesapla yükledi. İki Türkçe satır okundu, kardeş veritabanı korundu ve ikinci staging isteği reddedildi. Ubuntu ARM64 paketi çıkarılarak iki CLI giriş noktası çalıştırıldı. [Operatör adımları](../operations.md#plesk-pilotu).
 - **Posta.** Dovecot gerçek Sieve motorunda Türkçe otomatik yanıt, yerel INBOX, kardeş kutu ve kendi adresinden gelen mesaj doğrulandı. Rspamd 3.8.1 gerçek taramada ilk statik liste biçimini yükledi ama puan üretmedi. Yerleşik statik haritayla tek alıcıya +5, kardeş ve çoklu alıcıya sıfır politika puanı, kimlik doğrulamalı gönderime puan dışı işaret doğrulandı. Ürün içinden ayar kaydı, uygulama ve geri alma ile SMTP/IMAP teslimatı açık.
 
+Sieve, mevcut yönlendirmeyle zincirde çalıştı. Kopyalı yönlendirme yerel teslimatı korudu ve yalnız yönlendirme yerel teslimatı kaldırdı. Null gönderici, süre içi tekrar ve gerçek SMTP teslimi açık. DMARC olumlu izin listesi denemesinde yerel TXT sorguları zaman aşımına düştü ve Rspamd izin puanı uygulamadı. DMARC geçen iletide beklenen eksi puan ayrı doğrulanacak.
+
+`4184ce36` için tam görev denetimi, lint, test ve derleme geçti. Aynı kaynak Ubuntu ARM64 Debian paketi `0.3.0-2026112099` olarak oluşturuldu. Paket manifesti ve Plesk/Recovery CLI girişleri çıkarılan paket içinde doğrulandı. Paket SHA-256 `2ef900fa605fa7686c954d6d47b992ddf47bf4634462f0f96ecb6fc74bd724c2`. Bu paket yerel prova çıktısıdır.
+
 İlk canlı adım ayrı yedek hedefinde uzak depo ve kapalı kaynakla kurtarma provasıdır. Ardından yetkili Plesk dışa aktarımıyla PHP ve postalı WordPress pilotu, ayrı ağdan DNS ve WAF kabulü gelir.
 
 ### T936 · Dosya ve SQL taşıma paketini yerelde hazırla
