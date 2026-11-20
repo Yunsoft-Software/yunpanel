@@ -15,6 +15,7 @@ const DOCKER_COMPOSE_START = 'docker.compose.start';
 const DOCKER_COMPOSE_STOP = 'docker.compose.stop';
 const DOCKER_COMPOSE_RESTART = 'docker.compose.restart';
 const DOCKER_COMPOSE_REMOVE = 'docker.compose.remove';
+const DOCKER_VOLUME_DELETE = 'docker.volume.delete';
 const DOCKER_OPERATIONS = Object.freeze([
   DOCKER_COMPOSE_BUILD,
   DOCKER_COMPOSE_PULL,
@@ -23,8 +24,13 @@ const DOCKER_OPERATIONS = Object.freeze([
   DOCKER_COMPOSE_RESTART,
   DOCKER_COMPOSE_REMOVE,
 ]);
+const DOCKER_VOLUME_OPS = Object.freeze([DOCKER_VOLUME_DELETE]);
 const DOCKER_OPERATION_SET = new Set(DOCKER_OPERATIONS);
+const DOCKER_VOLUME_OPERATION_SET = new Set(DOCKER_VOLUME_OPS);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const PROJECT_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,62}$/;
+const VOLUME_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+const VOLUME_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$/;
 const REGISTRY_HOST_PATTERN = /^(?:localhost|[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?)(?::[1-9][0-9]{0,4})?$/;
 
 export const OPERATIONS = Object.freeze({
@@ -35,12 +41,16 @@ export const OPERATIONS = Object.freeze({
   DOCKER_COMPOSE_STOP,
   DOCKER_COMPOSE_RESTART,
   DOCKER_COMPOSE_REMOVE,
+  DOCKER_VOLUME_DELETE,
 });
 
 export const DOCKER_COMPOSE_OPERATIONS = DOCKER_OPERATIONS;
+export const DOCKER_VOLUME_OPERATIONS = DOCKER_VOLUME_OPS;
 
 export function isKnownOperation(operation) {
-  return isBaseKnownOperation(operation) || DOCKER_OPERATION_SET.has(operation);
+  return isBaseKnownOperation(operation)
+    || DOCKER_OPERATION_SET.has(operation)
+    || DOCKER_VOLUME_OPERATION_SET.has(operation);
 }
 
 function validateCredentialRevisions(value, operation, errors) {
@@ -93,8 +103,54 @@ function validateDockerComposeLifecycle(payload, operation, errors) {
   validateCredentialRevisions(payload.credentialRevisions, operation, errors);
 }
 
+function validateDockerVolumeDelete(payload, operation, errors) {
+  const allowed = new Set([
+    'projectId',
+    'projectName',
+    'expectedProjectRevision',
+    'expectedComposeSha256',
+    'volumeKey',
+    'volumeName',
+    'volumeFingerprint',
+    'previewDigest',
+  ]);
+  if (Object.keys(payload).length !== allowed.size || Object.keys(payload).some((key) => !allowed.has(key))) {
+    errors.push(`${operation} contains unsupported arguments`);
+  }
+  try {
+    if (assertUuid(payload.projectId, 'projectId') !== payload.projectId) throw new Error('noncanonical');
+  } catch {
+    errors.push(`${operation} projectId is invalid`);
+  }
+  if (typeof payload.projectName !== 'string' || !PROJECT_NAME_PATTERN.test(payload.projectName)) {
+    errors.push(`${operation} projectName is invalid`);
+  }
+  if (!Number.isSafeInteger(payload.expectedProjectRevision) || payload.expectedProjectRevision < 1) {
+    errors.push(`${operation} expectedProjectRevision is invalid`);
+  }
+  if (typeof payload.expectedComposeSha256 !== 'string' || !SHA256_PATTERN.test(payload.expectedComposeSha256)) {
+    errors.push(`${operation} expectedComposeSha256 is invalid`);
+  }
+  if (typeof payload.volumeKey !== 'string' || !VOLUME_KEY_PATTERN.test(payload.volumeKey)) {
+    errors.push(`${operation} volumeKey is invalid`);
+  }
+  if (typeof payload.volumeName !== 'string' || !VOLUME_NAME_PATTERN.test(payload.volumeName)
+    || (typeof payload.projectName === 'string' && typeof payload.volumeKey === 'string'
+      && payload.volumeName !== `${payload.projectName}_${payload.volumeKey}`)) {
+    errors.push(`${operation} volumeName is invalid`);
+  }
+  if (typeof payload.volumeFingerprint !== 'string' || !SHA256_PATTERN.test(payload.volumeFingerprint)) {
+    errors.push(`${operation} volumeFingerprint is invalid`);
+  }
+  if (typeof payload.previewDigest !== 'string' || !SHA256_PATTERN.test(payload.previewDigest)) {
+    errors.push(`${operation} previewDigest is invalid`);
+  }
+}
+
 export function validateOperationEnvelope(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value) || !DOCKER_OPERATION_SET.has(value.operation)) {
+  const isCompose = DOCKER_OPERATION_SET.has(value?.operation);
+  const isVolume = DOCKER_VOLUME_OPERATION_SET.has(value?.operation);
+  if (!value || typeof value !== 'object' || Array.isArray(value) || (!isCompose && !isVolume)) {
     return validateBaseOperationEnvelope(value);
   }
   const errors = [];
@@ -103,8 +159,10 @@ export function validateOperationEnvelope(value) {
   }
   if (!value.payload || typeof value.payload !== 'object' || Array.isArray(value.payload)) {
     errors.push('payload must be an object');
-  } else {
+  } else if (isCompose) {
     validateDockerComposeLifecycle(value.payload, value.operation, errors);
+  } else {
+    validateDockerVolumeDelete(value.payload, value.operation, errors);
   }
   if (value.protocolVersion !== AGENT_PROTOCOL_VERSION) {
     errors.push(`protocolVersion must equal ${AGENT_PROTOCOL_VERSION}`);
@@ -113,7 +171,7 @@ export function validateOperationEnvelope(value) {
 }
 
 export function createOperationEnvelope({ id, operation, payload = {} }) {
-  if (!DOCKER_OPERATION_SET.has(operation)) {
+  if (!DOCKER_OPERATION_SET.has(operation) && !DOCKER_VOLUME_OPERATION_SET.has(operation)) {
     return createBaseOperationEnvelope({ id, operation, payload });
   }
   const envelope = { id, operation, payload, protocolVersion: AGENT_PROTOCOL_VERSION };
@@ -124,6 +182,8 @@ export function createOperationEnvelope({ id, operation, payload = {} }) {
 
 export const dockerProtocolInternals = Object.freeze({
   operations: DOCKER_OPERATIONS,
+  volumeOperations: DOCKER_VOLUME_OPS,
   validateDockerComposeLifecycle,
+  validateDockerVolumeDelete,
   validateCredentialRevisions,
 });

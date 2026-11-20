@@ -328,6 +328,21 @@ export function summarizeDockerComposeConfig(value, {
     name: networkName,
     scope: namedNetworkScope(networkName, networkDefinitions, expected),
   }));
+  const volumeNames = resourceNames(value.volumes, 'volume');
+  const volumeDetails = volumeNames.map((volumeName) => {
+    const def = volumeDefinitions[volumeName];
+    const scope = namedVolumeScope(volumeName, volumeDefinitions, expected);
+    const external = def?.external === true;
+    const runtimeName = typeof def?.name === 'string' && def.name.length > 0
+      ? def.name
+      : `${expected}_${volumeName}`;
+    return Object.freeze({
+      name: volumeName,
+      scope,
+      external,
+      runtimeName,
+    });
+  });
   return Object.freeze({
     version: 1,
     projectName: expected,
@@ -337,7 +352,8 @@ export function summarizeDockerComposeConfig(value, {
     services: Object.freeze(services),
     networks: Object.freeze(networkNames),
     networkDetails: Object.freeze(networkDetails),
-    volumes: Object.freeze(resourceNames(value.volumes, 'volume')),
+    volumes: Object.freeze(volumeNames),
+    volumeDetails: Object.freeze(volumeDetails),
     secretCount: resourceNames(value.secrets, 'secret').length,
     configCount: resourceNames(value.configs, 'config').length,
     validated: true,

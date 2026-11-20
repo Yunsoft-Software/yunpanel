@@ -51,6 +51,11 @@ export {
   DockerVolumeInspectorError,
   dockerVolumeInspectorInternals,
 } from './docker-volume-inspector.js';
+export {
+  createDockerVolumeManager,
+  DockerVolumeManagerError,
+  dockerVolumeManagerInternals,
+} from './docker-volume-manager.js';
 export { createNginxInspector, inspectNginx, parseNginxConfigMetadata } from './nginx-inspector.js';
 export { createNginxManager, nginxManager, NginxManagerError } from './nginx-manager.js';
 export {
