@@ -57,8 +57,8 @@ Sieve, mevcut yönlendirmeyle zincirde çalıştı. Kopyalı yönlendirme yerel 
 - **Kabul:** Yönetilen yapılandırma yalnız doğrulanmış kutular için değişir. Sieve derleme, izin, Rspamd configtest, başarısız uygulama sonrası geri dönüş ve yönetilmeyen dosya koruması kanıtlanır. Gerçek dosya ve motor testi kullan. Üretim veya .28 kurulumu bu işte yok.
 
 ### T943 · Otomatik yanıt ve spam kurallarını posta kutusuna kaydet
-- **Bağımlı:** T938
-- **Dosyalar:** `apps/api/src/mailbox-registry.js`, `apps/api/src/mailbox-http.js`, `apps/api/test/mailbox-registry.test.js`, `apps/api/test/mailbox-delivery-policy-http.test.js`
+- **Bağımlı:** T942
+- **Dosyalar:** `apps/api/src/mailbox-registry.js`, `apps/api/src/mailbox-http.js`, `apps/api/src/management-audit.js`, `apps/api/test/mailbox-registry.test.js`, `apps/api/test/mailbox-delivery-policy-http.test.js`
 - **İş:** Kuralı mevcut posta kutusu kaydına geriye uyumlu olarak bağla ve normal yedek/silme yaşam döngüsünü kullan. Mevcut yerel kapsam denetimiyle yalnız Owner için `GET/PUT /api/mailboxes/:mailboxId/delivery-policy`. Yanıt `data: {mailboxId, revision, vacation, allow, deny}`, PUT `{expectedRevision, vacation, allow, deny}`. `vacation` null veya `{subject, body}`. Boş listeler ve null politikayı temizler. Mevcut revision, CSRF ve yetki korunur. `materializeEnabledDeliveryPolicies()` etkin kutular için ayrıca adresi döndürür.
 - **Kabul:** Gerçek yerel HTTP/auth ve dosya registry ile kaydet, tekrar oku, stale revision, başka rol reddi, bozuk liste reddi, temizleme ve eski kayıt okuma geçer. Genel posta kutusu listesi mesaj içeriğini döndürmez.
 
