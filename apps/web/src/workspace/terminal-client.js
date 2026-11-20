@@ -1,5 +1,7 @@
 const CAPABILITY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const ID_PATTERN = /^[0-9a-f-]{36}$/i;
+const CONTAINER_ID_PATTERN = /^[a-f0-9]{64}$/;
+const ALLOWED_DOCKER_SHELLS = new Set(['/bin/bash', '/bin/sh']);
 const PROTOCOL = 'yunpanel-terminal-v1';
 const CAPABILITY_PREFIX = 'yunpanel-terminal-capability.';
 const TTYD_PROTOCOL = 'yunpanel-ttyd-v1';
@@ -19,6 +21,27 @@ function targetIdentity(target) {
   if (target.scope === 'site' && typeof target.serverId === 'string' && typeof target.websiteId === 'string'
     && /^yunapp-[a-f0-9]{12}$/.test(target.user ?? '') && typeof target.cwd === 'string') {
     return `site:${target.serverId}:${target.websiteId}:${target.user}:${target.cwd}`;
+  }
+  if (target.scope === 'docker_container') {
+    const fields = [
+      'scope', 'serverId', 'dockerProjectId', 'projectName', 'serviceName',
+      'containerId', 'containerName', 'user', 'uid', 'gid', 'cwd', 'shell',
+    ];
+    if (!exactObject(target, fields)) return null;
+    if (typeof target.serverId !== 'string' || !target.serverId
+      || typeof target.dockerProjectId !== 'string' || !target.dockerProjectId
+      || typeof target.projectName !== 'string' || !target.projectName
+      || typeof target.serviceName !== 'string' || !target.serviceName
+      || typeof target.containerName !== 'string' || !target.containerName
+      || !CONTAINER_ID_PATTERN.test(target.containerId ?? '')
+      || !Number.isSafeInteger(target.uid) || target.uid < 1
+      || !Number.isSafeInteger(target.gid) || target.gid < 1
+      || target.user !== `${target.uid}:${target.gid}`
+      || typeof target.cwd !== 'string' || !target.cwd.startsWith('/')
+      || !ALLOWED_DOCKER_SHELLS.has(target.shell)) {
+      return null;
+    }
+    return `docker_container:${target.serverId}:${target.dockerProjectId}:${target.containerId}:${target.user}:${target.cwd}:${target.shell}`;
   }
   return null;
 }
@@ -99,6 +122,37 @@ export function parseTerminalMessage(raw) {
   if (message?.type === 'revoked' && exactObject(message, ['type', 'reason']) && typeof message.reason === 'string') return message;
   if (message?.type === 'pong' && exactObject(message, ['type'])) return message;
   throw new Error('Terminal iletisi geçersiz.');
+}
+
+export function terminalCapabilityRequestBody(target) {
+  if (target?.scope === 'server' && typeof target.serverId === 'string' && target.serverId) {
+    return { scope: 'server', serverId: target.serverId };
+  }
+  if (target?.scope === 'site' && typeof target.websiteId === 'string' && target.websiteId) {
+    return { scope: 'site', websiteId: target.websiteId };
+  }
+  if (target?.scope === 'docker_container'
+    && typeof target.dockerProjectId === 'string' && target.dockerProjectId
+    && typeof target.containerId === 'string' && target.containerId) {
+    return {
+      scope: 'docker_container',
+      dockerProjectId: target.dockerProjectId,
+      containerId: target.containerId,
+    };
+  }
+  return null;
+}
+
+export function terminalContextUser(target) {
+  if (target?.scope === 'server') return 'root';
+  if (target?.scope === 'docker_container') return target.user || 'Root olmayan kullanıcı';
+  return 'Site kullanıcısı';
+}
+
+export function terminalContextCwd(target) {
+  if (target?.scope === 'server') return '/root';
+  if (target?.scope === 'docker_container') return target.cwd || '/';
+  return 'Site kök dizini';
 }
 
 export const terminalClientInternals = Object.freeze({

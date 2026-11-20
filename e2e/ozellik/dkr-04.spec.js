@@ -386,16 +386,148 @@ print(json.dumps({'content':open(p,'r',encoding='utf-8',errors='replace').read()
     expect(errorText.toLowerCase()).toMatch(/already bound|bağlı|çakışma|conflict|managed_compose_binding|önizleme doğrulanamadı/);
   });
 
-  test('eksik özellik: container terminal / konsol bağlantısı (Plesk parity)', async ({ page }) => {
-    test.fail(true, 'BULGU DKR-04: Plesk eşdeğeri container terminal / console bağlantısı YunPanel Docker arayüzünde ve terminal resolver katmanında henüz mevcut değil');
-
+  test('container konsolu: non-root oturum açılır, komut ve resize çalışır, kapatma ve container durdurma sonrası süreçler temizlenir', async ({ page }) => {
     expect(createdProjectId).toBeTruthy();
-    await page.goto(`/docker/${encodeURIComponent(createdProjectId)}`);
-    await expect(page.locator('h1')).toContainText(projectName, { timeout: 15000 });
 
-    // Docker detay sayfasında container terminal yüzeyi, terminal butonu veya terminal sekmesi aranır
-    const terminalElement = page.locator('.ws-terminal-surface, section:has-text("Container terminali"), button:has-text("Terminal"), a:has-text("Terminal")');
-    await expect(terminalElement).toBeVisible({ timeout: 4000 });
+    function inspectContainerIdAndProcesses(name) {
+      return hostProbe.runPythonJson(`import json,re,subprocess,sys
+proj=sys.argv[1]
+assert re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,62}',proj)
+cid_res=subprocess.run(
+    ['docker','ps','-a','--no-trunc','--filter',f'label=com.docker.compose.project={proj}','--format','{{.ID}} {{.Names}} {{.Status}}'],
+    capture_output=True,text=True,timeout=15
+)
+lines=[l.strip() for l in (cid_res.stdout or '').splitlines() if l.strip()]
+cid=lines[0].split()[0] if lines else ''
+cname=lines[0].split()[1] if lines and len(lines[0].split())>=2 else ''
+status=' '.join(lines[0].split()[2:]) if lines and len(lines[0].split())>=3 else ''
+top_out=''
+if cid and status.startswith('Up'):
+    t=subprocess.run(['docker','top',cid,'-eo','pid,user,args'],capture_output=True,text=True,timeout=15)
+    top_out=t.stdout or ''
+ps_res=subprocess.run(['ps','-eo','pid,args'],capture_output=True,text=True,timeout=15)
+host_exec=[l.strip() for l in (ps_res.stdout or '').splitlines() if 'docker' in l and 'exec' in l and ((cid and cid[:12] in l) or (cname and cname in l))]
+print(json.dumps({'containerId':cid,'containerName':cname,'status':status,'top':top_out,'hostExec':host_exec}))`, [name], { timeoutMs: 25_000 });
+    }
+
+    const consoleMarker = `dkr04_${timestamp}`;
+    const closeSessionTag = `DKR04_CLOSE_${timestamp}`;
+    const stopSessionTag = `DKR04_STOP_${timestamp}`;
+    const outputs = [];
+    const sentResizes = [];
+
+    page.on('websocket', (socket) => {
+      socket.on('framereceived', (event) => {
+        try {
+          const message = JSON.parse(String(event.payload));
+          if (message.type === 'output' && typeof message.data === 'string') outputs.push(message.data);
+        } catch { /* Non-terminal WebSocket frames are ignored. */ }
+      });
+      socket.on('framesent', (event) => {
+        try {
+          const message = JSON.parse(String(event.payload));
+          if (message.type === 'resize') sentResizes.push(message);
+        } catch { /* Non-terminal WebSocket frames are ignored. */ }
+      });
+    });
+
+    await page.goto(`/docker/${encodeURIComponent(createdProjectId)}`);
+    await expect(page.locator('h1')).toContainText(projectName, { timeout: 15_000 });
+
+    const runtimeSection = page.locator('section').filter({ has: page.locator('h2:text-is("Runtime")') });
+    await expect(runtimeSection).toBeVisible({ timeout: 15_000 });
+
+    // 1. Konsolu aç -> Terminali aç -> root olmayan canlı oturum (65534:65534)
+    const openConsoleBtn = runtimeSection.getByRole('button', { name: 'Konsolu aç', exact: true }).first();
+    await expect(openConsoleBtn).toBeVisible({ timeout: 15_000 });
+    await openConsoleBtn.click();
+
+    const consoleSection = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Konteyner konsolu', exact: true }) });
+    await expect(consoleSection).toBeVisible({ timeout: 15_000 });
+
+    await consoleSection.getByRole('button', { name: /Terminali aç|Yeniden bağlan/ }).click();
+    await expect(consoleSection.getByRole('status')).toHaveText('Bağlı', { timeout: 20_000 });
+
+    const contextBar = consoleSection.locator('[aria-label="Terminal bağlamı"]');
+    await expect(contextBar).toContainText('65534:65534', { timeout: 10_000 });
+    await expect(contextBar).not.toContainText('0:0');
+
+    // 2. Non-root UID ve komut çıktısını doğrula (asla uid 0 / root değil)
+    await consoleSection.locator('.ws-terminal-surface').click();
+    await page.keyboard.type(`printf 'UID=%s %s\\n' "$(id -u)" "CONSOLE_OK_${consoleMarker}"`);
+    await page.keyboard.press('Enter');
+
+    await expect.poll(
+      () => outputs.join('').includes(`UID=65534 CONSOLE_OK_${consoleMarker}`),
+      { timeout: 20_000, intervals: [500, 1000] },
+    ).toBe(true);
+    expect(outputs.join('')).not.toContain(`UID=0 CONSOLE_OK_${consoleMarker}`);
+    await expect(consoleSection.locator('.xterm-accessibility')).toContainText(`UID=65534 CONSOLE_OK_${consoleMarker}`, { timeout: 10_000 });
+
+    // 3. Terminal resize olayı gönderilir ve oturum canlı kalır
+    const resizeCountBefore = sentResizes.length;
+    await page.setViewportSize({ width: 1360, height: 860 });
+    await page.setViewportSize({ width: 1180, height: 740 });
+    await expect.poll(() => sentResizes.length, { timeout: 15_000, intervals: [300, 700] }).toBeGreaterThan(resizeCountBefore);
+
+    await consoleSection.locator('.ws-terminal-surface').click();
+    await page.keyboard.type(`echo "RESIZE_OK_${consoleMarker}"`);
+    await page.keyboard.press('Enter');
+    await expect.poll(
+      () => outputs.join('').includes(`RESIZE_OK_${consoleMarker}`),
+      { timeout: 15_000, intervals: [500, 1000] },
+    ).toBe(true);
+
+    // 4. Oturum içi benzersiz süreci başlat ve hem konteynerde hem host'ta varlığını doğrula
+    await page.keyboard.type(`sh -c 'sleep 60' "${closeSessionTag}"`);
+    await page.keyboard.press('Enter');
+    await expect.poll(() => {
+      const info = inspectContainerIdAndProcesses(projectName);
+      return info.top.includes(closeSessionTag) && info.hostExec.length > 0;
+    }, { timeout: 15_000, intervals: [500, 1000] }).toBe(true);
+
+    // 5. Konsolu kapat (Bağlantıyı kapat + Konsolu kapat) ve süreç temizliğini host üzerinden doğrula
+    await consoleSection.getByRole('button', { name: 'Bağlantıyı kapat', exact: true }).click();
+    await expect(consoleSection.getByRole('status')).toHaveText('Bağlantı kapandı', { timeout: 15_000 });
+
+    await consoleSection.getByRole('button', { name: 'Konsolu kapat', exact: true }).click();
+    await expect(consoleSection).not.toBeVisible({ timeout: 10_000 });
+
+    await expect.poll(() => {
+      const info = inspectContainerIdAndProcesses(projectName);
+      return !info.top.includes(closeSessionTag) && !info.top.includes('/bin/sh') && info.hostExec.length === 0;
+    }, { timeout: 25_000, intervals: [1000, 2000] }).toBe(true);
+
+    // 6. Konsol açıkken proje durdurulduğunda (stop) bağlantının kapandığını ve süreçlerin temizlendiğini doğrula
+    await runtimeSection.getByRole('button', { name: 'Konsolu aç', exact: true }).first().click();
+    await expect(consoleSection).toBeVisible({ timeout: 15_000 });
+    await consoleSection.getByRole('button', { name: /Terminali aç|Yeniden bağlan/ }).click();
+    await expect(consoleSection.getByRole('status')).toHaveText('Bağlı', { timeout: 20_000 });
+
+    await consoleSection.locator('.ws-terminal-surface').click();
+    await page.keyboard.type(`sh -c 'sleep 60' "${stopSessionTag}"`);
+    await page.keyboard.press('Enter');
+    await expect.poll(() => {
+      const info = inspectContainerIdAndProcesses(projectName);
+      return info.top.includes(stopSessionTag) && info.hostExec.length > 0;
+    }, { timeout: 15_000, intervals: [500, 1000] }).toBe(true);
+
+    const lifecycleSection = page.locator('section').filter({ has: page.locator('h2:text-is("Lifecycle")') });
+    const stopBtn = lifecycleSection.locator('button:has-text("Durdur")');
+    await expect(stopBtn).toBeEnabled({ timeout: 20_000 });
+    await stopBtn.click();
+    await confirmLifecycleAction(page, 'stop');
+
+    await expect.poll(() => {
+      const info = inspectContainerIdAndProcesses(projectName);
+      return !info.status.startsWith('Up') && info.hostExec.length === 0;
+    }, { timeout: 60_000, intervals: [1500, 2500] }).toBe(true);
+
+    await expect.poll(async () => {
+      if (!(await consoleSection.isVisible().catch(() => false))) return 'panel-closed';
+      const statusText = (await consoleSection.getByRole('status').textContent().catch(() => ''))?.trim() ?? '';
+      return statusText !== 'Bağlı' ? statusText : 'still-open';
+    }, { timeout: 25_000, intervals: [1000, 2000] }).not.toBe('still-open');
   });
 
   test('temizlik: bağlı subdomain ve Docker Compose projesi panel akışıyla kaldırılır ve fiziksel yokluk doğrulanır', async ({ page }) => {

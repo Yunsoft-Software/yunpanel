@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import {
   getDockerCatalog,
+  getDockerConsoleTargets,
   getDockerDiagnosis,
   getDockerHistory,
   getDockerLogs,
@@ -16,8 +17,10 @@ import DockerConfigPanel from './DockerConfigPanel.jsx';
 import DockerLifecyclePanel from './DockerLifecyclePanel.jsx';
 import DockerProjectCreateDialog from './DockerProjectCreateDialog.jsx';
 import DockerVolumesPanel from './DockerVolumesPanel.jsx';
+import LazyTerminalPanel from './LazyTerminalPanel.jsx';
 import { Badge, Button, DEFAULT_DOCKER_STACK_TEMPLATES, EmptyState, KeyValues, LinkButton, PageHeading, Section } from './PanelKit.jsx';
 import { formatDate } from './site-model.js';
+import { useWorkspace } from './WorkspaceContext.jsx';
 
 function useAsyncResource(loader, dependencies = [], { enabled = true } = {}) {
   const [state, setState] = useState({ status: enabled ? 'loading' : 'idle', data: null, error: null });
@@ -432,14 +435,130 @@ function StoragePanel({ project, backup }) {
   </Section>;
 }
 
-function RuntimePanel({ projectId }) {
-  const runtime = useAsyncResource(() => getDockerRuntime(projectId), [projectId]);
+function findConsoleTarget(targets, container) {
+  if (!Array.isArray(targets) || !container) return null;
+  const id = typeof container.id === 'string' ? container.id : '';
+  const name = typeof container.name === 'string' ? container.name : '';
+  return targets.find((item) => (
+    (id && item.containerId === id)
+    || (id.length >= 12 && typeof item.containerId === 'string' && item.containerId.startsWith(id))
+    || (name && item.containerName === name)
+  )) ?? null;
+}
+
+function RuntimePanel({ projectId, projectRevision = 0 }) {
+  const { isOwner } = useWorkspace();
+  const runtime = useAsyncResource(() => getDockerRuntime(projectId), [projectId, projectRevision]);
+  const consoleTargets = useAsyncResource(
+    (signal) => getDockerConsoleTargets(projectId, { signal }),
+    [projectId, projectRevision],
+    { enabled: Boolean(isOwner && projectId) },
+  );
+  const [activeContainerId, setActiveContainerId] = useState(null);
+  const targets = useMemo(
+    () => (Array.isArray(consoleTargets.data?.targets) ? consoleTargets.data.targets : []),
+    [consoleTargets.data],
+  );
+
+  useEffect(() => {
+    setActiveContainerId(null);
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!activeContainerId || consoleTargets.status !== 'ready') return;
+    const stillEligible = targets.some((item) => item.containerId === activeContainerId && item.eligible === true);
+    if (!stillEligible) setActiveContainerId(null);
+  }, [activeContainerId, consoleTargets.status, targets]);
+
+  const activeTarget = isOwner && activeContainerId
+    ? (targets.find((item) => item.containerId === activeContainerId && item.eligible === true) ?? null)
+    : null;
+
+  const refreshAllRuntime = () => {
+    runtime.refresh();
+    if (isOwner) consoleTargets.refresh();
+  };
+
   const result = runtime.data;
-  return <Section title="Runtime" actions={<Button icon="refresh" onClick={runtime.refresh}>Yenile</Button>}><LoadNotice resource={runtime} label="Runtime" />{result && <div className="ws-section-body"><KeyValues items={[
-    ['Durum', <Badge key="runtime" state={runtimeBadge(result.status)}>{result.status}</Badge>],
-    ['Container', result.containerCount],
-    ['Proje', result.projectName],
-  ]} />{result.containers?.length > 0 && <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Container</th><th>Durum</th><th>Health</th><th>Exit</th></tr></thead><tbody>{result.containers.map((container) => <tr key={container.id}><td><strong>{container.name ?? container.id.slice(0, 12)}</strong><small>{container.image ?? '—'}</small></td><td><Badge state={container.runtime?.running ? 'active' : container.runtime?.restarting ? 'warning' : 'offline'}>{container.runtime?.status ?? 'unknown'}</Badge></td><td>{container.runtime?.health?.status ?? '—'}</td><td>{container.runtime?.exitCode ?? '—'}</td></tr>)}</tbody></table></div>}</div>}</Section>;
+  return <>
+    <Section title="Runtime" actions={<Button icon="refresh" onClick={refreshAllRuntime}>Yenile</Button>}>
+      <LoadNotice resource={runtime} label="Runtime" />
+      {result && (
+        <div className="ws-section-body">
+          <KeyValues items={[
+            ['Durum', <Badge key="runtime" state={runtimeBadge(result.status)}>{result.status}</Badge>],
+            ['Container', result.containerCount],
+            ['Proje', result.projectName],
+          ]} />
+          {result.containers?.length > 0 && (
+            <div className="ws-table-scroll">
+              <table className="ws-table">
+                <thead>
+                  <tr>
+                    <th>Container</th>
+                    <th>Durum</th>
+                    <th>Health</th>
+                    <th>Exit</th>
+                    {isOwner && <th>Konsol</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.containers.map((container) => {
+                    const consoleTarget = isOwner ? findConsoleTarget(targets, container) : null;
+                    const isOpen = Boolean(consoleTarget && activeContainerId === consoleTarget.containerId);
+                    return (
+                      <tr key={container.id}>
+                        <td><strong>{container.name ?? container.id.slice(0, 12)}</strong><small>{container.image ?? '—'}</small></td>
+                        <td><Badge state={container.runtime?.running ? 'active' : container.runtime?.restarting ? 'warning' : 'offline'}>{container.runtime?.status ?? 'unknown'}</Badge></td>
+                        <td>{container.runtime?.health?.status ?? '—'}</td>
+                        <td>{container.runtime?.exitCode ?? '—'}</td>
+                        {isOwner && (
+                          <td>
+                            {consoleTarget?.eligible === true ? (
+                              <div className="ws-actions">
+                                {isOpen ? (
+                                  <Button onClick={() => setActiveContainerId(null)}>Konsolu kapat</Button>
+                                ) : (
+                                  <Button icon="terminal" onClick={() => setActiveContainerId(consoleTarget.containerId)}>Konsolu aç</Button>
+                                )}
+                                <small className="ws-muted">{consoleTarget.user}</small>
+                              </div>
+                            ) : consoleTarget ? (
+                              <span className="ws-muted">{consoleTarget.reason || 'Konsol şu anda kullanılamıyor.'}</span>
+                            ) : consoleTargets.status === 'loading' ? (
+                              <span className="ws-muted">Kontrol ediliyor…</span>
+                            ) : consoleTargets.status === 'error' ? (
+                              <span className="ws-muted">Konsol durumu alınamadı</span>
+                            ) : (
+                              <span className="ws-muted">—</span>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </Section>
+    {isOwner && activeTarget && (
+      <LazyTerminalPanel
+        title="Konteyner konsolu"
+        description={`${activeTarget.containerName} · ${activeTarget.serviceName} servisi için root olmayan konteyner oturumu.`}
+        target={{
+          scope: 'docker_container',
+          dockerProjectId: projectId,
+          containerId: activeTarget.containerId,
+          user: activeTarget.user,
+          cwd: activeTarget.cwd,
+        }}
+        extraActions={<Button onClick={() => setActiveContainerId(null)}>Konsolu kapat</Button>}
+      />
+    )}
+  </>;
 }
 
 function LogsPanel({ project }) {
@@ -470,7 +589,7 @@ function DockerProjectDetail({ projectId }) {
   const refresh = () => { detail.refresh(); storageBackup.refresh(); };
   return <><nav className="ws-breadcrumb"><Link to="/docker">Docker</Link><span>/ {project?.projectName ?? projectId}</span></nav><PageHeading title={project?.projectName ? project.projectName : 'Docker projesi'} description="Compose desired state, depolama yedekleme politikası, yayınlanan portlar, runtime ve işlem geçmişi." actions={<Button icon="refresh" onClick={refresh}>Yenile</Button>} /><LoadNotice resource={detail} label="Docker proje detayı" />{project && <><Section title="Desired state"><div className="ws-section-body"><KeyValues items={[
     ['Revizyon', project.revision], ['Compose SHA-256', project.composeSha256], ['Servis', project.services?.length ?? 0], ['Network', project.networks?.length ?? 0], ['Named volume', project.volumes?.length ?? 0], ['Mount', storageCount], ['Env revizyonu', data.environment?.revision ?? 0], ['Registry credential', data.credentials?.length ?? 0],
-  ]} /><div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Servis</th><th>Kaynak</th><th>Inner Port (Container targetPort)</th><th>Outer Port (Host publishedPort)</th><th>Published ports</th><th>Domain / Subdomain Proxy Hedefi</th></tr></thead><tbody>{project.services?.map((service) => <tr key={service.name}><td><strong>{service.name}</strong></td><td>{service.imageConfigured ? 'image' : service.buildConfigured ? 'build' : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <span key={`in:${portLabel(port)}`} className="yp-port-mapping-badge">Inner: {port.targetPort}/{port.protocol ?? 'tcp'}</span>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <span key={`out:${portLabel(port)}`} className="yp-port-mapping-badge">Outer: {(port.hostIp ?? '127.0.0.1')}:{port.publishedPort}</span>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <small key={portLabel(port)}>{portLabel(port)}</small>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <code key={`proxy:${portLabel(port)}`}>{innerOuterPortLabel(port)}</code>) : '—'}</td></tr>)}</tbody></table></div></div></Section><LoadNotice resource={storageBackup} label="Docker storage backup policy" /><StoragePanel project={project} backup={storageBackup.data} /><DockerVolumesPanel project={project} onChanged={refresh} /><DockerConfigPanel data={data} onChanged={detail.refresh} /><DockerLifecyclePanel project={project} onChanged={detail.refresh} /><Section title="Website / Nginx diagnosis" description="Konteyner servislerinin web sitesi ve alan adı yönlendirme durumu."><DiagnosisPanel project={project} /></Section><RuntimePanel projectId={project.id} /><LogsPanel project={project} /><HistoryPanel projectId={project.id} /></>}</>;
+  ]} /><div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Servis</th><th>Kaynak</th><th>Inner Port (Container targetPort)</th><th>Outer Port (Host publishedPort)</th><th>Published ports</th><th>Domain / Subdomain Proxy Hedefi</th></tr></thead><tbody>{project.services?.map((service) => <tr key={service.name}><td><strong>{service.name}</strong></td><td>{service.imageConfigured ? 'image' : service.buildConfigured ? 'build' : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <span key={`in:${portLabel(port)}`} className="yp-port-mapping-badge">Inner: {port.targetPort}/{port.protocol ?? 'tcp'}</span>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <span key={`out:${portLabel(port)}`} className="yp-port-mapping-badge">Outer: {(port.hostIp ?? '127.0.0.1')}:{port.publishedPort}</span>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <small key={portLabel(port)}>{portLabel(port)}</small>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <code key={`proxy:${portLabel(port)}`}>{innerOuterPortLabel(port)}</code>) : '—'}</td></tr>)}</tbody></table></div></div></Section><LoadNotice resource={storageBackup} label="Docker storage backup policy" /><StoragePanel project={project} backup={storageBackup.data} /><DockerVolumesPanel project={project} onChanged={refresh} /><DockerConfigPanel data={data} onChanged={detail.refresh} /><DockerLifecyclePanel project={project} onChanged={detail.refresh} /><Section title="Website / Nginx diagnosis" description="Konteyner servislerinin web sitesi ve alan adı yönlendirme durumu."><DiagnosisPanel project={project} /></Section><RuntimePanel projectId={project.id} projectRevision={project.revision} /><LogsPanel project={project} /><HistoryPanel projectId={project.id} /></>}</>;
 }
 
 export default function DockerProjectsPage() {
@@ -488,4 +607,5 @@ export const dockerProjectsPageInternals = Object.freeze({
   storagePolicyLabel,
   storagePolicyBadge,
   runtimeBadge,
+  findConsoleTarget,
 });

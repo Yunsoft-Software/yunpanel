@@ -252,6 +252,10 @@ export function getDockerRuntime(projectId) {
   return panelRequest(`${projectPath(projectId)}/runtime`);
 }
 
+export function getDockerConsoleTargets(projectId, { signal } = {}) {
+  return panelRequest(`${projectPath(projectId)}/console-targets`, signal ? { signal } : undefined);
+}
+
 export function getDockerDiagnosis(projectId, { service, targetPort } = {}) {
   if (typeof service !== 'string' || !service) throw new Error('service is required');
   integer(targetPort, 'targetPort', 1, 65535);

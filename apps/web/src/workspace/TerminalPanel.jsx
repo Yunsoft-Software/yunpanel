@@ -7,7 +7,10 @@ import { Button, ErrorNotice, Section } from './PanelKit.jsx';
 import {
   createTerminalWebSocket,
   parseTerminalMessage,
+  terminalCapabilityRequestBody,
   terminalClientInternals,
+  terminalContextCwd,
+  terminalContextUser,
 } from './terminal-client.js';
 import './terminal.css';
 
@@ -20,11 +23,9 @@ const statusLabels = {
   error: 'Bağlantı hatası',
 };
 
-function issueBody(target) {
-  if (target?.scope === 'server' && typeof target.serverId === 'string') return { scope: 'server', serverId: target.serverId };
-  if (target?.scope === 'site' && typeof target.websiteId === 'string') return { scope: 'site', websiteId: target.websiteId };
-  return null;
-}
+const issueBody = terminalCapabilityRequestBody;
+const defaultContextUser = terminalContextUser;
+const defaultContextCwd = terminalContextCwd;
 
 function closeMessage(code) {
   if (code === 4001) return 'Oturum veya yetki değiştiği için terminal kapatıldı.';
@@ -38,7 +39,7 @@ function safeLine(value) {
   return String(value ?? '').replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').slice(0, 500);
 }
 
-export default function TerminalPanel({ target, title, description, unavailable = null }) {
+export default function TerminalPanel({ target, title, description, unavailable = null, extraActions = null }) {
   const container = useRef(null);
   const terminal = useRef(null);
   const fit = useRef(null);
@@ -49,10 +50,26 @@ export default function TerminalPanel({ target, title, description, unavailable 
   const [error, setError] = useState(null);
   const [context, setContext] = useState(null);
   const body = issueBody(target);
+  const targetKey = body ? JSON.stringify(body) : '';
+  const previousTargetKey = useRef(targetKey);
 
   function writeNotice(message) {
     terminal.current?.write(`\r\n\u001b[90m[YunPanel] ${safeLine(message)}\u001b[0m\r\n`);
   }
+
+  useEffect(() => {
+    if (previousTargetKey.current === targetKey) return;
+    previousTargetKey.current = targetKey;
+    attempt.current += 1;
+    connected.current = false;
+    const active = socket.current;
+    socket.current = null;
+    if (active && active.readyState < WebSocket.CLOSING) active.close(1000, 'target_changed');
+    setStatus('idle');
+    setContext(null);
+    setError(null);
+    terminal.current?.reset();
+  }, [targetKey]);
 
   useEffect(() => {
     const instance = new Terminal({
@@ -202,13 +219,14 @@ export default function TerminalPanel({ target, title, description, unavailable 
         onClick={connect}
         disabled={!body || pending}
       >{status === 'closed' || status === 'error' ? 'Yeniden bağlan' : 'Terminali aç'}</Button>}
+      {extraActions}
     </div>}
   >
     {unavailable && <div className="ws-notice ws-notice-warn"><span>{unavailable}</span></div>}
     <ErrorNotice error={error} />
     <div className="ws-terminal-context" aria-label="Terminal bağlamı">
-      <span><strong>Kullanıcı:</strong> {context?.user ?? (target?.scope === 'server' ? 'root' : 'Site kullanıcısı (izole)')}</span>
-      <span><strong>Dizin:</strong> {context?.cwd ?? (target?.scope === 'server' ? '/root' : 'Site document root')}</span>
+      <span><strong>Kullanıcı:</strong> {context?.user ?? defaultContextUser(target)}</span>
+      <span><strong>Dizin:</strong> {context?.cwd ?? defaultContextCwd(target)}</span>
     </div>
     <div
       ref={container}
@@ -218,4 +236,10 @@ export default function TerminalPanel({ target, title, description, unavailable 
   </Section>;
 }
 
-export const terminalPanelInternals = Object.freeze({ issueBody, closeMessage, safeLine });
+export const terminalPanelInternals = Object.freeze({
+  issueBody,
+  closeMessage,
+  safeLine,
+  defaultContextUser,
+  defaultContextCwd,
+});
