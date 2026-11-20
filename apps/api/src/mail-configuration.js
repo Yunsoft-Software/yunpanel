@@ -7,14 +7,18 @@ import {
   MailSqlTemplateError,
   MailSrsTemplateError,
   MailSubmissionTemplateError,
+  MailSpamPolicyTemplateError,
   MailTemplateError,
   MailTlsIdentityTemplateError,
+  MailVacationTemplateError,
   bindManagedMailTlsIdentity,
   enableManagedMailAntivirus,
   enableManagedMailSql,
   enableManagedMailSrs,
   enableManagedMailSubmission,
+  mailForwardingTemplatePolicy,
   mailSqlTemplatePolicy,
+  mailSpamPolicyTemplatePolicy,
   mailSrsTemplatePolicy,
   mailTemplatePolicy,
   normalizeMailboxAddress,
@@ -29,6 +33,10 @@ const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const LOCAL_STATUSES = new Set(['disabled', 'enabled']);
 const EMPTY_QUOTA_REGISTRY = Object.freeze({ listQuotas: async () => [] });
 const EMPTY_FORWARDING_REGISTRY = Object.freeze({ materializeEnabledForwardings: async () => [] });
+const DELIVERY_POLICY_ARTIFACT_PATHS = new Set([
+  mailForwardingTemplatePolicy.sievePath,
+  mailSpamPolicyTemplatePolicy.path,
+]);
 
 export class MailConfigurationError extends Error {
   constructor(code, message, status = 400) {
@@ -337,6 +345,27 @@ export function createMailConfigurationService({
 
     assertNoMailRoutingCycles(forwardings, aliases);
 
+    const vacations = [];
+    const spamPolicies = [];
+    const deliveryPolicies = await mailboxRegistry.materializeEnabledDeliveryPolicies?.() ?? [];
+    for (const policy of deliveryPolicies) {
+      const mailbox = enabledMailboxById.get(policy.mailboxId);
+      if (!mailbox || (!policy.vacation && !policy.allow.length && !policy.deny.length)) continue;
+      if (policy.address !== mailbox.address || policy.revision !== mailbox.revision) {
+        throw new MailConfigurationError(
+          'mail_configuration_delivery_policy_mismatch',
+          'Mailbox delivery policy changed during preparation',
+          409,
+        );
+      }
+      if (policy.vacation) vacations.push({ ...policy.vacation, mailbox: mailbox.address });
+      if (policy.allow.length || policy.deny.length) {
+        spamPolicies.push({ mailbox: mailbox.address, allow: policy.allow, deny: policy.deny });
+      }
+    }
+    const managedDeliveryPolicy = vacations.length > 0 || spamPolicies.length > 0
+      || await mailboxRegistry.hasManagedDeliveryPolicies?.() === true;
+
     if (publicMailboxes.length !== privateAccounts.length
       || publicMailboxes.some((mailbox, index) => mailbox.address !== privateAccounts[index]?.address)) {
       throw new MailConfigurationError('mail_configuration_account_mismatch', 'Mailbox registry public and protected account state is inconsistent', 409);
@@ -370,6 +399,8 @@ export function createMailConfigurationService({
       const legacyPreview = enableManagedMailSubmission(
         secureManagedMailPreview(previewManagedMailEmptyConfiguration()),
         [],
+        [],
+        managedDeliveryPolicy ? [] : undefined,
       );
       const preview = enableManagedMailSql(legacyPreview, {
         domains: [],
@@ -422,6 +453,8 @@ export function createMailConfigurationService({
         accounts,
         postmasterAddress,
         forwardings,
+        vacations: managedDeliveryPolicy ? vacations : undefined,
+        spamPolicies: managedDeliveryPolicy ? spamPolicies : undefined,
       });
       if (srs?.private) {
         preview = enableManagedMailSrs(preview, {
@@ -471,6 +504,8 @@ export function createMailConfigurationService({
         || error instanceof MailSqlTemplateError
         || error instanceof MailSrsTemplateError
         || error instanceof MailSubmissionTemplateError
+        || error instanceof MailSpamPolicyTemplateError
+        || error instanceof MailVacationTemplateError
         || error instanceof MailTlsIdentityTemplateError) {
         throw new MailConfigurationError(
           'mail_configuration_state_invalid',
@@ -547,6 +582,17 @@ export function createMailConfigurationService({
         path: mailSrsTemplatePolicy.secretPath,
         content: materialized.srs.secretContent,
       }));
+    }
+    for (const artifact of preview.artifacts) {
+      if (artifact.sensitive !== true || !DELIVERY_POLICY_ARTIFACT_PATHS.has(artifact.path)) continue;
+      if (typeof artifact.content !== 'string' || createHash('sha256').update(artifact.content).digest('hex') !== artifact.sha256) {
+        throw new MailConfigurationError(
+          'mail_configuration_sensitive_digest_mismatch',
+          'Protected mailbox delivery policy is inconsistent',
+          409,
+        );
+      }
+      sensitiveArtifacts.push(Object.freeze({ path: artifact.path, content: artifact.content }));
     }
     return Object.freeze(sensitiveArtifacts);
   }
