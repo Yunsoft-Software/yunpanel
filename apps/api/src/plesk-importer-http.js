@@ -14,6 +14,11 @@ export function mountPleskImporterRoutes(app, { pleskImporter } = {}) {
   }
 
   app.post('/api/importer/plesk/preview', requirePanelRouteAccess, async (request, response, next) => {
+    if (request.auth.user.role !== 'owner') {
+      return response.status(403).json({
+        error: { code: 'forbidden', message: 'Only the owner can preview a Plesk import.' },
+      });
+    }
     try {
       const exportData = request.body?.exportData ?? request.body;
       const preview = pleskImporter.importFromOfflineExport(exportData);

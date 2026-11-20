@@ -25,27 +25,21 @@ function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
 }
 
-function assertNotForbiddenHost(value, field = 'target') {
-  if (!value) return;
-  if (typeof value === 'string') {
-    if (/\.44\b/.test(value) || /157\.180\.11\.44/.test(value)) {
+function assertNotForbiddenHost(value) {
+  const pending = [value];
+  const visited = new WeakSet();
+  while (pending.length > 0) {
+    const entry = pending.pop();
+    if (typeof entry === 'string' && /\.44\b/.test(entry)) {
       throw new PleskImporterError(
         'plesk_forbidden_target_server',
-        `${field} references prohibited server (.44)`,
+        'Plesk export references a prohibited server (.44)',
         403,
       );
     }
-    return;
-  }
-  if (typeof value === 'object') {
-    if (Array.isArray(value)) {
-      for (let i = 0; i < value.length; i += 1) {
-        assertNotForbiddenHost(value[i], `${field}[${i}]`);
-      }
-    } else {
-      for (const [key, v] of Object.entries(value)) {
-        assertNotForbiddenHost(v, `${field}.${key}`);
-      }
+    if (entry && typeof entry === 'object' && !visited.has(entry)) {
+      visited.add(entry);
+      for (const child of Object.values(entry)) pending.push(child);
     }
   }
 }
@@ -160,7 +154,7 @@ function normalizeDns(rawDns, warnings, domainName) {
     const value = String(r.value || r.content || '').trim();
     const ttl = Number.isSafeInteger(r.ttl) && r.ttl >= 60 ? r.ttl : 3600;
     if (type && value) {
-      assertNotForbiddenHost(value, `DNS record ${name} (${type})`);
+      assertNotForbiddenHost(value);
       records.push({ name, type, value, ttl });
     }
   }
@@ -182,18 +176,17 @@ function normalizeCrons(rawCrons, warnings, domainName) {
     if (!scheduleRaw || !commandRaw) continue;
     try {
       const schedule = normalizeCronSchedule(scheduleRaw);
-      const command = normalizeCronCommand(commandRaw);
+      normalizeCronCommand(commandRaw);
       crons.push({
         name,
         schedule,
-        command,
         enabled: c.enabled !== false,
       });
-    } catch (err) {
+    } catch {
       warnings.push({
         domain: domainName,
         code: 'cron_expression_invalid',
-        message: `Cron task '${name}' has invalid schedule or command: ${err.message}`,
+        message: `Cron task '${name}' has an invalid schedule or command`,
       });
     }
   }
@@ -207,14 +200,9 @@ function normalizeCertificates(rawCerts, warnings, domainName) {
     if (!cert || typeof cert !== 'object') continue;
     const name = String(cert.name || `${domainName}-cert`).trim();
     const certPem = cert.cert || cert.certPem || null;
-    const chainPem = cert.chain || cert.chainPem || null;
-    const privkeyPem = cert.privkey || cert.privkeyPem || cert.key || null;
-    if (certPem && privkeyPem) {
+    if (certPem) {
       certs.push({
         name,
-        certPem: String(certPem).trim(),
-        chainPem: chainPem ? String(chainPem).trim() : null,
-        privkeyPem: String(privkeyPem).trim(),
         domains: Array.isArray(cert.domains) ? cert.domains.map(String) : [domainName],
       });
     }
@@ -228,10 +216,9 @@ function normalizeBackups(rawBackups, warnings, domainName) {
   for (const b of rawBackups) {
     if (!b || typeof b !== 'object') continue;
     const name = String(b.name || b.fileName || '').trim();
-    const filePath = String(b.path || b.filePath || '').trim();
     const sizeBytes = Number.isSafeInteger(b.sizeBytes) ? b.sizeBytes : (b.size || 0);
     if (name) {
-      backups.push({ name, path: filePath, sizeBytes });
+      backups.push({ name, sizeBytes });
     }
   }
   return backups;
@@ -246,14 +233,13 @@ export function createPleskImporter({ localServerId } = {}) {
     }
     let data = exportData;
     if (typeof data === 'string') {
-      assertNotForbiddenHost(data, 'Plesk export payload');
       try {
         data = JSON.parse(data);
-      } catch (err) {
-        throw new PleskImporterError('plesk_export_invalid_json', `Plesk export is not valid JSON: ${err.message}`);
+      } catch {
+        throw new PleskImporterError('plesk_export_invalid_json', 'Plesk export is not valid JSON');
       }
     }
-    assertNotForbiddenHost(data, 'Plesk export payload');
+    assertNotForbiddenHost(data);
 
     if (!data || typeof data !== 'object') {
       throw new PleskImporterError('plesk_export_invalid', 'Plesk offline export must be an object');
@@ -281,8 +267,6 @@ export function createPleskImporter({ localServerId } = {}) {
         warnings.push({ code: 'website_missing_domain', message: 'A website entry is missing its primary domain' });
         continue;
       }
-      assertNotForbiddenHost(rawDomain, 'Plesk domain');
-
       let domainSet;
       try {
         domainSet = normalizeDomainSet(rawDomain, Array.isArray(raw.aliases) ? raw.aliases : []);
@@ -346,7 +330,7 @@ export function createPleskImporter({ localServerId } = {}) {
       version: 1,
       serverId,
       summary,
-      websites,
+      websites: websites.map(({ id, ...website }) => website),
       warnings,
     };
 
