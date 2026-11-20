@@ -167,6 +167,8 @@ test('TerminalPanel supports exact 3-field docker_container issueBody and resets
   );
   assert.equal(terminalCapabilityRequestBody({ scope: 'docker_container', dockerProjectId: PROJECT_ID }), null);
   assert.equal(terminalCapabilityRequestBody({ scope: 'docker_container', containerId: CONTAINER_ID }), null);
+  assert.equal(terminalCapabilityRequestBody({ scope: 'docker_container', dockerProjectId: PROJECT_ID, containerId: 'short123' }), null);
+  assert.equal(terminalCapabilityRequestBody({ scope: 'docker_container', dockerProjectId: PROJECT_ID, containerId: 'A'.repeat(64) }), null);
   assert.deepEqual(terminalCapabilityRequestBody({ scope: 'server', serverId: SERVER_ID }), { scope: 'server', serverId: SERVER_ID });
   assert.deepEqual(terminalCapabilityRequestBody({ scope: 'site', websiteId: 'site-1' }), { scope: 'site', websiteId: 'site-1' });
   assert.equal(terminalContextUser({ scope: 'docker_container', user: '65534:65534' }), '65534:65534');
@@ -204,8 +206,22 @@ test('DockerProjectsPage wires Owner-only container console via LazyTerminalPane
     dockerProjectsPageInternals.findConsoleTarget(targets, { id: CONTAINER_ID, name: 'shop_stack-web-1' })?.user,
     '65534:65534',
   );
+  // Stale consoleTargets from a different projectId must be dropped/masked
+  assert.equal(
+    dockerProjectsPageInternals.projectScopedConsoleTargets({ projectId: PROJECT_ID, targets }, PROJECT_ID)?.projectId,
+    PROJECT_ID,
+  );
+  assert.equal(
+    dockerProjectsPageInternals.projectScopedConsoleTargets(
+      { projectId: PROJECT_ID, targets },
+      '33333333-3333-4333-8333-333333333333',
+    ),
+    null,
+  );
 
   const source = await readFile(new URL('../src/workspace/DockerProjectsPage.jsx', import.meta.url), 'utf8');
+  assert.match(source, /<RuntimePanel key=\{project\.id\} projectId=\{project\.id\} projectRevision=\{project\.revision\} \/>/);
+  assert.match(source, /projectScopedConsoleTargets\(consoleTargets\.data, projectId\)/);
   assert.match(source, /getDockerConsoleTargets/);
   assert.match(source, /import LazyTerminalPanel from '\.\/LazyTerminalPanel\.jsx';/);
   assert.match(source, /useWorkspace/);

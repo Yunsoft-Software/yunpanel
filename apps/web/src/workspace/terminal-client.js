@@ -133,7 +133,7 @@ export function terminalCapabilityRequestBody(target) {
   }
   if (target?.scope === 'docker_container'
     && typeof target.dockerProjectId === 'string' && target.dockerProjectId
-    && typeof target.containerId === 'string' && target.containerId) {
+    && typeof target.containerId === 'string' && CONTAINER_ID_PATTERN.test(target.containerId)) {
     return {
       scope: 'docker_container',
       dockerProjectId: target.dockerProjectId,

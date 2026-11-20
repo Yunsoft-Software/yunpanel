@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import {
   getDockerCatalog,
@@ -446,8 +446,13 @@ function findConsoleTarget(targets, container) {
   )) ?? null;
 }
 
+function projectScopedConsoleTargets(data, projectId) {
+  if (!data || typeof projectId !== 'string' || !projectId || data.projectId !== projectId) return null;
+  return data;
+}
+
 function RuntimePanel({ projectId, projectRevision = 0 }) {
-  const { isOwner } = useWorkspace();
+  const { isOwner, resourceBusy } = useWorkspace();
   const runtime = useAsyncResource(() => getDockerRuntime(projectId), [projectId, projectRevision]);
   const consoleTargets = useAsyncResource(
     (signal) => getDockerConsoleTargets(projectId, { signal }),
@@ -455,22 +460,34 @@ function RuntimePanel({ projectId, projectRevision = 0 }) {
     { enabled: Boolean(isOwner && projectId) },
   );
   const [activeContainerId, setActiveContainerId] = useState(null);
+  const scopedConsoleData = projectScopedConsoleTargets(consoleTargets.data, projectId);
   const targets = useMemo(
-    () => (Array.isArray(consoleTargets.data?.targets) ? consoleTargets.data.targets : []),
-    [consoleTargets.data],
+    () => (Array.isArray(scopedConsoleData?.targets) ? scopedConsoleData.targets : []),
+    [scopedConsoleData],
   );
+  const projectBusy = Boolean(projectId && typeof resourceBusy === 'function' && resourceBusy('docker_project', projectId));
+  const wasProjectBusy = useRef({ projectId, busy: projectBusy });
 
   useEffect(() => {
     setActiveContainerId(null);
   }, [projectId]);
 
   useEffect(() => {
-    if (!activeContainerId || consoleTargets.status !== 'ready') return;
+    const previous = wasProjectBusy.current;
+    if (previous.projectId === projectId && previous.busy && !projectBusy && projectId) {
+      runtime.refresh();
+      if (isOwner) consoleTargets.refresh();
+    }
+    wasProjectBusy.current = { projectId, busy: projectBusy };
+  }, [projectBusy, isOwner, projectId, runtime.refresh, consoleTargets.refresh]);
+
+  useEffect(() => {
+    if (!activeContainerId || consoleTargets.status !== 'ready' || !scopedConsoleData) return;
     const stillEligible = targets.some((item) => item.containerId === activeContainerId && item.eligible === true);
     if (!stillEligible) setActiveContainerId(null);
-  }, [activeContainerId, consoleTargets.status, targets]);
+  }, [activeContainerId, consoleTargets.status, scopedConsoleData, targets]);
 
-  const activeTarget = isOwner && activeContainerId
+  const activeTarget = isOwner && activeContainerId && scopedConsoleData
     ? (targets.find((item) => item.containerId === activeContainerId && item.eligible === true) ?? null)
     : null;
 
@@ -525,10 +542,10 @@ function RuntimePanel({ projectId, projectRevision = 0 }) {
                               </div>
                             ) : consoleTarget ? (
                               <span className="ws-muted">{consoleTarget.reason || 'Konsol şu anda kullanılamıyor.'}</span>
-                            ) : consoleTargets.status === 'loading' ? (
-                              <span className="ws-muted">Kontrol ediliyor…</span>
-                            ) : consoleTargets.status === 'error' ? (
+                            ) : consoleTargets.error && !scopedConsoleData ? (
                               <span className="ws-muted">Konsol durumu alınamadı</span>
+                            ) : !scopedConsoleData && ['loading', 'stale'].includes(consoleTargets.status) ? (
+                              <span className="ws-muted">Kontrol ediliyor…</span>
                             ) : (
                               <span className="ws-muted">—</span>
                             )}
@@ -589,7 +606,7 @@ function DockerProjectDetail({ projectId }) {
   const refresh = () => { detail.refresh(); storageBackup.refresh(); };
   return <><nav className="ws-breadcrumb"><Link to="/docker">Docker</Link><span>/ {project?.projectName ?? projectId}</span></nav><PageHeading title={project?.projectName ? project.projectName : 'Docker projesi'} description="Compose desired state, depolama yedekleme politikası, yayınlanan portlar, runtime ve işlem geçmişi." actions={<Button icon="refresh" onClick={refresh}>Yenile</Button>} /><LoadNotice resource={detail} label="Docker proje detayı" />{project && <><Section title="Desired state"><div className="ws-section-body"><KeyValues items={[
     ['Revizyon', project.revision], ['Compose SHA-256', project.composeSha256], ['Servis', project.services?.length ?? 0], ['Network', project.networks?.length ?? 0], ['Named volume', project.volumes?.length ?? 0], ['Mount', storageCount], ['Env revizyonu', data.environment?.revision ?? 0], ['Registry credential', data.credentials?.length ?? 0],
-  ]} /><div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Servis</th><th>Kaynak</th><th>Inner Port (Container targetPort)</th><th>Outer Port (Host publishedPort)</th><th>Published ports</th><th>Domain / Subdomain Proxy Hedefi</th></tr></thead><tbody>{project.services?.map((service) => <tr key={service.name}><td><strong>{service.name}</strong></td><td>{service.imageConfigured ? 'image' : service.buildConfigured ? 'build' : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <span key={`in:${portLabel(port)}`} className="yp-port-mapping-badge">Inner: {port.targetPort}/{port.protocol ?? 'tcp'}</span>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <span key={`out:${portLabel(port)}`} className="yp-port-mapping-badge">Outer: {(port.hostIp ?? '127.0.0.1')}:{port.publishedPort}</span>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <small key={portLabel(port)}>{portLabel(port)}</small>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <code key={`proxy:${portLabel(port)}`}>{innerOuterPortLabel(port)}</code>) : '—'}</td></tr>)}</tbody></table></div></div></Section><LoadNotice resource={storageBackup} label="Docker storage backup policy" /><StoragePanel project={project} backup={storageBackup.data} /><DockerVolumesPanel project={project} onChanged={refresh} /><DockerConfigPanel data={data} onChanged={detail.refresh} /><DockerLifecyclePanel project={project} onChanged={detail.refresh} /><Section title="Website / Nginx diagnosis" description="Konteyner servislerinin web sitesi ve alan adı yönlendirme durumu."><DiagnosisPanel project={project} /></Section><RuntimePanel projectId={project.id} projectRevision={project.revision} /><LogsPanel project={project} /><HistoryPanel projectId={project.id} /></>}</>;
+  ]} /><div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Servis</th><th>Kaynak</th><th>Inner Port (Container targetPort)</th><th>Outer Port (Host publishedPort)</th><th>Published ports</th><th>Domain / Subdomain Proxy Hedefi</th></tr></thead><tbody>{project.services?.map((service) => <tr key={service.name}><td><strong>{service.name}</strong></td><td>{service.imageConfigured ? 'image' : service.buildConfigured ? 'build' : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <span key={`in:${portLabel(port)}`} className="yp-port-mapping-badge">Inner: {port.targetPort}/{port.protocol ?? 'tcp'}</span>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <span key={`out:${portLabel(port)}`} className="yp-port-mapping-badge">Outer: {(port.hostIp ?? '127.0.0.1')}:{port.publishedPort}</span>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <small key={portLabel(port)}>{portLabel(port)}</small>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <code key={`proxy:${portLabel(port)}`}>{innerOuterPortLabel(port)}</code>) : '—'}</td></tr>)}</tbody></table></div></div></Section><LoadNotice resource={storageBackup} label="Docker storage backup policy" /><StoragePanel project={project} backup={storageBackup.data} /><DockerVolumesPanel project={project} onChanged={refresh} /><DockerConfigPanel data={data} onChanged={detail.refresh} /><DockerLifecyclePanel project={project} onChanged={detail.refresh} /><Section title="Website / Nginx diagnosis" description="Konteyner servislerinin web sitesi ve alan adı yönlendirme durumu."><DiagnosisPanel project={project} /></Section><RuntimePanel key={project.id} projectId={project.id} projectRevision={project.revision} /><LogsPanel project={project} /><HistoryPanel projectId={project.id} /></>}</>;
 }
 
 export default function DockerProjectsPage() {
@@ -608,4 +625,5 @@ export const dockerProjectsPageInternals = Object.freeze({
   storagePolicyBadge,
   runtimeBadge,
   findConsoleTarget,
+  projectScopedConsoleTargets,
 });
