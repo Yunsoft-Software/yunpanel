@@ -69,7 +69,11 @@ test('offline Plesk inventory exposes stable, safe metadata through real Owner a
       runtimeType: 'php',
       certificates: [{ name: 'Pilot TLS', cert: 'public-certificate', privkey: privateMaterial }],
       crons: [{ name: 'Worker', schedule: '0 2 * * *', command: `php worker.php ${privateMaterial}` }],
-      backups: [{ name: 'old.tar', path: `/old/${privateMaterial}`, sizeBytes: 20 }],
+      backups: [
+        { name: 'old.tar', path: `/old/${privateMaterial}`, sizeBytes: 20 },
+        { name: 'previous.tar', size: '17' },
+        { name: 'untyped.tar', size: { key: privateMaterial } },
+      ],
     };
     const ownerHeaders = await signIn('owner');
     const first = await preview(ownerHeaders, input);
@@ -81,7 +85,11 @@ test('offline Plesk inventory exposes stable, safe metadata through real Owner a
     assert.equal(inventory.serverId, localServerId);
     assert.deepEqual(inventory.websites[0].certificates, [{ name: 'Pilot TLS', domains: ['pilot.test'] }]);
     assert.deepEqual(inventory.websites[0].crons, [{ name: 'Worker', schedule: '0 2 * * *', enabled: true }]);
-    assert.deepEqual(inventory.websites[0].backups, [{ name: 'old.tar', sizeBytes: 20 }]);
+    assert.deepEqual(inventory.websites[0].backups, [
+      { name: 'old.tar', sizeBytes: 20 },
+      { name: 'previous.tar', sizeBytes: 17 },
+      { name: 'untyped.tar', sizeBytes: 0 },
+    ]);
     const second = await preview(ownerHeaders, input);
     assert.equal((await second.json()).preview.previewDigest, inventory.previewDigest);
     const changed = await preview(ownerHeaders, { ...input, name: 'other.test' });

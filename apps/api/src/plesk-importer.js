@@ -216,7 +216,10 @@ function normalizeBackups(rawBackups, warnings, domainName) {
   for (const b of rawBackups) {
     if (!b || typeof b !== 'object') continue;
     const name = String(b.name || b.fileName || '').trim();
-    const sizeBytes = Number.isSafeInteger(b.sizeBytes) ? b.sizeBytes : (b.size || 0);
+    const oldSize = typeof b.size === 'string' && /^\d{1,16}$/.test(b.size)
+      ? Number(b.size)
+      : b.size;
+    const sizeBytes = [b.sizeBytes, oldSize].find((size) => Number.isSafeInteger(size) && size >= 0) ?? 0;
     if (name) {
       backups.push({ name, sizeBytes });
     }
