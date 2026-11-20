@@ -1,6 +1,7 @@
+import { assertUuid } from './application.js';
 import { normalizeRedirectTarget } from './redirect-target.js';
 
-const COMMON_FIELDS = new Set(['clientMaxBodySizeMb', 'headers', 'preferredDomain', 'redirectRules', 'gzip', 'protectedPaths', 'serviceOverride']);
+const COMMON_FIELDS = new Set(['clientMaxBodySizeMb', 'headers', 'preferredDomain', 'redirectRules', 'gzip', 'protectedPaths', 'serviceOverride', 'proxyRoutes']);
 const FILE_FIELDS = ['indexFiles', 'errorPages', 'documentRoot'];
 const ERROR_CODES = new Set(['403', '404', '500', '502', '503', '504']);
 const TARGET_FIELDS = Object.freeze({
@@ -200,6 +201,104 @@ function protectedPaths(value) {
   return Object.freeze(value.map(entry => Object.freeze({ path: entry.path, key: entry.key })));
 }
 
+const MAX_PROXY_ROUTES = 20;
+const PROXY_ROUTE_FIELDS = Object.freeze([
+  'path',
+  'projectId',
+  'serviceName',
+  'targetPort',
+  'protocol',
+  'upstreamHost',
+  'upstreamPort',
+  'websocket',
+  'stripPrefix',
+]);
+const PROXY_ROUTE_PATH = /^\/[A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/;
+const RESERVED_PROXY_ROUTE_PREFIXES = Object.freeze([
+  '/.well-known',
+  '/autodiscover',
+  '/mail/config-v1.1.xml',
+]);
+const PROXY_ROUTE_SERVICE_NAME = /^[a-z0-9][a-z0-9_.-]{0,62}$/;
+const LOOPBACK_IPV4 = /^127\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
+
+function isLoopbackHost(value) {
+  return typeof value === 'string' && (LOOPBACK_IPV4.test(value) || value === '::1');
+}
+
+function proxyRoutes(value) {
+  if (value === null) return null;
+  if (!Array.isArray(value) || value.length > MAX_PROXY_ROUTES) {
+    throw new NginxSettingsValidationError('invalid_nginx_proxy_routes', 'Proxy routes must be a list with at most 20 entries');
+  }
+  const seen = new Set();
+  const normalized = value.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+      || Object.keys(entry).length !== PROXY_ROUTE_FIELDS.length
+      || PROXY_ROUTE_FIELDS.some((field) => !Object.hasOwn(entry, field))) {
+      throw new NginxSettingsValidationError('invalid_nginx_proxy_route', 'Proxy route fields are invalid');
+    }
+    if (typeof entry.path !== 'string' || entry.path.length > 128 || entry.path === '/'
+      || !PROXY_ROUTE_PATH.test(entry.path)) {
+      throw new NginxSettingsValidationError('invalid_nginx_proxy_route', 'Proxy route path must be a safe non-root URL path');
+    }
+    const lowerPath = entry.path.toLowerCase();
+    if (RESERVED_PROXY_ROUTE_PREFIXES.some((reserved) => lowerPath === reserved || lowerPath.startsWith(`${reserved}/`))) {
+      throw new NginxSettingsValidationError('invalid_nginx_proxy_route', 'Proxy route path cannot use a reserved system prefix');
+    }
+    let projectId;
+    try {
+      projectId = assertUuid(entry.projectId, 'projectId');
+    } catch {
+      throw new NginxSettingsValidationError('invalid_nginx_proxy_route', 'Proxy route projectId must be a valid UUID');
+    }
+    if (typeof entry.serviceName !== 'string' || !PROXY_ROUTE_SERVICE_NAME.test(entry.serviceName)) {
+      throw new NginxSettingsValidationError('invalid_nginx_proxy_route', 'Proxy route serviceName is invalid');
+    }
+    if (!Number.isSafeInteger(entry.targetPort) || entry.targetPort < 1 || entry.targetPort > 65535) {
+      throw new NginxSettingsValidationError('invalid_nginx_proxy_route', 'Proxy route targetPort must be between 1 and 65535');
+    }
+    if (entry.protocol !== 'tcp') {
+      throw new NginxSettingsValidationError('invalid_nginx_proxy_route', 'Proxy route protocol must be tcp');
+    }
+    if (!isLoopbackHost(entry.upstreamHost)) {
+      throw new NginxSettingsValidationError('invalid_nginx_proxy_route', 'Proxy route upstreamHost must be a loopback IP address');
+    }
+    if (!Number.isSafeInteger(entry.upstreamPort) || entry.upstreamPort < 1024 || entry.upstreamPort > 65535) {
+      throw new NginxSettingsValidationError('invalid_nginx_proxy_route', 'Proxy route upstreamPort must be between 1024 and 65535');
+    }
+    if (typeof entry.websocket !== 'boolean' || typeof entry.stripPrefix !== 'boolean') {
+      throw new NginxSettingsValidationError('invalid_nginx_proxy_route', 'Proxy route websocket and stripPrefix must be boolean');
+    }
+    if (seen.has(entry.path)) {
+      throw new NginxSettingsValidationError('duplicate_nginx_proxy_route', 'Each sub-path can have only one proxy route');
+    }
+    seen.add(entry.path);
+    return Object.freeze({
+      path: entry.path,
+      projectId,
+      serviceName: entry.serviceName,
+      targetPort: entry.targetPort,
+      protocol: 'tcp',
+      upstreamHost: entry.upstreamHost,
+      upstreamPort: entry.upstreamPort,
+      websocket: entry.websocket,
+      stripPrefix: entry.stripPrefix,
+    });
+  });
+  for (let i = 0; i < normalized.length; i += 1) {
+    for (let j = 0; j < normalized.length; j += 1) {
+      if (i !== j && normalized[i].path.startsWith(`${normalized[j].path}/`)) {
+        throw new NginxSettingsValidationError(
+          'overlapping_nginx_proxy_routes',
+          'Proxy route paths must not overlap or nest inside each other',
+        );
+      }
+    }
+  }
+  return Object.freeze(normalized);
+}
+
 export function newProtectedPathKey() {
   return [...globalThis.crypto.getRandomValues(new Uint8Array(8))].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
@@ -263,6 +362,26 @@ export function normalizeNginxSettings(targetType, value = {}, base = null) {
   if (rules?.some(rule => rule.match === 'exact' && Object.values(fileSettings.errorPages ?? {}).includes(rule.source))) {
     throw new NginxSettingsValidationError('nginx_redirect_error_page_conflict', 'A redirect source cannot also be an internal error page');
   }
+  const routes = Object.hasOwn(merged, 'proxyRoutes') ? proxyRoutes(merged.proxyRoutes) : undefined;
+  if (routes?.length && rules?.length) {
+    const hasRedirectConflict = routes.some((route) => rules.some((rule) => (
+      (rule.match === 'exact' && (rule.source === route.path || rule.source.startsWith(`${route.path}/`)))
+      || (rule.match === 'prefix' && (
+        rule.source === `${route.path}/`
+        || rule.source.startsWith(`${route.path}/`)
+        || `${route.path}/`.startsWith(rule.source)
+      ))
+    )));
+    if (hasRedirectConflict) {
+      throw new NginxSettingsValidationError('nginx_proxy_route_redirect_conflict', 'A proxy route path cannot overlap a redirect rule');
+    }
+  }
+  if (routes?.length && fileSettings.errorPages) {
+    const errorUris = Object.values(fileSettings.errorPages);
+    if (routes.some((route) => errorUris.some((uri) => uri === route.path || uri.startsWith(`${route.path}/`)))) {
+      throw new NginxSettingsValidationError('nginx_proxy_route_error_page_conflict', 'A proxy route path cannot overlap an internal error page');
+    }
+  }
   const common = {
     clientMaxBodySizeMb: optionalInteger(merged.clientMaxBodySizeMb, 'clientMaxBodySizeMb', 1, 1024),
     ...(Object.hasOwn(merged, 'preferredDomain') ? { preferredDomain: preferredDomain(merged.preferredDomain) } : {}),
@@ -272,6 +391,7 @@ export function normalizeNginxSettings(targetType, value = {}, base = null) {
     ...(Object.hasOwn(merged, 'gzip') ? { gzip: boolean(merged.gzip, 'gzip') } : {}),
     ...(Object.hasOwn(merged, 'protectedPaths') ? { protectedPaths: protectedPaths(merged.protectedPaths) } : {}),
     ...(Object.hasOwn(merged, 'serviceOverride') ? { serviceOverride: serviceOverride(merged.serviceOverride) } : {}),
+    ...(routes !== undefined ? { proxyRoutes: routes } : {}),
   };
   if (targetType === 'proxy' || targetType === 'python') {
     return Object.freeze({
@@ -301,5 +421,6 @@ export function normalizeNginxSettings(targetType, value = {}, base = null) {
 export const nginxSettingsPolicy = Object.freeze({
   maxHeaders: 12,
   maxHeaderValueLength: 256,
+  maxProxyRoutes: MAX_PROXY_ROUTES,
   blockedHeaders: Object.freeze([...BLOCKED_HEADERS]),
 });

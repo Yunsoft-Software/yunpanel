@@ -143,6 +143,25 @@ function redirectLocations(rules = []) {
   }).join('\n\n');
 }
 
+function proxyRouteLocations(routes = [], { headers = [], isPassenger = false, proxyTimeoutSeconds = null } = {}) {
+  if (!routes || routes.length === 0) return '';
+  const renderedHeaders = headerLines(headers);
+  const timeout = proxyTimeoutSeconds == null ? ''
+    : `\n    proxy_connect_timeout ${proxyTimeoutSeconds}s;\n    proxy_send_timeout ${proxyTimeoutSeconds}s;\n    proxy_read_timeout ${proxyTimeoutSeconds}s;`;
+  return routes.map((route) => {
+    const host = assertUpstreamHost(route.upstreamHost);
+    const port = assertUpstreamPort(route.upstreamPort);
+    const passengerOff = isPassenger ? '    passenger_enabled off;\n' : '';
+    const ws = route.websocket
+      ? '\n    proxy_set_header Upgrade $http_upgrade;\n    proxy_set_header Connection "upgrade";'
+      : '';
+    const headerSuffix = renderedHeaders ? `\n${renderedHeaders}` : '';
+    const passTarget = `http://${host}:${port}${route.stripPrefix ? '/' : ''}`;
+    const directives = `${passengerOff}    proxy_pass ${passTarget};\n    proxy_http_version 1.1;\n    proxy_set_header Host $host;\n    proxy_set_header X-Real-IP $remote_addr;\n    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n    proxy_set_header X-Forwarded-Proto $scheme;${ws}${timeout}${headerSuffix}`;
+    return `  location = ${route.path} {\n${directives}\n  }\n\n  location ^~ ${route.path}/ {\n${directives}\n  }`;
+  }).join('\n\n');
+}
+
 export const PROTECTED_PATH_AUTH_DIRECTORY = '/etc/nginx/yunpanel-auth';
 
 // Password-protected directories for every target type without duplicating the
@@ -199,6 +218,7 @@ function renderServerSet({
   canonicalRedirect,
   httpsRedirect,
   nginxSettings,
+  isPassenger = false,
   acmeOnlyHostnames = [],
   mailDiscoverySocketPath = null,
   accessLogPath = undefined,
@@ -224,7 +244,13 @@ function renderServerSet({
   // A service override replaces everything the site serves, so path rules and auth cannot bypass it.
   const override = serviceOverrideBody(nginxSettings.serviceOverride, nginxSettings.headers);
   const rules = override ? '' : redirectLocations(nginxSettings.redirectRules ?? []);
+  const proxyRoutes = override ? '' : proxyRouteLocations(nginxSettings.proxyRoutes ?? [], {
+    headers: nginxSettings.headers,
+    isPassenger,
+    proxyTimeoutSeconds: nginxSettings.proxyTimeoutSeconds ?? null,
+  });
   if (override) body = override;
+  if (proxyRoutes) body = `${proxyRoutes}\n\n${body}`;
   if (rules) body = `${rules}\n\n${body}`;
   if (!override && nginxSettings.gzip === true) body = `${GZIP_DIRECTIVES}\n\n${body}`;
   const auth = override ? null : protectedPathAuth(primaryDomain, nginxSettings.protectedPaths ?? []);
@@ -398,7 +424,7 @@ export function renderPassengerSiteConfig({
   const settings = normalizeNginxSettings('passenger', nginxSettings ?? {});
   const body = passengerBody({ target, nginxSettings: settings });
   return renderServerSet({
-    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings, accessLogPath, errorLogPath,
+    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings, isPassenger: true, accessLogPath, errorLogPath,
   });
 }
 
