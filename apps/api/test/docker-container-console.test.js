@@ -37,6 +37,7 @@ import { createOwnerMfaPolicy } from '../src/owner-mfa-policy.js';
 import { createServerRegistry } from '../src/server-registry.js';
 import { createSiteMutationLock } from '../src/site-mutation-lock.js';
 import { createTerminalCapabilityRegistry, TerminalCapabilityError } from '../src/terminal-capability-registry.js';
+import { createTerminalProcessManager } from '../src/terminal-process-manager.js';
 import { resolveTerminalTarget } from '../src/terminal-target-resolver.js';
 import { terminalWebSocketInternals } from '../src/terminal-websocket.js';
 import { createWebsiteRegistry } from '../src/website-registry.js';
@@ -604,6 +605,7 @@ test('deterministic container exec cleanup helpers bind exact session marker, pa
   // Linux pidfd boundary: strictly uses pidfd_open + post-open verification + pidfd_send_signal (no plain process.kill)
   const py = dockerContainerConsoleCleanupInternals.containerPidfdCleanupPython;
   assert.match(py, /os\.pidfd_open\(/);
+  assert.match(py, /if post is None:\n\s+os\.close\(fd\);continue/);
   assert.match(py, /signal\.pidfd_send_signal\(/);
   assert.doesNotMatch(py, /os\.kill\(/);
 
@@ -709,4 +711,69 @@ test('cleanupDockerContainerExec fails closed with metadata on docker_unavailabl
   assert.equal(recovered.verified, true);
   assert.equal(recovered.reason, 'terminated');
   assert.deepEqual(recovered.signaledPids, [4120]);
+});
+
+test('terminal-process-manager runs in-container pidfd cleanup BEFORE signaling host docker exec CLI so background children cannot orphan', async () => {
+  const liveSessions = createLiveSessionRegistry({ requireGenerationBoundary: false });
+  const projectId = '22222222-2222-4222-8222-222222222222';
+  const containerId = 'c'.repeat(64);
+  const events = [];
+  let resolveCleanup;
+  const cleanupPromise = new Promise((resolve) => { resolveCleanup = resolve; });
+
+  const manager = createTerminalProcessManager({
+    liveSessions,
+    getuid: () => 0,
+    statFn: async (file) => (file === '/usr/bin/docker' ? { isFile: () => true } : Promise.reject(new Error('ENOENT'))),
+    realpathFn: async () => '/',
+    readPasswd: async () => '',
+    spawnPty: () => ({
+      pid: 98765,
+      onData: () => ({ dispose() {} }),
+      onExit: () => ({ dispose() {} }),
+      write: () => {},
+      resize: () => {},
+      kill: () => {},
+    }),
+    killProcessGroup: (pid, sig) => {
+      events.push(`host_signal:${pid}:${sig}`);
+    },
+    cleanupContainerExec: async ({ containerId: cid, consoleSessionId }) => {
+      events.push(`container_cleanup_start:${cid}:${consoleSessionId.length}`);
+      await cleanupPromise;
+      events.push('container_cleanup_done');
+      return { verified: true, reason: 'terminated', signaledPids: [] };
+    },
+  });
+
+  const handle = await manager.open({
+    target: {
+      scope: 'docker_container',
+      serverId: '11111111-1111-4111-8111-111111111111',
+      dockerProjectId: projectId,
+      projectName: 'demo_app',
+      serviceName: 'web',
+      containerId,
+      containerName: 'demo_app-web-1',
+      user: '65534:65534',
+      uid: 65534,
+      gid: 65534,
+      cwd: '/',
+      shell: '/bin/sh',
+    },
+    onData: () => {},
+    onExit: () => {},
+  });
+
+  handle.close();
+  // Before container cleanup finishes, host SIGHUP must NOT have been sent yet!
+  assert.deepEqual(events, [`container_cleanup_start:${containerId}:32`]);
+
+  resolveCleanup();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(events, [
+    `container_cleanup_start:${containerId}:32`,
+    'container_cleanup_done',
+    'host_signal:98765:SIGHUP',
+  ]);
 });

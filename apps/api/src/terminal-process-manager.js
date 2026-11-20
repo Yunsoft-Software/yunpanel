@@ -430,11 +430,13 @@ export function createTerminalProcessManager({
   setTimer = setTimeout,
   clearTimer = clearTimeout,
   killGraceMs = 2_000,
+  cleanupContainerExec = cleanupDockerContainerExec,
   onDrainError = null,
 } = {}) {
   if (typeof spawnPty !== 'function' || typeof statFn !== 'function' || typeof realpathFn !== 'function'
     || typeof readPasswd !== 'function' || typeof getuid !== 'function' || typeof killProcessGroup !== 'function'
     || typeof setTimer !== 'function' || typeof clearTimer !== 'function'
+    || typeof cleanupContainerExec !== 'function'
     || (onDrainError !== null && typeof onDrainError !== 'function')
     || !Number.isSafeInteger(killGraceMs) || killGraceMs < 0 || killGraceMs > 10_000) {
     throw new TypeError('Terminal process dependencies are invalid');
@@ -508,7 +510,22 @@ export function createTerminalProcessManager({
     const argsToSpawn = isRoot ? resolved.args : (resolved.directArgs ?? resolved.args);
 
     if (lease) await assertOwnedTerminalSupport();
-    if (lease?.isFenced() || cancelled) throw new TerminalProcessError('terminal_website_removing', 'Site siliniyor', 409);
+    if (dockerProjectId !== null && typeof liveSessions?.assertDockerProjectOpen === 'function') {
+      try {
+        liveSessions.assertDockerProjectOpen(dockerProjectId);
+      } catch (error) {
+        throw new TerminalProcessError(
+          error.code ?? 'terminal_docker_project_busy',
+          error.code === 'terminal_docker_project_busy' ? 'Docker projesi durduruluyor veya kaldırılıyor' : 'Terminal kullanılamıyor',
+          error.status ?? 409,
+        );
+      }
+    }
+    if (lease?.isFenced() || cancelled) {
+      throw dockerProjectId !== null
+        ? new TerminalProcessError('terminal_docker_project_busy', 'Docker projesi durduruluyor veya kaldırılıyor', 409)
+        : new TerminalProcessError('terminal_website_removing', 'Site siliniyor', 409);
+    }
     try {
       spawnAttempted = true;
       child = spawnPty(fileToSpawn, argsToSpawn, {
@@ -531,19 +548,21 @@ export function createTerminalProcessManager({
 
     let closed = false;
     let exited = false;
-    let containerCleanupStarted = false;
     let forceTimer = null;
     let dataSubscription;
     let exitSubscription;
     let childExitResolve;
     const childExit = new Promise(resolve => { childExitResolve = resolve; });
+    let containerCleanupPromise = null;
     const triggerContainerCleanup = () => {
-      if (containerCleanupStarted || target?.scope !== 'docker_container' || !resolved.consoleSessionId) return;
-      containerCleanupStarted = true;
-      void cleanupDockerContainerExec({
-        containerId: target.containerId,
-        consoleSessionId: resolved.consoleSessionId,
-      }).catch(() => {});
+      if (target?.scope !== 'docker_container' || !resolved.consoleSessionId) return null;
+      if (!containerCleanupPromise) {
+        containerCleanupPromise = Promise.resolve(cleanupContainerExec({
+          containerId: target.containerId,
+          consoleSessionId: resolved.consoleSessionId,
+        })).catch(() => null);
+      }
+      return containerCleanupPromise;
     };
     dataSubscription = child.onData((data) => {
       if (!closed && typeof data === 'string') onData(data);
@@ -578,16 +597,26 @@ export function createTerminalProcessManager({
       }
     }
 
+    function terminateHostChild() {
+      if (exited) return;
+      signal('SIGHUP');
+      if (!exited && forceTimer === null) {
+        forceTimer = setTimer(() => { if (!exited) signal('SIGKILL'); }, killGraceMs);
+        forceTimer?.unref?.();
+      }
+    }
+
     function close() {
       if (closed) return false;
       closed = true;
       if (lease) { void drain().catch((error) => reportDrainError(websiteId, error)); return true; }
-      signal('SIGHUP');
-      triggerContainerCleanup();
-      if (!exited) {
-        forceTimer = setTimer(() => { if (!exited) signal('SIGKILL'); }, killGraceMs);
-        forceTimer?.unref?.();
+      if (target?.scope === 'docker_container' && resolved.consoleSessionId) {
+        // Reap the in-container exec session tree via pidfd BEFORE signaling the host
+        // docker exec CLI so background children are not orphaned when leader_pid exits.
+        void triggerContainerCleanup()?.finally(() => terminateHostChild());
+        return true;
       }
+      terminateHostChild();
       return true;
     }
 

@@ -184,7 +184,8 @@ function resolveConsoleUserSpec(rawUser) {
   if (groupPart !== undefined && (!groupPart || groupPart.toLowerCase() === 'root' || /^0+$/.test(groupPart))) {
     return Object.freeze({ userSpec: FALLBACK_NON_ROOT_USER, forcedNonRoot: true });
   }
-  if (!/^[A-Za-z0-9._-]+$/.test(userPart) || (groupPart !== undefined && !/^[A-Za-z0-9._-]+$/.test(groupPart))) {
+  if (!/^[A-Za-z0-9_][A-Za-z0-9._-]*$/.test(userPart)
+    || (groupPart !== undefined && !/^[A-Za-z0-9_][A-Za-z0-9._-]*$/.test(groupPart))) {
     throw new DockerContainerConsoleInspectorError(
       'container_console_user_invalid',
       REASON_MESSAGES.container_console_user_invalid,
@@ -241,9 +242,15 @@ export function assertContainerVolumeInspectSafe(rawVolume, { projectName, expec
   const name = typeof rawVolume.Name === 'string' ? rawVolume.Name : null;
   const driver = typeof rawVolume.Driver === 'string' ? rawVolume.Driver : null;
   const scope = typeof rawVolume.Scope === 'string' ? rawVolume.Scope : null;
-  const options = rawVolume.Options && typeof rawVolume.Options === 'object' && !Array.isArray(rawVolume.Options)
-    ? rawVolume.Options
-    : null;
+  const rawOptions = rawVolume.Options;
+  if (rawOptions !== null && rawOptions !== undefined
+    && (typeof rawOptions !== 'object' || Array.isArray(rawOptions) || Object.keys(rawOptions).length > 0)) {
+    throw new DockerContainerConsoleInspectorError(
+      'container_console_unsafe_mount_forbidden',
+      REASON_MESSAGES.container_console_unsafe_mount_forbidden,
+      409,
+    );
+  }
   const labels = rawVolume.Labels && typeof rawVolume.Labels === 'object' && !Array.isArray(rawVolume.Labels)
     ? rawVolume.Labels
     : {};
@@ -253,7 +260,6 @@ export function assertContainerVolumeInspectSafe(rawVolume, { projectName, expec
   if (!name || name !== expectedVolumeName
     || driver !== 'local'
     || scope !== 'local'
-    || (options !== null && Object.keys(options).length > 0)
     || labelProject !== projectName
     || !labelVolume || `${projectName}_${labelVolume}` !== name) {
     throw new DockerContainerConsoleInspectorError(
@@ -332,7 +338,13 @@ export function evaluateContainerConsoleInspect(rawInspect, {
 
   const capAdd = Array.isArray(hostConfig.CapAdd) ? hostConfig.CapAdd : [];
   for (const rawCap of capAdd) {
-    if (typeof rawCap !== 'string') continue;
+    if (typeof rawCap !== 'string') {
+      throw new DockerContainerConsoleInspectorError(
+        'container_console_unsafe_capability_forbidden',
+        REASON_MESSAGES.container_console_unsafe_capability_forbidden,
+        409,
+      );
+    }
     const normalizedCap = rawCap.trim().toUpperCase().replace(/^CAP_/, '');
     if (FORBIDDEN_CAPABILITIES.has(normalizedCap)) {
       throw new DockerContainerConsoleInspectorError(
@@ -345,7 +357,13 @@ export function evaluateContainerConsoleInspect(rawInspect, {
 
   const securityOpts = Array.isArray(hostConfig.SecurityOpt) ? hostConfig.SecurityOpt : [];
   for (const rawOpt of securityOpts) {
-    if (typeof rawOpt !== 'string') continue;
+    if (typeof rawOpt !== 'string') {
+      throw new DockerContainerConsoleInspectorError(
+        'container_console_unsafe_security_opt_forbidden',
+        REASON_MESSAGES.container_console_unsafe_security_opt_forbidden,
+        409,
+      );
+    }
     const normalizedOpt = rawOpt.trim().toLowerCase().replace(/\s+/g, '');
     if (FORBIDDEN_SECURITY_OPTS.has(normalizedOpt)) {
       throw new DockerContainerConsoleInspectorError(

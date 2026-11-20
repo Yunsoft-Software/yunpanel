@@ -104,6 +104,8 @@ try:
      try:fd=os.pidfd_open(pid,0)
      except ProcessLookupError:continue
      post=read_proc(pid)
+     if post is None:
+      os.close(fd);continue
      if not same(post,known[pid]) or post['ns']!=target_ns:
       os.close(fd);fail('pidfd_identity_mismatch')
      held[pid]=fd
