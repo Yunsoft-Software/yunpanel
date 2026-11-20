@@ -257,6 +257,10 @@ function emptyState() {
   return { version: STORE_VERSION, jobs: [] };
 }
 
+function isNonRetryableOperation(operation) {
+  return isWebsiteCopyOperation(operation) || operation === OPERATIONS.DOCKER_VOLUME_DELETE;
+}
+
 function publicJob(job) {
   const proto = job?.payload != null ? { payload: structuredClone(job.payload) } : Object.prototype;
   const result = Object.create(proto);
@@ -275,7 +279,7 @@ function publicJob(job) {
     ...(job.availableAt ? { availableAt: job.availableAt } : {}),
     ...(job.manualRetry ? { manualRetry: job.manualRetry } : {}),
     ...(typeof job.retryExhausted === 'boolean' ? { retryExhausted: job.retryExhausted } : {}),
-    ...(isWebsiteCopyOperation(job.operation) && job.status === 'failed'
+    ...(isNonRetryableOperation(job.operation) && job.status === 'failed'
       ? { permanentError: true, manualRetryAllowed: false } : {}),
     result: job.result == null ? null : structuredClone(job.result),
     error: job.error == null ? null : structuredClone(job.error),
@@ -1456,8 +1460,16 @@ export function createJobRegistry({
             409,
           );
         }
-        if (websiteCopy && existing.status === 'failed') {
-          if (manual === true || manualRetry === true) throw new JobRegistryError('job_not_retryable', 'A failed website copy cannot be replayed', 409);
+        if (isNonRetryableOperation(operation) && existing.status === 'failed') {
+          if (manual === true || manualRetry === true) {
+            throw new JobRegistryError(
+              'job_not_retryable',
+              operation === OPERATIONS.DOCKER_VOLUME_DELETE
+                ? 'A failed Docker volume deletion cannot be replayed; request a fresh preview'
+                : 'A failed website copy cannot be replayed',
+              409,
+            );
+          }
           return enqueueResult(existing, false);
         }
         let changed = false;
@@ -1747,8 +1759,14 @@ export function createJobRegistry({
 
       const job = state.jobs.find((candidate) => candidate.id === jobId && (!serverId || candidate.serverId === serverId));
       if (!job) throw new JobRegistryError('job_not_found', 'Job not found', 404);
-      if (isWebsiteCopyOperation(job.operation)) {
-        throw new JobRegistryError('job_not_retryable', 'A failed website copy cannot be replayed', 409);
+      if (isNonRetryableOperation(job.operation)) {
+        throw new JobRegistryError(
+          'job_not_retryable',
+          job.operation === OPERATIONS.DOCKER_VOLUME_DELETE
+            ? 'A failed Docker volume deletion cannot be replayed; request a fresh preview'
+            : 'A failed website copy cannot be replayed',
+          409,
+        );
       }
       if (job.status !== 'failed') {
         throw new JobRegistryError('job_not_retryable', 'Only failed jobs may be manually retried', 409);

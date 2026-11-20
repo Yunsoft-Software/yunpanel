@@ -13,10 +13,10 @@ export class DockerComposeRecoveryError extends Error {
   }
 }
 
-function volumeReceiptResult(job, receipt) {
+function assertVolumeReceiptMatchesJob(job, receipt, expectedPhase) {
   if (!job || job.status !== 'running' || job.resourceType !== 'docker_project'
     || job.operation !== OPERATIONS.DOCKER_VOLUME_DELETE || !job.payload
-    || receipt?.phase !== 'completed'
+    || receipt?.phase !== expectedPhase
     || receipt.serverId !== job.serverId || receipt.jobId !== job.id
     || receipt.operation !== job.operation || receipt.projectId !== job.resourceId
     || receipt.projectId !== job.payload.projectId
@@ -26,8 +26,17 @@ function volumeReceiptResult(job, receipt) {
     || receipt.volumeKey !== job.payload.volumeKey
     || receipt.volumeName !== job.payload.volumeName
     || receipt.volumeFingerprint !== job.payload.volumeFingerprint
-    || receipt.previewDigest !== job.payload.previewDigest
-    || receipt.deleted !== true || receipt.sideEffects !== true) {
+    || receipt.previewDigest !== job.payload.previewDigest) {
+    throw new DockerComposeRecoveryError(
+      'docker_volume_recovery_receipt_mismatch',
+      'Docker volume recovery receipt does not match the persisted running job',
+    );
+  }
+}
+
+function volumeReceiptResult(job, receipt) {
+  assertVolumeReceiptMatchesJob(job, receipt, 'completed');
+  if (receipt.deleted !== true || receipt.sideEffects !== true) {
     throw new DockerComposeRecoveryError(
       'docker_volume_recovery_receipt_mismatch',
       'Docker volume recovery receipt does not match the persisted running job',
@@ -167,6 +176,9 @@ export function createDockerComposeRecoveryService({
           continue;
         }
         if (receipt.phase === 'intent') {
+          // Verify intent receipt identity before classifying as interrupted; mismatched
+          // evidence must fail closed with docker_volume_recovery_receipt_mismatch.
+          assertVolumeReceiptMatchesJob(job, receipt, 'intent');
           // Pre-delete intent persisted before absence verification: never blindly replay docker volume rm.
           pending.push(Object.freeze({ jobId: job.id, serverId: job.serverId, reason: 'volume_delete_intent_interrupted' }));
           continue;

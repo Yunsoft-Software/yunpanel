@@ -14,12 +14,15 @@ import {
   dockerComposeManagerInternals,
 } from '@yunpanel/host-runtime';
 import { DOCKER_COMPOSE_OPERATIONS, OPERATIONS } from '@yunpanel/protocol';
+import { apiKeyActor, createApiKeyActorAuthorizer } from '../src/api-key-actor.js';
+import { createApiKeyStore } from '../src/api-key-store.js';
 import { createApp } from '../src/app.js';
 import { createAuthenticatedApi } from '../src/auth-http.js';
 import { createAuthStore } from '../src/auth-store.js';
 import { createOwnerMfaPolicy } from '../src/owner-mfa-policy.js';
 import { createDockerComposeApiHandler } from '../src/docker-compose-api-handler.js';
 import { createDockerComposeOperationReceiptStore } from '../src/docker-compose-operation-receipt.js';
+import { DockerComposeRecoveryError } from '../src/docker-compose-recovery.js';
 import { createDockerComposeRuntime } from '../src/docker-compose-runtime.js';
 import { createDockerVolumeOperationReceiptStore } from '../src/docker-volume-operation-receipt.js';
 import {
@@ -28,14 +31,15 @@ import {
 } from '../src/docker-volume-operations.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
 import { createDurableJobRegistry } from '../src/durable-job-registry.js';
-import { createJobRegistry } from '../src/job-registry.js';
+import { createJobRegistry, JobRegistryError } from '../src/job-registry.js';
 import {
   createLocalDockerVolumeOperation,
   LocalDockerVolumeOperationError,
 } from '../src/local-docker-volume-operation.js';
-import { createLocalHostOperations } from '../src/local-host-operations.js';
+import { createLocalHostOperations, createPanelJobAuthorizer } from '../src/local-host-operations.js';
 import { createServerRegistry } from '../src/server-registry.js';
 import { createSiteMutationLock } from '../src/site-mutation-lock.js';
+import { createTenantSiteStore } from '../src/tenant-site-store.js';
 import { createWebsiteRegistry } from '../src/website-registry.js';
 
 async function resolveLocalDockerCommand() {
@@ -260,6 +264,7 @@ async function createRealFixture(t, {
     rootDir,
     baseUrl,
     authStore,
+    serverRegistry,
     serverId: server.id,
     jobRegistry,
     siteMutationLock,
@@ -597,7 +602,7 @@ test('two-phase 0600 pre-delete intent receipt blocks blind replay and recovery 
       YUNPANEL_SERVER_STORE: path.join(fx.rootDir, 'servers.json'),
       YUNPANEL_SECRET_MASTER_KEY: randomBytes(32).toString('hex'),
     },
-    serverRegistry: { getServer: async (id) => (id === fx.serverId ? { id } : null) },
+    serverRegistry: fx.serverRegistry,
     jobRegistry: reloadedJobsIntent,
     projectRegistry: fx.dockerComposeRuntime.projectRegistry,
     siteMutationLock: fx.siteMutationLock,
@@ -608,6 +613,44 @@ test('two-phase 0600 pre-delete intent receipt blocks blind replay and recovery 
     volumeReceiptStore: fx.volumeReceiptStore,
   });
   assert.ok(recoveryRuntimeIntent.recovery.pending.some((item) => item.jobId === job.id && item.reason === 'volume_delete_intent_interrupted'));
+
+  // Corrupted/mismatched phase: 'intent' receipt MUST fail closed with docker_volume_recovery_receipt_mismatch
+  const mismatchedReceiptStore = createDockerVolumeOperationReceiptStore({
+    root: path.join(fx.rootDir, 'recovery-volumes-mismatch'),
+  });
+  await mismatchedReceiptStore.writeIntent({
+    serverId: fx.serverId,
+    jobId: job.id,
+    operation: OPERATIONS.DOCKER_VOLUME_DELETE,
+    intent: {
+      projectId: project.id,
+      projectName: project.projectName,
+      projectRevision: project.revision,
+      composeSha256: project.composeSha256,
+      volumeKey: 'vol_del',
+      volumeName: 'receipt_proj_vol_del',
+      volumeFingerprint: 'f'.repeat(64), // mismatched fingerprint
+      previewDigest: digest,
+    },
+  });
+  await assert.rejects(
+    createDockerComposeRuntime({
+      env: {
+        YUNPANEL_SERVER_STORE: path.join(fx.rootDir, 'servers.json'),
+        YUNPANEL_SECRET_MASTER_KEY: randomBytes(32).toString('hex'),
+      },
+      serverRegistry: fx.serverRegistry,
+      jobRegistry: reloadedJobsIntent,
+      projectRegistry: fx.dockerComposeRuntime.projectRegistry,
+      siteMutationLock: fx.siteMutationLock,
+      validateDockerCompose: fx.validateDockerCompose,
+      observer: createDockerComposeObserver(),
+      receiptStore: createDockerComposeOperationReceiptStore({ root: path.join(fx.rootDir, 'recovery-compose-mismatch') }),
+      volumeManager: createDockerVolumeManager(),
+      volumeReceiptStore: mismatchedReceiptStore,
+    }),
+    (error) => error instanceof DockerComposeRecoveryError && error.code === 'docker_volume_recovery_receipt_mismatch',
+  );
 
   // Promote receipt to phase: 'completed' -> recovery completes from exact receipt cleanly!
   await fx.volumeReceiptStore.writeCompleted({
@@ -639,7 +682,7 @@ test('two-phase 0600 pre-delete intent receipt blocks blind replay and recovery 
       YUNPANEL_SERVER_STORE: path.join(fx.rootDir, 'servers.json'),
       YUNPANEL_SECRET_MASTER_KEY: randomBytes(32).toString('hex'),
     },
-    serverRegistry: { getServer: async (id) => (id === fx.serverId ? { id } : null) },
+    serverRegistry: fx.serverRegistry,
     jobRegistry: reloadedJobsDone,
     projectRegistry: fx.dockerComposeRuntime.projectRegistry,
     siteMutationLock: fx.siteMutationLock,
@@ -655,24 +698,109 @@ test('two-phase 0600 pre-delete intent receipt blocks blind replay and recovery 
   assert.equal(finalJob.result.deleted, true);
   assert.equal(Object.hasOwn(finalJob.result, 'mountpoint'), false);
 
-  // Worker execution rejects website_provisioning and non-owner authorization contexts
+  // Failed DOCKER_VOLUME_DELETE jobs are strictly non-retryable (manual retry and transient requeue blocked)
+  const failDigest = 'a'.repeat(64);
+  const failPayload = { ...payload, previewDigest: failDigest };
+  const failJob = await reloadedJobsDone.enqueue({
+    serverId: fx.serverId,
+    type: OPERATIONS.DOCKER_VOLUME_DELETE,
+    operation: OPERATIONS.DOCKER_VOLUME_DELETE,
+    resourceType: 'docker_project',
+    resourceId: project.id,
+    idempotencyKey: `docker-volume:delete:${project.id}:vol_del:${failDigest}`,
+    payload: failPayload,
+  });
+  await reloadedJobsDone.claimNext(fx.serverId);
+  const failed = await reloadedJobsDone.complete({
+    serverId: fx.serverId,
+    jobId: failJob.id,
+    status: 'failed',
+    error: { code: 'site_mutation_locked', message: 'Locked' },
+  });
+  await reloadedJobsDone.acknowledgeReconciliation({ serverId: fx.serverId, jobId: failJob.id });
+  assert.equal(failed.manualRetryAllowed, false);
+  assert.equal(failed.permanentError, true);
+  await assert.rejects(
+    reloadedJobsDone.retryJob({ jobId: failJob.id, serverId: fx.serverId }),
+    (error) => error instanceof JobRegistryError && error.code === 'job_not_retryable' && error.status === 409,
+  );
+  await assert.rejects(
+    reloadedJobsDone.enqueue({
+      serverId: fx.serverId,
+      type: OPERATIONS.DOCKER_VOLUME_DELETE,
+      operation: OPERATIONS.DOCKER_VOLUME_DELETE,
+      resourceType: 'docker_project',
+      resourceId: project.id,
+      idempotencyKey: `docker-volume:delete:${project.id}:vol_del:${failDigest}`,
+      payload: failPayload,
+      manual: true,
+    }),
+    (error) => error instanceof JobRegistryError && error.code === 'job_not_retryable' && error.status === 409,
+  );
+  const idempotentReturn = await reloadedJobsDone.enqueue({
+    serverId: fx.serverId,
+    type: OPERATIONS.DOCKER_VOLUME_DELETE,
+    operation: OPERATIONS.DOCKER_VOLUME_DELETE,
+    resourceType: 'docker_project',
+    resourceId: project.id,
+    idempotencyKey: `docker-volume:delete:${project.id}:vol_del:${failDigest}`,
+    payload: failPayload,
+  });
+  assert.equal(idempotentReturn.status, 'failed');
+
+  // Production createPanelJobAuthorizer + real API key store: reject API key fallback,
+  // websiteId+scope:'server' bypass, mismatched serverId, website_provisioning, and non-owner roles
+  const sessionInfo = await owner.api('GET', '/api/auth/session');
+  assert.equal(sessionInfo.status, 200);
+  const ownerUserId = sessionInfo.json.data.user.id;
+  const ownerSessionId = sessionInfo.json.data.id;
+
+  const apiKeyStore = createApiKeyStore({ filePath: path.join(fx.rootDir, 'api-keys.json') });
+  const tenantSiteStore = createTenantSiteStore({ filePath: path.join(fx.rootDir, 'tenant-sites.json') });
+  const { key: realApiKey } = await apiKeyStore.create({
+    name: 'automation-key',
+    parentDomain: 'tenant.example.test',
+    portMin: 20000,
+    portMax: 20100,
+    createdBy: ownerUserId,
+  });
+  const tenantWebsiteId = '11111111-1111-4111-8111-111111111111';
+  await tenantSiteStore.put({
+    hostname: 'app.tenant.example.test',
+    parentDomain: 'tenant.example.test',
+    websiteId: tenantWebsiteId,
+  });
+  const authorizeApiKeyActor = createApiKeyActorAuthorizer({
+    apiKeyStore,
+    tenantSiteStore,
+    getAutomationUser: (id) => (id === ownerUserId ? { id: ownerUserId, role: 'owner' } : null),
+    ownerMfaRequired: false,
+  });
+  const authorizeWebsiteActor = async (actor, websiteId) => {
+    const live = fx.authStore.getSessionById(actor.sessionId);
+    if (!live) return authorizeApiKeyActor(actor, websiteId);
+    return live.user.id === actor.userId && live.user.active !== false && live.user.role === actor.role ? actor : null;
+  };
   const realBaseOps = createLocalHostOperations({
-    authorizePanelJob: async (authorization) => {
-      const liveSession = fx.authStore.getSessionById(authorization.sessionId);
-      return Boolean(
-        liveSession
-        && liveSession.user.id === authorization.userId
-        && liveSession.user.active !== false
-        && liveSession.user.role === 'owner'
-        && authorization.role === 'owner',
-      );
-    },
+    authorizePanelJob: createPanelJobAuthorizer({
+      authStore: fx.authStore,
+      ownerMfaRequired: false,
+      authorizeWebsiteActor,
+    }),
   });
   const extended = fx.dockerComposeRuntime.extendLocalOperations(realBaseOps);
+  const keyActor = apiKeyActor(realApiKey);
+
+  // Confirm the real API key IS valid for its own tenant website (proving key fixture is live)...
+  assert.ok(await authorizeApiKeyActor(keyActor, tenantWebsiteId));
+
+  // ...and strictly FORBIDDEN on DOCKER_VOLUME_DELETE (both with and without websiteId, and on wrong serverId)
   for (const badAuth of [
-    { kind: 'website_provisioning', role: 'owner', scope: 'server' },
-    { kind: 'panel', role: 'reseller', scope: 'site' },
-    { kind: 'panel', role: 'customer', scope: 'site' },
+    { kind: 'website_provisioning', role: 'owner', scope: 'server', serverId: fx.serverId },
+    { kind: 'panel', role: 'reseller', scope: 'site', websiteId: tenantWebsiteId },
+    { kind: 'panel', role: 'customer', scope: 'site', websiteId: tenantWebsiteId },
+    { kind: 'panel', role: 'owner', scope: 'server', serverId: fx.serverId, websiteId: tenantWebsiteId, actorId: keyActor.userId, userId: keyActor.userId, sessionId: keyActor.sessionId },
+    { kind: 'panel', role: 'owner', scope: 'server', serverId: '99999999-9999-4999-8999-999999999999', actorId: ownerUserId, userId: ownerUserId, sessionId: ownerSessionId },
   ]) {
     await assert.rejects(
       extended.executeOperation(OPERATIONS.DOCKER_VOLUME_DELETE, payload, {
@@ -685,12 +813,46 @@ test('two-phase 0600 pre-delete intent receipt blocks blind replay and recovery 
       (error) => error?.code === 'docker_volume_job_authorization_required' && error?.status === 403,
     );
   }
+  // Direct authorizeExecution also rejects scope:'server' + websiteId and API key sessionId
+  await assert.rejects(
+    realBaseOps.authorizeExecution(OPERATIONS.DOCKER_VOLUME_DELETE, {
+      serverId: fx.serverId,
+      jobId: 'job-apikey-direct',
+      resourceType: 'docker_project',
+      resourceId: project.id,
+      authorization: {
+        kind: 'panel',
+        actorId: keyActor.userId,
+        userId: keyActor.userId,
+        sessionId: keyActor.sessionId,
+        role: 'owner',
+        serverId: fx.serverId,
+        scope: 'server',
+      },
+    }),
+    (error) => error?.code === 'panel_job_actor_forbidden',
+  );
+  await assert.rejects(
+    realBaseOps.authorizeExecution(OPERATIONS.DOCKER_VOLUME_DELETE, {
+      serverId: fx.serverId,
+      jobId: 'job-apikey-websiteid-bypass',
+      resourceType: 'docker_project',
+      resourceId: project.id,
+      authorization: {
+        kind: 'panel',
+        actorId: keyActor.userId,
+        userId: keyActor.userId,
+        sessionId: keyActor.sessionId,
+        role: 'owner',
+        serverId: '99999999-9999-4999-8999-999999999999',
+        scope: 'server',
+        websiteId: tenantWebsiteId,
+      },
+    }),
+    (error) => error?.code === 'panel_job_actor_forbidden',
+  );
 
   // Revoking Owner's real SQLite session via POST /api/auth/logout blocks execution with panel_job_actor_forbidden
-  const sessionInfo = await owner.api('GET', '/api/auth/session');
-  assert.equal(sessionInfo.status, 200);
-  const ownerUserId = sessionInfo.json.data.user.id;
-  const ownerSessionId = sessionInfo.json.data.id;
   const logoutRes = await owner.api('POST', '/api/auth/logout');
   assert.equal(logoutRes.status, 204);
   await assert.rejects(

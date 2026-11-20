@@ -464,7 +464,11 @@ export function createDockerVolumeOperationsService({
       );
     }
 
-    const executionRevision = previousJobs.length;
+    const executionRevision = sha256Json(
+      previousJobs
+        .map((job) => [job.id, job.operation, job.status])
+        .sort((left, right) => String(left[0]).localeCompare(String(right[0]))),
+    );
     const digest = sha256Json({
       version: 1,
       action: 'delete',

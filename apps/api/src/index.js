@@ -89,7 +89,7 @@ import { createLiveSessionRegistry } from './live-session-registry.js';
 import { createElFinderHandoffService } from './elfinder-handoff-service.js';
 import { startElFinderHandoffSocket } from './elfinder-handoff-socket.js';
 import { createLocalDatabaseCredentialOperation } from './local-database-credential-operation.js';
-import { createLocalHostOperations } from './local-host-operations.js';
+import { createLocalHostOperations, createPanelJobAuthorizer } from './local-host-operations.js';
 import { createMailAliasRegistry } from './mail-alias-registry.js';
 import { createMailConfigurationService } from './mail-configuration.js';
 import { createMailDkimConfigurationService } from './mail-dkim-configuration.js';
@@ -1531,9 +1531,11 @@ const localRuntime = await startConfiguredLocalRuntime({
       loadGitCredential: applicationId => applicationEnvironmentRegistry.materializeDeploymentCredential(applicationId)}),
     passengerRestartOperation:createLocalPassengerRestartOperation({applicationRegistry,websiteRegistry,domainRegistry,applicationEnvironmentRegistry,siteMutationLock}),
     authorizeWebsiteProvisioning: authorizeWebsiteProvisioningChildJob,
-    authorizePanelJob: async (authorization) => Boolean(await authorizeWebsitePhpActor({
-      sessionId: authorization.sessionId, userId: authorization.userId, role: authorization.role,
-    }, authorization.websiteId)),
+    authorizePanelJob: createPanelJobAuthorizer({
+      authStore,
+      ownerMfaRequired,
+      authorizeWebsiteActor: authorizeWebsitePhpActor,
+    }),
     authorizeWebsiteBackupScheduleJob: authorizeWebsiteBackupSchedule,
     requiresWebsiteProvisioningAuthorization,
   })),

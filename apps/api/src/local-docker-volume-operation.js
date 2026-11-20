@@ -213,12 +213,16 @@ export function createLocalDockerVolumeOperation({
           });
 
           // 7. Promote durable 0600 receipt from intent -> completed after verified absence.
-          await receiptStore.writeCompleted({
-            serverId: execution.serverId,
-            jobId: execution.jobId,
-            operation,
-            result,
-          });
+          // Physical deletion and absence verification have already succeeded; a transient
+          // receipt write failure must not misclassify confirmed deletion as failed.
+          try {
+            await receiptStore.writeCompleted({
+              serverId: execution.serverId,
+              jobId: execution.jobId,
+              operation,
+              result,
+            });
+          } catch {}
 
           return result;
         },

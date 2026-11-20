@@ -116,9 +116,13 @@ function extendLocalOperations(baseOperations, localOperation, localVolumeOperat
         return localOperation.execute(operation, payload, { ...authorized, authorize: () => baseOperations.authorizeExecution(operation, execution) });
       }
       if (localVolumeOperation && DOCKER_VOLUME_OPERATION_SET.has(operation)) {
-        if (execution?.authorization?.kind !== 'panel'
-          || execution?.authorization?.role !== 'owner'
-          || execution?.authorization?.scope !== 'server'
+        const auth = execution?.authorization;
+        if (auth?.kind !== 'panel'
+          || auth?.role !== 'owner'
+          || auth?.scope !== 'server'
+          || auth?.websiteId !== undefined
+          || typeof execution?.serverId !== 'string'
+          || auth?.serverId !== execution.serverId
           || typeof baseOperations.authorizeExecution !== 'function') {
           throw Object.assign(new DockerComposeRuntimeError('docker_volume_job_authorization_required', 'Docker volume silme işlemi yalnız güncel Owner oturumuyla yürütülebilir'), { status: 403 });
         }

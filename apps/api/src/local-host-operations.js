@@ -775,12 +775,19 @@ export function createLocalHostOperations({
       return Object.freeze(Object.fromEntries(Object.entries(execution).filter(([key]) => key !== 'authorization')));
     }
     if (requested != null && requested.kind !== 'website_provisioning') {
+      const isServerScopedOwner = requested?.kind === 'panel'
+        && requested?.scope === 'server'
+        && requested?.role === 'owner'
+        && requested?.websiteId === undefined
+        && typeof execution?.serverId === 'string'
+        && requested?.serverId === execution.serverId;
+      const isWebsiteScoped = requested?.scope !== 'server'
+        && typeof requested?.websiteId === 'string'
+        && requested.websiteId.length > 0;
       const valid = requested && typeof requested === 'object' && !Array.isArray(requested)
         && typeof requested.userId === 'string' && requested.userId === requested.actorId
         && typeof requested.sessionId === 'string' && requested.sessionId.length > 0
-        && ((typeof requested.websiteId === 'string' && requested.websiteId.length > 0)
-          || (requested.kind === 'panel' && requested.scope === 'server' && requested.role === 'owner'
-            && requested.serverId === execution.serverId))
+        && (isServerScopedOwner || isWebsiteScoped)
         && ['owner', 'site_manager', 'reseller', 'customer'].includes(requested.role);
       if (!valid || !authorizePanelJob || await authorizePanelJob(requested, { operation, ...execution }) !== true) {
         const error = new Error('Panel session or website access changed before job execution');
@@ -971,6 +978,47 @@ export function createLocalHostOperations({
         || execution.authorization.websiteId !== payload.websiteId)) throw Object.assign(new Error('Passenger release requires an authenticated Website actor'), { code:'panel_job_actor_forbidden' });
       return handler(payload, authorizedExecution, passengerRelease ? { reauthorize: () => authorizeExecution(operation, execution) } : undefined);
     },
+  };
+}
+
+export function createPanelJobAuthorizer({
+  authStore,
+  ownerMfaRequired = true,
+  authorizeWebsiteActor,
+} = {}) {
+  if (!authStore || typeof authStore.getSessionById !== 'function'
+    || typeof authorizeWebsiteActor !== 'function') {
+    throw new TypeError('Panel job authorizer dependencies are required');
+  }
+  return async function authorizePanelJob(authorization, context = null) {
+    if (!authorization || typeof authorization !== 'object' || Array.isArray(authorization)) return false;
+    const isServerScope = authorization.scope === 'server'
+      || context?.operation === OPERATIONS.DOCKER_VOLUME_DELETE;
+    if (isServerScope) {
+      // Server-scoped and Docker volume mutations require a live interactive Owner
+      // panel session; never fall back to tenant API keys.
+      if (authorization.kind !== 'panel'
+        || authorization.role !== 'owner'
+        || authorization.websiteId !== undefined
+        || typeof authorization.sessionId !== 'string' || !authorization.sessionId
+        || typeof authorization.userId !== 'string' || !authorization.userId) {
+        return false;
+      }
+      const session = authStore.getSessionById(authorization.sessionId);
+      if (!session || session.user?.id !== authorization.userId
+        || session.user?.active === false || session.user?.role !== 'owner') {
+        return false;
+      }
+      if (ownerMfaRequired && authStore.mfa?.enabled?.(authorization.userId) !== true) {
+        return false;
+      }
+      return true;
+    }
+    return Boolean(await authorizeWebsiteActor({
+      sessionId: authorization.sessionId,
+      userId: authorization.userId,
+      role: authorization.role,
+    }, authorization.websiteId));
   };
 }
 

@@ -656,6 +656,7 @@ export function createDockerComposeProjectRegistry({
       encryptedDocument: encryptDocument(encryptionKey, id, revision, document),
       updatedAt: new Date(now()).toISOString(),
     });
+    if (!summary.volumeDetails) delete project.volumeDetails;
     await persist();
     return publicProject(project);
   }

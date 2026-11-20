@@ -1403,6 +1403,7 @@ export async function provisionOneClickApp(
     dockerComposeProjectRegistry = null,
     validateDockerCompose = null,
     domainRegistry = null,
+    siteMutationLock = null,
     localServerId = null,
   } = {},
 ) {
@@ -1411,21 +1412,26 @@ export async function provisionOneClickApp(
     return prepared;
   }
   const serverId = input.serverId ?? localServerId ?? 'srv_local';
-  const validation = typeof validateDockerCompose === 'function'
-    ? await validateDockerCompose({
-        projectName: prepared.projectName,
-        document: prepared.document,
-        environment: {},
-        interpolate: false,
-      })
-    : undefined;
+  const runCreate = async () => {
+    const validation = typeof validateDockerCompose === 'function'
+      ? await validateDockerCompose({
+          projectName: prepared.projectName,
+          document: prepared.document,
+          environment: {},
+          interpolate: false,
+        })
+      : undefined;
 
-  const project = await dockerComposeProjectRegistry.createProject({
-    serverId,
-    projectName: prepared.projectName,
-    document: prepared.document,
-    validation,
-  });
+    return dockerComposeProjectRegistry.createProject({
+      serverId,
+      projectName: prepared.projectName,
+      document: prepared.document,
+      validation,
+    });
+  };
+  const project = siteMutationLock && typeof siteMutationLock.withDockerInventoryLock === 'function'
+    ? await siteMutationLock.withDockerInventoryLock(serverId, runCreate)
+    : await runCreate();
 
   const proxyRule = prepared.proxyPreview.hostname
     ? await resolveDockerProxyRule(
