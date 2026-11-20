@@ -12,11 +12,13 @@ const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const MAX_CONTAINERS = 128;
 const MAX_BUFFER = 512 * 1024;
 const TIMEOUT_MS = 15_000;
+const DOCKER_LOCAL_SOCKET = 'unix:///var/run/docker.sock';
 const CLEAN_ENV = Object.freeze({
   PATH: '/usr/bin:/bin',
   LANG: 'C',
   LC_ALL: 'C',
-  DOCKER_HOST: 'unix:///var/run/docker.sock',
+  DOCKER_HOST: DOCKER_LOCAL_SOCKET,
+  DOCKER_CONFIG: '/nonexistent',
 });
 
 export class DockerVolumeManagerError extends Error {
@@ -90,6 +92,17 @@ export function computeVolumeFingerprint({
   composeProject,
   composeVolume,
 }) {
+  if (typeof name !== 'string' || !name
+    || typeof driver !== 'string' || !driver
+    || typeof scope !== 'string' || !scope
+    || typeof mountpoint !== 'string' || !mountpoint
+    || typeof createdAt !== 'string' || !createdAt || !Number.isFinite(Date.parse(createdAt))) {
+    throw new DockerVolumeManagerError(
+      'docker_volume_identity_incomplete',
+      'Docker volume identity requires verified scope and creation timestamp',
+      409,
+    );
+  }
   return createHash('sha256')
     .update(JSON.stringify({
       version: 1,
@@ -116,10 +129,7 @@ export function normalizeVolumeInspect(raw, expectedName) {
   if (!driver) {
     throw new DockerVolumeManagerError('docker_volume_inspect_invalid', 'Docker volume driver metadata is missing', 503);
   }
-  const scope = raw.Scope === undefined || raw.Scope === null ? 'local' : raw.Scope;
-  if (typeof scope !== 'string' || scope.length === 0) {
-    throw new DockerVolumeManagerError('docker_volume_inspect_invalid', 'Docker volume scope metadata is invalid', 503);
-  }
+  const scope = typeof raw.Scope === 'string' && raw.Scope.trim().length > 0 ? sanitizeText(raw.Scope, 64) : null;
   if (typeof raw.Mountpoint !== 'string' || !path.posix.isAbsolute(raw.Mountpoint)
     || raw.Mountpoint.length > 4096 || /[\u0000-\u001f\u007f]/.test(raw.Mountpoint)) {
     throw new DockerVolumeManagerError('docker_volume_mountpoint_invalid', 'Docker volume mountpoint is invalid', 503);
@@ -130,18 +140,21 @@ export function normalizeVolumeInspect(raw, expectedName) {
   }
   const options = normalizeOptions(raw.Options);
   const labels = normalizeLabels(raw.Labels);
-  const createdAt = typeof raw.CreatedAt === 'string' ? sanitizeText(raw.CreatedAt, 128) : null;
+  const rawCreatedAt = typeof raw.CreatedAt === 'string' ? sanitizeText(raw.CreatedAt, 128) : '';
+  const createdAt = rawCreatedAt.length > 0 && Number.isFinite(Date.parse(rawCreatedAt)) ? rawCreatedAt : null;
   const composeProject = Object.hasOwn(labels, 'com.docker.compose.project') ? labels['com.docker.compose.project'] : null;
   const composeVolume = Object.hasOwn(labels, 'com.docker.compose.volume') ? labels['com.docker.compose.volume'] : null;
-  const fingerprint = computeVolumeFingerprint({
-    name: safeName,
-    driver,
-    scope,
-    mountpoint,
-    createdAt,
-    composeProject,
-    composeVolume,
-  });
+  const fingerprint = scope && createdAt
+    ? computeVolumeFingerprint({
+      name: safeName,
+      driver,
+      scope,
+      mountpoint,
+      createdAt,
+      composeProject,
+      composeVolume,
+    })
+    : null;
 
   return Object.freeze({
     present: true,
@@ -198,10 +211,26 @@ export function assertVolumeDeletableMetadata(detail, { projectName, volumeKey, 
   if (!detail || detail.present !== true) {
     throw new DockerVolumeManagerError('docker_volume_not_found', 'Docker volume was not found on the host', 404);
   }
-  if (detail.driver !== 'local' || detail.scope !== 'local') {
+  if (detail.driver !== 'local') {
     throw new DockerVolumeManagerError(
       'docker_volume_driver_unsupported',
       'Only local Docker volumes can be deleted through this operation',
+      409,
+    );
+  }
+  if (detail.scope !== 'local') {
+    throw new DockerVolumeManagerError(
+      detail.scope === null ? 'docker_volume_identity_incomplete' : 'docker_volume_driver_unsupported',
+      detail.scope === null
+        ? 'Docker volume scope metadata is missing and cannot be verified as local'
+        : 'Only local-scope Docker volumes can be deleted through this operation',
+      409,
+    );
+  }
+  if (!detail.createdAt || !Number.isFinite(Date.parse(detail.createdAt)) || !detail.fingerprint) {
+    throw new DockerVolumeManagerError(
+      'docker_volume_identity_incomplete',
+      'Docker volume creation timestamp is missing or invalid',
       409,
     );
   }
@@ -289,7 +318,7 @@ export function createDockerVolumeManager({
     const binary = await resolveDockerPath();
     let result;
     try {
-      result = await execFn(binary, ['volume', 'inspect', '--format', '{{json .}}', safeName]);
+      result = await execFn(binary, ['--host', DOCKER_LOCAL_SOCKET, 'volume', 'inspect', '--format', '{{json .}}', safeName]);
     } catch (error) {
       if (isMissingVolumeError(error)) {
         return Object.freeze({ present: false, name: safeName });
@@ -310,7 +339,7 @@ export function createDockerVolumeManager({
     const binary = await resolveDockerPath();
     let result;
     try {
-      result = await execFn(binary, ['ps', '-a', '--no-trunc', '--filter', `volume=${safeName}`, '--format', '{{json .}}']);
+      result = await execFn(binary, ['--host', DOCKER_LOCAL_SOCKET, 'ps', '-a', '--no-trunc', '--filter', `volume=${safeName}`, '--format', '{{json .}}']);
     } catch {
       throw new DockerVolumeManagerError('docker_volume_usage_check_failed', 'Docker volume container usage inspection failed', 503);
     }
@@ -338,7 +367,7 @@ export function createDockerVolumeManager({
     }
     const binary = await resolveDockerPath();
     try {
-      await execFn(binary, ['volume', 'rm', identity.volumeName]);
+      await execFn(binary, ['--host', DOCKER_LOCAL_SOCKET, 'volume', 'rm', identity.volumeName]);
     } catch (error) {
       const stderr = String(error?.stderr ?? '').toLowerCase();
       if (stderr.includes('in use')) {

@@ -149,6 +149,32 @@ test('normalizeVolumeInspect and assertVolumeDeletableMetadata enforce Compose l
     (error) => error instanceof DockerVolumeManagerError && error.code === 'docker_volume_driver_unsupported',
   );
 
+  // Missing Scope must NOT default to local -> fail closed
+  const missingScope = dockerVolumeManagerInternals.normalizeVolumeInspect({ ...raw, Scope: undefined }, 'shop_stack_app_data');
+  assert.equal(missingScope.scope, null);
+  assert.equal(missingScope.fingerprint, null);
+  assert.throws(
+    () => dockerVolumeManagerInternals.assertVolumeDeletableMetadata(missingScope, {
+      projectName: 'shop_stack',
+      volumeKey: 'app_data',
+    }),
+    (error) => error instanceof DockerVolumeManagerError && error.code === 'docker_volume_identity_incomplete',
+  );
+
+  // Missing or invalid CreatedAt must NOT produce a fingerprint -> fail closed
+  for (const badCreatedAt of [undefined, null, '', 'not-a-timestamp']) {
+    const missingTs = dockerVolumeManagerInternals.normalizeVolumeInspect({ ...raw, CreatedAt: badCreatedAt }, 'shop_stack_app_data');
+    assert.equal(missingTs.createdAt, null);
+    assert.equal(missingTs.fingerprint, null);
+    assert.throws(
+      () => dockerVolumeManagerInternals.assertVolumeDeletableMetadata(missingTs, {
+        projectName: 'shop_stack',
+        volumeKey: 'app_data',
+      }),
+      (error) => error instanceof DockerVolumeManagerError && error.code === 'docker_volume_identity_incomplete',
+    );
+  }
+
   // Drifted fingerprint -> fail closed stale preview
   assert.throws(
     () => dockerVolumeManagerInternals.assertVolumeDeletableMetadata(detail, {
