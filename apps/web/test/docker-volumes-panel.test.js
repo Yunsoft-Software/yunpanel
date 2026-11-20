@@ -14,7 +14,7 @@ import { setSession } from '../src/session-client.js';
 register('./jsx-loader.js', import.meta.url);
 
 const { WorkspaceContext } = await import('../src/workspace/WorkspaceContext.jsx');
-const { ConfirmDialog } = await import('../src/workspace/PanelKit.jsx');
+const { CollectionNotice, ConfirmDialog } = await import('../src/workspace/PanelKit.jsx');
 const {
   default: DockerVolumesPanel,
   dockerVolumesPanelInternals,
@@ -279,6 +279,55 @@ test('DockerVolumesPanel confirmation message names the single volume and warns 
   assert.equal(dockerVolumesPanelInternals.isDeleteLocked({ busy: true, jobsStatus: 'ready', projectBusy: false }), true);
   assert.equal(dockerVolumesPanelInternals.isDeleteLocked({ busy: false, jobsStatus: 'loading', projectBusy: false }), true);
   assert.equal(dockerVolumesPanelInternals.isDeleteLocked({ busy: false, jobsStatus: 'ready', projectBusy: true }), true);
+});
+
+test('DockerVolumesPanel keeps healthy refresh free of false alert banners and isolates inventory per projectId', () => {
+  const readyState = { status: 'ready', data: sampleInventory(), error: null, updatedAt: Date.now(), refreshing: false };
+
+  // Healthy refresh on the same project preserves ready status (never stale) so CollectionNotice emits no alert
+  const refreshingSame = dockerVolumesPanelInternals.nextInventoryFetchStart(readyState, PROJECT.id);
+  assert.equal(refreshingSame.status, 'ready');
+  assert.equal(refreshingSame.refreshing, true);
+  assert.equal(refreshingSame.data.projectId, PROJECT.id);
+  const refreshNoticeHtml = renderToStaticMarkup(createElement(CollectionNotice, {
+    resource: { ...refreshingSame, refresh: () => {} },
+    label: 'Proje volume listesi',
+  }));
+  assert.equal(refreshNoticeHtml.includes('role="alert"'), false);
+  assert.equal(refreshNoticeHtml.includes('Veriler alınamadı'), false);
+
+  // Real failure on the same project becomes stale and shows alert
+  const failedSame = dockerVolumesPanelInternals.nextInventoryFetchError(refreshingSame, PROJECT.id, new Error('Ağ hatası'));
+  assert.equal(failedSame.status, 'stale');
+  assert.equal(failedSame.refreshing, false);
+  const failedNoticeHtml = renderToStaticMarkup(createElement(CollectionNotice, {
+    resource: { ...failedSame, refresh: () => {} },
+    label: 'Proje volume listesi',
+  }));
+  assert.ok(failedNoticeHtml.includes('role="alert"'));
+  assert.ok(failedNoticeHtml.includes('Ağ hatası'));
+
+  // Switching to another project drops previous project data immediately and on error
+  const otherProjectId = '33333333-3333-4333-8333-333333333333';
+  const switchedStart = dockerVolumesPanelInternals.nextInventoryFetchStart(readyState, otherProjectId);
+  assert.equal(switchedStart.status, 'loading');
+  assert.equal(switchedStart.data, null);
+  const switchedError = dockerVolumesPanelInternals.nextInventoryFetchError(readyState, otherProjectId, new Error('Yüklenemedi'));
+  assert.equal(switchedError.status, 'error');
+  assert.equal(switchedError.data, null);
+
+  // Render layer never leaks previous project's volumes or delete buttons when projectId differs
+  const leakedHtml = renderToStaticMarkup(createElement(
+    WorkspaceContext.Provider,
+    { value: workspaceValue({ isOwner: true }) },
+    createElement(DockerVolumesPanel, {
+      project: { id: otherProjectId, projectName: 'other_stack', revision: 1 },
+      initialData: sampleInventory(),
+    }),
+  ));
+  assert.equal(leakedHtml.includes('shop_stack_pg_data'), false);
+  assert.equal(leakedHtml.includes('>Sil</button>'), false);
+  assert.equal(leakedHtml.includes('Kayıtlı volume bulunamadı'), false);
 });
 
 test('DockerVolumesPanel wires single-volume delete flow without bulk/prune/force actions and mounts cleanly below StoragePanel', async () => {

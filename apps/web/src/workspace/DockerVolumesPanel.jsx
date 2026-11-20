@@ -47,43 +47,80 @@ function isDeleteLocked({ busy, jobsStatus, projectBusy }) {
   return Boolean(busy || jobsStatus !== 'ready' || projectBusy);
 }
 
+function projectScopedInventory(data, projectId) {
+  return data && typeof projectId === 'string' && projectId && data.projectId === projectId ? data : null;
+}
+
+function nextInventoryFetchStart(current, projectId) {
+  const sameProjectData = projectScopedInventory(current?.data, projectId);
+  if (sameProjectData) {
+    return {
+      ...current,
+      status: 'ready',
+      data: sameProjectData,
+      error: null,
+      refreshing: true,
+    };
+  }
+  return {
+    status: 'loading',
+    data: null,
+    error: null,
+    updatedAt: null,
+    refreshing: true,
+  };
+}
+
+function nextInventoryFetchError(current, projectId, error) {
+  const sameProjectData = projectScopedInventory(current?.data, projectId);
+  if (sameProjectData) {
+    return {
+      status: 'stale',
+      data: sameProjectData,
+      error,
+      updatedAt: current.updatedAt,
+      refreshing: false,
+    };
+  }
+  return {
+    status: 'error',
+    data: null,
+    error,
+    updatedAt: null,
+    refreshing: false,
+  };
+}
+
 function useVolumeInventory(projectId, projectRevision, { enabled, initialData }) {
-  const [state, setState] = useState(() => (
-    initialData !== null && initialData !== undefined
-      ? { status: 'ready', data: initialData, error: null, updatedAt: Date.now() }
-      : { status: enabled ? 'loading' : 'disabled', data: null, error: null, updatedAt: null }
-  ));
+  const [state, setState] = useState(() => {
+    const scopedInitial = projectScopedInventory(initialData, projectId);
+    if (scopedInitial) {
+      return { status: 'ready', data: scopedInitial, error: null, updatedAt: Date.now(), refreshing: false };
+    }
+    return { status: enabled ? 'loading' : 'disabled', data: null, error: null, updatedAt: null, refreshing: false };
+  });
   const [reloadCount, setReloadCount] = useState(0);
   const refresh = useCallback(() => setReloadCount((value) => value + 1), []);
 
   useEffect(() => {
     if (!enabled || !projectId) {
-      setState({ status: 'disabled', data: null, error: null, updatedAt: null });
+      setState({ status: 'disabled', data: null, error: null, updatedAt: null, refreshing: false });
       return undefined;
     }
-    if (initialData !== null && initialData !== undefined && reloadCount === 0) {
+    if (projectScopedInventory(initialData, projectId) && reloadCount === 0) {
       return undefined;
     }
     const controller = new AbortController();
-    setState((current) => ({
-      ...current,
-      status: current.data ? 'stale' : 'loading',
-      error: null,
-    }));
+    setState((current) => nextInventoryFetchStart(current, projectId));
     Promise.resolve(getDockerProjectVolumes(projectId, { signal: controller.signal }))
       .then((data) => {
         if (!controller.signal.aborted) {
-          setState({ status: 'ready', data, error: null, updatedAt: Date.now() });
+          setState({ status: 'ready', data, error: null, updatedAt: Date.now(), refreshing: false });
         }
       })
       .catch((error) => {
         if (!controller.signal.aborted && error?.name !== 'AbortError') {
-          setState((current) => ({
-            status: current.data ? 'stale' : 'error',
-            data: current.data,
-            error,
-            updatedAt: current.updatedAt,
-          }));
+          setState((current) => nextInventoryFetchError(current, projectId, error));
         }
       });
     return () => controller.abort();
@@ -105,7 +142,7 @@ export default function DockerVolumesPanel({ project, onChanged, initialData = n
   const [error, setError] = useState(null);
   const inFlight = useRef(false);
   const projectBusy = Boolean(projectId && typeof resourceBusy === 'function' && resourceBusy('docker_project', projectId));
-  const wasProjectBusy = useRef(projectBusy);
+  const wasProjectBusy = useRef({ projectId, busy: projectBusy });
 
   useEffect(() => {
     setPending(null);
@@ -113,16 +150,21 @@ export default function DockerVolumesPanel({ project, onChanged, initialData = n
   }, [projectId, projectRevision]);
 
   useEffect(() => {
-    if (wasProjectBusy.current && !projectBusy && isOwner && projectId) {
+    const previous = wasProjectBusy.current;
+    if (previous.projectId === projectId && previous.busy && !projectBusy && isOwner && projectId) {
       volumes.refresh();
     }
-    wasProjectBusy.current = projectBusy;
+    wasProjectBusy.current = { projectId, busy: projectBusy };
   }, [projectBusy, isOwner, projectId, volumes.refresh]);
 
   if (!isOwner || !project) return null;
 
+  const currentData = projectScopedInventory(volumes.data, project.id);
+  const scopedResource = currentData || volumes.data === null
+    ? volumes
+    : { ...volumes, status: 'loading', data: null, error: null, updatedAt: null };
   const locked = isDeleteLocked({ busy, jobsStatus: jobs?.status, projectBusy });
-  const items = Array.isArray(volumes.data?.volumes) ? volumes.data.volumes : [];
+  const items = Array.isArray(currentData?.volumes) ? currentData.volumes : [];
 
   async function requestPreview(item) {
     if (inFlight.current || locked || item?.deletable !== true) return;
@@ -131,6 +173,10 @@ export default function DockerVolumesPanel({ project, onChanged, initialData = n
     setError(null);
     try {
       const preview = await previewDockerVolumeDelete(project.id, item.volumeKey);
+      if (!preview || typeof preview.previewDigest !== 'string' || !preview.previewDigest
+        || typeof preview.confirmation !== 'string' || !preview.confirmation) {
+        throw new Error('Geçerli volume silme önizlemesi alınamadı.');
+      }
       setPending({ volumeKey: item.volumeKey, preview });
     } catch (failure) {
       if (failure?.name !== 'AbortError') setError(failure?.message ?? 'Volume silme önizlemesi alınamadı.');
@@ -168,9 +214,9 @@ export default function DockerVolumesPanel({ project, onChanged, initialData = n
     <Section
       title="Kalıcı volume yönetimi"
       description="Yalnız bu projeye ait ve hiçbir konteynere bağlı olmayan tekil volume kayıtlarını kalıcı olarak silebilirsiniz."
-      actions={<Button icon="refresh" disabled={busy} onClick={volumes.refresh}>Yenile</Button>}
+      actions={<Button icon="refresh" disabled={busy || volumes.refreshing} onClick={volumes.refresh}>Yenile</Button>}
     >
-      <CollectionNotice resource={volumes} label="Proje volume listesi" />
+      <CollectionNotice resource={scopedResource} label="Proje volume listesi" />
       {error && !pending && <div className="ws-section-body"><ErrorNotice error={error} /></div>}
       {items.length > 0 ? (
         <div className="ws-table-scroll">
@@ -225,7 +271,7 @@ export default function DockerVolumesPanel({ project, onChanged, initialData = n
             </tbody>
           </table>
         </div>
-      ) : volumes.status === 'ready' && (
+      ) : scopedResource.status === 'ready' && Boolean(currentData) && (
         <EmptyState
           icon="archive"
           title="Kayıtlı volume bulunamadı"
@@ -239,6 +285,7 @@ export default function DockerVolumesPanel({ project, onChanged, initialData = n
         message={buildDeleteMessage(pending.preview)}
         confirmation={pending.preview.confirmation}
         busy={busy}
+        disabled={projectBusy || jobs?.status !== 'ready'}
         error={error}
         onCancel={() => {
           if (!busy) {
@@ -259,4 +306,7 @@ export const dockerVolumesPanelInternals = Object.freeze({
   volumeBlockReason,
   buildDeleteMessage,
   isDeleteLocked,
+  projectScopedInventory,
+  nextInventoryFetchStart,
+  nextInventoryFetchError,
 });
