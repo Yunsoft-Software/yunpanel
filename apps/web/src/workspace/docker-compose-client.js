@@ -17,6 +17,14 @@ function integer(value, field, minimum, maximum) {
   return value;
 }
 
+function volumeKeyValue(value) {
+  if (typeof value !== 'string' || !value.trim()) throw new Error('volumeKey is required');
+  if (value !== value.trim() || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(value) || value.includes('..')) {
+    throw new Error('volumeKey is invalid');
+  }
+  return value;
+}
+
 export function listDockerProjects({ signal } = {}) {
   return panelRequest('/docker/projects', signal ? { signal } : undefined);
 }
@@ -289,4 +297,32 @@ export function setDockerCredential(projectId, { registryHost, expectedRevision,
   });
 }
 
-export const dockerComposeClientInternals = Object.freeze({ projectPath, action, integer });
+export function getDockerProjectVolumes(projectId, { signal } = {}) {
+  return panelRequest(`${projectPath(projectId)}/volumes`, signal ? { signal } : undefined);
+}
+
+export function previewDockerVolumeDelete(projectId, volumeKey) {
+  const key = volumeKeyValue(volumeKey);
+  return panelRequest(`${projectPath(projectId)}/volumes/delete-preview`, {
+    method: 'POST',
+    body: { volumeKey: key },
+  });
+}
+
+export function applyDockerVolumeDelete(projectId, { volumeKey, preview } = {}) {
+  const key = volumeKeyValue(volumeKey);
+  if (!preview || typeof preview.previewDigest !== 'string' || !preview.previewDigest
+    || typeof preview.confirmation !== 'string' || !preview.confirmation) {
+    throw new Error('Current Docker volume delete preview is required');
+  }
+  return panelRequest(`${projectPath(projectId)}/volumes/delete`, {
+    method: 'POST',
+    body: {
+      volumeKey: key,
+      expectedPreviewDigest: preview.previewDigest,
+      confirmation: preview.confirmation,
+    },
+  });
+}
+
+export const dockerComposeClientInternals = Object.freeze({ projectPath, action, integer, volumeKeyValue });
