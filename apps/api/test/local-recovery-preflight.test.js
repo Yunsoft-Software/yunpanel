@@ -16,7 +16,12 @@ const otherServerId = '04b0148c-e05f-4c60-a916-320f0f0ef054';
 const privateMarker = 'local-test-private-config-marker';
 const cliPath = fileURLToPath(new URL('../../../scripts/local-migration-backup.mjs', import.meta.url));
 
-async function createFixture(t, serverBinding = `YUNPANEL_LOCAL_SERVER_ID="${sourceServerId}"`) {
+async function createFixture(t, {
+  serverBinding = `YUNPANEL_LOCAL_SERVER_ID="${sourceServerId}"`,
+  archiveMembers,
+  includeNginx = false,
+  passwdAsDirectory = false,
+} = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'yunpanel-recovery-preflight-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const tree = path.join(root, 'tree');
@@ -24,19 +29,24 @@ async function createFixture(t, serverBinding = `YUNPANEL_LOCAL_SERVER_ID="${sou
   const siblingDirectory = path.join(root, 'untouched');
   await mkdir(path.join(tree, 'etc/yunpanel/control-plane'), { recursive: true });
   await mkdir(path.join(tree, 'var/lib/yunpanel'), { recursive: true });
+  if (includeNginx) await mkdir(path.join(tree, 'etc/nginx'));
   await mkdir(backupDirectory, { mode: 0o700 });
   await mkdir(siblingDirectory);
   const siblingFile = path.join(siblingDirectory, 'marker');
   await writeFile(siblingFile, 'unchanged');
   await writeFile(path.join(tree, 'etc/yunpanel/control-plane/api.env'), `${serverBinding}\nPRIVATE_CONFIG=${privateMarker}\n`);
-  await writeFile(path.join(tree, 'etc/passwd'), 'yunapp-example:x:1001:1001::/nonexistent:/usr/sbin/nologin\n');
+  const passwd = path.join(tree, 'etc/passwd');
+  if (passwdAsDirectory) await mkdir(passwd);
+  else await writeFile(passwd, 'yunapp-example:x:1001:1001::/nonexistent:/usr/sbin/nologin\n');
   await writeFile(path.join(tree, 'etc/group'), 'yunapp-example:x:1001:\n');
   await writeFile(path.join(tree, 'var/lib/yunpanel/state.json'), '{"stored":true}\n');
 
   const archivePath = path.join(backupDirectory, 'state.tar');
   const manifestPath = path.join(backupDirectory, 'manifest.json');
-  const required = localMigrationBackupInternals.requiredEntries;
-  const members = required.filter((entry) => entry.required).map((entry) => entry.path.slice(1));
+  const entries = localMigrationBackupInternals.requiredEntries.map(({ path: entryPath, type, required }) => ({
+    path: entryPath, type, present: required || (includeNginx && entryPath === '/etc/nginx'),
+  }));
+  const members = archiveMembers ?? entries.filter((entry) => entry.present).map((entry) => entry.path.slice(1));
   await execFileAsync('/usr/bin/tar', ['--create', '--file', archivePath, '-C', tree, ...members]);
   await chmod(archivePath, 0o600);
   const expectedSha256 = createHash('sha256').update(await readFile(archivePath)).digest('hex');
@@ -45,7 +55,7 @@ async function createFixture(t, serverBinding = `YUNPANEL_LOCAL_SERVER_ID="${sou
     createdAt: '2026-11-20T00:00:00.000Z',
     archive: 'state.tar',
     sha256: expectedSha256,
-    entries: required.map(({ path: entryPath, type, required: present }) => ({ path: entryPath, type, present })),
+    entries,
   };
   await writeFile(manifestPath, JSON.stringify(manifest), { mode: 0o600 });
   return {
@@ -92,8 +102,44 @@ test('preflight rejects even a valid archive and manifest when the recorded dige
   });
 });
 
+test('preflight refuses an archive whose manifest overstates the actual source roots', async (t) => {
+  const fixture = await createFixture(t, { archiveMembers: ['etc/yunpanel'] });
+  const beforeEntries = await readdir(fixture.options.backupDirectory);
+  await assert.rejects(execFileAsync(process.execPath, cliArguments(fixture.options)), (error) => {
+    assert.equal(error.code, 1);
+    assert.equal(error.stdout, '');
+    assert.match(error.stderr, /recovery_snapshot_source_roots_invalid/);
+    assert.equal(error.stderr.includes(fixture.root), false);
+    return true;
+  });
+  assert.deepEqual(await readdir(fixture.options.backupDirectory), beforeEntries);
+  assert.equal(await readFile(fixture.siblingFile, 'utf8'), 'unchanged');
+});
+
+test('preflight refuses a source root whose archived type differs from the manifest', async (t) => {
+  const fixture = await createFixture(t, { passwdAsDirectory: true });
+  await assert.rejects(preflightLocalRecoveryBackup(fixture.options), {
+    code: 'recovery_snapshot_source_roots_invalid',
+  });
+});
+
+test('preflight refuses duplicate archive source roots', async (t) => {
+  const archiveMembers = ['etc/yunpanel', 'var/lib/yunpanel', 'etc/passwd', 'etc/group', 'etc/group'];
+  const fixture = await createFixture(t, { archiveMembers });
+  await assert.rejects(preflightLocalRecoveryBackup(fixture.options), {
+    code: 'recovery_snapshot_source_roots_invalid',
+  });
+});
+
+test('preflight includes optional roots in the count only when they are archived', async (t) => {
+  const fixture = await createFixture(t, { includeNginx: true });
+  const result = await preflightLocalRecoveryBackup(fixture.options);
+  assert.equal(result.presentSources, 5);
+});
+
 test('preflight rejects malformed or ambiguous archived server bindings', async (t) => {
-  const fixture = await createFixture(t, `YUNPANEL_LOCAL_SERVER_ID=${sourceServerId}\nYUNPANEL_LOCAL_SERVER_ID=${otherServerId}`);
+  const serverBinding = `YUNPANEL_LOCAL_SERVER_ID=${sourceServerId}\nYUNPANEL_LOCAL_SERVER_ID=${otherServerId}`;
+  const fixture = await createFixture(t, { serverBinding });
   await assert.rejects(execFileAsync(process.execPath, cliArguments(fixture.options)), (error) => {
     assert.equal(error.code, 1);
     assert.equal(error.stdout, '');
@@ -106,7 +152,7 @@ test('preflight rejects malformed or ambiguous archived server bindings', async 
 });
 
 test('preflight takes the binding from an environment assignment rather than a multiline value', async (t) => {
-  const fixture = await createFixture(t, `MULTILINE="first\nYUNPANEL_LOCAL_SERVER_ID=${sourceServerId}\nlast"`);
+  const fixture = await createFixture(t, { serverBinding: `MULTILINE="first\nYUNPANEL_LOCAL_SERVER_ID=${sourceServerId}\nlast"` });
   await assert.rejects(preflightLocalRecoveryBackup(fixture.options), { code: 'recovery_snapshot_binding_invalid' });
 });
 

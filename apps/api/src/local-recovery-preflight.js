@@ -3,6 +3,7 @@ import { lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { parseEnv, promisify } from 'node:util';
 import { assertUuid } from '@yunpanel/shared';
+import { localMigrationArchiveInspectionInternals } from './local-migration-archive-inspection.js';
 import { localMigrationBackupInternals, verifyLocalMigrationBackup } from './local-migration-backup.js';
 
 const execFileAsync = promisify(execFile);
@@ -47,6 +48,29 @@ function compareSnapshotMetadata(before, after) {
   return before.every((entry, index) => fields.every((field) => entry[field] === after[index][field]));
 }
 
+async function verifyArchivedSourceRoots(verification) {
+  const { manifestRoots, normalizeMemberName, assertArchiveSourceRoots } = localMigrationArchiveInspectionInternals;
+  try {
+    const roots = manifestRoots(verification, verification.backupDirectory);
+    const selected = new Set(roots.filter((root) => root.present).map((root) => root.archivePath));
+    // These exact, whitespace-free root names can be inspected by GNU tar and bsdtar.
+    const { stdout } = await runTar([
+      '--list', '--verbose', '--no-recursion', '--file', verification.archivePath, '--', ...selected,
+    ], 128 * 1024);
+    const seen = new Set();
+    const members = stdout.trimEnd().split('\n').map((line) => {
+      const name = normalizeMemberName(line.slice(line.lastIndexOf(' ') + 1));
+      if (!selected.has(name) || seen.has(name)) throw new Error('Invalid source root listing');
+      seen.add(name);
+      return { name, type: line[0] };
+    });
+    assertArchiveSourceRoots(roots, members);
+    return members.length;
+  } catch {
+    throw new LocalRecoveryPreflightError('recovery_snapshot_source_roots_invalid', 'The archive lacks the expected source roots and file types');
+  }
+}
+
 async function readArchivedServerId(archivePath) {
   try {
     const listing = await runTar(['--list', '--verbose', '--file', archivePath, '--', BINDING_MEMBER], 128 * 1024);
@@ -88,6 +112,7 @@ export async function preflightLocalRecoveryBackup({ backupDirectory, expectedSh
   if (verification.sha256 !== expectedSha256) {
     throw new LocalRecoveryPreflightError('recovery_snapshot_hash_mismatch', 'The snapshot differs from the recorded archive SHA-256');
   }
+  const presentSources = await verifyArchivedSourceRoots(verification);
   if (await readArchivedServerId(verification.archivePath) !== expectedBinding) {
     throw new LocalRecoveryPreflightError('recovery_snapshot_binding_mismatch', 'The snapshot belongs to a different server');
   }
@@ -99,7 +124,7 @@ export async function preflightLocalRecoveryBackup({ backupDirectory, expectedSh
     verified: true,
     manifestVersion: localMigrationBackupInternals.storeVersion,
     serverBindingMatches: true,
-    presentSources: verification.entries.filter((entry) => entry.present).length,
+    presentSources,
     liveMutation: false,
   });
 }

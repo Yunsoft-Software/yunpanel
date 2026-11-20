@@ -10,7 +10,7 @@
 
 ### T937 · Boş sunucu kurtarması için yerel hazırlanabilirliği doğrula
 - **Bağımlı:** —
-- **Dosyalar:** `apps/api/src/local-recovery-preflight.js`, `apps/api/test/local-recovery-preflight.test.js`, `scripts/local-migration-backup.mjs`, `apps/api/test/local-migration-backup-cli.test.js`, `docs/local-migration-backup.md`
+- **Dosyalar:** `apps/api/src/local-migration-archive-inspection.js`, `apps/api/src/local-recovery-preflight.js`, `apps/api/test/local-recovery-preflight.test.js`, `scripts/local-migration-backup.mjs`, `apps/api/test/local-migration-backup-cli.test.js`, `docs/local-migration-backup.md`
 - **İş:** Mevcut migration yedeği doğrulama ve private restore stage hattından yararlan. Dış depodan indirilmiş doğrulanmış arşivin hazırlanabilirliğini kayıtlara yazmadan, yalnız yerel geçici dizinde ve redakte biçimde kontrol et. Restic/rclone sürecini ve YunPanel anahtarlarının ayrı erişim gereğini operatör akışına yaz. Paket üretimi ve canlı restore bu dilimin dışında.
 - **Kabul:** Gerçek arşiv, sahipsiz/bozuk arşiv, sürüm ya da kimlik uyuşmazlığı ve değişmeyen hedef kanıtı. Mevcut migration CLI regresyonları geçer. Canlı sunucuya başarı kaydı yazılmaz.
 
@@ -30,10 +30,10 @@
 - **Bağımlı:** —
 - **Dosyalar:** `packages/host-runtime/src/restic-manager.js`, `packages/host-runtime/test/restic-manager-native.test.js`
 - **İş:** Gerçek Restic 0.19.1, panelin kısıtlı alt süreç ortamında geçerli önbellek yolu bulamadığı için yedek almayı durduruyor. Süreç ortamını genişletmeden mevcut özel geçici dizinde açık cache yolu ver ve işlemden sonra kaldır.
-- **Kabul:** Sürümü ve hash’i doğrulanan gerçek Restic ile ayrı geçici repo, snapshot, %100 okuma ve kaynak dosya yolu yokken HTML ve SQLite verisinin temiz dizine dönüşü geçer. Mevcut Restic regresyonları geçer.
+- **Kabul:** Sürümü ve hash’i doğrulanan gerçek Restic ile ayrı geçici repo, snapshot, %100 okuma ve kaynak dosya yolu yokken HTML ve SQLite verisinin temiz dizine dönüşü geçer. Gerçek önbellek izin hatası Restic sonucunu değiştirmez ve parola dosyası kaldırılır. Mevcut Restic regresyonları geçer.
 
 ### T941 · Doğrulanmış Plesk paketini boş yerel staging alanına kopyala
-- **Bağımlı:** T936
-- **Dosyalar:** `apps/api/src/plesk-offline-transfer.js`, `apps/api/test/plesk-offline-transfer.test.js`, `scripts/plesk-transfer.mjs`
+- **Bağımlı:** T936, T901
+- **Dosyalar:** `apps/api/src/plesk-offline-transfer.js`, `apps/api/test/plesk-offline-transfer.test.js`, `scripts/plesk-transfer.mjs`, `scripts/build-deb.sh`
 - **İş:** CLI önizleme ve doğrulamayı koru. Açık staging eylemi ile yalnız doğrulanan HTML/PHP dosyaları, manifest ve SQL dump’ını sahipli boş hazırlık alanında güvenli biçimde kopyala. Kaynak dosyalar, gerçek barındırma ve veritabanı işlemleri kapsam dışı. Aynı içeriği ikinci kopya veya overwrite olmadan yönet.
 - **Kabul:** Gerçek geçici dosya ve CLI ile kopya içeriği ve hash eşleşir. Yanlış beklenen hash ve dolu hedef hiçbir mevcut veriyi değiştirmez. Kısmi kopya yayınlanmaz, test sonunda dış dizinler değişmez.

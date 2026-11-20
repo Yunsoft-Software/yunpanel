@@ -28,6 +28,6 @@ node scripts/local-migration-backup.mjs preflight "$SNAPSHOT_DIR" \
   --expected-sha256 "$ARCHIVE_SHA256" --expected-server-id "$SOURCE_SERVER_ID"
 ```
 
-Komut manifest sürümünü, dosya listesinin kayıtlı kaynaklarla sınırlı olduğunu ve arşivin SHA-256 değerini doğrular. Arşivdeki yerel sunucu bağını kaydedilen kaynak kimliğiyle karşılaştırır. JSON sonuç yalnız kontrol durumunu ve kaynak sayısını içerir. Paket sürümü boş VM’de kurulumdan önce ayrı kurtarma kaydıyla eşleştirilir.
+Komut manifest sürümünü, arşivin SHA-256 değerini ve dosya listesinin kayıtlı kaynaklarla sınırlı olduğunu doğrular. Manifestte mevcut olarak işaretlenen her kaynak kökünün arşivde bir kez ve beklenen dosya türünde bulunduğunu kontrol eder. Arşivdeki yerel sunucu bağını kaydedilen kaynak kimliğiyle karşılaştırır. JSON sonuç yalnız kontrol durumunu ve arşivde doğrulanan kaynak sayısını içerir. Paket sürümü boş VM’de kurulumdan önce ayrı kurtarma kaydıyla eşleştirilir.
 
 Bu kontrol panel durum arşivini kapsar. Boş VM kabulünde site dosyaları, gerçek SQL içeriği ve posta yedeği de geri alınır. Paketli `preview` ve özel `stage` adımlarından sonra HTTP, SQL, IMAP ve kullanıcı erişimi doğrulanır. Bu kabul, dış depoya erişim ve ayrı temiz Ubuntu ortamı gerektirir.

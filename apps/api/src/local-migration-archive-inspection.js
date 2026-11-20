@@ -225,6 +225,22 @@ function isSafeArchiveLink(name, resolvedTarget, rootRef, { hardlink = false } =
   return false;
 }
 
+function assertArchiveSourceRoots(roots, members) {
+  for (const root of roots) {
+    const exact = members.find((member) => member.name === root.archivePath);
+    if (!root.present) {
+      if (exact || members.some((member) => member.name.startsWith(`${root.archivePath}/`))) {
+        throw new LocalMigrationArchiveInspectionError('migration_archive_absent_source_present', 'Migration archive contains data for a source recorded as absent');
+      }
+      continue;
+    }
+    const expectedType = root.type === 'directory' ? 'd' : '-';
+    if (!exact || exact.type !== expectedType) {
+      throw new LocalMigrationArchiveInspectionError('migration_archive_root_type_mismatch', 'Migration archive source root type does not match the verified manifest');
+    }
+  }
+}
+
 function parseVerboseListing(stdout, roots) {
   if (typeof stdout !== 'string' || Buffer.byteLength(stdout, 'utf8') > MAX_LISTING_BYTES) {
     throw new LocalMigrationArchiveInspectionError('migration_archive_listing_invalid', 'Migration archive listing is invalid or unexpectedly large');
@@ -279,19 +295,7 @@ function parseVerboseListing(stdout, roots) {
     throw new LocalMigrationArchiveInspectionError('migration_archive_listing_invalid', 'Migration archive is empty');
   }
 
-  for (const root of roots) {
-    const exact = members.find((member) => member.name === root.archivePath);
-    if (!root.present) {
-      if (exact || members.some((member) => member.name.startsWith(`${root.archivePath}/`))) {
-        throw new LocalMigrationArchiveInspectionError('migration_archive_absent_source_present', 'Migration archive contains data for a source recorded as absent');
-      }
-      continue;
-    }
-    const expectedType = root.type === 'directory' ? 'd' : '-';
-    if (!exact || exact.type !== expectedType) {
-      throw new LocalMigrationArchiveInspectionError('migration_archive_root_type_mismatch', 'Migration archive source root type does not match the verified manifest');
-    }
-  }
+  assertArchiveSourceRoots(roots, members);
 
   for (const member of members.filter((entry) => entry.type === 'h')) {
     if (!seen.has(member.resolvedLinkTarget)) {
@@ -399,5 +403,6 @@ export const localMigrationArchiveInspectionInternals = Object.freeze({
   rootForMember,
   insideRoot,
   isSafeArchiveLink,
+  assertArchiveSourceRoots,
   parseVerboseListing,
 });
