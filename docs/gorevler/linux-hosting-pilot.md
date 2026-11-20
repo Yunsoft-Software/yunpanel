@@ -14,6 +14,18 @@ Sieve, mevcut yönlendirmeyle zincirde çalıştı. Kopyalı yönlendirme yerel 
 
 İlk canlı adım ayrı yedek hedefinde uzak depo ve kapalı kaynakla kurtarma provasıdır. Ardından yetkili Plesk dışa aktarımıyla PHP ve postalı WordPress pilotu, ayrı ağdan DNS ve WAF kabulü gelir.
 
+## 20 Kasım ikinci çalışma ve durma noktası
+
+- **Posta motorları.** T942 `80b09c3e` gerçek Ubuntu'da başarılı apply, bozuk Rspamd yapılandırması sonrası otomatik geri dönüş ve açık rollback senaryolarından geçti. Fiziksel içerik, sahiplik ve izinler karşılaştırıldı. Dovecot başlangıç include ayarı, geçici SMTP/IMAP fixture'ında ilk soket engelini giderdi. Yerel Postfix STARTTLS ve IMAPS ile dört ileti teslim edildi. Tek Türkçe otomatik yanıt geldi. Tekrar, boş SMTP göndereni ve kardeş posta kutusu yanıt üretmedi. Rspamd gerçek PowerDNS ile olumlu DMARC'a `-1` uyguladı, başarısız DMARC'a uygulamadı. Gerçek RSA DKIM imzası onaylandı ve gövde değişince reddedildi.
+- **Panel.** T943 Owner kaydet/temizle yetkisi, gerçek HTTP/SQLite, yedek ve kayıt uyumunda 101/101 geçti. T944 gerçek Chromium, loopback API ve SQLite ile 9/9 geçti. Owner formu, 409 sonrası yenileme, kaydetme, yeniden açma, temizleme, yapılandırma önizlemesi ve site yöneticisi rolünde gizlilik doğrulandı. T945 `a9b2aa28` aynı içeriğin yeni revizyonla kaydından sonra eski uygulama onayını reddediyor. Son odak koşusu 21/21 geçti. T944 ve T945 bağımsız incelemede.
+- **Kurtarma.** T947 isimli rclone hedefiyle bağlanmayı ve özel yapılandırmayı doğruluyor. Geçici Ubuntu'da 17/17 native ve 23/23 depo/HTTP testi geçti. Gerçek ayrı loopback WebDAV işlemi, kaynak yol erişilemezken veriyi geri verdi. [Yapılandırma ve kurtarma](../local-migration-backup.md).
+- **DNS.** T946 iki PowerDNS süreciyle NOTIFY ve AXFR, ikincil SQLite okuması ve birincil durunca yetkili DNS yanıtı verdi. Mevcut YunPanel denetleyicisi güncel, geride ve erişilemiyor durumlarını gerçek sorguyla ayırdı.
+- **WordPress.** Resmi Türkçe WordPress 7.1.5 arşivi native tar ile açıldı ve WP-CLI checksum kontrolü geçti. Geçici WordPress dosyaları ve gerçek MariaDB dökümü Plesk hazırlama komutuyla taşındı. Hedefte Türkçe HTTP içerik ve yönetici girişi doğrulandı. Hedefte geçiş sonrası oluşturulan yazı ayrı geri dönüş kopyasında korundu. Yetkili gerçek Plesk dışa aktarımı ve posta eşitlemesi canlı kabulde açık.
+
+Kullanıcı bu noktada Codex çalışmasını durdurup Antigravity'ye devretmeyi istedi. Son kaynak dilimi için tam lint/test/build ve yeni adayın dağıtımı açık. .28 üzerinde değişiklik yapılmadı. Test sanal makinesi kaldırıldı. Bağımsız dış depo, gerçek Plesk export'u, ikinci ağ ve WAF kabulü [açık listede](../../todo.md#linux-hosting-pilotu-ve-plesk-geçişi).
+
+**Devam sırası.** Önce T944 ve T945'i bağımsız incele. Kapalı alan adında kural kaydından sonra ekrandaki bekleme ve yeniden uygulama yolunu kontrol et. Bulgu giderilince tam görev denetimini, lint, test ve derlemeyi bir kez çalıştır. Sonra izinli paket ve .28 kabulü, gerçek dış yedek/kurtarma, Plesk taşıma ve bağımsız DNS/WAF adımlarını uygun ortam geldikçe ilerlet. Antigravity'de kullanıcı tercihi Gemini 4 Neon Extra ve aynı anda en fazla üç alt ajandır.
+
 ### T936 · Dosya ve SQL taşıma paketini yerelde hazırla
 - **Bağımlı:** —
 - **Dosyalar:** `apps/api/src/plesk-offline-transfer.js`, `apps/api/test/plesk-offline-transfer.test.js`, `scripts/plesk-transfer.mjs`, `apps/api/test/plesk-transfer-cli.test.js`
