@@ -4,6 +4,7 @@ import path from 'node:path';
 import {
   mailForwardingTemplatePolicy,
   mailSqlTemplatePolicy,
+  mailSpamPolicyTemplatePolicy,
   mailSrsTemplatePolicy,
   mailSubmissionTemplatePolicy,
   mailTemplatePolicy,
@@ -54,7 +55,11 @@ const SQL_SRS_ARTIFACT_PATHS = Object.freeze([
 const ALLOWED_ARTIFACT_SET = new Set([
   ...SRS_ARTIFACT_PATHS,
   ...SQL_SRS_ARTIFACT_PATHS,
+  mailSpamPolicyTemplatePolicy.path,
 ]);
+const ARTIFACT_PATH_VARIANTS = [
+  BASE_ARTIFACT_PATHS, SRS_ARTIFACT_PATHS, SQL_BASE_ARTIFACT_PATHS, SQL_SRS_ARTIFACT_PATHS,
+].flatMap((paths) => [paths, mailSpamPolicyTemplatePolicy.extendArtifactPaths(paths)]);
 
 export class MailConfigManagerError extends Error {
   constructor(code, message) {
@@ -84,17 +89,18 @@ function expectedArtifactPaths(plan) {
   }
   const sql = plan.requirements.includes('mail_sqlite');
   const srs = plan.requirements.includes(mailSrsTemplatePolicy.requirement);
-  if (sql) return srs ? SQL_SRS_ARTIFACT_PATHS : SQL_BASE_ARTIFACT_PATHS;
-  return srs ? SRS_ARTIFACT_PATHS : BASE_ARTIFACT_PATHS;
+  const paths = sql
+    ? (srs ? SQL_SRS_ARTIFACT_PATHS : SQL_BASE_ARTIFACT_PATHS)
+    : (srs ? SRS_ARTIFACT_PATHS : BASE_ARTIFACT_PATHS);
+  return plan.artifacts.some((artifact) => artifact.path === mailSpamPolicyTemplatePolicy.path)
+    ? mailSpamPolicyTemplatePolicy.extendArtifactPaths(paths)
+    : paths;
 }
 
 function manifestArtifactPaths(value) {
   if (!Array.isArray(value)) return null;
-  if (value.length === BASE_ARTIFACT_PATHS.length) return BASE_ARTIFACT_PATHS;
-  if (value.length === SRS_ARTIFACT_PATHS.length) return SRS_ARTIFACT_PATHS;
-  if (value.length === SQL_BASE_ARTIFACT_PATHS.length) return SQL_BASE_ARTIFACT_PATHS;
-  if (value.length === SQL_SRS_ARTIFACT_PATHS.length) return SQL_SRS_ARTIFACT_PATHS;
-  return null;
+  return ARTIFACT_PATH_VARIANTS.find((paths) => paths.length === value.length
+    && paths.every((targetPath, index) => value[index]?.targetPath === targetPath)) ?? null;
 }
 
 function normalizeSensitiveArtifacts(values) {
@@ -202,7 +208,8 @@ function normalizeManifest(value, expectedPlanSha256 = null) {
       || artifact.targetPath !== expectedPath || artifact.stagedName !== expectedName
       || typeof artifact.sha256 !== 'string' || !CHECKSUM_PATTERN.test(artifact.sha256)
       || !Number.isSafeInteger(artifact.bytes) || artifact.bytes < 0
-      || ![PRIVATE_MODE, PUBLIC_MODE].includes(artifact.mode)
+      || artifact.mode !== (artifact.sensitive === true ? PRIVATE_MODE : PUBLIC_MODE)
+      || (artifact.targetPath === mailSpamPolicyTemplatePolicy.path && artifact.sensitive !== true)
       || typeof artifact.sensitive !== 'boolean' || seen.has(artifact.targetPath)) {
       throw new MailConfigManagerError('mail_stage_manifest_invalid', 'Managed mail staging manifest artifact is invalid');
     }

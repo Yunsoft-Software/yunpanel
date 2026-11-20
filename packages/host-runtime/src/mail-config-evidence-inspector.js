@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { parseManagedRspamdIdentity } from './mail-rspamd-identity.js';
 import {
   mailForwardingTemplatePolicy,
+  mailSpamPolicyTemplatePolicy,
   mailSqlTemplatePolicy,
   mailSubmissionTemplatePolicy,
   previewManagedMailApplyPlan,
@@ -78,8 +79,11 @@ export function createMailConfigEvidenceInspector({
   async function inspectArtifact(artifact, vmailGid, postfixGid, rspamdGid) {
     try {
       const metadata = await lstatFn(artifact.path);
-      const expectedMode = artifact.sensitive ? SENSITIVE_MODE : PUBLIC_MODE;
-      const expectedGid = artifact.path.startsWith('/etc/rspamd/local.d/') ? rspamdGid : artifact.path === mailForwardingTemplatePolicy.sievePath
+      const mailboxSieve = artifact.path === mailForwardingTemplatePolicy.sievePath;
+      const mailboxSpam = artifact.path === mailSpamPolicyTemplatePolicy.path;
+      const rspamdConfig = mailboxSpam || artifact.path.startsWith('/etc/rspamd/local.d/');
+      const expectedMode = artifact.sensitive && !mailboxSieve && !mailboxSpam ? SENSITIVE_MODE : PUBLIC_MODE;
+      const expectedGid = rspamdConfig ? rspamdGid : mailboxSieve
         ? vmailGid
         : artifact.path.startsWith(mailSqlTemplatePolicy.postfixSqlDirectory + '/')
           ? postfixGid

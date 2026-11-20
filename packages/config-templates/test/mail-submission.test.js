@@ -2,12 +2,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   enableManagedMailSubmission,
+  mailForwardingTemplatePolicy,
+  mailSpamPolicyTemplatePolicy,
   MailSubmissionTemplateError,
   mailSubmissionTemplatePolicy,
   mailTemplatePolicy,
+  previewManagedMailEmptyConfiguration,
   previewManagedMailSecurityConfiguration,
   previewManagedMailSubmissionConfiguration,
   renderPostfixSenderLoginMap,
+  secureManagedMailPreview,
 } from '../src/index.js';
 
 const HASH = `$argon2id$v=19$m=65536,t=3,p=1$${Buffer.alloc(16, 7).toString('base64').replace(/=+$/, '')}$${Buffer.alloc(32, 8).toString('base64').replace(/=+$/, '')}`;
@@ -62,6 +66,56 @@ test('submission sender login map is canonical, deterministic and empty for an e
     ),
     'alice@example.com alice@example.com\ninfo@example.com alice@example.com\n',
   );
+});
+
+test('submission combines vacation before forwarding and uses an independent, clearable spam artifact', () => {
+  const fixture = {
+    ...input(),
+    forwardings: [{ source: 'owner@example.com', mode: 'redirect', destinations: ['outside@elsewhere.test'] }],
+  };
+  const baseline = previewManagedMailSubmissionConfiguration(fixture);
+  const preview = previewManagedMailSubmissionConfiguration({
+    ...fixture,
+    vacations: [{ mailbox: 'Owner@EXAMPLE.COM', subject: 'Yıllık izin', body: 'Cuma günü döneceğim.' }],
+    spamPolicies: [{ mailbox: 'owner@example.com', allow: [], deny: ['sender@elsewhere.test'] }],
+  });
+  const cleared = previewManagedMailSubmissionConfiguration({ ...fixture, vacations: [], spamPolicies: [] });
+  const delivery = (value) => value.artifacts.find((artifact) => artifact.path === mailForwardingTemplatePolicy.sievePath);
+  const spam = (value) => value.artifacts.find((artifact) => artifact.path === mailSpamPolicyTemplatePolicy.path);
+
+  assert.equal(delivery(preview).sensitive, true);
+  assert.match(delivery(preview).content, /^require \["envelope", "copy", "vacation"\];/);
+  assert.match(delivery(preview).content, /vacation[\s\S]*Cuma günü döneceğim\.[\s\S]*redirect "outside@elsewhere\.test"/);
+  assert.deepEqual(delivery(preview).compile, delivery(baseline).compile);
+  assert.equal(delivery(cleared).content, delivery(baseline).content);
+  assert.equal(delivery(cleared).sensitive, false);
+
+  assert.equal(spam(baseline), undefined);
+  assert.equal(spam(preview).sensitive, true);
+  assert.match(spam(preview).content, /multimap \{[\s\S]*YUNPANEL_MAIL_POLICY_DENY[\s\S]*mailbox\|owner@example\.com\|sender@elsewhere\.test/);
+  assert.equal(spam(cleared).content, mailSpamPolicyTemplatePolicy.header);
+  assert.equal(new Set([preview.sha256, cleared.sha256, baseline.sha256]).size, 3);
+});
+
+test('submission refuses vacation and spam policies for a mailbox outside its validated set', () => {
+  assert.throws(() => previewManagedMailSubmissionConfiguration({
+    ...input(),
+    vacations: [{ mailbox: 'foreign@example.com', subject: 'Away', body: 'Back tomorrow' }],
+  }), { code: 'mail_vacation_mailbox_invalid' });
+  assert.throws(() => previewManagedMailSubmissionConfiguration({
+    ...input(),
+    spamPolicies: [{ mailbox: 'foreign@example.com', allow: [], deny: ['sender@elsewhere.test'] }],
+  }), { code: 'mail_spam_mailbox_invalid' });
+});
+
+test('the last managed domain can clear only the owned spam policy', () => {
+  const empty = secureManagedMailPreview(previewManagedMailEmptyConfiguration());
+  const legacy = enableManagedMailSubmission(empty);
+  const cleared = enableManagedMailSubmission(empty, [], [], []);
+  const policy = cleared.artifacts.find((artifact) => artifact.path === mailSpamPolicyTemplatePolicy.path);
+  assert.equal(policy.content, mailSpamPolicyTemplatePolicy.header);
+  assert.deepEqual(cleared.artifacts.filter((artifact) => artifact !== policy), legacy.artifacts);
+  assert.notEqual(cleared.sha256, legacy.sha256);
 });
 
 test('submission rejects drifted Dovecot authentication policy instead of silently weakening it', () => {

@@ -17,6 +17,7 @@ import { parseManagedRspamdIdentity } from './mail-rspamd-identity.js';
 import { probeMailCertificate, reloadMailCertificate } from './mail-certificate-reload.js';
 import {
   mailForwardingTemplatePolicy,
+  mailSpamPolicyTemplatePolicy,
   mailSqlTemplatePolicy,
   mailSrsTemplatePolicy,
   mailSubmissionTemplatePolicy,
@@ -250,9 +251,11 @@ export function createMailConfigActivator({
   }
 
   async function assertRequiredDirectoriesSafe(plan) {
-    const requiredDirectories = plan.srs?.required === true
-      ? [...UNMANAGED_REQUIRED_DIRECTORIES, ...SRS_REQUIRED_DIRECTORIES]
-      : UNMANAGED_REQUIRED_DIRECTORIES;
+    const requiredDirectories = [...UNMANAGED_REQUIRED_DIRECTORIES];
+    if (plan.srs?.required === true) requiredDirectories.push(...SRS_REQUIRED_DIRECTORIES);
+    if (plan.artifacts.some((artifact) => artifact.path === mailSpamPolicyTemplatePolicy.path)) {
+      requiredDirectories.push(path.dirname(mailSpamPolicyTemplatePolicy.path));
+    }
     for (const directoryPath of requiredDirectories) {
       try {
         const metadata = await lstatFn(directoryPath);
@@ -349,10 +352,13 @@ export function createMailConfigActivator({
       }
       onMutation();
       try {
+        const mailboxSieve = artifact.targetPath === mailForwardingTemplatePolicy.sievePath;
+        const mailboxSpam = artifact.targetPath === mailSpamPolicyTemplatePolicy.path;
+        const rspamdConfig = mailboxSpam || artifact.targetPath.startsWith('/etc/rspamd/local.d/');
         await atomicReplace(artifact.targetPath, content, {
-          mode: artifact.mode,
+          mode: mailboxSieve || mailboxSpam ? SIEVE_SHARED_MODE : artifact.mode,
           uid: ROOT_UID,
-          gid: artifact.targetPath.startsWith('/etc/rspamd/local.d/') ? rspamdGid : artifact.targetPath === mailForwardingTemplatePolicy.sievePath
+          gid: rspamdConfig ? rspamdGid : mailboxSieve
             ? vmailGid
             : artifact.targetPath.startsWith(mailSqlTemplatePolicy.postfixSqlDirectory + '/')
               ? postfixGid
@@ -450,7 +456,7 @@ export function createMailConfigActivator({
         throw new Error('compiled sieve metadata mismatch');
       }
     } catch {
-      throw activationError('mail_sieve_output_invalid', 'Mailbox forwarding compilation did not produce a safe Sieve binary');
+      throw activationError('mail_sieve_output_invalid', 'Mailbox delivery compilation did not produce a safe Sieve binary');
     }
   }
 
@@ -547,7 +553,7 @@ export function createMailConfigActivator({
   async function runApplyCommands(plan, vmailGid, postfixIdentity, mailAuthGroup) {
     for (const command of plan.stages.compile) {
       if (command.file === '/usr/bin/sievec') {
-        await runCommand(command, 'mail_sieve_compile_failed', 'Managed mailbox forwarding script compilation failed');
+        await runCommand(command, 'mail_sieve_compile_failed', 'Managed mailbox delivery script compilation failed');
       } else if (command.file === '/usr/bin/sqlite3') {
         await runCommand(command, 'mail_sql_seed_apply_failed', 'Managed virtual-mail SQLite state could not be applied');
       } else {
@@ -663,7 +669,22 @@ export function createMailConfigActivator({
     const command = defaults.present && secret.present
       ? { file: SYSTEMCTL, args: ['restart', mailSrsTemplatePolicy.serviceUnit] }
       : { file: SYSTEMCTL, args: ['stop', mailSrsTemplatePolicy.serviceUnit] };
-    await runCommand(command, 'mail_restore_srs_runtime_failed', 'Restored PostSRSd runtime state could not be confirmed');
+    try {
+      await runCommand(command, 'mail_restore_srs_runtime_failed', 'Restored PostSRSd runtime state could not be confirmed');
+    } catch (error) {
+      if (!defaults.present && !secret.present) {
+        try {
+          const result = await run(SYSTEMCTL, ['show', '-p', 'LoadState', '--value', mailSrsTemplatePolicy.serviceUnit], {
+            timeout: 10_000,
+            maxBuffer: MAX_OUTPUT,
+          });
+          if (boundedOutput(result) === 'not-found') return;
+        } catch {
+          // Preserve the rollback failure when service absence cannot be verified.
+        }
+      }
+      throw error;
+    }
   }
 
   async function confirmRestoredBackup(preview, plan, backup) {

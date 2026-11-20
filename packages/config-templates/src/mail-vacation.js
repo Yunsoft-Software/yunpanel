@@ -7,6 +7,7 @@ const MAX_SUBJECT_BYTES = 200;
 const MAX_BODY_BYTES = 4_000;
 const MAX_SCRIPT_BYTES = 512 * 1024;
 const REPLY_INTERVAL_DAYS = 7;
+const SIEVE_HEADER = 'require ["envelope", "vacation"];\n\n';
 
 export class MailVacationTemplateError extends Error {
   constructor(code, message) {
@@ -24,7 +25,7 @@ function validateText(value, maxBytes, disallowed, code) {
   return value;
 }
 
-function normalizePolicies(mailboxes, policies) {
+export function normalizeManagedMailboxVacationPolicies(mailboxes, policies) {
   if (!Array.isArray(mailboxes) || mailboxes.length > mailTemplatePolicy.maxMailboxes
     || !Array.isArray(policies) || policies.length > mailboxes.length) {
     throw new MailVacationTemplateError('mail_vacation_input_invalid', 'Vacation requires a bounded list of managed mailboxes and policies');
@@ -51,9 +52,10 @@ function normalizePolicies(mailboxes, policies) {
   return normalized.sort((left, right) => left.mailbox.localeCompare(right.mailbox));
 }
 
-function renderPolicies(policies) {
-  const lines = ['require ["envelope", "vacation"];', ''];
-  for (const { mailbox, subject, body } of policies) {
+export function renderManagedMailboxVacationRules({ mailboxes = [], policies = [] } = {}) {
+  const normalized = normalizeManagedMailboxVacationPolicies(mailboxes, policies);
+  const lines = [];
+  for (const { mailbox, subject, body } of normalized) {
     const escapedSubject = subject.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
     // Every body line beginning with a dot must be escaped, including a lone dot.
     const dotStuffedBody = body.replace(/^\./gm, '..');
@@ -67,16 +69,16 @@ function renderPolicies(policies) {
       '',
     );
   }
-  const content = `${lines.join('\n')}\n`;
-  if (Buffer.byteLength(content) > MAX_SCRIPT_BYTES) {
+  const content = lines.length === 0 ? '' : `${lines.join('\n')}\n`;
+  if (Buffer.byteLength(SIEVE_HEADER + content) > MAX_SCRIPT_BYTES) {
     throw new MailVacationTemplateError('mail_vacation_script_too_large', 'Vacation script exceeds the supported size');
   }
-  return content;
+  return { content, policies: normalized.length };
 }
 
 export function previewManagedMailboxVacationSieve({ mailboxes = [], policies = [] } = {}) {
-  const normalized = normalizePolicies(mailboxes, policies);
-  const content = renderPolicies(normalized);
+  const rules = renderManagedMailboxVacationRules({ mailboxes, policies });
+  const content = SIEVE_HEADER + rules.content;
   return Object.freeze({
     version: 1,
     path: SIEVE_PATH,
@@ -84,7 +86,7 @@ export function previewManagedMailboxVacationSieve({ mailboxes = [], policies = 
     compile: Object.freeze({ file: '/usr/bin/sievec', args: Object.freeze([SIEVE_PATH]) }),
     sha256: createHash('sha256').update(content).digest('hex'),
     bytes: Buffer.byteLength(content),
-    policies: normalized.length,
+    policies: rules.policies,
     content,
     sensitive: true,
     sideEffects: false,

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { normalizeMailboxAddress, mailTemplatePolicy } from './mail.js';
 import { mailSecurityTemplatePolicy, previewManagedMailSecurityConfiguration } from './mail-security.js';
+import { mailSpamPolicyTemplatePolicy, previewManagedMailSpamPolicyArtifact } from './mail-spam-policy.js';
 
 const SENDER_LOGIN_PATH = '/etc/yunpanel/mail/postfix/sender-logins';
 const DOVECOT_AUTH_SOCKET = '/var/spool/postfix/private/auth';
@@ -141,7 +142,7 @@ function submissionAuthArtifact(artifact) {
   });
 }
 
-export function enableManagedMailSubmission(preview, mailboxes = [], aliases = []) {
+export function enableManagedMailSubmission(preview, mailboxes = [], aliases = [], spamPolicies) {
   if (!preview || typeof preview !== 'object' || Array.isArray(preview)
     || preview.version !== 1 || typeof preview.sha256 !== 'string'
     || !Array.isArray(preview.artifacts) || !Array.isArray(preview.postfixParameters)) {
@@ -172,6 +173,16 @@ export function enableManagedMailSubmission(preview, mailboxes = [], aliases = [
       'Managed mail preview does not contain the canonical submission insertion points',
     );
   }
+  let counts = preview.counts;
+  if (spamPolicies !== undefined) {
+    const proxyIndex = artifacts.findIndex((artifact) => artifact.path === mailTemplatePolicy.rspamdProxyConfigPath);
+    if (proxyIndex === -1 || artifacts.some((artifact) => artifact.path === mailSpamPolicyTemplatePolicy.path)) {
+      throw new MailSubmissionTemplateError('submission_artifact_set_invalid', 'Managed mail preview does not contain the canonical spam policy insertion point');
+    }
+    const spam = previewManagedMailSpamPolicyArtifact({ mailboxes, policies: spamPolicies });
+    artifacts.splice(proxyIndex + 1, 0, spam);
+    counts = Object.freeze({ ...counts, spamAllow: spam.counts.allow, spamDeny: spam.counts.deny });
+  }
   const frozenArtifacts = Object.freeze(artifacts);
   const identity = Object.freeze({
     version: 1,
@@ -181,6 +192,7 @@ export function enableManagedMailSubmission(preview, mailboxes = [], aliases = [
   });
   return Object.freeze({
     ...preview,
+    ...(spamPolicies === undefined ? {} : { counts }),
     sha256: sha256(JSON.stringify(identity)),
     artifacts: frozenArtifacts,
     postfixMasterServices: POSTFIX_MASTER_SERVICES,
@@ -194,6 +206,7 @@ export function previewManagedMailSubmissionConfiguration(input = {}) {
     previewManagedMailSecurityConfiguration(input),
     input.mailboxes ?? [],
     input.aliases ?? [],
+    input.spamPolicies,
   );
 }
 

@@ -19,6 +19,7 @@ import test from 'node:test';
 import {
   enableManagedMailSql,
   mailForwardingTemplatePolicy,
+  mailSpamPolicyTemplatePolicy,
   mailSqlTemplatePolicy,
   mailSubmissionTemplatePolicy,
   mailTemplatePolicy,
@@ -766,6 +767,68 @@ test('rejects live state drift after backup before the first activation mutation
     lstat(context.mapped.mapPath('/etc/yunpanel/mail/postfix')),
     (error) => error?.code === 'ENOENT',
   );
+}));
+
+test('stages mailbox policy privately and snapshots only the managed Rspamd file from real disk', async () => withTempDirectory(async (root) => {
+  const baseline = fixture();
+  const preview = previewManagedMailSubmissionConfiguration({
+    ...baseline.input,
+    vacations: [{ mailbox: 'owner@example.com', subject: 'Yıllık izin', body: 'Çarşamba döneceğim.' }],
+    spamPolicies: [{ mailbox: 'owner@example.com', allow: [], deny: ['sender@elsewhere.test'] }],
+  });
+  const privatePaths = [mailForwardingTemplatePolicy.sievePath, mailSpamPolicyTemplatePolicy.path];
+  const sensitiveArtifacts = [
+    { path: mailTemplatePolicy.dovecotPasswdFilePath, content: baseline.passwd },
+    ...privatePaths.map((policyPath) => {
+      const artifact = preview.artifacts.find((value) => value.path === policyPath);
+      return { path: artifact.path, content: artifact.content };
+    }),
+  ];
+  const configManager = createMailConfigManager({ stagingRoot: path.join(root, 'stage') });
+  const stage = await configManager.stageConfiguration(preview, { sensitiveArtifacts });
+  assert.equal((await configManager.inspectStagedConfiguration(preview)).satisfied, true);
+  for (const policyPath of privatePaths) {
+    const staged = stage.artifacts.find((artifact) => artifact.targetPath === policyPath);
+    const stagedPath = path.join(configManager.stageDirectory(stage.planSha256), staged.stagedName);
+    assert.equal((await stat(stagedPath)).mode & 0o777, 0o600);
+    assert.equal(sha256(await readFile(stagedPath)), staged.sha256);
+  }
+  assert.equal(JSON.stringify(stage).includes('Çarşamba döneceğim.'), false);
+  assert.equal(JSON.stringify(stage).includes('sender@elsewhere.test'), false);
+
+  const live = (target) => path.join(root, 'live', target);
+  const backupManager = createMailConfigBackupManager({
+    backupRoot: path.join(root, 'backup'),
+    liveLstatFn: (target) => lstat(live(target)),
+    liveReadFileFn: (target) => readFile(live(target)),
+  });
+  const adminPath = '/etc/rspamd/local.d/multimap.conf';
+  const adminConfig = '# Existing administrator rule\n';
+  const oldPolicy = mailSpamPolicyTemplatePolicy.header + '# Previous policy\n';
+  for (const [target, content] of [
+    [mailConfigBackupInternals.postfixMainCfPath, '# main.cf\n'],
+    [mailConfigBackupInternals.postfixMasterCfPath, '# master.cf\n'],
+    [adminPath, adminConfig],
+    [mailSpamPolicyTemplatePolicy.path, oldPolicy],
+  ]) {
+    await mkdir(path.dirname(live(target)), { recursive: true });
+    await writeFile(live(target), content);
+  }
+  const transactionId = 'mail-policy-native-disk-001';
+  const backup = await backupManager.backupConfiguration(preview, { transactionId });
+  const saved = backup.artifacts.find((artifact) => artifact.targetPath === mailSpamPolicyTemplatePolicy.path);
+  const savedPath = path.join(backupManager.transactionDirectory(transactionId), saved.backupName);
+  assert.equal((await stat(savedPath)).mode & 0o777, 0o600);
+  assert.equal(await readFile(savedPath, 'utf8'), oldPolicy);
+  assert.equal(backup.artifacts.some((artifact) => artifact.targetPath === adminPath), false);
+  assert.equal((await backupManager.inspectBackup(preview, { transactionId })).satisfied, true);
+
+  await writeFile(live(mailSpamPolicyTemplatePolicy.path), adminConfig);
+  await assert.rejects(backupManager.backupConfiguration(preview, { transactionId: 'mail-policy-native-disk-002' }), {
+    code: 'mail_rspamd_policy_unmanaged',
+  });
+  assert.equal(await readFile(live(mailSpamPolicyTemplatePolicy.path), 'utf8'), adminConfig);
+  assert.equal(await readFile(live(adminPath), 'utf8'), adminConfig);
 }));
 
 test('restores legacy hash/passwd files, removes sqlite db and cleans new directories when sqlite activation fails validation', async () => withTempDirectory(async (root) => {

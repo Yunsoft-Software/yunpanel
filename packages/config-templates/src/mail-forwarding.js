@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { normalizeMailboxAddress } from './mail.js';
+import { renderManagedMailboxVacationRules } from './mail-vacation.js';
 import {
   previewManagedMailQuotaConfiguration,
   renderDovecotQuotaMailConfig,
@@ -110,10 +111,13 @@ function forwardingRequirements(baseRequirements) {
   return Object.freeze(result);
 }
 
-export function renderManagedMailboxForwardingSieve(forwardings = []) {
-  const normalized = normalizeForwardings(forwardings);
-  const lines = ['require ["envelope", "copy"];', ''];
-  for (const policy of normalized) {
+function renderDeliverySieve(forwardings, vacation) {
+  const sieveHeader = vacation.policies
+    ? 'require ["envelope", "copy", "vacation"];'
+    : 'require ["envelope", "copy"];';
+  const lines = [sieveHeader, ''];
+  if (vacation.policies) lines.push(vacation.content.trimEnd(), '');
+  for (const policy of forwardings) {
     lines.push(`if envelope :is "to" "${policy.source}" {`);
     for (const destination of policy.destinations) {
       lines.push(`  redirect${policy.mode === 'copy' ? ' :copy' : ''} "${destination}";`);
@@ -124,9 +128,16 @@ export function renderManagedMailboxForwardingSieve(forwardings = []) {
   return `${lines.join('\n')}\n`;
 }
 
-export function previewManagedMailboxForwardingSieve(forwardings = []) {
+export function renderManagedMailboxForwardingSieve(forwardings = []) {
+  return renderDeliverySieve(normalizeForwardings(forwardings), { policies: 0 });
+}
+
+export function previewManagedMailboxForwardingSieve(forwardings = [], { mailboxes, vacations } = {}) {
   const normalized = normalizeForwardings(forwardings);
-  const content = renderManagedMailboxForwardingSieve(normalized);
+  const vacation = vacations === undefined
+    ? { policies: 0 }
+    : renderManagedMailboxVacationRules({ mailboxes, policies: vacations });
+  const content = renderDeliverySieve(normalized, vacation);
   return Object.freeze({
     version: 1,
     path: FORWARDING_SIEVE_PATH,
@@ -134,8 +145,9 @@ export function previewManagedMailboxForwardingSieve(forwardings = []) {
     sha256: sha256(content),
     bytes: Buffer.byteLength(content),
     policies: normalized.length,
+    ...(vacations === undefined ? {} : { vacations: vacation.policies }),
     content,
-    sensitive: false,
+    sensitive: vacation.policies > 0,
     compile: Object.freeze({ file: '/usr/bin/sievec', args: Object.freeze([FORWARDING_SIEVE_PATH]) }),
     sideEffects: false,
   });
@@ -178,6 +190,7 @@ export function previewManagedMailForwardingConfiguration({
   accounts = [],
   postmasterAddress,
   forwardings = [],
+  vacations,
 } = {}) {
   const base = previewManagedMailQuotaConfiguration({
     domains,
@@ -186,7 +199,7 @@ export function previewManagedMailForwardingConfiguration({
     accounts,
     postmasterAddress,
   });
-  const forwarding = previewManagedMailboxForwardingSieve(forwardings);
+  const forwarding = previewManagedMailboxForwardingSieve(forwardings, { mailboxes, vacations });
   const dovecotMail = publicArtifact(
     '/etc/dovecot/conf.d/99-yunpanel-mail.conf',
     renderDovecotQuotaForwardingMailConfig({ domains, postmasterAddress }),
@@ -209,7 +222,11 @@ export function previewManagedMailForwardingConfiguration({
   return Object.freeze({
     version: 1,
     sha256: sha256(JSON.stringify(identity)),
-    counts: Object.freeze({ ...base.counts, forwardings: forwarding.policies }),
+    counts: Object.freeze({
+      ...base.counts,
+      forwardings: forwarding.policies,
+      ...(vacations === undefined ? {} : { vacations: forwarding.vacations }),
+    }),
     artifacts: Object.freeze(artifacts),
     postfixParameters: base.postfixParameters,
     validate: base.validate,

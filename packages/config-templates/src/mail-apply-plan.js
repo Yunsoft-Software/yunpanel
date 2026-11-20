@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mailSqlTemplatePolicy } from './mail-sql.js';
 import { mailSrsTemplatePolicy } from './mail-srs.js';
+import { mailSpamPolicyTemplatePolicy } from './mail-spam-policy.js';
 import { mailSubmissionTemplatePolicy } from './mail-submission.js';
 
 const POSTFIX_SERVICE = 'postfix';
@@ -49,7 +50,8 @@ function assertPreview(preview) {
 function snapshotArtifact(artifact) {
   if (!artifact || typeof artifact.path !== 'string' || !artifact.path.startsWith('/')
     || artifact.path.includes('\0') || artifact.path.includes('\n') || artifact.path.includes('\r')
-    || typeof artifact.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(artifact.sha256)) {
+    || typeof artifact.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(artifact.sha256)
+    || (artifact.path === mailSpamPolicyTemplatePolicy.path && artifact.sensitive !== true)) {
     throw new MailApplyPlanError('invalid_mail_artifact', 'Managed mail artifact metadata is invalid');
   }
   return Object.freeze({

@@ -3,6 +3,8 @@ import test from 'node:test';
 import {
   MailApplyPlanError,
   enableManagedMailSql,
+  mailForwardingTemplatePolicy,
+  mailSpamPolicyTemplatePolicy,
   mailSqlTemplatePolicy,
   mailSubmissionTemplatePolicy,
   previewManagedMailApplyPlan,
@@ -84,6 +86,30 @@ test('builds deterministic secret-free managed mail apply and rollback stages wi
   });
   assert.equal(JSON.stringify(plan).includes(ARGON2ID_HASH), false);
   assert.equal(previewManagedMailApplyPlan(preview).sha256, plan.sha256);
+});
+
+test('binds private policy material to staging and rollback while compiling the existing Sieve once', () => {
+  const preview = managedPreview({
+    vacations: [{ mailbox: 'owner@example.com', subject: 'Away', body: 'Protected vacation body' }],
+    spamPolicies: [{ mailbox: 'owner@example.com', allow: [], deny: ['blocked@outside.test'] }],
+  });
+  const plan = previewManagedMailApplyPlan(preview);
+  for (const policyPath of [mailForwardingTemplatePolicy.sievePath, mailSpamPolicyTemplatePolicy.path]) {
+    const artifact = plan.artifacts.find((candidate) => candidate.path === policyPath);
+    assert.equal(artifact.sensitive, true);
+    assert.equal(artifact.contentIncluded, false);
+    assert.ok(plan.stages.backup.some(({ path }) => path === policyPath));
+    assert.ok(plan.rollback.restore.some(({ path }) => path === policyPath));
+  }
+  assert.deepEqual(plan.stages.compile, EXPECTED_COMPILE);
+  assert.ok(plan.stages.validate.some(({ file, args }) => file === '/usr/bin/rspamadm' && args[0] === 'configtest'));
+  assert.equal(JSON.stringify(plan).includes('Protected vacation body'), false);
+  assert.equal(JSON.stringify(plan).includes('blocked@outside.test'), false);
+  assert.notEqual(plan.sha256, previewManagedMailApplyPlan(managedPreview()).sha256);
+
+  const altered = preview.artifacts.map((artifact) => artifact.path === mailSpamPolicyTemplatePolicy.path
+    ? { ...artifact, sensitive: false } : artifact);
+  assert.throws(() => previewManagedMailApplyPlan({ ...preview, artifacts: altered }), { code: 'invalid_mail_artifact' });
 });
 
 test('SQLite managed mail plan replaces postmap compilation with one transactional seed apply', () => {

@@ -3,6 +3,7 @@ import { chmod, lstat, mkdir, readFile, rename, writeFile } from 'node:fs/promis
 import path from 'node:path';
 import {
   mailForwardingTemplatePolicy,
+  mailSpamPolicyTemplatePolicy,
   mailSqlTemplatePolicy,
   mailSrsTemplatePolicy,
   mailSubmissionTemplatePolicy,
@@ -15,6 +16,7 @@ const DIRECTORY_MODE = 0o700;
 const BACKUP_FILE_MODE = 0o600;
 const LEGACY_MANIFEST_VERSION = 5;
 const MANIFEST_VERSION = 6;
+const SPAM_POLICY_MANIFEST_VERSION = 7;
 const MANIFEST_FILE = 'manifest.json';
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
 const TRANSACTION_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
@@ -92,6 +94,8 @@ const BACKUP_TARGET_PATHS = Object.freeze([
   mailSqlTemplatePolicy.dovecotSqlPath,
   mailSqlTemplatePolicy.databasePath,
 ]);
+const SPAM_POLICY_BACKUP_TARGET_PATHS = Object.freeze([...BACKUP_TARGET_PATHS, mailSpamPolicyTemplatePolicy.path]);
+const SPAM_POLICY_HEADER = Buffer.from(mailSpamPolicyTemplatePolicy.header);
 const LEGACY_MANAGED_DIRECTORY_PATHS = Object.freeze([
   '/etc/yunpanel',
   '/etc/yunpanel/mail',
@@ -141,14 +145,20 @@ function backupName(index, targetPath) {
   return `${String(index).padStart(2, '0')}-${path.basename(targetPath)}.bak`;
 }
 
+function includesSpamPolicy(plan) {
+  return plan.artifacts.some((artifact) => artifact.path === mailSpamPolicyTemplatePolicy.path);
+}
+
 function expectedPlanArtifactPaths(plan) {
-  if (!plan || !Array.isArray(plan.requirements)) {
+  if (!plan || !Array.isArray(plan.requirements) || !Array.isArray(plan.artifacts)) {
     throw new MailConfigBackupError('mail_backup_artifact_set_invalid', 'Managed mail apply plan requirements are invalid');
   }
   const sql = plan.requirements.includes('mail_sqlite');
   const srs = plan.requirements.includes(mailSrsTemplatePolicy.requirement);
-  if (sql) return srs ? SQL_SRS_PLAN_ARTIFACT_PATHS : SQL_BASE_PLAN_ARTIFACT_PATHS;
-  return srs ? SRS_PLAN_ARTIFACT_PATHS : BASE_PLAN_ARTIFACT_PATHS;
+  const paths = sql
+    ? (srs ? SQL_SRS_PLAN_ARTIFACT_PATHS : SQL_BASE_PLAN_ARTIFACT_PATHS)
+    : (srs ? SRS_PLAN_ARTIFACT_PATHS : BASE_PLAN_ARTIFACT_PATHS);
+  return includesSpamPolicy(plan) ? mailSpamPolicyTemplatePolicy.extendArtifactPaths(paths) : paths;
 }
 
 function assertPlanArtifactSet(plan) {
@@ -192,9 +202,11 @@ function normalizeDirectorySnapshot(value, expectedPath) {
 function normalizeManifest(value, { transactionId, planSha256 } = {}) {
   const legacy = value?.version === LEGACY_MANIFEST_VERSION;
   const current = value?.version === MANIFEST_VERSION;
-  const targetPaths = legacy ? LEGACY_BACKUP_TARGET_PATHS : BACKUP_TARGET_PATHS;
+  const includesPolicy = value?.version === SPAM_POLICY_MANIFEST_VERSION;
+  const targetPaths = legacy ? LEGACY_BACKUP_TARGET_PATHS
+    : includesPolicy ? SPAM_POLICY_BACKUP_TARGET_PATHS : BACKUP_TARGET_PATHS;
   const directoryPaths = legacy ? LEGACY_MANAGED_DIRECTORY_PATHS : MANAGED_DIRECTORY_PATHS;
-  if (!value || typeof value !== 'object' || Array.isArray(value) || (!legacy && !current)
+  if (!value || typeof value !== 'object' || Array.isArray(value) || (!legacy && !current && !includesPolicy)
     || value.transactionId !== transactionId || value.planSha256 !== planSha256
     || typeof value.previewSha256 !== 'string' || !CHECKSUM_PATTERN.test(value.previewSha256)
     || !Array.isArray(value.artifacts) || value.artifacts.length !== targetPaths.length
@@ -330,11 +342,14 @@ export function createMailConfigBackupManager({
     const normalizedTransactionId = normalizeTransactionId(transactionId);
     const plan = previewManagedMailApplyPlan(preview);
     assertPlanArtifactSet(plan);
+    const includesPolicy = includesSpamPolicy(plan);
     const directory = transactionDirectory(normalizedTransactionId);
 
     const existing = await loadExistingManifest(directory, normalizedTransactionId, plan.sha256);
     if (existing) {
-      if (existing.previewSha256 !== plan.previewSha256 || !(await inspectManifestFiles(directory, existing))) {
+      if (existing.previewSha256 !== plan.previewSha256
+        || includesPolicy !== (existing.version === SPAM_POLICY_MANIFEST_VERSION)
+        || !(await inspectManifestFiles(directory, existing))) {
         throw new MailConfigBackupError('mail_backup_existing_invalid', 'Existing managed mail backup cannot be safely reused');
       }
       return publicManifest(existing);
@@ -347,8 +362,9 @@ export function createMailConfigBackupManager({
     await chmodFn(directory, DIRECTORY_MODE);
 
     const artifacts = [];
-    for (let index = 0; index < BACKUP_TARGET_PATHS.length; index += 1) {
-      const targetPath = BACKUP_TARGET_PATHS[index];
+    const targetPaths = includesPolicy ? SPAM_POLICY_BACKUP_TARGET_PATHS : BACKUP_TARGET_PATHS;
+    for (let index = 0; index < targetPaths.length; index += 1) {
+      const targetPath = targetPaths[index];
       let metadata;
       try {
         metadata = await liveLstatFn(targetPath);
@@ -382,6 +398,10 @@ export function createMailConfigBackupManager({
       let content;
       try { content = await liveReadFileFn(targetPath); }
       catch { throw new MailConfigBackupError('mail_live_artifact_read_failed', 'Managed mail live artifact could not be read'); }
+      if (targetPath === mailSpamPolicyTemplatePolicy.path
+        && !content.subarray(0, SPAM_POLICY_HEADER.length).equals(SPAM_POLICY_HEADER)) {
+        throw new MailConfigBackupError('mail_rspamd_policy_unmanaged', 'An unmanaged file occupies the mailbox spam policy path');
+      }
       const name = backupName(index, targetPath);
       await atomicWrite(path.join(directory, name), content);
       artifacts.push(Object.freeze({
@@ -397,7 +417,7 @@ export function createMailConfigBackupManager({
     }
 
     const manifest = Object.freeze({
-      version: MANIFEST_VERSION,
+      version: includesPolicy ? SPAM_POLICY_MANIFEST_VERSION : MANIFEST_VERSION,
       transactionId: normalizedTransactionId,
       planSha256: plan.sha256,
       previewSha256: plan.previewSha256,
@@ -423,7 +443,10 @@ export function createMailConfigBackupManager({
     assertPlanArtifactSet(plan);
     const directory = transactionDirectory(normalizedTransactionId);
     const manifest = await loadExistingManifest(directory, normalizedTransactionId, plan.sha256);
-    if (!manifest || manifest.previewSha256 !== plan.previewSha256) return { satisfied: false, result: null };
+    if (!manifest || manifest.previewSha256 !== plan.previewSha256
+      || includesSpamPolicy(plan) !== (manifest.version === SPAM_POLICY_MANIFEST_VERSION)) {
+      return { satisfied: false, result: null };
+    }
     if (!(await inspectManifestFiles(directory, manifest))) return { satisfied: false, result: null };
     return { satisfied: true, result: publicManifest(manifest) };
   }

@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { mailTemplatePolicy, normalizeMailboxAddress } from './mail.js';
 
 const MULTIMAP_PATH = '/etc/rspamd/local.d/multimap.conf';
+const MANAGED_MULTIMAP_PATH = '/etc/rspamd/modules.d/zz-yunpanel-mail-policy.conf';
+const MANAGED_MULTIMAP_HEADER = '# Managed by YunPanel: mailbox spam policy\n';
 const MAX_SENDERS_PER_LIST = 64;
 const MAX_PAIRS = 1_000;
 const AUTH_SYMBOL = 'YUNPANEL_MAIL_POLICY_AUTHENTICATED';
@@ -24,6 +26,18 @@ function normalizeSenders(value) {
   return new Set(value.map((sender) => normalizeMailboxAddress(sender).address));
 }
 
+export function normalizeManagedMailboxSpamSenderLists(allow, deny) {
+  const allowed = normalizeSenders(allow);
+  const denied = normalizeSenders(deny);
+  for (const sender of allowed) {
+    if (denied.has(sender)) throw new MailSpamPolicyTemplateError('mail_spam_sender_conflict', 'The same sender cannot be allowed and denied for one mailbox');
+  }
+  return Object.freeze({
+    allow: Object.freeze([...allowed].sort()),
+    deny: Object.freeze([...denied].sort()),
+  });
+}
+
 function normalizePairs(mailboxes, policies) {
   if (!Array.isArray(mailboxes) || mailboxes.length > mailTemplatePolicy.maxMailboxes
     || !Array.isArray(policies) || policies.length > mailboxes.length) {
@@ -42,12 +56,8 @@ function normalizePairs(mailboxes, policies) {
       throw new MailSpamPolicyTemplateError('mail_spam_mailbox_invalid', 'Mail spam policy requires a unique, managed mailbox');
     }
     seen.add(mailbox);
-    const allow = normalizeSenders(policy.allow);
-    const deny = normalizeSenders(policy.deny);
-    for (const sender of allow) {
-      if (deny.has(sender)) throw new MailSpamPolicyTemplateError('mail_spam_sender_conflict', 'The same sender cannot be allowed and denied for one mailbox');
-      pairs.allow.push(`mailbox|${mailbox}|${sender}`);
-    }
+    const { allow, deny } = normalizeManagedMailboxSpamSenderLists(policy.allow, policy.deny);
+    for (const sender of allow) pairs.allow.push(`mailbox|${mailbox}|${sender}`);
     for (const sender of deny) pairs.deny.push(`mailbox|${mailbox}|${sender}`);
     if (pairs.allow.length + pairs.deny.length > MAX_PAIRS) {
       throw new MailSpamPolicyTemplateError('mail_spam_policy_too_large', 'Mail spam policy exceeds the supported number of mailbox and sender pairs');
@@ -92,14 +102,33 @@ export function previewManagedMailboxSpamPolicy({ mailboxes = [], policies = [] 
     }));
   }
   const content = rules.join('\n');
+  return policyArtifact(MULTIMAP_PATH, content, Object.freeze({ allow: allow.length, deny: deny.length }));
+}
+
+function policyArtifact(path, content, counts) {
   return Object.freeze({
     version: 1,
-    path: MULTIMAP_PATH,
+    path,
     sha256: createHash('sha256').update(content).digest('hex'),
     bytes: Buffer.byteLength(content),
-    counts: Object.freeze({ allow: allow.length, deny: deny.length }),
+    counts,
     content,
     sensitive: true,
     sideEffects: false,
   });
 }
+
+export function previewManagedMailSpamPolicyArtifact(input) {
+  const { content: rules, counts } = previewManagedMailboxSpamPolicy(input);
+  const content = rules ? `${MANAGED_MULTIMAP_HEADER}multimap {\n${rules}}\n` : MANAGED_MULTIMAP_HEADER;
+  return policyArtifact(MANAGED_MULTIMAP_PATH, content, counts);
+}
+
+export const mailSpamPolicyTemplatePolicy = Object.freeze({
+  path: MANAGED_MULTIMAP_PATH,
+  header: MANAGED_MULTIMAP_HEADER,
+  extendArtifactPaths(paths) {
+    const index = paths.indexOf(mailTemplatePolicy.rspamdProxyConfigPath) + 1;
+    return Object.freeze([...paths.slice(0, index), MANAGED_MULTIMAP_PATH, ...paths.slice(index)]);
+  },
+});
