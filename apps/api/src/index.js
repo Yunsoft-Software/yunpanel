@@ -1125,6 +1125,7 @@ const dockerComposeRuntime = await createDockerComposeRuntime({
   projectRegistry: dockerComposeProjectBootstrap.projectRegistry,
   websiteRegistry,
   domainRegistry,
+  siteMutationLock,
   projectBackupLocked,
 });
 const databaseCredentialApplyService = createDatabaseCredentialApplyService({

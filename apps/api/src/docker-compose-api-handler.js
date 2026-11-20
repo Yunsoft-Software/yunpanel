@@ -1,6 +1,7 @@
 import express from 'express';
 import { mountDockerComposeRoutes } from './docker-compose-http.js';
 import { mountDockerStorageBackupRoutes } from './docker-storage-backup-http.js';
+import { mountDockerVolumeRoutes } from './docker-volume-http.js';
 
 export const dockerComposeApiRequestContext = Symbol.for('yunpanel.docker-compose-api-context');
 
@@ -49,6 +50,13 @@ export function createDockerComposeApiHandler({
     dockerComposeProjectRegistry: runtime.projectRegistry,
     localServerId,
   });
+  if (runtime.volumeOperationsService) {
+    mountDockerVolumeRoutes(app, {
+      dockerComposeProjectRegistry: runtime.projectRegistry,
+      dockerVolumeOperationsService: runtime.volumeOperationsService,
+      localServerId,
+    });
+  }
   app.use((error, request, response, next) => {
     if (response.headersSent) return next(error);
     return response.status(500).json({

@@ -1,6 +1,7 @@
 import { createDockerComposeManager } from '@yunpanel/host-runtime';
 import { DOCKER_COMPOSE_OPERATIONS, OPERATIONS } from '@yunpanel/protocol';
 import { createDockerComposeOperationReceiptStore } from './docker-compose-operation-receipt.js';
+import { SiteMutationLockError } from './site-mutation-lock.js';
 
 const EXECUTION_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -15,10 +16,11 @@ const ACTIONS = new Map([
 ]);
 
 export class LocalDockerComposeOperationError extends Error {
-  constructor(code, message) {
+  constructor(code, message, status = 409) {
     super(message);
     this.name = 'LocalDockerComposeOperationError';
     this.code = code;
+    this.status = status;
   }
 }
 
@@ -85,6 +87,7 @@ export function createLocalDockerComposeOperation({
   materialize,
   manager = createDockerComposeManager(),
   receiptStore = createDockerComposeOperationReceiptStore(),
+  siteMutationLock = null,
   authorizeRemoval = async () => { throw new LocalDockerComposeOperationError('docker_compose_removal_unavailable', 'Removal scope inspector is required'); },
   finalizeRemoval = async () => { throw new LocalDockerComposeOperationError('docker_compose_removal_unavailable', 'Removal finalizer is required'); },
 } = {}) {
@@ -97,7 +100,7 @@ export function createLocalDockerComposeOperation({
     );
   }
 
-  async function execute(operation, payload, execution) {
+  async function executeUnlocked(operation, payload, execution) {
     const context = assertExecution(execution, payload);
     if (!OPERATION_SET.has(operation)) {
       throw new LocalDockerComposeOperationError('docker_compose_operation_invalid', 'Docker Compose operation is invalid');
@@ -124,6 +127,21 @@ export function createLocalDockerComposeOperation({
     }
     if (action === 'remove') await finalizeRemoval({ ...context, operation, payload, result: safeResult });
     return safeResult;
+  }
+
+  async function execute(operation, payload, execution) {
+    const context = assertExecution(execution, payload);
+    if (!siteMutationLock || typeof siteMutationLock.withDockerProjectLock !== 'function') {
+      return executeUnlocked(operation, payload, context);
+    }
+    try {
+      return await siteMutationLock.withDockerProjectLock(payload.projectId, () => executeUnlocked(operation, payload, context));
+    } catch (error) {
+      if (error instanceof SiteMutationLockError || error?.name === 'SiteMutationLockError') {
+        throw new LocalDockerComposeOperationError(error.code, error.message, error.status ?? 409);
+      }
+      throw error;
+    }
   }
 
   return Object.freeze({ execute });

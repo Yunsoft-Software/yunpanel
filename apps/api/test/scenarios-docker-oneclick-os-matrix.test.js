@@ -35,6 +35,7 @@ import { createDockerRegistryCredentialRegistry } from '../src/docker-registry-c
 import { createDockerComposeOperationsService } from '../src/docker-compose-operations.js';
 import { createJobRegistry } from '../src/job-registry.js';
 import { mountDockerComposeRoutes } from '../src/docker-compose-http.js';
+import { createSiteMutationLock } from '../src/site-mutation-lock.js';
 import { RegistryError } from '../src/server-registry.js';
 import {
    EASYPANEL_ONE_CLICK_APPS,
@@ -313,6 +314,7 @@ async function createRealScenarioDockerServer(t, { defaultAuth = null } = {}) {
     dockerComposeObserver: observer,
     validateDockerCompose,
     domainRegistry,
+    siteMutationLock: createSiteMutationLock({ root: path.join(rootDir, 'locks') }),
     localServerId: LOCAL_SERVER_ID,
   });
 

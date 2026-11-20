@@ -1,7 +1,9 @@
-import { DOCKER_COMPOSE_OPERATIONS, OPERATIONS } from '@yunpanel/protocol';
+import { DOCKER_COMPOSE_OPERATIONS, DOCKER_VOLUME_OPERATIONS, OPERATIONS } from '@yunpanel/protocol';
 import { sanitizeDockerComposeJobResult } from './docker-compose-job-result.js';
+import { sanitizeDockerVolumeJobResult } from './docker-volume-job-result.js';
 
 const OPERATION_SET = new Set(DOCKER_COMPOSE_OPERATIONS);
+const VOLUME_OPERATION_SET = new Set(DOCKER_VOLUME_OPERATIONS);
 
 export class DockerComposeRecoveryError extends Error {
   constructor(code, message) {
@@ -9,6 +11,41 @@ export class DockerComposeRecoveryError extends Error {
     this.name = 'DockerComposeRecoveryError';
     this.code = code;
   }
+}
+
+function volumeReceiptResult(job, receipt) {
+  if (!job || job.status !== 'running' || job.resourceType !== 'docker_project'
+    || job.operation !== OPERATIONS.DOCKER_VOLUME_DELETE || !job.payload
+    || receipt?.phase !== 'completed'
+    || receipt.serverId !== job.serverId || receipt.jobId !== job.id
+    || receipt.operation !== job.operation || receipt.projectId !== job.resourceId
+    || receipt.projectId !== job.payload.projectId
+    || receipt.projectName !== job.payload.projectName
+    || receipt.projectRevision !== job.payload.expectedProjectRevision
+    || receipt.composeSha256 !== job.payload.expectedComposeSha256
+    || receipt.volumeKey !== job.payload.volumeKey
+    || receipt.volumeName !== job.payload.volumeName
+    || receipt.volumeFingerprint !== job.payload.volumeFingerprint
+    || receipt.previewDigest !== job.payload.previewDigest
+    || receipt.deleted !== true || receipt.sideEffects !== true) {
+    throw new DockerComposeRecoveryError(
+      'docker_volume_recovery_receipt_mismatch',
+      'Docker volume recovery receipt does not match the persisted running job',
+    );
+  }
+  return sanitizeDockerVolumeJobResult(job, {
+    version: 1,
+    projectId: receipt.projectId,
+    projectName: receipt.projectName,
+    projectRevision: receipt.projectRevision,
+    composeSha256: receipt.composeSha256,
+    volumeKey: receipt.volumeKey,
+    volumeName: receipt.volumeName,
+    volumeFingerprint: receipt.volumeFingerprint,
+    previewDigest: receipt.previewDigest,
+    deleted: true,
+    sideEffects: true,
+  });
 }
 
 function receiptResult(job, receipt) {
@@ -42,6 +79,7 @@ function receiptResult(job, receipt) {
 export function createDockerComposeRecoveryService({
   jobRegistry,
   receiptStore,
+  volumeReceiptStore = null,
   reconcileCompletedJob,
   reconcileRunningReceipt = async () => { throw new DockerComposeRecoveryError('docker_compose_recovery_reconciliation_failed', 'Removal metadata finalizer is unavailable'); },
 } = {}) {
@@ -50,6 +88,7 @@ export function createDockerComposeRecoveryService({
     || typeof jobRegistry.beginReconciliation !== 'function'
     || typeof jobRegistry.acknowledgeReconciliation !== 'function'
     || !receiptStore || typeof receiptStore.read !== 'function'
+    || (volumeReceiptStore !== null && typeof volumeReceiptStore.read !== 'function')
     || typeof reconcileCompletedJob !== 'function') {
     throw new DockerComposeRecoveryError(
       'docker_compose_recovery_dependencies_invalid',
@@ -98,7 +137,9 @@ export function createDockerComposeRecoveryService({
           'Docker Compose durable recovery references a missing job',
         );
       }
-      if (!OPERATION_SET.has(job.operation) || job.resourceType !== 'docker_project') {
+      const isCompose = OPERATION_SET.has(job.operation);
+      const isVolume = VOLUME_OPERATION_SET.has(job.operation);
+      if ((!isCompose && !isVolume) || job.resourceType !== 'docker_project') {
         pending.push(Object.freeze({ jobId: job.id, serverId: job.serverId, reason: 'non_compose_job' }));
         continue;
       }
@@ -113,6 +154,47 @@ export function createDockerComposeRecoveryService({
           'docker_compose_recovery_job_state_invalid',
           'Docker Compose recovery job is not running or terminal',
         );
+      }
+
+      if (isVolume) {
+        if (!volumeReceiptStore) {
+          pending.push(Object.freeze({ jobId: job.id, serverId: job.serverId, reason: 'volume_receipt_store_unavailable' }));
+          continue;
+        }
+        const receipt = await volumeReceiptStore.read(job.id);
+        if (!receipt) {
+          pending.push(Object.freeze({ jobId: job.id, serverId: job.serverId, reason: 'receipt_missing' }));
+          continue;
+        }
+        if (receipt.phase === 'intent') {
+          // Pre-delete intent persisted before absence verification: never blindly replay docker volume rm.
+          pending.push(Object.freeze({ jobId: job.id, serverId: job.serverId, reason: 'volume_delete_intent_interrupted' }));
+          continue;
+        }
+        const result = volumeReceiptResult(job, receipt);
+        const begun = await jobRegistry.beginReconciliation({ serverId: job.serverId, jobId: job.id });
+        if (!begun || begun.jobId !== job.id || begun.serverId !== job.serverId
+          || begun.status !== 'running' || begun.pending !== true) {
+          throw new DockerComposeRecoveryError(
+            'docker_compose_recovery_begin_failed',
+            'Docker volume recovery reconciliation could not be started',
+          );
+        }
+        const terminal = await jobRegistry.complete({
+          serverId: job.serverId,
+          jobId: job.id,
+          status: 'succeeded',
+          result,
+        });
+        if (!terminal || terminal.id !== job.id || terminal.serverId !== job.serverId || terminal.status !== 'succeeded') {
+          throw new DockerComposeRecoveryError(
+            'docker_compose_recovery_completion_failed',
+            'Docker volume recovery completion is inconsistent',
+          );
+        }
+        await reconcileAndAcknowledge(terminal);
+        recovered.push(Object.freeze({ jobId: job.id, serverId: job.serverId, status: 'succeeded', source: 'volume_operation_receipt' }));
+        continue;
       }
 
       const receipt = await receiptStore.read(job.id);

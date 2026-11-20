@@ -14,6 +14,7 @@ import { createDockerRegistryCredentialRegistry } from '../src/docker-registry-c
 import { createDockerComposeOperationsService } from '../src/docker-compose-operations.js';
 import { createJobRegistry } from '../src/job-registry.js';
 import { mountDockerComposeRoutes } from '../src/docker-compose-http.js';
+import { createSiteMutationLock } from '../src/site-mutation-lock.js';
 import {
   DockerPleskCatalogError,
   EASYPANEL_ONE_CLICK_APPS,
@@ -149,6 +150,7 @@ async function createRealDockerApiServer(t) {
     dockerComposeOperationsService: operationsService,
     dockerComposeObserver: observer,
     validateDockerCompose,
+    siteMutationLock: createSiteMutationLock({ root: path.join(rootDir, 'locks') }),
     localServerId: SERVER_ID,
   });
 

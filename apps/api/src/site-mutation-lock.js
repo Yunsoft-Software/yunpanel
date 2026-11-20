@@ -1,9 +1,10 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const TYPES = new Set(['application', 'website', 'domain', 'docker_project']);
+const VOLUME_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$/;
+const TYPES = new Set(['application', 'website', 'domain', 'docker_project', 'docker_inventory', 'docker_volume']);
 
 export class SiteMutationLockError extends Error {
   constructor(code, message, status = 409) {
@@ -21,11 +22,24 @@ function safeType(value) {
   return value;
 }
 
-function safeId(value, field = 'resourceId') {
+function safeId(value, type, field = 'resourceId') {
+  if (type === 'docker_volume') {
+    if (typeof value !== 'string' || !VOLUME_NAME.test(value)) {
+      throw new SiteMutationLockError('site_mutation_lock_identity_invalid', `${field} must be a valid Docker volume name`, 400);
+    }
+    return value;
+  }
   if (typeof value !== 'string' || !UUID.test(value)) {
     throw new SiteMutationLockError('site_mutation_lock_identity_invalid', `${field} must be a UUID`, 400);
   }
   return value.toLowerCase();
+}
+
+function lockFileName(type, id) {
+  if (type === 'docker_volume') {
+    return `${type}-${createHash('sha256').update(id).digest('hex')}.lock`;
+  }
+  return `${type}-${id}.lock`;
 }
 
 function parseRecord(value, expectedType, expectedId) {
@@ -67,7 +81,7 @@ export function createSiteMutationLock({
 
   async function withLock({ resourceType, resourceId } = {}, action) {
     const type = safeType(resourceType);
-    const id = safeId(resourceId);
+    const id = safeId(resourceId, type);
     if (typeof action !== 'function') {
       throw new SiteMutationLockError('site_mutation_lock_action_invalid', 'Site mutation lock action is invalid', 400);
     }
@@ -77,7 +91,7 @@ export function createSiteMutationLock({
     } catch {
       throw new SiteMutationLockError('site_mutation_lock_failed', 'Site mutation lock could not be acquired', 503);
     }
-    const target = path.join(root, `${type}-${id}.lock`);
+    const target = path.join(root, lockFileName(type, id));
     const token = randomUUID();
     const record = Object.freeze({
       version: 1,
@@ -164,15 +178,34 @@ export function createSiteMutationLock({
     return withLock({ resourceType: 'domain', resourceId: domainId }, action);
   }
 
+  function withDockerInventoryLock(serverId, action) {
+    return withLock({ resourceType: 'docker_inventory', resourceId: serverId }, action);
+  }
+
   function withDockerProjectLock(projectId, action) {
     return withLock({ resourceType: 'docker_project', resourceId: projectId }, action);
+  }
+
+  function withDockerVolumeLock(volumeName, action) {
+    return withLock({ resourceType: 'docker_volume', resourceId: volumeName }, action);
+  }
+
+  async function withDockerVolumeOperationLocks({ serverId, projectId, volumeName } = {}, action) {
+    if (typeof action !== 'function') {
+      throw new SiteMutationLockError('site_mutation_lock_action_invalid', 'Site mutation lock action is invalid', 400);
+    }
+    return withDockerInventoryLock(serverId, () => (
+      withDockerProjectLock(projectId, () => (
+        withDockerVolumeLock(volumeName, action)
+      ))
+    ));
   }
 
   async function withDockerProjectLocks(projectIds, action) {
     if (typeof action !== 'function') {
       throw new SiteMutationLockError('site_mutation_lock_action_invalid', 'Site mutation lock action is invalid', 400);
     }
-    const ids = [...new Set((projectIds ?? []).map((id) => safeId(id, 'dockerProjectId')))].sort();
+    const ids = [...new Set((projectIds ?? []).map((id) => safeId(id, 'docker_project', 'dockerProjectId')))].sort();
     const acquire = (index) => {
       if (index >= ids.length) return action();
       return withDockerProjectLock(ids[index], () => acquire(index + 1));
@@ -195,8 +228,11 @@ export function createSiteMutationLock({
     withApplicationLock,
     withWebsiteLock,
     withDomainLock,
+    withDockerInventoryLock,
     withDockerProjectLock,
     withDockerProjectLocks,
+    withDockerVolumeLock,
+    withDockerVolumeOperationLocks,
     withSiteLock,
   });
 }

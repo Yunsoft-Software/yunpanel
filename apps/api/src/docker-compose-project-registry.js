@@ -246,6 +246,54 @@ function normalizeServiceSummary(service, code = 'docker_compose_validation_inva
   };
 }
 
+function normalizeVolumeDetails(value, code = 'docker_compose_validation_invalid') {
+  if (value === undefined) return null;
+  const status = code === 'docker_compose_project_state_invalid' ? 409 : 400;
+  if (!Array.isArray(value) || value.length > 128) {
+    throw new DockerComposeProjectRegistryError(code, 'Docker Compose volume details are invalid', status);
+  }
+  const seen = new Set();
+  const output = value.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+      || Object.keys(entry).length !== 4
+      || Object.keys(entry).some((key) => !['name', 'scope', 'external', 'runtimeName'].includes(key))
+      || typeof entry.name !== 'string' || !RESOURCE_NAME_PATTERN.test(entry.name)
+      || typeof entry.scope !== 'string' || !STORAGE_SCOPES.has(entry.scope)
+      || typeof entry.external !== 'boolean'
+      || typeof entry.runtimeName !== 'string' || entry.runtimeName.length < 1 || entry.runtimeName.length > 256
+      || /[\u0000-\u001f\u007f]/.test(entry.runtimeName)
+      || seen.has(entry.name)) {
+      throw new DockerComposeProjectRegistryError(code, 'Docker Compose volume details are invalid', status);
+    }
+    seen.add(entry.name);
+    return Object.freeze({
+      name: entry.name,
+      scope: entry.scope,
+      external: entry.external,
+      runtimeName: entry.runtimeName,
+    });
+  });
+  return Object.freeze(output.sort((left, right) => left.name.localeCompare(right.name)));
+}
+
+function projectOwnedVolumeKeys(projectName, volumeDetails) {
+  if (!Array.isArray(volumeDetails)) return [];
+  return volumeDetails
+    .filter((entry) => entry.scope === 'project' && entry.external !== true && entry.runtimeName === `${projectName}_${entry.name}`)
+    .map((entry) => entry.name)
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function mergeOwnedVolumeKeys(projectName, previousOwned = [], previousDetails = null, nextDetails = null) {
+  const keys = new Set();
+  for (const key of previousOwned ?? []) {
+    if (typeof key === 'string' && RESOURCE_NAME_PATTERN.test(key)) keys.add(key);
+  }
+  for (const key of projectOwnedVolumeKeys(projectName, previousDetails)) keys.add(key);
+  for (const key of projectOwnedVolumeKeys(projectName, nextDetails)) keys.add(key);
+  return Object.freeze([...keys].sort((left, right) => left.localeCompare(right)));
+}
+
 function normalizeValidation(value, projectName, document) {
   const bytes = Buffer.byteLength(document);
   const sha256 = createHash('sha256').update(document).digest('hex');
@@ -276,6 +324,7 @@ function normalizeValidation(value, projectName, document) {
       return Object.freeze({ name: net.name, scope: net.scope });
     });
   }
+  const volumeDetails = normalizeVolumeDetails(value.volumeDetails, 'docker_compose_validation_invalid');
   return Object.freeze({
     composeSha256: sha256,
     composeBytes: bytes,
@@ -287,6 +336,7 @@ function normalizeValidation(value, projectName, document) {
     networks: Object.freeze(normalizeNameArray(value.networks, 'network')),
     ...(networkDetails ? { networkDetails: Object.freeze(networkDetails) } : {}),
     volumes: Object.freeze(normalizeNameArray(value.volumes, 'volume')),
+    ...(volumeDetails ? { volumeDetails } : {}),
     secretCount: value.secretCount,
     configCount: value.configCount,
   });
@@ -365,6 +415,12 @@ function publicProject(record) {
     services: Object.freeze(record.services.map(cloneService)),
     networks: Object.freeze([...record.networks]),
     volumes: Object.freeze([...record.volumes]),
+    ...(Array.isArray(record.volumeDetails)
+      ? { volumeDetails: Object.freeze(record.volumeDetails.map((entry) => Object.freeze({ ...entry }))) }
+      : {}),
+    ...(Array.isArray(record.ownedVolumes)
+      ? { ownedVolumes: Object.freeze([...record.ownedVolumes]) }
+      : {}),
     secretCount: record.secretCount,
     configCount: record.configCount,
     documentConfigured: true,
@@ -376,7 +432,7 @@ function publicProject(record) {
 function validatePersisted(value) {
   const allowedFields = new Set([
     'id', 'serverId', 'projectName', 'revision', 'composeSha256', 'composeBytes', 'services',
-    'networks', 'networkDetails', 'volumes', 'secretCount', 'configCount', 'encryptedDocument', 'createdAt', 'updatedAt',
+    'networks', 'networkDetails', 'volumes', 'volumeDetails', 'ownedVolumes', 'secretCount', 'configCount', 'encryptedDocument', 'createdAt', 'updatedAt',
   ]);
   const requiredFields = new Set([
     'id', 'serverId', 'projectName', 'revision', 'composeSha256', 'composeBytes', 'services',
@@ -413,6 +469,10 @@ function validatePersisted(value) {
   } else if (value.networkDetails !== undefined) {
     throw new DockerComposeProjectRegistryError('docker_compose_project_state_invalid', 'Docker Compose project network state is invalid', 409);
   }
+  const volumeDetails = normalizeVolumeDetails(value.volumeDetails, 'docker_compose_project_state_invalid');
+  const ownedVolumes = value.ownedVolumes === undefined
+    ? null
+    : Object.freeze(normalizeNameArray(value.ownedVolumes, 'volume'));
   return {
     id: normalizeUuid(value.id, 'dockerProjectId'),
     serverId: normalizeUuid(value.serverId, 'serverId'),
@@ -424,6 +484,8 @@ function validatePersisted(value) {
     networks: normalizeNameArray(value.networks, 'network'),
     ...(networkDetails ? { networkDetails: Object.freeze(networkDetails) } : {}),
     volumes: normalizeNameArray(value.volumes, 'volume'),
+    ...(volumeDetails ? { volumeDetails } : {}),
+    ...(ownedVolumes ? { ownedVolumes } : {}),
     secretCount: value.secretCount,
     configCount: value.configCount,
     encryptedDocument: encryptedShape(value.encryptedDocument),
@@ -541,12 +603,16 @@ export function createDockerComposeProjectRegistry({
     assertNoPublishedPortConflict(state.projects, { serverId: normalizedServerId, services: summary.services });
     const timestamp = new Date(now()).toISOString();
     const revision = 1;
+    const ownedVolumes = summary.volumeDetails
+      ? mergeOwnedVolumeKeys(name, [], null, summary.volumeDetails)
+      : null;
     const record = {
       id,
       serverId: normalizedServerId,
       projectName: name,
       revision,
       ...summary,
+      ...(ownedVolumes ? { ownedVolumes } : {}),
       encryptedDocument: encryptDocument(encryptionKey, id, revision, document),
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -581,7 +647,11 @@ export function createDockerComposeProjectRegistry({
       await beforeUpdateProject({ current: publicProject(project), next: summary });
     }
     const revision = project.revision + 1;
+    const ownedVolumes = (Array.isArray(project.ownedVolumes) || Array.isArray(project.volumeDetails) || Array.isArray(summary.volumeDetails))
+      ? mergeOwnedVolumeKeys(project.projectName, project.ownedVolumes ?? [], project.volumeDetails ?? null, summary.volumeDetails ?? null)
+      : null;
     Object.assign(project, summary, {
+      ...(ownedVolumes ? { ownedVolumes } : {}),
       revision,
       encryptedDocument: encryptDocument(encryptionKey, id, revision, document),
       updatedAt: new Date(now()).toISOString(),

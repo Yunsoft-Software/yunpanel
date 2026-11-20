@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { DOCKER_COMPOSE_OPERATIONS, OPERATIONS } from '@yunpanel/protocol';
+import { DOCKER_COMPOSE_OPERATIONS, DOCKER_VOLUME_OPERATIONS, OPERATIONS } from '@yunpanel/protocol';
 
 const ACTION_TO_OPERATION = Object.freeze({
   build: OPERATIONS.DOCKER_COMPOSE_BUILD,
@@ -10,7 +10,7 @@ const ACTION_TO_OPERATION = Object.freeze({
   remove: OPERATIONS.DOCKER_COMPOSE_REMOVE,
 });
 const ACTIVE_STATUSES = new Set(['queued', 'running']);
-const DOCKER_OPERATION_SET = new Set(DOCKER_COMPOSE_OPERATIONS);
+const DOCKER_OPERATION_SET = new Set([...DOCKER_COMPOSE_OPERATIONS, ...DOCKER_VOLUME_OPERATIONS]);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
 export class DockerComposeOperationsError extends Error {

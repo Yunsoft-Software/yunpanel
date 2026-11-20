@@ -346,10 +346,13 @@ export function createDockerVolumeManager({
     return parseVolumeContainersOutput(result?.stdout ?? '', safeName);
   }
 
-  async function deleteVolume({ projectName, volumeKey, volumeName, expectedFingerprint } = {}) {
+  async function deleteVolume({ projectName, volumeKey, volumeName, expectedFingerprint, beforeRemove = null } = {}) {
     const identity = assertOwnedVolumeIdentity(projectName, volumeKey, volumeName);
     if (typeof expectedFingerprint !== 'string' || !SHA256_PATTERN.test(expectedFingerprint)) {
       throw new DockerVolumeManagerError('docker_volume_fingerprint_invalid', 'A verified Docker volume fingerprint is required', 400);
+    }
+    if (beforeRemove !== null && typeof beforeRemove !== 'function') {
+      throw new DockerVolumeManagerError('docker_volume_manager_dependencies_invalid', 'beforeRemove hook must be a function', 500);
     }
     const detail = await inspectVolumeDetail(identity.volumeName);
     assertVolumeDeletableMetadata(detail, {
@@ -366,6 +369,9 @@ export function createDockerVolumeManager({
       );
     }
     const binary = await resolveDockerPath();
+    if (beforeRemove) {
+      await beforeRemove({ detail, usage, identity });
+    }
     try {
       await execFn(binary, ['--host', DOCKER_LOCAL_SOCKET, 'volume', 'rm', identity.volumeName]);
     } catch (error) {

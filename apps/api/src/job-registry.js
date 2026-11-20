@@ -7,6 +7,7 @@ import path from 'node:path';
 import {
   createOperationEnvelope,
   DOCKER_COMPOSE_OPERATIONS,
+  DOCKER_VOLUME_OPERATIONS,
   isWebsiteCopyOperation,
   MANAGED_SERVICE_ACTIONS,
   MANAGED_SERVICE_IDS,
@@ -31,6 +32,7 @@ import {
   DockerComposeJobResultError,
   sanitizeDockerComposeJobResult,
 } from './docker-compose-job-result.js';
+import { sanitizeDockerVolumeJobResult } from './docker-volume-job-result.js';
 import { safeLocalOperationError } from './local-execution-error.js';
 import {
   MailDataJobResultError,
@@ -101,6 +103,7 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.WEBSITE_PHP_COPY,
 ]);
 for (const op of DOCKER_COMPOSE_OPERATIONS) ASYNC_OPERATIONS.add(op);
+for (const op of DOCKER_VOLUME_OPERATIONS) ASYNC_OPERATIONS.add(op);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -1222,6 +1225,13 @@ function sanitizeResult(job, result) {
       verified: true, sideEffects: result.sideEffects };
   }
   if (DOCKER_COMPOSE_OPERATION_SET.has(job.operation)) return sanitizeDockerComposeResult(job, result);
+  if (job.operation === OPERATIONS.DOCKER_VOLUME_DELETE) {
+    try {
+      return sanitizeDockerVolumeJobResult(job, result);
+    } catch {
+      throw new JobRegistryError('invalid_job_result', 'Docker volume deletion result does not match the queued operation');
+    }
+  }
   if (job.operation === OPERATIONS.SYSTEM_SERVICES_INSPECT) return sanitizeManagedServiceResult(job, result);
   if ([OPERATIONS.DATABASE_INSPECT, OPERATIONS.DATABASE_CREATE, OPERATIONS.DATABASE_DELETE].includes(job.operation)) {
     return sanitizeDatabaseResult(job, result);

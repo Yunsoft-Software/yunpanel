@@ -23,6 +23,7 @@ import {
 } from './domain-proxy-routes.js';
 import { JobRegistryError } from './job-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
+import { SiteMutationLockError } from './site-mutation-lock.js';
 
 export class DockerComposeHttpError extends Error {
   constructor(code, message, status = 400) {
@@ -139,6 +140,24 @@ async function requireProject(projectRegistry, projectId, localServerId) {
   return project;
 }
 
+async function withRequiredDockerInventoryLock(siteMutationLock, serverId, action) {
+  if (!siteMutationLock || typeof siteMutationLock.withDockerInventoryLock !== 'function') {
+    throw new DockerComposeHttpError(
+      'docker_inventory_lock_unavailable',
+      'Docker inventory lock is unavailable',
+      503,
+    );
+  }
+  try {
+    return await siteMutationLock.withDockerInventoryLock(serverId, action);
+  } catch (error) {
+    if (error instanceof SiteMutationLockError || error?.name === 'SiteMutationLockError') {
+      throw new DockerComposeHttpError(error.code, error.message, error.status ?? 409);
+    }
+    throw error;
+  }
+}
+
 export function mountDockerComposeRoutes(app, {
   dockerComposeProjectRegistry,
   dockerComposeEnvironmentRegistry,
@@ -224,46 +243,51 @@ export function mountDockerComposeRoutes(app, {
       'Send serverId, projectName and document',
     );
     const serverId = requireLocalServer(body.serverId, localServerId);
-    const validation = await safeCall(() => validateDockerCompose({
-      projectName: body.projectName,
-      document: body.document,
-      environment: {},
-      interpolate: false,
-    }));
-    const project = await safeCall(() => dockerComposeProjectRegistry.createProject({
-      serverId,
-      projectName: body.projectName,
-      document: body.document,
-      validation,
-    }));
-    const environment = await safeCall(() => dockerComposeEnvironmentRegistry.getEnvironment(project.id));
-    return response.status(201).json({ data: { project, environment }, sideEffects: false });
+    const created = await withRequiredDockerInventoryLock(siteMutationLock, serverId, async () => {
+      const validation = await safeCall(() => validateDockerCompose({
+        projectName: body.projectName,
+        document: body.document,
+        environment: {},
+        interpolate: false,
+      }));
+      const project = await safeCall(() => dockerComposeProjectRegistry.createProject({
+        serverId,
+        projectName: body.projectName,
+        document: body.document,
+        validation,
+      }));
+      const environment = await safeCall(() => dockerComposeEnvironmentRegistry.getEnvironment(project.id));
+      return { project, environment };
+    });
+    return response.status(201).json({ data: created, sideEffects: false });
   }));
 
   app.put('/api/docker/projects/:dockerProjectId', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
     const body = exactBody(request.body, ['expectedRevision', 'document'], 'Send expectedRevision and document');
     const current = await requireProject(dockerComposeProjectRegistry, request.params.dockerProjectId, localServerId);
-    const project = await withProxyRouteProjectLocks(siteMutationLock, [current.id], async () => {
-      const latest = await requireProject(dockerComposeProjectRegistry, current.id, localServerId);
-      const validation = await safeCall(() => validateDockerCompose({
-        projectName: latest.projectName,
-        document: body.document,
-        environment: {},
-        interpolate: false,
-      }));
-      await assertProjectUpdatePreservesProxyRoutes({
-        project: latest,
-        nextServices: validation.services,
-        domainRegistry,
-        jobRegistry,
-        ErrorClass: DockerComposeHttpError,
-      });
-      return safeCall(() => dockerComposeProjectRegistry.updateProject(latest.id, {
-        expectedRevision: body.expectedRevision,
-        document: body.document,
-        validation,
-      }));
-    }, DockerComposeHttpError);
+    const project = await withRequiredDockerInventoryLock(siteMutationLock, current.serverId, () => (
+      withProxyRouteProjectLocks(siteMutationLock, [current.id], async () => {
+        const latest = await requireProject(dockerComposeProjectRegistry, current.id, localServerId);
+        const validation = await safeCall(() => validateDockerCompose({
+          projectName: latest.projectName,
+          document: body.document,
+          environment: {},
+          interpolate: false,
+        }));
+        await assertProjectUpdatePreservesProxyRoutes({
+          project: latest,
+          nextServices: validation.services,
+          domainRegistry,
+          jobRegistry,
+          ErrorClass: DockerComposeHttpError,
+        });
+        return safeCall(() => dockerComposeProjectRegistry.updateProject(latest.id, {
+          expectedRevision: body.expectedRevision,
+          document: body.document,
+          validation,
+        }));
+      }, DockerComposeHttpError)
+    ));
     return response.json({ data: project, sideEffects: false });
   }));
 
@@ -380,9 +404,7 @@ export function mountDockerComposeRoutes(app, {
       expectedPreviewDigest: body.expectedPreviewDigest,
       confirmation: body.confirmation,
     }));
-    const queued = request.params.action === 'remove'
-      ? await withProxyRouteProjectLocks(siteMutationLock, [project.id], runQueue, DockerComposeHttpError)
-      : await runQueue();
+    const queued = await withProxyRouteProjectLocks(siteMutationLock, [project.id], runQueue, DockerComposeHttpError);
     return response.status(202).json({ data: queued, sideEffects: false });
   }));
 

@@ -1,6 +1,10 @@
 import path from 'node:path';
-import { createDockerComposeObserver, createDockerComposeValidator } from '@yunpanel/host-runtime';
-import { DOCKER_COMPOSE_OPERATIONS } from '@yunpanel/protocol';
+import {
+  createDockerComposeObserver,
+  createDockerComposeValidator,
+  createDockerVolumeManager,
+} from '@yunpanel/host-runtime';
+import { DOCKER_COMPOSE_OPERATIONS, DOCKER_VOLUME_OPERATIONS } from '@yunpanel/protocol';
 import { createDockerComposeRemoval } from './docker-compose-removal.js';
 import { createDockerComposeEnvironmentRegistry } from './docker-compose-environment-registry.js';
 import { createDockerComposeMaterializer } from './docker-compose-materializer.js';
@@ -9,9 +13,13 @@ import { createDockerComposeOperationsService } from './docker-compose-operation
 import { createDockerComposeProjectRegistry } from './docker-compose-project-registry.js';
 import { createDockerComposeRecoveryService } from './docker-compose-recovery.js';
 import { createDockerRegistryCredentialRegistry } from './docker-registry-credential-registry.js';
+import { createDockerVolumeOperationReceiptStore } from './docker-volume-operation-receipt.js';
+import { createDockerVolumeOperationsService } from './docker-volume-operations.js';
 import { createLocalDockerComposeOperation } from './local-docker-compose-operation.js';
+import { createLocalDockerVolumeOperation } from './local-docker-volume-operation.js';
 
 const DOCKER_OPERATION_SET = new Set(DOCKER_COMPOSE_OPERATIONS);
+const DOCKER_VOLUME_OPERATION_SET = new Set(DOCKER_VOLUME_OPERATIONS);
 
 export class DockerComposeRuntimeError extends Error {
   constructor(code, message) {
@@ -79,20 +87,24 @@ export function createDockerComposeProjectRegistryBootstrap({
   return Object.freeze({ paths, projectRegistry });
 }
 
-function extendLocalOperations(baseOperations, localOperation) {
+function extendLocalOperations(baseOperations, localOperation, localVolumeOperation = null) {
   if (!baseOperations || !Array.isArray(baseOperations.operations)
     || typeof baseOperations.supports !== 'function' || typeof baseOperations.executeOperation !== 'function'
-    || !localOperation || typeof localOperation.execute !== 'function') {
+    || !localOperation || typeof localOperation.execute !== 'function'
+    || (localVolumeOperation !== null && typeof localVolumeOperation.execute !== 'function')) {
     throw new DockerComposeRuntimeError(
       'docker_compose_local_operations_invalid',
       'Docker Compose local operation dependencies are invalid',
     );
   }
-  const operations = Object.freeze([...new Set([...baseOperations.operations, ...DOCKER_COMPOSE_OPERATIONS])]);
+  const volumeOps = localVolumeOperation ? DOCKER_VOLUME_OPERATIONS : [];
+  const operations = Object.freeze([...new Set([...baseOperations.operations, ...DOCKER_COMPOSE_OPERATIONS, ...volumeOps])]);
   return Object.freeze({
     operations,
     supports(operation) {
-      return DOCKER_OPERATION_SET.has(operation) || baseOperations.supports(operation);
+      return DOCKER_OPERATION_SET.has(operation)
+        || (Boolean(localVolumeOperation) && DOCKER_VOLUME_OPERATION_SET.has(operation))
+        || baseOperations.supports(operation);
     },
     async executeOperation(operation, payload = {}, execution = null) {
       if (DOCKER_OPERATION_SET.has(operation)) {
@@ -102,6 +114,16 @@ function extendLocalOperations(baseOperations, localOperation) {
         }
         const authorized = await baseOperations.authorizeExecution(operation, execution);
         return localOperation.execute(operation, payload, { ...authorized, authorize: () => baseOperations.authorizeExecution(operation, execution) });
+      }
+      if (localVolumeOperation && DOCKER_VOLUME_OPERATION_SET.has(operation)) {
+        if (execution?.authorization?.kind !== 'panel'
+          || execution?.authorization?.role !== 'owner'
+          || execution?.authorization?.scope !== 'server'
+          || typeof baseOperations.authorizeExecution !== 'function') {
+          throw Object.assign(new DockerComposeRuntimeError('docker_volume_job_authorization_required', 'Docker volume silme işlemi yalnız güncel Owner oturumuyla yürütülebilir'), { status: 403 });
+        }
+        const authorized = await baseOperations.authorizeExecution(operation, execution);
+        return localVolumeOperation.execute(operation, payload, { ...authorized, authorize: () => baseOperations.authorizeExecution(operation, execution) });
       }
       return baseOperations.executeOperation(operation, payload, execution);
     },
@@ -115,10 +137,15 @@ export async function createDockerComposeRuntime({
   projectRegistry: providedProjectRegistry = null,
   websiteRegistry = null,
   domainRegistry = null,
+  siteMutationLock = null,
   projectBackupLocked = async () => false,
   validateDockerCompose = createDockerComposeValidator(),
   observer = createDockerComposeObserver(),
   receiptStore = createDockerComposeOperationReceiptStore(),
+  volumeManager = createDockerVolumeManager(),
+  volumeReceiptStore = createDockerVolumeOperationReceiptStore(
+    env?.YUNPANEL_DOCKER_VOLUME_RECEIPT_ROOT ? { root: env.YUNPANEL_DOCKER_VOLUME_RECEIPT_ROOT } : undefined,
+  ),
 } = {}) {
   if (!env || typeof env !== 'object' || Array.isArray(env)
     || !serverRegistry || typeof serverRegistry.getServer !== 'function'
@@ -183,11 +210,39 @@ export async function createDockerComposeRuntime({
     credentialRegistry,
     validateDockerCompose,
   });
-  const localOperation = createLocalDockerComposeOperation({ materialize, receiptStore, authorizeRemoval: removal.authorize, finalizeRemoval: removal.finalize });
+  const localOperation = createLocalDockerComposeOperation({
+    materialize,
+    receiptStore,
+    siteMutationLock,
+    authorizeRemoval: removal.authorize,
+    finalizeRemoval: removal.finalize,
+  });
+  const volumeOperationsService = createDockerVolumeOperationsService({
+    projectRegistry,
+    jobRegistry,
+    volumeManager,
+    validateDockerCompose,
+    projectBackupLocked,
+    siteMutationLock,
+  });
+  const localVolumeOperation = createLocalDockerVolumeOperation({
+    projectRegistry,
+    volumeManager,
+    validateDockerCompose,
+    projectBackupLocked,
+    siteMutationLock,
+    receiptStore: volumeReceiptStore,
+  });
   const recoveryService = createDockerComposeRecoveryService({
     jobRegistry,
     receiptStore,
-    reconcileCompletedJob: async job => job.status === 'succeeded' ? removal.finalize(job) : ({ reconciled: true, error: null }),
+    volumeReceiptStore,
+    reconcileCompletedJob: async (job) => {
+      if (job.status === 'succeeded' && DOCKER_OPERATION_SET.has(job.operation)) {
+        return removal.finalize(job);
+      }
+      return { reconciled: true, error: null };
+    },
     reconcileRunningReceipt: removal.finalize,
   });
   const recovery = await recoveryService.recover();
@@ -198,6 +253,10 @@ export async function createDockerComposeRuntime({
     environmentRegistry,
     credentialRegistry,
     operationsService,
+    volumeOperationsService,
+    volumeManager,
+    volumeReceiptStore,
+    localVolumeOperation,
     validateDockerCompose,
     observer,
     materialize,
@@ -207,7 +266,7 @@ export async function createDockerComposeRuntime({
     removal,
     recovery,
     extendLocalOperations(baseOperations) {
-      return extendLocalOperations(baseOperations, localOperation);
+      return extendLocalOperations(baseOperations, localOperation, localVolumeOperation);
     },
   });
 }

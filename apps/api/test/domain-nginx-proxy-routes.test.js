@@ -1257,11 +1257,18 @@ test('missing or incomplete siteMutationLock fails closed with 503 across all 6 
     const fx = await createRealFixture(t, { siteMutationLockOverride: brokenLock });
     const owner = await fx.loginAs('owner');
 
-    const project = (await owner.api('POST', '/api/docker/projects', {
+    const initialValidation = await fx.validateDockerCompose({
+      projectName: 'lock_guard_stack',
+      document: COMPOSE_INITIAL,
+      environment: {},
+      interpolate: false,
+    });
+    const project = await fx.projectRegistry.createProject({
       serverId: fx.serverId,
       projectName: 'lock_guard_stack',
       document: COMPOSE_INITIAL,
-    })).json.data.project;
+      validation: initialValidation,
+    });
 
     const route = {
       path: '/api',
@@ -1387,20 +1394,36 @@ test('missing or incomplete siteMutationLock fails closed with 503 across all 6 
     assert.equal(stageBlocked.status, 503);
     assert.equal(stageBlocked.json.error.code, 'docker_proxy_route_lock_unavailable');
 
-    // 5. PUT /api/docker/projects/:id -> 503
+    // 5. POST & PUT /api/docker/projects -> 503 when shared inventory/project lock is unavailable
+    const createProjectBlocked = await owner.api('POST', '/api/docker/projects', {
+      serverId: fx.serverId,
+      projectName: 'lock_guard_create',
+      document: 'services:\n  web:\n    image: nginx:alpine\n    ports:\n      - "127.0.0.1:13112:80/tcp"\n',
+    });
+    assert.equal(createProjectBlocked.status, 503);
+    assert.equal(createProjectBlocked.json.error.code, 'docker_inventory_lock_unavailable');
+
     const putBlocked = await owner.api('PUT', `/api/docker/projects/${project.id}`, {
       expectedRevision: project.revision,
       document: COMPOSE_INITIAL,
     });
     assert.equal(putBlocked.status, 503);
-    assert.equal(putBlocked.json.error.code, 'docker_proxy_route_lock_unavailable');
+    assert.equal(putBlocked.json.error.code, 'docker_inventory_lock_unavailable');
 
     // 6. POST /api/docker/projects/:id/operations/remove -> 503 (use fresh unreferenced project)
-    const unrefProject = (await owner.api('POST', '/api/docker/projects', {
+    const removeDoc = 'services:\n  web:\n    image: nginx:alpine\n    ports:\n      - "127.0.0.1:13111:80/tcp"\n';
+    const removeValidation = await fx.validateDockerCompose({
+      projectName: 'lock_guard_remove',
+      document: removeDoc,
+      environment: {},
+      interpolate: false,
+    });
+    const unrefProject = await fx.projectRegistry.createProject({
       serverId: fx.serverId,
       projectName: 'lock_guard_remove',
-      document: 'services:\n  web:\n    image: nginx:alpine\n    ports:\n      - "127.0.0.1:13111:80/tcp"\n',
-    })).json.data.project;
+      document: removeDoc,
+      validation: removeValidation,
+    });
     const remPrev = (await owner.api('POST', `/api/docker/projects/${unrefProject.id}/operations/remove/preview`, {})).json.data;
     const remBlocked = await owner.api('POST', `/api/docker/projects/${unrefProject.id}/operations/remove`, {
       expectedPreviewDigest: remPrev.previewDigest,

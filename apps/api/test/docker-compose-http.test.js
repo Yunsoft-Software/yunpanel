@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import { mountDockerComposeRoutes } from '../src/docker-compose-http.js';
+import { createSiteMutationLock } from '../src/site-mutation-lock.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const projectId = '0bb78242-03a6-429f-9d17-7725c521437c';
@@ -140,6 +144,9 @@ function mounted() {
       networks: [], volumes: [], secretCount: 0, configCount: 0, validated: true, sideEffects: false,
     };
   };
+  const lockRoot = mkdtempSync(path.join(os.tmpdir(), 'yp-dc-http-lock-'));
+  process.once('exit', () => { try { rmSync(lockRoot, { recursive: true, force: true }); } catch {} });
+  const siteMutationLock = createSiteMutationLock({ root: lockRoot });
   mountDockerComposeRoutes(app, {
     dockerComposeProjectRegistry: projectRegistry,
     dockerComposeEnvironmentRegistry: environmentRegistry,
@@ -147,9 +154,10 @@ function mounted() {
     dockerComposeOperationsService: operationsService,
     dockerComposeObserver: observer,
     validateDockerCompose,
+    siteMutationLock,
     localServerId: serverId,
   });
-  return { routes, calls, operationPreview, history, runtimeState, logState };
+  return { routes, calls, operationPreview, history, runtimeState, logState, cleanup: () => rmSync(lockRoot, { recursive: true, force: true }) };
 }
 
 function route(fx, method, suffix) {
