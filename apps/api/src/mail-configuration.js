@@ -347,6 +347,7 @@ export function createMailConfigurationService({
 
     const vacations = [];
     const spamPolicies = [];
+    const deliveryPolicyBindings = [];
     const deliveryPolicies = await mailboxRegistry.materializeEnabledDeliveryPolicies?.() ?? [];
     for (const policy of deliveryPolicies) {
       const mailbox = enabledMailboxById.get(policy.mailboxId);
@@ -362,6 +363,7 @@ export function createMailConfigurationService({
       if (policy.allow.length || policy.deny.length) {
         spamPolicies.push({ mailbox: mailbox.address, allow: policy.allow, deny: policy.deny });
       }
+      deliveryPolicyBindings.push([mailbox.id, policy.revision]);
     }
     const managedDeliveryPolicy = vacations.length > 0 || spamPolicies.length > 0
       || await mailboxRegistry.hasManagedDeliveryPolicies?.() === true;
@@ -479,7 +481,13 @@ export function createMailConfigurationService({
       if (antivirusProfile === 'clamav') {
         preview = enableManagedMailAntivirus(preview, { profile: 'clamav' });
       }
-      const legacyPreview = preview;
+      const legacyPreview = deliveryPolicyBindings.length === 0 ? preview : Object.freeze({
+        ...preview,
+        sha256: digest({
+          configurationSha256: preview.sha256,
+          deliveryPolicies: deliveryPolicyBindings.sort(([left], [right]) => left.localeCompare(right)),
+        }),
+      });
       preview = enableManagedMailSql(legacyPreview, {
         domains: resolved.domains,
         accounts,

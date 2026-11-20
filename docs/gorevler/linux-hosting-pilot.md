@@ -64,7 +64,7 @@ Sieve, mevcut yönlendirmeyle zincirde çalıştı. Kopyalı yönlendirme yerel 
 
 ### T944 · Posta kutusunda otomatik yanıt ve spam ayarlarını göster
 - **Bağımlı:** T943, T851
-- **Dosyalar:** `apps/web/src/workspace/MailboxesPanel.jsx`, `apps/web/src/workspace/MailboxDeliveryPolicyPanel.jsx`, `apps/web/src/workspace/useMailChange.js`, `apps/web/src/workspace/mail-client.js`, `apps/web/test/mail-client.test.js`
+- **Dosyalar:** `apps/web/src/workspace/MailboxesPanel.jsx`, `apps/web/src/workspace/MailboxDeliveryPolicyPanel.jsx`, `apps/web/src/workspace/useMailChange.js`, `apps/web/src/workspace/mail-client.js`, `apps/web/src/api.js`, `apps/web/test/mail-client.test.js`
 - **İş:** Mevcut posta kutusu ayarlarına Owner için Türkçe otomatik yanıt ve gönderen listeleri ekle. Ortak bileşenler ve mevcut posta değişikliği/uygulama akışını kullan. Kuralı okumada ve kaydetmede revision, yetki, bekleme ve hata durumlarını koru.
 - **Kabul:** Mevcut kota ve yönlendirme çalışır. Yeni form boş politika, mevcut kural, kaydetme ve temizlemeyi normal API ile yönetir. Derleme ve etkilenen istemci kontrolleri geçer.
 

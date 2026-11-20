@@ -87,12 +87,21 @@ test('saved delivery rules alter the normal mail plan without exposing data and 
     assert.ok(active.configuration.artifactDigests.some(item => item.path === artifact.path && item.sha256 === hash && item.sensitive));
   }
 
-  const disabledBox = await mailboxRegistry.setEnabled(local.mailbox.id, { expectedRevision: saved.revision, enabled: false });
+  const resaved = await mailboxRegistry.setDeliveryPolicy(local.mailbox.id, {
+    expectedRevision: saved.revision, vacation, allow, deny,
+  });
+  assert.equal(resaved.revision, saved.revision + 1);
+  const current = await service.previewTransition(input);
+  assert.notEqual(current.configurationSha256, active.configurationSha256);
+  assert.deepEqual(current.configuration.artifactDigests, active.configuration.artifactDigests);
+  await assert.rejects(service.materializeTransition(input, bind(active)), { code: 'mail_configuration_preview_stale' });
+
+  const disabledBox = await mailboxRegistry.setEnabled(local.mailbox.id, { expectedRevision: resaved.revision, enabled: false });
   const inactive = await service.previewTransition(input);
   assert.equal(inactive.configuration.counts.vacations, 0);
   assert.equal(inactive.configuration.counts.spamAllow, 0);
   assert.equal(inactive.configuration.counts.spamDeny, 0);
-  await assert.rejects(service.materializeTransition(input, bind(active)), { code: 'mail_configuration_preview_stale' });
+  await assert.rejects(service.materializeTransition(input, bind(current)), { code: 'mail_configuration_preview_stale' });
   assert.equal((await mailboxRegistry.getDeliveryPolicy(local.mailbox.id)).revision, disabledBox.revision);
 
   const enabledDomain = await mailDomainRegistry.transitionLocalStatus(local.domain.id, {
