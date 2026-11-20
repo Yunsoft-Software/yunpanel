@@ -312,6 +312,52 @@ export function createWebsiteRemovalCleanupAdapters({
     }
   }
 
+  async function retirePythonRuntime(source) {
+    const steps = source.operation.steps.filter((step) => step.kind === 'python_runtime');
+    const application = await applicationRegistry.getApplication(source.website.applicationId);
+    if (steps.length === 0 && application?.type !== 'python') return;
+    const step = steps[0];
+    const handler = websiteProvisioningRuntime.handlers?.python_runtime;
+    if (steps.length !== 1 || !['succeeded', 'compensated', 'pending', 'failed', 'blocked'].includes(step?.state)
+      || step.intent?.adapter !== 'python-runtime' || step.intent?.websiteId !== source.website.id
+      || step.intent?.applicationId !== source.website.applicationId || step.intent?.unixUser !== source.website.unixUser) {
+      unavailable('website_cleanup_python_evidence_invalid', 'Owned Website Python provisioning journal is unavailable or changed');
+    }
+    if (typeof handler?.retire !== 'function' || typeof handler?.inspectRetirement !== 'function') {
+      unavailable('website_cleanup_python_unavailable', 'Website Python retirement is unavailable');
+    }
+    const context = {
+      intent: step.intent,
+      operationId: source.operation.operationId,
+      evidence: step.evidence ?? null,
+    };
+    try {
+      let result;
+      if (step.state === 'succeeded') {
+        await handler.retire(context);
+        result = await handler.inspectRetirement(context);
+      } else {
+        result = await handler.inspectRetirement(context);
+        if (!result?.satisfied || result.unitFileRemoved !== true || result.socketRemoved !== true
+          || result.envFileRemoved !== true || result.serviceInactive !== true
+          || result.serviceUnloaded !== true || result.serviceMasked === true || result.mainPid !== 0) {
+          await handler.retire(context);
+          result = await handler.inspectRetirement(context);
+        }
+      }
+      if (!result?.satisfied || result.unitFileRemoved !== true || result.socketRemoved !== true
+        || result.envFileRemoved !== true || result.serviceInactive !== true
+        || result.serviceUnloaded !== true || result.serviceMasked === true || result.mainPid !== 0
+        || result.websiteId !== source.website.id || result.applicationId !== source.website.applicationId
+        || result.unixUser !== source.website.unixUser) {
+        unavailable('website_cleanup_python_unverified', 'Website Python systemd unit, socket, or environment file is still present');
+      }
+    } catch (error) {
+      if (error instanceof WebsiteRemovalCleanupAdapterError) throw error;
+      unavailable('website_cleanup_python_unverified', 'Website Python retirement could not be verified');
+    }
+  }
+
   async function retireSftp(source) {
     const steps = source.operation.steps.filter(step => step.kind === 'sftp');
     const handler = websiteProvisioningRuntime.handlers?.sftp;
@@ -463,6 +509,7 @@ export function createWebsiteRemovalCleanupAdapters({
     const source = await ownedIdentitySource(input);
     await retireSftp(source);
     await retirePhpRuntime(source);
+    await retirePythonRuntime(source);
     await retireFileManager(source);
     const { websiteId, systemUser } = input;
     if (source.neverProvisioned) return Object.freeze({ websiteId, systemUser, unixIdentityCleaned: true });
@@ -519,6 +566,7 @@ export function createWebsiteRemovalCleanupAdapters({
     const source = await ownedIdentitySource({ websiteId, systemUser: website.unixUser });
     await retireSftp(source);
     await retirePhpRuntime(source);
+    await retirePythonRuntime(source);
     await retireFileManager(source);
     let removed = 0;
     for (const target of inspection.targets) {

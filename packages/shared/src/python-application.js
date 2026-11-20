@@ -39,6 +39,7 @@ const APPLICATION_SPEC_FIELDS = new Set([
   'gitTarget',
   'runtime',
   'retention',
+  'environmentRevision',
 ]);
 
 export function normalizePythonRuntimeConfig(value = {}, { requirePort = false } = {}) {
@@ -133,12 +134,15 @@ export function normalizePythonApplicationSpec(value = {}) {
   const applicationId = assertUuid(value.applicationId, 'applicationId');
   const deploymentId = value.deploymentId !== undefined ? assertUuid(value.deploymentId, 'deploymentId') : undefined;
   const repositoryUrl = normalizeGithubRepositoryUrl(value.repositoryUrl);
-  const branch = normalizeGitBranch(value.branch);
+  const branch = normalizeGitBranch(value.branch ?? 'main');
   const gitTarget = normalizeGitDeploymentTarget(value.gitTarget, { defaultBranch: branch });
   const runtime = normalizePythonRuntimeConfig(value.runtime);
   const retention = Number.isInteger(value.retention) && value.retention >= 2 && value.retention <= 20
     ? value.retention
     : 5;
+  if (value.environmentRevision !== undefined && (!Number.isSafeInteger(value.environmentRevision) || value.environmentRevision < 0)) {
+    throw new ApplicationValidationError('invalid_environment_revision', 'environmentRevision must be a non-negative integer');
+  }
 
   const result = {
     applicationId,
@@ -150,6 +154,9 @@ export function normalizePythonApplicationSpec(value = {}) {
   };
   if (deploymentId !== undefined) {
     result.deploymentId = deploymentId;
+  }
+  if (value.environmentRevision !== undefined) {
+    result.environmentRevision = value.environmentRevision;
   }
 
   return Object.freeze(result);

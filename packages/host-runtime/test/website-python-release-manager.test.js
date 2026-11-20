@@ -32,7 +32,7 @@ function createHarness({ existingLink = null, isDirectory = true } = {}) {
 
   const run = async (file, args, options = {}) => {
     commands.push({ file, args, options });
-    if (file === '/usr/bin/git' && args.includes('rev-parse')) {
+    if (args.includes('/usr/bin/git') && args.includes('rev-parse')) {
       return { stdout: 'b'.repeat(40) + '\n' };
     }
     return { stdout: '' };
@@ -55,16 +55,20 @@ function createHarness({ existingLink = null, isDirectory = true } = {}) {
     receiptRoot: '/staging',
     pythonSiteManager,
     run,
+    chmodFn: async () => {},
     mkdirFn: async () => {},
     lstatFn: async () => ({
       isDirectory: () => isDirectory,
       isFile: () => true,
+      isSymbolicLink: () => false,
     }),
     readlinkFn: async () => existingLink ?? `releases/${DEPLOYMENT_ID}`,
     readFileFn: async () => JSON.stringify({
       version: 1,
       applicationId: APPLICATION_ID,
       deploymentId: DEPLOYMENT_ID,
+      previousReleaseId: null,
+      commitSha: 'b'.repeat(40),
       state: 'prepared',
     }),
     renameFn: async () => {},

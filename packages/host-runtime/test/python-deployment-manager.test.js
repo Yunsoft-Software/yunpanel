@@ -43,11 +43,11 @@ function createHarness({
 
   const run = async (file, args, options = {}) => {
     commands.push({ file, args, options });
-    if (file === '/usr/bin/git' && args.includes('rev-parse')) {
+    if (args.includes('/usr/bin/git') && args.includes('rev-parse')) {
       if (gitFail) throw new Error('git rev-parse failed');
       return { stdout: `${gitCommit}\n` };
     }
-    if (file === '/usr/bin/git' && gitFail) {
+    if (args.includes('/usr/bin/git') && gitFail) {
       throw new Error('git command failed');
     }
     return { stdout: '' };
@@ -100,10 +100,22 @@ function createHarness({
     envRoot: '/env',
     pythonSiteManager,
     run,
+    chmodFn: async () => {},
     mkdirFn: async () => {},
+    readFileFn: async () => {
+      const err = new Error('ENOENT');
+      err.code = 'ENOENT';
+      throw err;
+    },
+    readlinkFn: async () => {
+      const err = new Error('ENOENT');
+      err.code = 'ENOENT';
+      throw err;
+    },
     lstatFn: async () => ({
       isFile: () => true,
       isDirectory: () => true,
+      isSymbolicLink: () => false,
       mtimeMs: 1000,
     }),
     readdirFn: async () => existingReleases.map((name) => ({
@@ -205,5 +217,6 @@ test('deployPython prunes old releases exceeding retention', async () => {
   await harness.manager.deployPython(spec);
 
   // Total releases = 4 existing + 1 new = 5. Retention = 3. Excess = 2.
-  assert.equal(harness.removals.length, 2);
+  const prunedReleases = harness.removals.filter((entry) => !entry.target.endsWith('/.git'));
+  assert.equal(prunedReleases.length, 2);
 });

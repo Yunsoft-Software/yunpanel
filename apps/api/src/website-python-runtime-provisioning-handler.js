@@ -119,11 +119,61 @@ export function createWebsitePythonRuntimeProvisioningHandler({
     return Object.freeze({ satisfied: false, reason: 'python_service_still_active' });
   }
 
+  async function retire({ intent, operationId } = {}) {
+    const normalized = runtimeIntent(intent);
+    if (typeof pythonSiteManager.retire !== 'function') {
+      throw new WebsitePythonRuntimeProvisioningError(
+        'website_python_runtime_retirement_unavailable',
+        'Website Python runtime retirement is unavailable',
+        503,
+      );
+    }
+    const result = await pythonSiteManager.retire({
+      websiteId: normalized.websiteId,
+      applicationId: normalized.applicationId,
+      unixUser: normalized.unixUser,
+      runtime: normalized.runtime,
+      operationId,
+    });
+    return Object.freeze({
+      ...result,
+      websiteId: normalized.websiteId,
+      applicationId: normalized.applicationId,
+      unixUser: normalized.unixUser,
+    });
+  }
+
+  async function inspectRetirement({ intent, operationId = null } = {}) {
+    const normalized = runtimeIntent(intent);
+    if (typeof pythonSiteManager.inspectRetirement !== 'function') {
+      throw new WebsitePythonRuntimeProvisioningError(
+        'website_python_runtime_retirement_unavailable',
+        'Website Python runtime retirement inspection is unavailable',
+        503,
+      );
+    }
+    const result = await pythonSiteManager.inspectRetirement({
+      websiteId: normalized.websiteId,
+      applicationId: normalized.applicationId,
+      unixUser: normalized.unixUser,
+      runtime: normalized.runtime,
+      operationId,
+    });
+    return Object.freeze({
+      ...result,
+      websiteId: normalized.websiteId,
+      applicationId: normalized.applicationId,
+      unixUser: normalized.unixUser,
+    });
+  }
+
   return Object.freeze({
     apply,
     inspect,
     compensate,
     inspectCompensation,
+    retire,
+    inspectRetirement,
   });
 }
 

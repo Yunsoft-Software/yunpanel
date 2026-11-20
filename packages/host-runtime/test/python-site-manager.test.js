@@ -43,6 +43,11 @@ function createMockFs() {
     writeFileFn: async (filePath, content) => {
       files.set(filePath, content);
     },
+    chmodFn: async () => {},
+    renameFn: async (sourcePath, targetPath) => {
+      files.set(targetPath, files.get(sourcePath));
+      files.delete(sourcePath);
+    },
     rmFn: async (filePath) => {
       files.delete(filePath);
     },
@@ -127,7 +132,7 @@ test('installRequirements installs requirements.txt when present and skips when 
     unixUser: USER,
   });
   assert.equal(present.installed, true);
-  assert.ok(calls.some(([bin, action]) => bin.endsWith('/pip') && action === 'install'));
+  assert.ok(calls.some((call) => call[0] === '/usr/sbin/runuser' && call.some((arg) => arg.endsWith('/pip')) && call.includes('install')));
 });
 
 test('apply writes systemd unit, manages systemctl, and records receipt', async () => {
