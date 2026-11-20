@@ -57,6 +57,7 @@ export {
   dockerVolumeManagerInternals,
 } from './docker-volume-manager.js';
 export {
+  assertContainerVolumeInspectSafe,
   createDockerContainerConsoleInspector,
   DockerContainerConsoleInspectorError,
   dockerContainerConsoleInspectorInternals,

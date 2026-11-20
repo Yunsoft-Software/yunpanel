@@ -6,12 +6,28 @@ import { dockerComposeManagerInternals } from './docker-compose-manager.js';
 
 const DOCKER_PATHS = Object.freeze(['/usr/bin/docker', '/usr/local/bin/docker']);
 const DOCKER_LOCAL_SOCKET = 'unix:///var/run/docker.sock';
+const FALLBACK_NON_ROOT_UID = 65534;
+const FALLBACK_NON_ROOT_GID = 65534;
+const FALLBACK_NON_ROOT_USER = `${FALLBACK_NON_ROOT_UID}:${FALLBACK_NON_ROOT_GID}`;
 const PROJECT_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,62}$/;
 const SERVICE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/;
+const VOLUME_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 const CONTAINER_ID_PATTERN = /^[a-f0-9]{64}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ALLOWED_SHELLS = Object.freeze(['/bin/bash', '/bin/sh']);
-const PROBE_COMMAND = 'printf "%s:%s:" "$(id -u)" "$(id -g)"; if [ -x /bin/bash ]; then printf "/bin/bash"; elif [ -x /bin/sh ]; then printf "/bin/sh"; fi';
+const ALLOWED_MOUNT_TYPES = Object.freeze(new Set(['bind', 'volume', 'tmpfs']));
+
+// Runs inside the container as the resolved non-root user. Verifies effective
+// numeric UID:GID, selects an allowlisted shell, and checks whether candidate
+// working directory $1 is traversable by that non-root user (falling back to /).
+const PROBE_COMMAND = [
+  'u="$(id -u)"; g="$(id -g)";',
+  'sh_path="";',
+  'if [ -x /bin/bash ]; then sh_path="/bin/bash"; elif [ -x /bin/sh ]; then sh_path="/bin/sh"; fi;',
+  'wd="/";',
+  'if [ -n "$1" ] && [ -d "$1" ] && [ -r "$1" ] && [ -x "$1" ]; then wd="$1"; fi;',
+  'printf "%s:%s:%s:%s" "$u" "$g" "$sh_path" "$wd"',
+].join(' ');
 
 const FORBIDDEN_CAPABILITIES = Object.freeze(new Set([
   'ALL',
@@ -52,26 +68,6 @@ const FORBIDDEN_SOCKET_BASENAMES = Object.freeze([
   'crio.sock',
 ]);
 
-const SENSITIVE_HOST_ROOTS = Object.freeze([
-  '/',
-  '/bin',
-  '/boot',
-  '/dev',
-  '/etc',
-  '/lib',
-  '/lib64',
-  '/proc',
-  '/root',
-  '/run',
-  '/sbin',
-  '/sys',
-  '/usr',
-  '/var/run',
-  '/var/lib/docker',
-  '/var/lib/containerd',
-  '/var/lib/yunpanel',
-]);
-
 const REASON_MESSAGES = Object.freeze({
   container_console_not_found: 'Konteyner bulunamadı.',
   container_console_ownership_mismatch: 'Konteyner bu Compose projesine ait değil.',
@@ -79,10 +75,11 @@ const REASON_MESSAGES = Object.freeze({
   container_console_privileged_forbidden: 'Ayrıcalıklı konteynerler için konsol erişimi kapalıdır.',
   container_console_unsafe_capability_forbidden: 'Yüksek yetkili Linux capability tanımlı konteynerler için konsol kapalıdır.',
   container_console_unsafe_security_opt_forbidden: 'Güvenlik profili devre dışı bırakılmış konteynerler için konsol kapalıdır.',
-  container_console_host_device_forbidden: 'Host cihazı bağlı konteynerler için konsol kapalıdır.',
+  container_console_host_device_forbidden: 'Host cihazı veya cihaz kuralı tanımlı konteynerler için konsol kapalıdır.',
   container_console_host_namespace_forbidden: 'Host veya paylaşımlı namespace kullanan konteynerler için konsol kapalıdır.',
-  container_console_unsafe_mount_forbidden: 'Hassas host yolu veya Docker soketi bağlı konteynerler için konsol kapalıdır.',
-  container_console_root_user_forbidden: 'Root kullanıcısıyla çalışan konteynerlerde konsol erişimi güvenlik nedeniyle kapalıdır.',
+  container_console_unsafe_mount_forbidden: 'Proje dışı bind yolu, özel sürücülü volume veya soket bağlı konteynerler için konsol kapalıdır.',
+  container_console_root_user_forbidden: 'Konsol oturumu root yetkisiyle açılamaz.',
+  container_console_user_invalid: 'Konteyner kullanıcı tanımı geçersiz.',
   container_console_shell_unavailable: 'Konteyner içinde desteklenen bir kabuk bulunamadı.',
   container_console_cwd_invalid: 'Konteyner çalışma dizini doğrulanamadı.',
 });
@@ -138,18 +135,10 @@ function normalizePosixPath(value) {
   return normalized.length > 1 && normalized.endsWith('/') ? normalized.slice(0, -1) : normalized;
 }
 
-function pathMatchesRoot(targetPath, rootPath) {
-  if (rootPath === '/') return targetPath === '/';
-  return targetPath === rootPath || targetPath.startsWith(`${rootPath}/`);
-}
-
-function isSensitiveHostBind(sourcePath, expectedWorkingDir) {
+function isInsideProjectWorkspace(sourcePath, expectedWorkingDir) {
   const normalized = normalizePosixPath(sourcePath);
-  if (!normalized) return true;
-  if (expectedWorkingDir && pathMatchesRoot(normalized, expectedWorkingDir)) {
-    return false;
-  }
-  return SENSITIVE_HOST_ROOTS.some((root) => pathMatchesRoot(normalized, root));
+  if (!normalized || !expectedWorkingDir) return false;
+  return normalized === expectedWorkingDir || normalized.startsWith(`${expectedWorkingDir}/`);
 }
 
 function touchesContainerSocket(value) {
@@ -158,46 +147,51 @@ function touchesContainerSocket(value) {
   return FORBIDDEN_SOCKET_BASENAMES.some((name) => lower === `/${name}` || lower.endsWith(`/${name}`) || lower.includes(`/${name}/`));
 }
 
-function assertNonRootUserSpec(rawUser) {
+function resolveConsoleUserSpec(rawUser) {
+  if (rawUser === undefined || rawUser === null) {
+    return Object.freeze({ userSpec: FALLBACK_NON_ROOT_USER, forcedNonRoot: true });
+  }
   if (typeof rawUser !== 'string') {
     throw new DockerContainerConsoleInspectorError(
-      'container_console_root_user_forbidden',
-      REASON_MESSAGES.container_console_root_user_forbidden,
+      'container_console_user_invalid',
+      REASON_MESSAGES.container_console_user_invalid,
       409,
     );
   }
   const trimmed = rawUser.trim();
-  if (!trimmed || trimmed.length > 128 || /[\u0000-\u001f\u007f\s]/.test(trimmed)) {
+  if (trimmed === '') {
+    return Object.freeze({ userSpec: FALLBACK_NON_ROOT_USER, forcedNonRoot: true });
+  }
+  if (trimmed.length > 128 || /[\u0000-\u001f\u007f\s]/.test(trimmed)) {
     throw new DockerContainerConsoleInspectorError(
-      'container_console_root_user_forbidden',
-      REASON_MESSAGES.container_console_root_user_forbidden,
+      'container_console_user_invalid',
+      REASON_MESSAGES.container_console_user_invalid,
       409,
     );
   }
   const parts = trimmed.split(':');
   if (parts.length > 2) {
     throw new DockerContainerConsoleInspectorError(
-      'container_console_root_user_forbidden',
-      REASON_MESSAGES.container_console_root_user_forbidden,
+      'container_console_user_invalid',
+      REASON_MESSAGES.container_console_user_invalid,
       409,
     );
   }
   const [userPart, groupPart] = parts;
   if (!userPart || userPart.toLowerCase() === 'root' || /^0+$/.test(userPart)) {
-    throw new DockerContainerConsoleInspectorError(
-      'container_console_root_user_forbidden',
-      REASON_MESSAGES.container_console_root_user_forbidden,
-      409,
-    );
+    return Object.freeze({ userSpec: FALLBACK_NON_ROOT_USER, forcedNonRoot: true });
   }
   if (groupPart !== undefined && (!groupPart || groupPart.toLowerCase() === 'root' || /^0+$/.test(groupPart))) {
+    return Object.freeze({ userSpec: FALLBACK_NON_ROOT_USER, forcedNonRoot: true });
+  }
+  if (!/^[A-Za-z0-9._-]+$/.test(userPart) || (groupPart !== undefined && !/^[A-Za-z0-9._-]+$/.test(groupPart))) {
     throw new DockerContainerConsoleInspectorError(
-      'container_console_root_user_forbidden',
-      REASON_MESSAGES.container_console_root_user_forbidden,
+      'container_console_user_invalid',
+      REASON_MESSAGES.container_console_user_invalid,
       409,
     );
   }
-  return trimmed;
+  return Object.freeze({ userSpec: trimmed, forcedNonRoot: false });
 }
 
 function normalizeWorkingDir(rawWorkingDir) {
@@ -226,10 +220,56 @@ function isForbiddenNamespace(mode) {
   return lower === 'host' || lower.startsWith('container:') || lower.startsWith('service:');
 }
 
+function allowedProjectVolumeNames(projectName, allowedVolumeKeys = []) {
+  const names = new Set();
+  for (const key of Array.isArray(allowedVolumeKeys) ? allowedVolumeKeys : []) {
+    if (typeof key === 'string' && VOLUME_KEY_PATTERN.test(key) && !key.includes('..')) {
+      names.add(`${projectName}_${key}`);
+    }
+  }
+  return names;
+}
+
+export function assertContainerVolumeInspectSafe(rawVolume, { projectName, expectedVolumeName } = {}) {
+  if (!rawVolume || typeof rawVolume !== 'object' || Array.isArray(rawVolume)) {
+    throw new DockerContainerConsoleInspectorError(
+      'container_console_unsafe_mount_forbidden',
+      REASON_MESSAGES.container_console_unsafe_mount_forbidden,
+      409,
+    );
+  }
+  const name = typeof rawVolume.Name === 'string' ? rawVolume.Name : null;
+  const driver = typeof rawVolume.Driver === 'string' ? rawVolume.Driver : null;
+  const scope = typeof rawVolume.Scope === 'string' ? rawVolume.Scope : null;
+  const options = rawVolume.Options && typeof rawVolume.Options === 'object' && !Array.isArray(rawVolume.Options)
+    ? rawVolume.Options
+    : null;
+  const labels = rawVolume.Labels && typeof rawVolume.Labels === 'object' && !Array.isArray(rawVolume.Labels)
+    ? rawVolume.Labels
+    : {};
+  const labelProject = typeof labels['com.docker.compose.project'] === 'string' ? labels['com.docker.compose.project'] : null;
+  const labelVolume = typeof labels['com.docker.compose.volume'] === 'string' ? labels['com.docker.compose.volume'] : null;
+
+  if (!name || name !== expectedVolumeName
+    || driver !== 'local'
+    || scope !== 'local'
+    || (options !== null && Object.keys(options).length > 0)
+    || labelProject !== projectName
+    || !labelVolume || `${projectName}_${labelVolume}` !== name) {
+    throw new DockerContainerConsoleInspectorError(
+      'container_console_unsafe_mount_forbidden',
+      REASON_MESSAGES.container_console_unsafe_mount_forbidden,
+      409,
+    );
+  }
+  return true;
+}
+
 export function evaluateContainerConsoleInspect(rawInspect, {
   projectId,
   projectName,
   allowedServices = [],
+  allowedVolumes = [],
   expectedContainerId = null,
   composeRoot = dockerComposeManagerInternals.defaultRoot,
 } = {}) {
@@ -316,7 +356,9 @@ export function evaluateContainerConsoleInspect(rawInspect, {
     }
   }
 
-  if (Array.isArray(hostConfig.Devices) && hostConfig.Devices.length > 0) {
+  if ((Array.isArray(hostConfig.Devices) && hostConfig.Devices.length > 0)
+    || (Array.isArray(hostConfig.DeviceRequests) && hostConfig.DeviceRequests.length > 0)
+    || (Array.isArray(hostConfig.DeviceCgroupRules) && hostConfig.DeviceCgroupRules.length > 0)) {
     throw new DockerContainerConsoleInspectorError(
       'container_console_host_device_forbidden',
       REASON_MESSAGES.container_console_host_device_forbidden,
@@ -324,7 +366,13 @@ export function evaluateContainerConsoleInspect(rawInspect, {
     );
   }
 
-  for (const mode of [hostConfig.PidMode, hostConfig.NetworkMode, hostConfig.IpcMode, hostConfig.UTSMode]) {
+  for (const mode of [
+    hostConfig.PidMode,
+    hostConfig.NetworkMode,
+    hostConfig.IpcMode,
+    hostConfig.UTSMode,
+    hostConfig.CgroupnsMode,
+  ]) {
     if (isForbiddenNamespace(mode)) {
       throw new DockerContainerConsoleInspectorError(
         'container_console_host_namespace_forbidden',
@@ -333,20 +381,25 @@ export function evaluateContainerConsoleInspect(rawInspect, {
       );
     }
   }
-  if (typeof hostConfig.CgroupnsMode === 'string') {
-    const cg = hostConfig.CgroupnsMode.trim().toLowerCase();
-    if (cg.startsWith('container:') || cg.startsWith('service:')) {
+
+  const allowedVolumeSet = allowedProjectVolumeNames(projectName, allowedVolumes);
+  const mountedVolumeNames = [];
+  const mounts = Array.isArray(rawInspect.Mounts) ? rawInspect.Mounts : [];
+  for (const mount of mounts) {
+    if (!mount || typeof mount !== 'object') {
       throw new DockerContainerConsoleInspectorError(
-        'container_console_host_namespace_forbidden',
-        REASON_MESSAGES.container_console_host_namespace_forbidden,
+        'container_console_unsafe_mount_forbidden',
+        REASON_MESSAGES.container_console_unsafe_mount_forbidden,
         409,
       );
     }
-  }
-
-  const mounts = Array.isArray(rawInspect.Mounts) ? rawInspect.Mounts : [];
-  for (const mount of mounts) {
-    if (!mount || typeof mount !== 'object') continue;
+    if (!ALLOWED_MOUNT_TYPES.has(mount.Type)) {
+      throw new DockerContainerConsoleInspectorError(
+        'container_console_unsafe_mount_forbidden',
+        REASON_MESSAGES.container_console_unsafe_mount_forbidden,
+        409,
+      );
+    }
     if (touchesContainerSocket(mount.Source) || touchesContainerSocket(mount.Destination)) {
       throw new DockerContainerConsoleInspectorError(
         'container_console_unsafe_mount_forbidden',
@@ -354,16 +407,30 @@ export function evaluateContainerConsoleInspect(rawInspect, {
         409,
       );
     }
-    if (mount.Type === 'bind' && isSensitiveHostBind(mount.Source, expectedWorkingDir)) {
-      throw new DockerContainerConsoleInspectorError(
-        'container_console_unsafe_mount_forbidden',
-        REASON_MESSAGES.container_console_unsafe_mount_forbidden,
-        409,
-      );
+    if (mount.Type === 'bind') {
+      // Strictly reject every external host bind mount outside this project's workspace.
+      if (!isInsideProjectWorkspace(mount.Source, expectedWorkingDir)) {
+        throw new DockerContainerConsoleInspectorError(
+          'container_console_unsafe_mount_forbidden',
+          REASON_MESSAGES.container_console_unsafe_mount_forbidden,
+          409,
+        );
+      }
+    } else if (mount.Type === 'volume') {
+      const volName = typeof mount.Name === 'string' ? mount.Name : '';
+      const driver = typeof mount.Driver === 'string' ? mount.Driver : '';
+      if (driver !== 'local' || !volName || !allowedVolumeSet.has(volName)) {
+        throw new DockerContainerConsoleInspectorError(
+          'container_console_unsafe_mount_forbidden',
+          REASON_MESSAGES.container_console_unsafe_mount_forbidden,
+          409,
+        );
+      }
+      mountedVolumeNames.push(volName);
     }
   }
 
-  const userSpec = assertNonRootUserSpec(rawInspect.Config?.User);
+  const { userSpec, forcedNonRoot } = resolveConsoleUserSpec(rawInspect.Config?.User);
   const cwd = normalizeWorkingDir(rawInspect.Config?.WorkingDir);
 
   return Object.freeze({
@@ -372,11 +439,13 @@ export function evaluateContainerConsoleInspect(rawInspect, {
     serviceName: labelService,
     projectName,
     userSpec,
+    forcedNonRoot,
     cwd,
+    mountedVolumeNames: Object.freeze([...new Set(mountedVolumeNames)].sort()),
   });
 }
 
-export function parseContainerShellProbe(rawStdout) {
+export function parseContainerShellProbe(rawStdout, { forcedNonRoot = false } = {}) {
   if (typeof rawStdout !== 'string') {
     throw new DockerContainerConsoleInspectorError(
       'container_console_shell_unavailable',
@@ -385,7 +454,7 @@ export function parseContainerShellProbe(rawStdout) {
     );
   }
   const trimmed = rawStdout.trim();
-  const match = /^([0-9]{1,10}):([0-9]{1,10}):(.*)$/.exec(trimmed);
+  const match = /^([0-9]{1,10}):([0-9]{1,10}):([^:]*):(.+)$/.exec(trimmed);
   if (!match) {
     throw new DockerContainerConsoleInspectorError(
       'container_console_shell_unavailable',
@@ -396,8 +465,16 @@ export function parseContainerShellProbe(rawStdout) {
   const uid = Number.parseInt(match[1], 10);
   const gid = Number.parseInt(match[2], 10);
   const shell = match[3];
+  const cwd = normalizeWorkingDir(match[4]);
   if (!Number.isSafeInteger(uid) || uid < 1 || uid > 2_147_483_647
     || !Number.isSafeInteger(gid) || gid < 1 || gid > 2_147_483_647) {
+    throw new DockerContainerConsoleInspectorError(
+      'container_console_root_user_forbidden',
+      REASON_MESSAGES.container_console_root_user_forbidden,
+      409,
+    );
+  }
+  if (forcedNonRoot && (uid !== FALLBACK_NON_ROOT_UID || gid !== FALLBACK_NON_ROOT_GID)) {
     throw new DockerContainerConsoleInspectorError(
       'container_console_root_user_forbidden',
       REASON_MESSAGES.container_console_root_user_forbidden,
@@ -416,12 +493,13 @@ export function parseContainerShellProbe(rawStdout) {
     gid,
     user: `${uid}:${gid}`,
     shell,
+    cwd,
   });
 }
 
 function isNotFoundError(error) {
   const stderr = String(error?.stderr ?? '').toLowerCase();
-  return stderr.includes('no such container') || stderr.includes('no such object');
+  return stderr.includes('no such container') || stderr.includes('no such object') || stderr.includes('no such volume');
 }
 
 export function createDockerContainerConsoleInspector({
@@ -453,7 +531,7 @@ export function createDockerContainerConsoleInspector({
   async function inspectRawContainer(binary, containerId) {
     let stdout;
     try {
-      ({ stdout } = await execFn(binary, ['--host', DOCKER_LOCAL_SOCKET, 'inspect', '--type', 'container', '--', containerId], {
+      ({ stdout } = await execFn(binary, ['--host', DOCKER_LOCAL_SOCKET, 'inspect', '--type', 'container', containerId], {
         timeout: 10_000,
         maxBuffer: 2 * 1024 * 1024,
       }));
@@ -483,10 +561,54 @@ export function createDockerContainerConsoleInspector({
     return parsed[0];
   }
 
+  async function verifyMountedVolumes(binary, projectName, volumeNames) {
+    for (const volumeName of volumeNames) {
+      let stdout;
+      try {
+        ({ stdout } = await execFn(binary, ['--host', DOCKER_LOCAL_SOCKET, 'volume', 'inspect', volumeName], {
+          timeout: 10_000,
+          maxBuffer: 256 * 1024,
+        }));
+      } catch (error) {
+        if (isNotFoundError(error)) {
+          throw new DockerContainerConsoleInspectorError(
+            'container_console_unsafe_mount_forbidden',
+            REASON_MESSAGES.container_console_unsafe_mount_forbidden,
+            409,
+          );
+        }
+        throw new DockerContainerConsoleInspectorError(
+          'docker_console_inspect_failed',
+          'Docker volume inspection failed',
+          503,
+        );
+      }
+      let parsed;
+      try {
+        parsed = JSON.parse(stdout);
+      } catch {
+        throw new DockerContainerConsoleInspectorError(
+          'container_console_unsafe_mount_forbidden',
+          REASON_MESSAGES.container_console_unsafe_mount_forbidden,
+          409,
+        );
+      }
+      if (!Array.isArray(parsed) || parsed.length !== 1) {
+        throw new DockerContainerConsoleInspectorError(
+          'container_console_unsafe_mount_forbidden',
+          REASON_MESSAGES.container_console_unsafe_mount_forbidden,
+          409,
+        );
+      }
+      assertContainerVolumeInspectSafe(parsed[0], { projectName, expectedVolumeName: volumeName });
+    }
+  }
+
   async function inspectContainer({
     projectId,
     projectName,
     allowedServices,
+    allowedVolumes = [],
     containerId,
     probeShell = true,
   } = {}) {
@@ -499,9 +621,11 @@ export function createDockerContainerConsoleInspector({
       projectId,
       projectName,
       allowedServices,
+      allowedVolumes,
       expectedContainerId: containerId,
       composeRoot,
     });
+    await verifyMountedVolumes(binary, verified.projectName, verified.mountedVolumeNames);
 
     if (!probeShell) {
       return Object.freeze({
@@ -517,11 +641,12 @@ export function createDockerContainerConsoleInspector({
         '--host', DOCKER_LOCAL_SOCKET,
         'exec',
         '--user', verified.userSpec,
-        '--',
         verified.containerId,
         '/bin/sh',
         '-c',
         PROBE_COMMAND,
+        'yp-console-probe',
+        verified.cwd,
       ], { timeout: 5_000, maxBuffer: 16 * 1024 }));
     } catch {
       throw new DockerContainerConsoleInspectorError(
@@ -530,7 +655,7 @@ export function createDockerContainerConsoleInspector({
         409,
       );
     }
-    const probe = parseContainerShellProbe(probeStdout);
+    const probe = parseContainerShellProbe(probeStdout, { forcedNonRoot: verified.forcedNonRoot });
     return Object.freeze({
       containerId: verified.containerId,
       containerName: verified.containerName,
@@ -539,7 +664,8 @@ export function createDockerContainerConsoleInspector({
       uid: probe.uid,
       gid: probe.gid,
       user: probe.user,
-      cwd: verified.cwd,
+      forcedNonRoot: verified.forcedNonRoot,
+      cwd: probe.cwd,
       shell: probe.shell,
       dockerBinary: binary,
       eligible: true,
@@ -550,6 +676,7 @@ export function createDockerContainerConsoleInspector({
     projectId,
     projectName,
     allowedServices,
+    allowedVolumes = [],
     containers = [],
   } = {}) {
     if (typeof projectId !== 'string' || !UUID_PATTERN.test(projectId)
@@ -572,6 +699,8 @@ export function createDockerContainerConsoleInspector({
           serviceName: fallbackService,
           running: item?.runtime?.running === true,
           eligible: false,
+          user: null,
+          cwd: null,
           reasonCode: 'container_console_id_invalid',
           reason: 'Konteyner kimliği doğrulanamadı.',
         }));
@@ -583,9 +712,11 @@ export function createDockerContainerConsoleInspector({
           projectId,
           projectName,
           allowedServices,
+          allowedVolumes,
           expectedContainerId: id,
           composeRoot,
         });
+        await verifyMountedVolumes(binary, verified.projectName, verified.mountedVolumeNames);
         results.push(Object.freeze({
           containerId: verified.containerId,
           containerName: verified.containerName,
@@ -593,6 +724,7 @@ export function createDockerContainerConsoleInspector({
           running: true,
           eligible: true,
           user: verified.userSpec,
+          forcedNonRoot: verified.forcedNonRoot,
           cwd: verified.cwd,
           reasonCode: null,
           reason: null,
@@ -627,15 +759,19 @@ export function createDockerContainerConsoleInspector({
 export const dockerContainerConsoleInspectorInternals = Object.freeze({
   dockerPaths: DOCKER_PATHS,
   dockerSocket: DOCKER_LOCAL_SOCKET,
+  fallbackNonRootUid: FALLBACK_NON_ROOT_UID,
+  fallbackNonRootGid: FALLBACK_NON_ROOT_GID,
+  fallbackNonRootUser: FALLBACK_NON_ROOT_USER,
   allowedShells: ALLOWED_SHELLS,
   forbiddenCapabilities: FORBIDDEN_CAPABILITIES,
   forbiddenSecurityOpts: FORBIDDEN_SECURITY_OPTS,
   reasonMessages: REASON_MESSAGES,
   probeCommand: PROBE_COMMAND,
-  assertNonRootUserSpec,
+  resolveConsoleUserSpec,
   normalizeWorkingDir,
-  isSensitiveHostBind,
+  isInsideProjectWorkspace,
   touchesContainerSocket,
+  assertContainerVolumeInspectSafe,
   evaluateContainerConsoleInspect,
   parseContainerShellProbe,
 });
