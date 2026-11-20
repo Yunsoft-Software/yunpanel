@@ -1,4 +1,4 @@
-import { requestJson, sessionHeaders } from './session-client.js';
+import { requestJson, sessionHeaders, sessionVersion } from './session-client.js';
 
 const MANAGEMENT_ROOT = '/api/panel';
 
@@ -302,11 +302,14 @@ export function deleteDatabase(serverId, name) {
   });
 }
 
-export async function waitForJob(jobId, { attempts = 300, intervalMs = 1000 } = {}) {
+export async function waitForJob(jobId, { attempts = 300, intervalMs = 1000, signal } = {}) {
+  const version = sessionVersion();
   let connectionFailures = 0;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    signal?.throwIfAborted();
+    if (signal && version !== sessionVersion()) throw new DOMException('The request belongs to an obsolete session.', 'AbortError');
     try {
-      const job = await panelRequest(`/jobs/${jobId}`);
+      const job = await panelRequest(`/jobs/${jobId}`, { signal });
       connectionFailures = 0;
       if (job.status === 'succeeded') return job;
       if (job.status === 'failed' || job.status === 'cancelled') {
@@ -316,6 +319,7 @@ export async function waitForJob(jobId, { attempts = 300, intervalMs = 1000 } = 
         throw error;
       }
     } catch (error) {
+      if (signal && error.name === 'AbortError') throw error;
       if (error.code && !String(error.code).startsWith('http_')) throw error;
       connectionFailures += 1;
       if (connectionFailures >= 30) throw error;

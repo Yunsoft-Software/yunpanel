@@ -1,5 +1,23 @@
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
+import { once } from 'node:events';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { chromium, expect } from '@playwright/test';
+import { createServer as createViteServer } from 'vite';
+import { createAuthenticatedApi } from '../../api/src/auth-http.js';
+import { createAuthStore } from '../../api/src/auth-store.js';
+import { createDomainRegistry } from '../../api/src/domain-registry.js';
+import { createMailDomainRegistry } from '../../api/src/mail-domain-registry.js';
+import { createMailboxRegistry } from '../../api/src/mailbox-registry.js';
+import { createApp } from '../../api/src/management-app.js';
+import { createOwnerMfaPolicy } from '../../api/src/owner-mfa-policy.js';
+import { createServerRegistry } from '../../api/src/server-registry.js';
+import { createWebsiteRegistry } from '../../api/src/website-registry.js';
 import {
   applyMailConfiguration,
   clearMailboxForwarding,
@@ -158,4 +176,141 @@ test('managed mail delivery diagnostics client routes and payloads', async (t) =
     assert.equal(call.options.headers['x-csrf-token'], 'csrf-diag');
   }
   setSession(null);
+});
+
+test('Owner can load, revise and clear mailbox delivery settings in Chromium', async (t) => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'yunpanel-mail-policy-browser-'));
+  const masterKey = randomBytes(32);
+  const store = createAuthStore({ filePath: path.join(directory, 'auth.sqlite'), masterKey });
+  let browser, server, vite;
+  t.after(async () => {
+    await browser?.close();
+    if (server?.listening) await new Promise(resolve => server.close(resolve));
+    await vite?.close();
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  const registry = createServerRegistry({ filePath: path.join(directory, 'servers.json') });
+  const local = await registry.createLocalServer({ hostname: 'mail-policy.example.test' });
+  const serverExists = async id => Boolean(await registry.getServer(id));
+  const websiteRegistry = createWebsiteRegistry({ filePath: path.join(directory, 'websites.json'), serverExists });
+  const website = await websiteRegistry.createWebsite({
+    name: 'Mail policy', serverId: local.id, runtimeType: 'proxy', proxyTarget: { host: '127.0.0.1', port: 8500 },
+  });
+  const domainRegistry = createDomainRegistry({
+    filePath: path.join(directory, 'domains.json'), serverExists, getWebsite: websiteRegistry.getWebsite,
+  });
+  const webDomain = await domainRegistry.createDomain({
+    serverId: local.id, websiteId: website.id, primaryDomain: 'mail-policy.example.test',
+    targetType: 'proxy', target: { upstreamPort: 8500 },
+  });
+  const mailDomainRegistry = createMailDomainRegistry({
+    filePath: path.join(directory, 'mail-domains.json'), getWebDomain: domainRegistry.getDomain,
+  });
+  const domain = await mailDomainRegistry.createMailDomain({
+    domainName: webDomain.primaryDomain, webDomainId: webDomain.id, managementMode: 'local',
+  });
+  await mailDomainRegistry.transitionLocalStatus(domain.id, { expectedRevision: domain.revision, status: 'enabled' });
+  const mailboxOptions = { filePath: path.join(directory, 'mailboxes.json'), masterKey, getMailDomain: mailDomainRegistry.getMailDomain };
+  const mailboxRegistry = createMailboxRegistry(mailboxOptions);
+  const password = randomBytes(24).toString('hex');
+  const mailbox = await mailboxRegistry.createMailbox({
+    mailDomainId: domain.id, address: `owner@${domain.domainName}`, password,
+  });
+  const setup = store.issueSetupToken();
+  await store.completeSetup({ setupToken: setup.token, username: 'owner', password });
+  const owner = await store.login({ username: 'owner', password });
+  await store.users.create(owner.token, createOwnerMfaPolicy({ store, required: false }).requireManagement, {
+    username: 'siteuser', password, role: 'site_manager', websiteIds: [website.id],
+  });
+
+  vite = await createViteServer({
+    root: fileURLToPath(new URL('../', import.meta.url)),
+    server: { middlewareMode: true, hmr: false, watch: null },
+  });
+  let api;
+  server = createServer((request, response) => {
+    if (request.url.startsWith('/api/')) return api(request, response);
+    return vite.middlewares(request, response);
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  api = createAuthenticatedApi({ store, publicOrigin: origin, development: true, ownerMfaRequired: false,
+    createHandler: () => createApp({ registry, websiteRegistry, domainRegistry, mailDomainRegistry, mailboxRegistry, localServerId: local.id }),
+  });
+
+  browser = await chromium.launch();
+  const endpoint = `${origin}/mail/${domain.id}`;
+  async function signIn(page, username) {
+    await page.goto(endpoint);
+    await page.locator('input[name="username"]').fill(username);
+    await page.locator('input[name="password"]').fill(password);
+    await page.getByRole('button', { name: 'Giriş yap', exact: true }).click();
+  }
+  const page = await browser.newPage();
+  await signIn(page, 'owner');
+  const settings = page.getByRole('button', { name: 'Posta kutusu ayarları', exact: true });
+  await settings.click();
+  await expect(page.getByRole('button', { name: 'Kotayı kaydet' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Yönlendirmeyi kaydet' })).toBeVisible();
+  const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Otomatik yanıt ve spam ayarları' }) });
+  const vacation = section.getByRole('checkbox', { name: 'Otomatik yanıtı etkinleştir' });
+  const allowed = section.getByRole('textbox', { name: 'Güvenilen gönderenler' });
+  const denied = section.getByRole('textbox', { name: 'Şüpheli gönderenler' });
+  await expect(vacation).not.toBeChecked();
+  await expect(allowed).toHaveValue('');
+  await expect(denied).toHaveValue('');
+  await allowed.fill('first@sender.example.test');
+  await mailboxRegistry.rotatePassword(mailbox.id, { expectedRevision: 1, password: randomBytes(24).toString('hex') });
+
+  const nextWrite = () => page.waitForResponse(response => response.url().endsWith(`/mailboxes/${mailbox.id}/delivery-policy`)
+    && response.request().method() === 'PUT');
+  const save = section.getByRole('button', { name: 'Ayarları kaydet' });
+  const stale = nextWrite();
+  await save.click();
+  assert.equal((await stale).status(), 409);
+  await expect(section.getByRole('alert')).toContainText('güncel ayarları yükleyin');
+  await expect(save).toBeDisabled();
+  await section.getByRole('button', { name: 'Güncel ayarları yükle' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Ayarları yükle' }).click();
+  await expect(allowed).toHaveValue('');
+
+  await vacation.check();
+  await section.getByRole('textbox', { name: 'Yanıt konusu' }).fill('Ofis dışında');
+  await section.getByRole('textbox', { name: 'Yanıt metni' }).fill('Dönünce yanıtlayacağım.');
+  await allowed.fill('first@sender.example.test');
+  await denied.fill('second@sender.example.test');
+  const saved = nextWrite();
+  const preview = page.waitForResponse(response => response.url().endsWith(`/mail-domains/${domain.id}/config-preview`));
+  await save.click();
+  assert.equal((await saved).status(), 200);
+  assert.equal((await preview).status(), 200);
+  const expected = {
+    mailboxId: mailbox.id, revision: 3, vacation: { subject: 'Ofis dışında', body: 'Dönünce yanıtlayacağım.' },
+    allow: ['first@sender.example.test'], deny: ['second@sender.example.test'],
+  };
+  assert.deepEqual(await createMailboxRegistry(mailboxOptions).getDeliveryPolicy(mailbox.id), expected);
+  await expect(section.getByText('Teslimat ayarları kaydedildi.')).toHaveCount(0);
+
+  await settings.click();
+  await expect(section).toHaveCount(0);
+  await settings.click();
+  await expect(section.getByRole('textbox', { name: 'Yanıt konusu' })).toHaveValue(expected.vacation.subject);
+  await expect(allowed).toHaveValue(expected.allow[0]);
+  await expect(denied).toHaveValue(expected.deny[0]);
+  await section.getByRole('button', { name: 'Ayarları temizle' }).click();
+  const cleared = nextWrite();
+  await page.getByRole('dialog').getByRole('button', { name: 'Ayarları temizle' }).click();
+  assert.equal((await cleared).status(), 200);
+  assert.deepEqual(await createMailboxRegistry(mailboxOptions).getDeliveryPolicy(mailbox.id), {
+    mailboxId: mailbox.id, revision: 4, vacation: null, allow: [], deny: [],
+  });
+  await settings.click();
+
+  const siteUser = await browser.newPage();
+  await signIn(siteUser, 'siteuser');
+  await siteUser.getByRole('button', { name: 'Kota ve yönlendirme' }).click();
+  await expect(siteUser.getByRole('heading', { name: 'Otomatik yanıt ve spam ayarları' })).toHaveCount(0);
 });

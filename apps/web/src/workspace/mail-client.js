@@ -27,8 +27,8 @@ export function listMailDomains() {
   return panelRequest('/mail-domains');
 }
 
-export function getMailDomain(mailDomainId) {
-  return panelRequest(mailDomainPath(mailDomainId));
+export function getMailDomain(mailDomainId, { signal } = {}) {
+  return panelRequest(mailDomainPath(mailDomainId), { signal });
 }
 
 export function createMailDomain({ name, webDomainId, managementMode = 'local' } = {}) {
@@ -38,15 +38,15 @@ export function createMailDomain({ name, webDomainId, managementMode = 'local' }
   return panelRequest('/mail-domains', { method: 'POST', body: { name, webDomainId, managementMode } });
 }
 
-export function previewMailConfiguration(mailDomainId, { expectedRevision, status } = {}) {
+export function previewMailConfiguration(mailDomainId, { expectedRevision, status } = {}, { signal } = {}) {
   positiveRevision(expectedRevision);
   if (!['enabled', 'disabled'].includes(status)) throw new Error('status is invalid');
   return panelRequest(`${mailDomainPath(mailDomainId)}/config-preview`, {
-    method: 'POST', body: { expectedRevision, status },
+    method: 'POST', signal, body: { expectedRevision, status },
   });
 }
 
-export function applyMailConfiguration(mailDomainId, { expectedRevision, status, preview, requestId } = {}) {
+export function applyMailConfiguration(mailDomainId, { expectedRevision, status, preview, requestId } = {}, { signal } = {}) {
   positiveRevision(expectedRevision);
   if (!['enabled', 'disabled'].includes(status)) throw new Error('status is invalid');
   if (!preview || typeof preview.previewDigest !== 'string'
@@ -55,6 +55,7 @@ export function applyMailConfiguration(mailDomainId, { expectedRevision, status,
   }
   return panelRequest(`${mailDomainPath(mailDomainId)}/config-apply`, {
     method: 'POST',
+    signal,
     body: {
       expectedRevision,
       status,
@@ -92,6 +93,43 @@ export function rotateMailboxPassword(mailboxId, { expectedRevision, password } 
   positiveRevision(expectedRevision);
   if (typeof password !== 'string' || !password) throw new Error('password is required');
   return panelRequest(`${mailboxPath(mailboxId)}/password`, { method: 'POST', body: { expectedRevision, password } });
+}
+
+function senderListsValid(allow, deny) {
+  return [allow, deny].every(list => Array.isArray(list) && list.every(value => typeof value === 'string'));
+}
+
+function readDeliveryPolicy(data, mailboxId) {
+  const vacation = data?.vacation;
+  if (data?.mailboxId !== mailboxId || !Number.isSafeInteger(data.revision) || data.revision < 1
+    || (vacation !== null && (typeof vacation?.subject !== 'string' || typeof vacation?.body !== 'string'))
+    || !senderListsValid(data.allow, data.deny)) {
+    throw new Error('Posta kutusunun teslimat ayarları doğrulanamadı.');
+  }
+  return {
+    mailboxId, revision: data.revision,
+    vacation: vacation === null ? null : { subject: vacation.subject, body: vacation.body },
+    allow: data.allow, deny: data.deny,
+  };
+}
+
+export function getMailboxDeliveryPolicy(mailboxId, { signal } = {}) {
+  return panelRequest(`${mailboxPath(mailboxId)}/delivery-policy`, { signal })
+    .then(data => readDeliveryPolicy(data, mailboxId));
+}
+
+export function setMailboxDeliveryPolicy(mailboxId, { expectedRevision, vacation, allow, deny } = {}, { signal } = {}) {
+  positiveRevision(expectedRevision);
+  if (vacation !== null && (typeof vacation?.subject !== 'string' || typeof vacation?.body !== 'string')) {
+    throw new Error('Otomatik yanıt için konu ve mesaj gereklidir.');
+  }
+  if (!senderListsValid(allow, deny)) {
+    throw new Error('Gönderici listeleri geçersiz.');
+  }
+  return panelRequest(`${mailboxPath(mailboxId)}/delivery-policy`, {
+    method: 'PUT', signal,
+    body: { expectedRevision, vacation: vacation === null ? null : { subject: vacation.subject, body: vacation.body }, allow, deny },
+  }).then(data => readDeliveryPolicy(data, mailboxId));
 }
 
 export function getMailboxQuota(mailboxId) {
@@ -352,6 +390,6 @@ export function continueMailWebmail(mailDomainId, { operationId, expectedUpdated
 export const mailClientInternals = Object.freeze({ requiredId, positiveRevision, mailDomainPath, mailboxPath, aliasPath });
 
 
-export function getMailConfigurationRequest(mailDomainId, requestId) {
-  return panelRequest(`${mailDomainPath(mailDomainId)}/config-requests/${encodeURIComponent(requiredId(requestId, 'requestId'))}`);
+export function getMailConfigurationRequest(mailDomainId, requestId, { signal } = {}) {
+  return panelRequest(`${mailDomainPath(mailDomainId)}/config-requests/${encodeURIComponent(requiredId(requestId, 'requestId'))}`, { signal });
 }
