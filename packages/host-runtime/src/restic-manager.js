@@ -151,7 +151,7 @@ async function findResticBinary(customPath, accessFn) {
   return null;
 }
 
-function mapResticError(error, context = '', password = '', privateRcloneConfig = false) {
+function mapResticError(error, context = '', password = '', redactBackendOutput = false) {
   if (error instanceof ResticError) return error;
   const redact = (value) => password ? value.replaceAll(password, '[REDACTED]') : value;
   const originalStderr = (error?.stderr || '').toString();
@@ -162,7 +162,7 @@ function mapResticError(error, context = '', password = '', privateRcloneConfig 
   const lower = originalRaw.toLowerCase();
 
   if (lower.includes('is already locked') || lower.includes('unable to create lock') || lower.includes('invalid lock file') || lower.includes('failed to create lock')) {
-    if (privateRcloneConfig) return new ResticError('restic_repo_locked', 'Restic repository is locked', 409);
+    if (redactBackendOutput) return new ResticError('restic_repo_locked', 'Restic repository is locked', 409);
     return new ResticError('restic_repo_locked', `Restic repository is locked: ${stderr.trim() || raw}`, 409);
   }
   if (lower.includes('wrong password') || lower.includes('ciphertext verification failed') || lower.includes('keys do not match')) {
@@ -177,7 +177,7 @@ function mapResticError(error, context = '', password = '', privateRcloneConfig 
   if (lower.includes('no snapshot found') || lower.includes('specified snapshot does not exist')) {
     return new ResticError('restic_snapshot_not_found', 'Restic snapshot was not found', 404);
   }
-  if (privateRcloneConfig) return new ResticError('restic_command_failed', `Restic command failed (${context})`, 500);
+  if (redactBackendOutput) return new ResticError('restic_command_failed', `Restic command failed (${context})`, 500);
   return new ResticError('restic_command_failed', `Restic command failed (${context}): ${stderr.trim() || raw}`, 500);
 }
 
@@ -255,12 +255,16 @@ export function createResticManager({
     const binary = await requireBinary();
     const target = normalizeRepository(repository);
     const secret = normalizePassword(password);
+    const rcloneRepository = target.startsWith('rclone:');
+    if (rcloneRepository && !target.startsWith('rclone::') && rcloneConfigPath === null) {
+      throw new ResticError('restic_rclone_config_required', 'Named rclone repository configuration is required', 503);
+    }
     const secretDirectory = await mkdtemp(path.join(tmpdir(), 'yunpanel-restic-'));
     activeSecretDirs.add(secretDirectory);
     registerProcessHooks();
     const secretPath = path.join(secretDirectory, 'password');
     const cachePath = path.join(secretDirectory, 'cache');
-    const privateRcloneConfig = target.startsWith('rclone:') && rcloneConfigPath !== null;
+    const privateRcloneConfig = rcloneRepository && rcloneConfigPath !== null;
     const configPath = path.join(secretDirectory, 'rclone.conf');
     try {
       if (privateRcloneConfig) await copyPrivateRcloneConfiguration(rcloneConfigPath, configPath);
@@ -275,12 +279,12 @@ export function createResticManager({
           RESTIC_REPOSITORY: target,
           RESTIC_PASSWORD_FILE: secretPath,
           RESTIC_CACHE_DIR: cachePath,
-          ...(privateRcloneConfig ? { RCLONE_CONFIG: configPath } : {}),
+          ...(rcloneRepository ? { RCLONE_CONFIG: privateRcloneConfig ? configPath : '/dev/null' } : {}),
         },
         timeout,
       });
     } catch (error) {
-      throw mapResticError(error, context, secret, privateRcloneConfig);
+      throw mapResticError(error, context, secret, rcloneRepository);
     } finally {
       // Remove the password before descending into a cache that may be inaccessible.
       await unlink(secretPath).catch(() => {});

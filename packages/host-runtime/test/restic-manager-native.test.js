@@ -108,7 +108,9 @@ test('a private administrator rclone configuration enables a named Restic reposi
     await symlink(rcloneConfigPath, linkedConfigPath);
 
     const noConfig = createResticManager({ resticPath, rcloneConfigPath: null });
-    await assert.rejects(noConfig.init({ repository, password }), { name: 'ResticError' });
+    await assert.rejects(noConfig.init({ repository, password }), { code: 'restic_rclone_config_required' });
+    const explicitLocalBackend = `rclone::local:${path.join(root, 'inline-repository')}`;
+    assert.equal((await noConfig.init({ repository: explicitLocalBackend, password })).repository, explicitLocalBackend);
 
     const invalidLink = createResticManager({ resticPath, rcloneConfigPath: linkedConfigPath });
     await assert.rejects(invalidLink.init({ repository, password }), { code: 'restic_rclone_config_invalid' });
