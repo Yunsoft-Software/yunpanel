@@ -18,7 +18,6 @@ test.describe('DKR-SUBPATH Docker /api alt yol reverse-proxy yönlendirmesi', ()
   const timestamp = Date.now().toString(36);
   const projectName = `tdkrsub_a${agentN}_${timestamp}`;
   const subdomainPrefix = `tdkrsub-a${agentN}-${timestamp}`;
-  const rootMarker = `ROOT_SITE_MARKER_${timestamp}`;
 
   let hostProbe;
   let hostPort = 0;
@@ -50,25 +49,6 @@ host=sys.argv[1]
 assert re.fullmatch(r'[a-z0-9.-]+',host) and '..' not in host
 p='/etc/nginx/sites-enabled/yunpanel-'+host+'.conf'
 print(json.dumps({'content':open(p,'r',encoding='utf-8',errors='replace').read() if os.path.isfile(p) else ''}))`, [hostname], { timeoutMs: 20_000 }).content;
-  }
-
-  function writeStaticIndexMarker(docRoot, marker) {
-    return hostProbe.runPythonJson(`import json,os,sys
-root,marker=sys.argv[1],sys.argv[2]
-assert root.startswith('/var/') and '..' not in root.split('/')
-os.makedirs(root, exist_ok=True)
-st=os.stat(root)
-index_path=os.path.join(root,'index.html')
-if os.path.isfile(index_path):
-    st=os.stat(index_path)
-with open(index_path,'w',encoding='utf-8') as f:
-    f.write(f'<!doctype html><html><body>{marker}</body></html>\\n')
-os.chmod(index_path, 0o644)
-try:
-    os.chown(index_path, st.st_uid, st.st_gid)
-except PermissionError:
-    pass
-print(json.dumps({'written': True, 'path': index_path}))`, [docRoot, marker], { timeoutMs: 20_000 });
   }
 
   function probeLocalHttp(hostname, requestPath) {
@@ -292,17 +272,17 @@ print(json.dumps({'rc':r.returncode,'status':status,'headers':head,'body':body})
       { timeout: 20_000, intervals: [1000, 2000] },
     ).toContain('DOCKER_BACKEND:/api');
 
-    // 2. Panelden yeni statik subdomain oluştur (HTTP modunda) ve kök içeriğe ROOT_SITE_MARKER yaz
+    // 2. Panelden yeni statik subdomain oluştur (yalnız tam webrich.news altında, HTTP modunda)
     await page.goto('/websites/new?mode=subdomain');
     await expect(page.locator('h1', { hasText: 'Alt alan adı ekle' })).toBeVisible({ timeout: 15_000 });
 
     const parentSelect = page.locator('label:has-text("Üst alan adı") select');
     await expect(parentSelect.locator('option:not([value=""])').first()).toBeAttached({ timeout: 15_000 });
-    const parentOptions = await parentSelect.locator('option').allTextContents();
-    const parentOption = parentOptions.find((opt) => opt.includes('webrich.news')) || parentOptions[1];
-    expect(parentOption).toBeTruthy();
-    await parentSelect.selectOption({ label: parentOption });
-    fullSubdomain = `${subdomainPrefix}.${parentOption.trim()}`;
+    const parentOptions = (await parentSelect.locator('option').allTextContents()).map((opt) => opt.trim());
+    const exactParent = parentOptions.find((opt) => opt === 'webrich.news');
+    expect(exactParent, `Required exact parent domain "webrich.news" not found in options: ${parentOptions.join(', ')}`).toBe('webrich.news');
+    await parentSelect.selectOption({ label: exactParent });
+    fullSubdomain = `${subdomainPrefix}.webrich.news`;
 
     await page.locator('input[aria-label="Alt alan adı"]').fill(subdomainPrefix);
     await page.locator('button[type="submit"]:has-text("Devam et")').click();
@@ -339,18 +319,17 @@ print(json.dumps({'rc':r.returncode,'status':status,'headers':head,'body':body})
 
     createdWebsiteId = await waitForWebsiteSetup(page, createdDomainId);
 
-    const domainRes = await page.request.get(`/api/panel/domains/${encodeURIComponent(createdDomainId)}`);
-    expect(domainRes.status()).toBe(200);
-    const domainRecord = (await domainRes.json()).data;
-    const docRoot = domainRecord?.target?.root;
-    expect(typeof docRoot === 'string' && docRoot.startsWith('/var/')).toBe(true);
-
-    writeStaticIndexMarker(docRoot, rootMarker);
-
+    // Proxy eklemeden önce sitenin kendi varsayılan statik başlangıç içeriğini (HTTP 200) yakala
+    let baselineRootBody = '';
     await expect.poll(() => {
       const res = probeLocalHttp(fullSubdomain, '/');
-      return res.status === 200 && res.body.includes(rootMarker);
+      if (res.status === 200 && res.body.trim().length > 0 && !res.body.includes('DOCKER_BACKEND')) {
+        baselineRootBody = res.body;
+        return true;
+      }
+      return false;
     }, { timeout: 30_000, intervals: [1000, 2000] }).toBe(true);
+    expect(baselineRootBody.trim().length).toBeGreaterThan(0);
 
     // 3. Domain Hosting ekranından /api kalıcı Docker proxy kuralı ekle ve Kaydet ve uygula
     await page.goto(`/websites/${encodeURIComponent(createdDomainId)}/hosting`);
@@ -404,10 +383,10 @@ print(json.dumps({'rc':r.returncode,'status':status,'headers':head,'body':body})
     expect(nginxAfterAdd).toContain('location ^~ /api/ {');
     expect(nginxAfterAdd).toContain(`proxy_pass http://127.0.0.1:${hostPort};`);
 
-    // GET / -> site kök içeriği (ROOT_SITE_MARKER), Docker DEĞİL
+    // GET / -> sitenin kendi statik başlangıç içeriği, Docker DEĞİL
     const rootRes = probeLocalHttp(fullSubdomain, '/');
     expect(rootRes.status).toBe(200);
-    expect(rootRes.body).toContain(rootMarker);
+    expect(rootRes.body).toBe(baselineRootBody);
     expect(rootRes.body).not.toContain('DOCKER_BACKEND');
     expect(rootRes.headers.toLowerCase()).not.toContain('x-test-origin: docker-backend');
 
@@ -428,7 +407,7 @@ print(json.dumps({'rc':r.returncode,'status':status,'headers':head,'body':body})
     expect(boundaryRes.body).not.toContain('DOCKER_BACKEND');
     expect(boundaryRes.headers.toLowerCase()).not.toContain('x-test-origin: docker-backend');
     if (boundaryRes.status === 200) {
-      expect(boundaryRes.body).toContain(rootMarker);
+      expect(boundaryRes.body).toBe(baselineRootBody);
     } else {
       expect(boundaryRes.status).toBe(404);
     }
@@ -460,14 +439,14 @@ print(json.dumps({'rc':r.returncode,'status':status,'headers':head,'body':body})
 
     const rootAfterRemove = probeLocalHttp(fullSubdomain, '/');
     expect(rootAfterRemove.status).toBe(200);
-    expect(rootAfterRemove.body).toContain(rootMarker);
+    expect(rootAfterRemove.body).toBe(baselineRootBody);
     expect(rootAfterRemove.body).not.toContain('DOCKER_BACKEND');
 
     const apiAfterRemove = probeLocalHttp(fullSubdomain, '/api');
     expect(apiAfterRemove.body).not.toContain('DOCKER_BACKEND');
     expect(apiAfterRemove.headers.toLowerCase()).not.toContain('x-test-origin: docker-backend');
     if (apiAfterRemove.status === 200) {
-      expect(apiAfterRemove.body).toContain(rootMarker);
+      expect(apiAfterRemove.body).toBe(baselineRootBody);
     } else {
       expect(apiAfterRemove.status).toBe(404);
     }

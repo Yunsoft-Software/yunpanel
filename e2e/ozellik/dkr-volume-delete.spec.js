@@ -30,7 +30,13 @@ test.describe('DKR-VOLUME-DELETE Default down volume koruma ve güvenli tekil vo
   const markerDel = `marker_del_${timestamp}`;
   const markerKeep = `marker_keep_${timestamp}`;
 
-  const ownedVolumeNames = [volAName, volBName, volDelName, volKeepName];
+  const ownedVolumeSpecs = Object.freeze([
+    Object.freeze({ volumeName: volAName, projectName: project1Name, volumeKey: 'vol_a' }),
+    Object.freeze({ volumeName: volBName, projectName: project1Name, volumeKey: 'vol_b' }),
+    Object.freeze({ volumeName: volDelName, projectName: project2Name, volumeKey: 'vol_del' }),
+    Object.freeze({ volumeName: volKeepName, projectName: project2Name, volumeKey: 'vol_keep' }),
+  ]);
+  const ownedVolumeAllowlist = new Map(ownedVolumeSpecs.map((spec) => [spec.volumeName, spec]));
 
   let hostProbe;
   let project1Id = null;
@@ -45,18 +51,34 @@ test.describe('DKR-VOLUME-DELETE Default down volume koruma ve güvenli tekil vo
   }
 
   function inspectVolumeAndMarker(volumeName, markerFile = 'marker.txt') {
-    return hostProbe.runPythonJson(`import json,os,re,subprocess,sys
+    const result = hostProbe.runPythonJson(`import json,os,re,subprocess,sys
 vol,fname=sys.argv[1],sys.argv[2]
 assert re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}',vol)
 assert re.fullmatch(r'[A-Za-z0-9_.-]{1,64}',fname)
-r=subprocess.run(['docker','volume','inspect','--format','{{.Mountpoint}}',vol],capture_output=True,text=True,timeout=15)
+r=subprocess.run(['docker','volume','inspect','--format','{{json .}}',vol],capture_output=True,text=True,timeout=15)
 if r.returncode!=0:
-    print(json.dumps({'exists':False,'mountpoint':'','marker':''}))
+    err=(r.stderr or '').strip()
+    if 'no such volume' in err.lower():
+        print(json.dumps({'exists':False,'mountpoint':'','marker':'','driver':None,'scope':None,'labels':{}}))
+        raise SystemExit(0)
+    print(json.dumps({'error':True,'rc':r.returncode,'stderr':err}))
     raise SystemExit(0)
-mp=(r.stdout or '').strip()
+info=json.loads((r.stdout or '').strip())
+mp=(info.get('Mountpoint') or '').strip()
 p=os.path.join(mp,fname)
 content=open(p,'r',encoding='utf-8',errors='replace').read().strip() if (mp and os.path.isfile(p)) else ''
-print(json.dumps({'exists':True,'mountpoint':mp,'marker':content}))`, [volumeName, markerFile], { timeoutMs: 25_000 });
+print(json.dumps({
+    'exists':True,
+    'mountpoint':mp,
+    'marker':content,
+    'driver':info.get('Driver'),
+    'scope':info.get('Scope'),
+    'labels':info.get('Labels') or {},
+}))`, [volumeName, markerFile], { timeoutMs: 25_000 });
+    if (result?.error) {
+      throw new Error(`docker volume inspect failed for ${volumeName} (rc=${result.rc}): ${result.stderr || 'unknown error'}`);
+    }
+    return result;
   }
 
   function writeMarkerViaExec(projectName, mountPath, markerValue) {
@@ -79,15 +101,43 @@ print(json.dumps({'written':True,'containerId':cids[0]}))`, [projectName, mountP
   }
 
   function removeOwnedVolumeIfPresent(volumeName) {
-    return hostProbe.runPythonJson(`import json,re,subprocess,sys
-vol=sys.argv[1]
+    const spec = ownedVolumeAllowlist.get(volumeName);
+    if (!spec) {
+      throw new Error(`Refusing to remove volume outside this test run allowlist: ${volumeName}`);
+    }
+    const result = hostProbe.runPythonJson(`import json,re,subprocess,sys
+vol,expected_proj,expected_key=sys.argv[1],sys.argv[2],sys.argv[3]
 assert re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}',vol)
-check=subprocess.run(['docker','volume','inspect',vol],capture_output=True,text=True,timeout=15)
+assert re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,62}',expected_proj)
+assert re.fullmatch(r'[A-Za-z0-9._-]{1,128}',expected_key)
+check=subprocess.run(['docker','volume','inspect','--format','{{json .}}',vol],capture_output=True,text=True,timeout=15)
 if check.returncode!=0:
-    print(json.dumps({'removed':True,'wasPresent':False}))
+    err=(check.stderr or '').strip()
+    if 'no such volume' in err.lower():
+        print(json.dumps({'removed':True,'wasPresent':False}))
+        raise SystemExit(0)
+    print(json.dumps({'error':True,'stage':'inspect','rc':check.returncode,'stderr':err}))
+    raise SystemExit(0)
+info=json.loads((check.stdout or '').strip())
+labels=info.get('Labels') or {}
+if (
+    info.get('Name') != vol
+    or info.get('Driver') != 'local'
+    or info.get('Scope') != 'local'
+    or labels.get('com.docker.compose.project') != expected_proj
+    or labels.get('com.docker.compose.volume') != expected_key
+):
+    print(json.dumps({'error':True,'stage':'verify','stderr':'Volume metadata/labels did not match owned test allowlist'}))
     raise SystemExit(0)
 rm_res=subprocess.run(['docker','volume','rm',vol],capture_output=True,text=True,timeout=20)
-print(json.dumps({'removed':rm_res.returncode==0,'wasPresent':True,'rc':rm_res.returncode}))`, [volumeName], { timeoutMs: 25_000 });
+if rm_res.returncode!=0:
+    print(json.dumps({'error':True,'stage':'rm','rc':rm_res.returncode,'stderr':(rm_res.stderr or '').strip()}))
+    raise SystemExit(0)
+print(json.dumps({'removed':True,'wasPresent':True,'rc':0}))`, [spec.volumeName, spec.projectName, spec.volumeKey], { timeoutMs: 25_000 });
+    if (result?.error) {
+      throw new Error(`Guarded volume cleanup failed for ${spec.volumeName} at ${result.stage}: ${result.stderr || `rc=${result.rc}`}`);
+    }
+    return result;
   }
 
   async function confirmLifecycleAction(page, actionKey) {
@@ -189,19 +239,16 @@ print(json.dumps({'removed':rm_res.returncode==0,'wasPresent':True,'rc':rm_res.r
       }
     }
 
-    // Yalnız bu testin oluşturduğu sahipli volume'ları temizle; mevcut host volume'larına dokunma.
-    for (const volumeName of ownedVolumeNames) {
+    // Yalnız bu testin oluşturduğu sahipli volume allowlist'ini driver/scope/label doğrulamasıyla temizle.
+    for (const spec of ownedVolumeSpecs) {
       try {
-        const res = removeOwnedVolumeIfPresent(volumeName);
-        if (!res.removed) {
-          cleanupErrors.push(`Owned test volume removal failed (${volumeName}, rc=${res.rc})`);
-        }
-        const after = inspectVolumeAndMarker(volumeName);
+        removeOwnedVolumeIfPresent(spec.volumeName);
+        const after = inspectVolumeAndMarker(spec.volumeName);
         if (after.exists) {
-          cleanupErrors.push(`Owned test volume still present after cleanup (${volumeName})`);
+          cleanupErrors.push(`Owned test volume still present after cleanup (${spec.volumeName})`);
         }
       } catch (err) {
-        cleanupErrors.push(`Owned test volume cleanup error (${volumeName}): ${err.message}`);
+        cleanupErrors.push(`Owned test volume cleanup error (${spec.volumeName}): ${err.message}`);
       }
     }
 
