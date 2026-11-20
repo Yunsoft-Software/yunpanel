@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -86,6 +86,63 @@ test('a local cache permission error preserves the actual Restic result and eras
       await chmod(blocked, 0o700);
       await rm(path.dirname(passwordFile), { recursive: true, force: true });
     }
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a private administrator rclone configuration enables a named Restic repository', {
+  skip: !resticPath || process.env.YUNPANEL_TEST_NATIVE_RCLONE !== '1',
+}, async () => {
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'yunpanel-restic-native-')));
+  try {
+    const rcloneConfigPath = path.join(root, 'rclone.conf');
+    const linkedConfigPath = path.join(root, 'linked.conf');
+    const source = path.join(root, 'source.txt');
+    const destination = path.join(root, 'restored');
+    const name = `pilot-${randomBytes(8).toString('hex')}`;
+    const repository = `rclone:${name}:${path.join(root, 'repository')}`;
+    const password = randomBytes(32).toString('hex');
+    const content = 'YunPanel isimli depo denemesi\n';
+    await writeFile(rcloneConfigPath, `[${name}]\ntype = local\n`, { mode: 0o600 });
+    await writeFile(source, content);
+    await symlink(rcloneConfigPath, linkedConfigPath);
+
+    const noConfig = createResticManager({ resticPath, rcloneConfigPath: null });
+    await assert.rejects(noConfig.init({ repository, password }), { name: 'ResticError' });
+
+    const invalidLink = createResticManager({ resticPath, rcloneConfigPath: linkedConfigPath });
+    await assert.rejects(invalidLink.init({ repository, password }), { code: 'restic_rclone_config_invalid' });
+
+    const operationFiles = [];
+    const execFileAsync = promisify(execFile);
+    const manager = createResticManager({
+      resticPath,
+      rcloneConfigPath,
+      async runCommand(binary, args, { env, timeout }) {
+        assert.notEqual(env.RCLONE_CONFIG, rcloneConfigPath);
+        assert.equal(await readFile(env.RCLONE_CONFIG, 'utf8'), await readFile(rcloneConfigPath, 'utf8'));
+        operationFiles.push(env.RCLONE_CONFIG, env.RESTIC_PASSWORD_FILE);
+        return execFileAsync(binary, args, {
+          env: { PATH: '/usr/bin:/bin:/usr/local/bin', ...env },
+          timeout,
+          encoding: 'utf8',
+        });
+      },
+    });
+    await chmod(rcloneConfigPath, 0o644);
+    await assert.rejects(manager.init({ repository, password }), { code: 'restic_rclone_config_invalid' });
+    await chmod(rcloneConfigPath, 0o600);
+
+    await manager.init({ repository, password });
+    const { snapshotId } = await manager.createSnapshot({ repository, password, paths: [source] });
+    assert.equal((await manager.check({ repository, password, readDataSubset: '100%' })).healthy, true);
+    await rename(source, path.join(root, 'offline.txt'));
+    await assert.rejects(readFile(source), { code: 'ENOENT' });
+    assert.equal((await manager.restore({ repository, password, snapshotId, targetDirectory: destination })).verified, true);
+    assert.equal(await readFile(path.join(destination, source), 'utf8'), content);
+    assert.equal(operationFiles.length, 8);
+    for (const file of operationFiles) await assert.rejects(readFile(file), { code: 'ENOENT' });
+  } finally {
     await rm(root, { recursive: true, force: true });
   }
 });

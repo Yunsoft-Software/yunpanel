@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { rmSync } from 'node:fs';
-import { access, mkdtemp, open, readdir, rm, stat, unlink } from 'node:fs/promises';
+import { constants, rmSync } from 'node:fs';
+import { access, mkdtemp, open, readdir, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -9,6 +9,7 @@ const execFileAsync = promisify(execFile);
 const RESTIC_PATHS = Object.freeze(['/usr/bin/restic', '/usr/local/bin/restic', '/bin/restic']);
 const SNAPSHOT_ID_PATTERN = /^[a-f0-9]{8,64}$/i;
 const DEFAULT_TIMEOUT = 60 * 60 * 1000; // 1 hour
+const MAX_RCLONE_CONFIG_BYTES = 256 * 1024;
 export const MINIMUM_RESTIC_VERSION = '0.16.0';
 
 function parseSemver(str) {
@@ -150,7 +151,7 @@ async function findResticBinary(customPath, accessFn) {
   return null;
 }
 
-function mapResticError(error, context = '', password = '') {
+function mapResticError(error, context = '', password = '', privateRcloneConfig = false) {
   if (error instanceof ResticError) return error;
   const redact = (value) => password ? value.replaceAll(password, '[REDACTED]') : value;
   const originalStderr = (error?.stderr || '').toString();
@@ -161,6 +162,7 @@ function mapResticError(error, context = '', password = '') {
   const lower = originalRaw.toLowerCase();
 
   if (lower.includes('is already locked') || lower.includes('unable to create lock') || lower.includes('invalid lock file') || lower.includes('failed to create lock')) {
+    if (privateRcloneConfig) return new ResticError('restic_repo_locked', 'Restic repository is locked', 409);
     return new ResticError('restic_repo_locked', `Restic repository is locked: ${stderr.trim() || raw}`, 409);
   }
   if (lower.includes('wrong password') || lower.includes('ciphertext verification failed') || lower.includes('keys do not match')) {
@@ -175,7 +177,35 @@ function mapResticError(error, context = '', password = '') {
   if (lower.includes('no snapshot found') || lower.includes('specified snapshot does not exist')) {
     return new ResticError('restic_snapshot_not_found', 'Restic snapshot was not found', 404);
   }
+  if (privateRcloneConfig) return new ResticError('restic_command_failed', `Restic command failed (${context})`, 500);
   return new ResticError('restic_command_failed', `Restic command failed (${context}): ${stderr.trim() || raw}`, 500);
+}
+
+async function copyPrivateRcloneConfiguration(source, destination) {
+  let handle;
+  const invalid = () => new ResticError(
+    'restic_rclone_config_invalid',
+    'Restic requires an administrator-owned private rclone configuration file',
+    503,
+  );
+  try {
+    if (typeof source !== 'string' || !path.isAbsolute(source) || /[\u0000\r\n]/u.test(source)) throw invalid();
+    handle = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const metadata = await handle.stat();
+    if (!metadata.isFile() || metadata.nlink !== 1 || (metadata.mode & 0o077) !== 0
+      || (metadata.uid !== 0 && metadata.uid !== process.geteuid?.())
+      || metadata.size < 1 || metadata.size > MAX_RCLONE_CONFIG_BYTES) {
+      throw invalid();
+    }
+    const buffer = Buffer.alloc(metadata.size + 1);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    if (bytesRead !== metadata.size) throw invalid();
+    await writeFile(destination, buffer.subarray(0, bytesRead), { mode: 0o600, flag: 'wx' });
+  } catch {
+    throw invalid();
+  } finally {
+    await handle?.close().catch(() => {});
+  }
 }
 
 function defaultRunCommand(file, args, { env = {}, timeout = DEFAULT_TIMEOUT } = {}) {
@@ -208,6 +238,7 @@ function parseJsonLines(stdout) {
 
 export function createResticManager({
   resticPath = null,
+  rcloneConfigPath = process.env.YUNPANEL_RESTIC_RCLONE_CONFIG ?? null,
   accessFn = access,
   runCommand = defaultRunCommand,
   now = () => Date.now(),
@@ -229,7 +260,10 @@ export function createResticManager({
     registerProcessHooks();
     const secretPath = path.join(secretDirectory, 'password');
     const cachePath = path.join(secretDirectory, 'cache');
+    const privateRcloneConfig = target.startsWith('rclone:') && rcloneConfigPath !== null;
+    const configPath = path.join(secretDirectory, 'rclone.conf');
     try {
+      if (privateRcloneConfig) await copyPrivateRcloneConfiguration(rcloneConfigPath, configPath);
       const handle = await open(secretPath, 'wx', 0o600);
       try {
         await handle.writeFile(secret, 'utf8');
@@ -241,14 +275,16 @@ export function createResticManager({
           RESTIC_REPOSITORY: target,
           RESTIC_PASSWORD_FILE: secretPath,
           RESTIC_CACHE_DIR: cachePath,
+          ...(privateRcloneConfig ? { RCLONE_CONFIG: configPath } : {}),
         },
         timeout,
       });
     } catch (error) {
-      throw mapResticError(error, context, secret);
+      throw mapResticError(error, context, secret, privateRcloneConfig);
     } finally {
       // Remove the password before descending into a cache that may be inaccessible.
       await unlink(secretPath).catch(() => {});
+      if (privateRcloneConfig) await unlink(configPath).catch(() => {});
       try {
         await rm(secretDirectory, { recursive: true, force: true });
         activeSecretDirs.delete(secretDirectory);

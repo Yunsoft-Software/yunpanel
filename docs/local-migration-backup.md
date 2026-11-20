@@ -21,6 +21,8 @@ local-migration-backup.mjs stage /var/backups/yunpanel/migration-<timestamp> --c
 
 Yetkili operatör, şifreli Restic deposu için mevcut rclone uzak hedeflerinden birini seçer. İlk provada bir uzak hedef ve bir saklama politikası kullanılır. Restic parolası, depo erişimi ve YunPanel ana şifreleme anahtarı için kaynak makineye bağımlı olmayan bir kurtarma yolu sağlanır.
 
+Panelden isimli rclone deposu kullanırken, yönetici API hizmetine `YUNPANEL_RESTIC_RCLONE_CONFIG` ile yöneticiye ait, mutlak yollu ve `0600` izinli rclone dosyasını tanıtır. Depo hedefi `rclone:<hesap>:<dizin>` biçimindedir. Hesap dosyasında yalnız pilot sağlayıcısının gerekli bağlantı bilgileri tutulur. Her Restic çağrısı özel geçici kopyayı kullanır ve işlem sonunda temizler. Boş sunucudan kurtarmada operatör kendi özel rclone dosyasını ve Restic parola dosyasını sağlar.
+
 Arşivin SHA-256 değeri, kaynak sunucu kimliği ve YunPanel paket sürümü yedek alınırken ayrı kurtarma kaydında saklanır. Restic ile geri alınan `state.tar` ve `manifest.json`, operatöre ait özel bir geçici dizine yerleştirilir. Arşivin yapısını ve kimliğini kayıtlara uygulamadan kontrol etmek için yerel kaynak ağacında aşağıdaki komut kullanılabilir.
 
 ```bash
