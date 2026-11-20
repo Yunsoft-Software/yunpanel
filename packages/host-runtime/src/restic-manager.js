@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { rmSync } from 'node:fs';
-import { access, mkdtemp, open, readdir, rm, rmdir, stat, unlink } from 'node:fs/promises';
+import { access, mkdtemp, open, readdir, rm, stat, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -247,10 +247,14 @@ export function createResticManager({
     } catch (error) {
       throw mapResticError(error, context, secret);
     } finally {
-      activeSecretDirs.delete(secretDirectory);
-      await unlink(secretPath).catch((error) => { if (error.code !== 'ENOENT') throw error; });
-      await rm(cachePath, { recursive: true, force: true });
-      await rmdir(secretDirectory).catch(() => {});
+      // Remove the password before descending into a cache that may be inaccessible.
+      await unlink(secretPath).catch(() => {});
+      try {
+        await rm(secretDirectory, { recursive: true, force: true });
+        activeSecretDirs.delete(secretDirectory);
+      } catch {
+        // Keep this directory registered for exit cleanup without replacing the Restic result.
+      }
     }
   }
 
