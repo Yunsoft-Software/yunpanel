@@ -76,16 +76,37 @@ function canonicalIp(value) {
   }
 }
 
-function publishedHostsOverlap(leftHostIp, rightHostIp) {
-  if (leftHostIp === null || rightHostIp === null) return true;
-  if (leftHostIp === rightHostIp) return true;
-  const leftFamily = isIP(leftHostIp);
-  const rightFamily = isIP(rightHostIp);
-  if (leftHostIp === '0.0.0.0' && rightFamily === 4) return true;
-  if (rightHostIp === '0.0.0.0' && leftFamily === 4) return true;
-  if (leftHostIp === '::' && rightFamily === 6) return true;
-  if (rightHostIp === '::' && leftFamily === 6) return true;
+export function publishedHostsOverlap(leftHostIp, rightHostIp) {
+  const left = leftHostIp ?? null;
+  const right = rightHostIp ?? null;
+  if (left === null || right === null) return true;
+  if (left === right) return true;
+  const leftFamily = isIP(left);
+  const rightFamily = isIP(right);
+  if (left === '0.0.0.0' && rightFamily === 4) return true;
+  if (right === '0.0.0.0' && leftFamily === 4) return true;
+  if (left === '::' && rightFamily === 6) return true;
+  if (right === '::' && leftFamily === 6) return true;
   return false;
+}
+
+export function publishedPortsOverlap(left, right) {
+  if (!left || !right) return false;
+  const leftPort = left.publishedPort ?? left.port;
+  const rightPort = right.publishedPort ?? right.port;
+  if (!Number.isSafeInteger(leftPort) || !Number.isSafeInteger(rightPort) || leftPort !== rightPort) {
+    return false;
+  }
+  const leftProtocol = (left.protocol ?? 'tcp').toLowerCase();
+  const rightProtocol = (right.protocol ?? 'tcp').toLowerCase();
+  if (leftProtocol !== rightProtocol) return false;
+  return publishedHostsOverlap(left.hostIp ?? left.host ?? null, right.hostIp ?? right.host ?? null);
+}
+
+function publishedPortAllocationKey(port) {
+  const host = port.hostIp ?? null;
+  const protocol = (port.protocol ?? 'tcp').toLowerCase();
+  return `${host === null ? '*' : host}|${port.publishedPort}|${protocol}`;
 }
 
 function collectProjectPublishedPorts(services) {
@@ -98,17 +119,20 @@ function collectProjectPublishedPorts(services) {
   return result;
 }
 
-function assertNoPublishedPortConflict(projects, { serverId, excludeProjectId = null, services }) {
-  const requested = collectProjectPublishedPorts(services);
+function assertNoPublishedPortConflict(projects, { serverId, excludeProjectId = null, services, previousServices = null }) {
+  const previousKeys = previousServices
+    ? new Set(collectProjectPublishedPorts(previousServices).map(publishedPortAllocationKey))
+    : null;
+  const requested = collectProjectPublishedPorts(services).filter(
+    (port) => !previousKeys || !previousKeys.has(publishedPortAllocationKey(port)),
+  );
   if (requested.length === 0) return;
   for (const other of projects) {
     if (!other || other.serverId !== serverId || other.id === excludeProjectId) continue;
     const existing = collectProjectPublishedPorts(other.services);
     for (const candidate of requested) {
       for (const bound of existing) {
-        if (candidate.publishedPort === bound.publishedPort
-          && candidate.protocol === bound.protocol
-          && publishedHostsOverlap(candidate.hostIp, bound.hostIp)) {
+        if (publishedPortsOverlap(candidate, bound)) {
           throw new DockerComposeProjectRegistryError(
             'docker_compose_published_port_conflict',
             `Published host port ${candidate.hostIp ?? '*'}:${candidate.publishedPort}/${candidate.protocol} is already allocated by Compose project "${other.projectName}"`,
@@ -551,6 +575,7 @@ export function createDockerComposeProjectRegistry({
       serverId: project.serverId,
       excludeProjectId: project.id,
       services: summary.services,
+      previousServices: project.services,
     });
     if (typeof beforeUpdateProject === 'function') {
       await beforeUpdateProject({ current: publicProject(project), next: summary });

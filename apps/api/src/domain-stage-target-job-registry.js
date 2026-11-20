@@ -44,8 +44,10 @@ function assertDependencies(
 }
 
 function resolvedNginxSettings(domain, resolved, current) {
-  if (!['passenger', 'php'].includes(resolved.targetType)) return current;
-  return domainNginxSettingsForTarget(domain, resolved.targetType);
+  if (['passenger', 'php'].includes(resolved.targetType)) {
+    return domainNginxSettingsForTarget(domain, resolved.targetType);
+  }
+  return domain?.nginxSettings !== undefined ? structuredClone(domain.nginxSettings) : current;
 }
 
 async function assertPassengerMigrationIdle(registry) {
@@ -94,17 +96,41 @@ export function createDomainStageTargetJobRegistry({
       const website = await websiteRegistry.getWebsite(domain.websiteId);
       if (website?.applicationId !== lockedApplicationId) throw new DomainRegistryError('passenger_runtime_binding_drift', 'Domain Application changed while acquiring its routing lock', 409);
     }
+    if (input.payload?.domainRevision !== undefined && input.payload.domainRevision !== domain.desiredRevision) {
+      throw new DomainRegistryError(
+        'domain_stage_routing_drift',
+        'Domain routing configuration changed before staging could begin; retry staging',
+        409,
+      );
+    }
     await assertPassengerMigrationIdle(registry);
     const proxyRouteProjects = proxyRouteProjectIds(domain.nginxSettings?.proxyRoutes);
     return withProxyRouteProjectLocks(siteMutationLock, proxyRouteProjects, async () => {
+      const lockedDomain = await domainRegistry.getDomain(input.resourceId);
+      if (!lockedDomain || lockedDomain.serverId !== input.serverId) {
+        throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
+      }
+      const lockedProjectIds = proxyRouteProjectIds(lockedDomain.nginxSettings?.proxyRoutes);
+      if (
+        lockedDomain.desiredRevision !== domain.desiredRevision
+        || (input.payload?.domainRevision !== undefined && input.payload.domainRevision !== lockedDomain.desiredRevision)
+        || lockedProjectIds.length !== proxyRouteProjects.length
+        || lockedProjectIds.some((id, index) => id !== proxyRouteProjects[index])
+      ) {
+        throw new DomainRegistryError(
+          'domain_stage_routing_drift',
+          'Domain routing configuration changed before staging could begin; retry staging',
+          409,
+        );
+      }
       await verifyDomainProxyRoutes({
-        routes: domain.nginxSettings?.proxyRoutes,
-        serverId: domain.serverId,
+        routes: lockedDomain.nginxSettings?.proxyRoutes,
+        serverId: lockedDomain.serverId,
         dockerComposeProjectRegistry,
         jobRegistry: registry,
       });
       const resolved = await resolveWebsiteDomainTarget({
-        domain,
+        domain: lockedDomain,
         websiteRegistry,
         dockerComposeProjectRegistry,
         applicationRegistry,
@@ -119,9 +145,9 @@ export function createDomainStageTargetJobRegistry({
         }
         for (const job of await registry.listJobs()) {
           if (job.operation !== OPERATIONS.DOMAIN_STAGE || job.payload?.targetType !== 'passenger'
-            || !['queued', 'running'].includes(job.status) || job.serverId !== domain.serverId) continue;
+            || !['queued', 'running'].includes(job.status) || job.serverId !== lockedDomain.serverId) continue;
           const queuedDomain = await domainRegistry.getDomain(job.resourceId);
-          if (queuedDomain?.websiteId === domain.websiteId) {
+          if (queuedDomain?.websiteId === lockedDomain.websiteId) {
             throw new DomainRegistryError('passenger_domain_routing_busy', 'Wait for this Website Domain preparation to finish before preparing another Domain', 409);
           }
         }
@@ -132,10 +158,10 @@ export function createDomainStageTargetJobRegistry({
         ...input,
         payload: {
           ...payload,
-          domainRevision: domain.desiredRevision,
+          domainRevision: lockedDomain.desiredRevision,
           targetType: resolved.targetType,
           target: resolved.target,
-          nginxSettings: resolvedNginxSettings(domain, resolved, input.payload?.nginxSettings),
+          nginxSettings: resolvedNginxSettings(lockedDomain, resolved, input.payload?.nginxSettings),
           ...(resolved.passengerAttachment ? { passengerAttachment: resolved.passengerAttachment } : {}),
         },
       });

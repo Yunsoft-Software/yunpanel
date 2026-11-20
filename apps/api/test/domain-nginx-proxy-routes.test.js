@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { access, mkdtemp, rm } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import { once } from 'node:events';
 import os from 'node:os';
@@ -21,6 +21,7 @@ import { createApplicationRegistry } from '../src/application-registry.js';
 import { createApplicationRuntimeBindingRegistry } from '../src/application-runtime-binding-registry.js';
 import { createAuthenticatedApi } from '../src/auth-http.js';
 import { createAuthStore } from '../src/auth-store.js';
+import { createApp as createCoreApp } from '../src/core-app.js';
 import { createDockerComposeApiHandler } from '../src/docker-compose-api-handler.js';
 import { createDockerComposeEnvironmentRegistry } from '../src/docker-compose-environment-registry.js';
 import { createDockerComposeOperationsService } from '../src/docker-compose-operations.js';
@@ -31,8 +32,18 @@ import {
 import { createDockerComposeRemoval } from '../src/docker-compose-removal.js';
 import { DockerPleskCatalogError, resolveDockerProxyRule } from '../src/docker-plesk-catalog.js';
 import { createDockerRegistryCredentialRegistry } from '../src/docker-registry-credential-registry.js';
+import {
+  createDomainHandler,
+  createDomainUpdateHandler,
+  createDomainUpdatePreviewHandler,
+} from '../src/domain-http.js';
 import { domainNginxSettingsForTarget } from '../src/domain-nginx-settings.js';
-import { assertProjectUpdatePreservesProxyRoutes } from '../src/domain-proxy-routes.js';
+import {
+  assertOwnerProxyRouteAccess,
+  assertProjectUpdatePreservesProxyRoutes,
+  isOwnerManagementAuth,
+  requireOwnerDockerAccess,
+} from '../src/domain-proxy-routes.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
 import { createDomainStageTargetJobRegistry } from '../src/domain-stage-target-job-registry.js';
 import { hostingWebsiteDigest } from '../src/hosting-site-allocation-store.js';
@@ -87,7 +98,11 @@ function createRealComposeValidator(rootDir) {
   });
 }
 
-async function createRealFixture(t, { ownerMfaRequired = false } = {}) {
+async function createRealFixture(t, {
+  ownerMfaRequired = false,
+  siteMutationLockOverride = undefined,
+  seedProjectsFile = null,
+} = {}) {
   const rootDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-proxy-routes-'));
   t.after(() => rm(rootDir, { recursive: true, force: true }));
 
@@ -111,7 +126,9 @@ async function createRealFixture(t, { ownerMfaRequired = false } = {}) {
   const localServer = await serverRegistry.createLocalServer({ hostname: 'panel.example.com', displayName: 'Local Panel' });
   const serverId = localServer.id;
 
-  const siteMutationLock = createSiteMutationLock({ root: path.join(rootDir, 'locks') });
+  const siteMutationLock = siteMutationLockOverride !== undefined
+    ? siteMutationLockOverride
+    : createSiteMutationLock({ root: path.join(rootDir, 'locks') });
   const baseJobRegistry = createJobRegistry({
     serverExists: async (id) => Boolean(await serverRegistry.getServer(id)),
   });
@@ -119,8 +136,20 @@ async function createRealFixture(t, { ownerMfaRequired = false } = {}) {
   let domainRegistryRef = null;
   let jobRegistryRef = null;
 
+  const projectsFilePath = path.join(rootDir, 'docker-projects.json');
+  const validateDockerCompose = createRealComposeValidator(rootDir);
+  if (typeof seedProjectsFile === 'function') {
+    await seedProjectsFile({
+      rootDir,
+      projectsFilePath,
+      masterKey,
+      serverId,
+      validateDockerCompose,
+    });
+  }
+
   const projectRegistry = createDockerComposeProjectRegistry({
-    filePath: path.join(rootDir, 'docker-projects.json'),
+    filePath: projectsFilePath,
     masterKey,
     serverExists: async (id) => Boolean(await serverRegistry.getServer(id)),
     beforeUpdateProject: ({ current, next }) => assertProjectUpdatePreservesProxyRoutes({
@@ -186,9 +215,8 @@ async function createRealFixture(t, { ownerMfaRequired = false } = {}) {
   });
   jobRegistryRef = jobRegistry;
 
-  // Real host-runtime observer and real docker compose config validator
+  // Real host-runtime observer (validateDockerCompose already created above)
   const observer = createDockerComposeObserver();
-  const validateDockerCompose = createRealComposeValidator(rootDir);
 
   const removal = createDockerComposeRemoval({
     projectRegistry,
@@ -364,6 +392,7 @@ async function createRealFixture(t, { ownerMfaRequired = false } = {}) {
   return {
     rootDir,
     serverId,
+    serverRegistry,
     baseUrl,
     website,
     domain,
@@ -1221,4 +1250,666 @@ test('PHP and Passenger projections preserve proxyRoutes through protocol valida
   assert.match(passengerConfig, /location \^~ \/api\/ \{\n    passenger_enabled off;\n    proxy_pass http:\/\/127\.0\.0\.1:13000\/;/);
 
   assert.equal(Object.hasOwn(domainNginxSettingsForTarget({ nginxSettings: { clientMaxBodySizeMb: null, headers: [] } }, 'php'), 'proxyRoutes'), false);
+});
+
+test('missing or incomplete siteMutationLock fails closed with 503 across all 6 proxyRoutes and Compose lock callers while empty proxyRoutes pass through', async (t) => {
+  for (const brokenLock of [null, {}]) {
+    const fx = await createRealFixture(t, { siteMutationLockOverride: brokenLock });
+    const owner = await fx.loginAs('owner');
+
+    const project = (await owner.api('POST', '/api/docker/projects', {
+      serverId: fx.serverId,
+      projectName: 'lock_guard_stack',
+      document: COMPOSE_INITIAL,
+    })).json.data.project;
+
+    const route = {
+      path: '/api',
+      projectId: project.id,
+      serviceName: 'api',
+      targetPort: 3000,
+      protocol: 'tcp',
+      upstreamHost: '127.0.0.1',
+      upstreamPort: 13000,
+      websocket: true,
+      stripPrefix: false,
+    };
+
+    // 1. POST /api/domains (management-app / domain-http.js): non-empty proxyRoutes -> 503; empty -> 201
+    const createBlocked = await owner.api('POST', '/api/domains', {
+      serverId: fx.serverId,
+      websiteId: fx.website.id,
+      primaryDomain: 'locked-create.example.com',
+      targetType: 'static',
+      target: { root: fx.website.documentRoot, spaFallback: true },
+      nginxSettings: { proxyRoutes: [route] },
+    });
+    assert.equal(createBlocked.status, 503);
+    assert.equal(createBlocked.json.error.code, 'docker_proxy_route_lock_unavailable');
+
+    const createEmptyAllowed = await owner.api('POST', '/api/domains', {
+      serverId: fx.serverId,
+      websiteId: fx.website.id,
+      primaryDomain: 'empty-routes.example.com',
+      targetType: 'static',
+      target: { root: fx.website.documentRoot, spaFallback: true },
+      nginxSettings: { proxyRoutes: [] },
+    });
+    assert.equal(createEmptyAllowed.status, 201);
+
+    // 2. core-app.js POST /api/domains directly: non-empty proxyRoutes -> 503; empty -> 201
+    const coreApp = createCoreApp({
+      registry: fx.serverRegistry,
+      domainRegistry: fx.domainRegistry,
+      websiteRegistry: fx.websiteRegistry,
+      applicationRegistry: fx.applicationRegistry,
+      jobRegistry: fx.jobRegistry,
+      dockerComposeProjectRegistry: fx.projectRegistry,
+      siteMutationLock: brokenLock,
+      localServerId: fx.serverId,
+    });
+    const coreRouteLayer = coreApp.router.stack.find((layer) => layer.route?.path === '/api/domains' && layer.route.methods.post);
+    assert.ok(coreRouteLayer);
+    const coreCreateHandler = coreRouteLayer.route.stack.at(-1).handle;
+    const ownerAuth = {
+      user: { id: 'owner-1', username: 'owner', role: 'owner' },
+      access: { mode: 'management', permissions: ['*'] },
+      security: { managementAllowed: true },
+    };
+    const coreBlockedRes = { statusCode: 200, body: null, status(c) { this.statusCode = c; return this; }, json(b) { this.body = b; return this; } };
+    let coreBlockedErr = null;
+    try {
+      await coreCreateHandler({
+        auth: ownerAuth,
+        body: {
+          serverId: fx.serverId,
+          websiteId: fx.website.id,
+          primaryDomain: 'core-locked.example.com',
+          targetType: 'static',
+          target: { root: fx.website.documentRoot, spaFallback: true },
+          nginxSettings: { proxyRoutes: [route] },
+        },
+      }, coreBlockedRes, (e) => { coreBlockedErr = e; });
+    } catch (e) {
+      coreBlockedErr = e;
+    }
+    assert.equal(coreBlockedErr?.code, 'docker_proxy_route_lock_unavailable');
+    assert.equal(coreBlockedErr?.status, 503);
+
+    const coreEmptyRes = { statusCode: 200, body: null, status(c) { this.statusCode = c; return this; }, json(b) { this.body = b; return this; } };
+    let coreEmptyErr = null;
+    await coreCreateHandler({
+      auth: ownerAuth,
+      body: {
+        serverId: fx.serverId,
+        websiteId: fx.website.id,
+        primaryDomain: 'core-empty.example.com',
+        targetType: 'static',
+        target: { root: fx.website.documentRoot, spaFallback: true },
+        nginxSettings: { proxyRoutes: [] },
+      },
+    }, coreEmptyRes, (e) => { coreEmptyErr = e; });
+    assert.equal(coreEmptyErr, null);
+    assert.equal(coreEmptyRes.statusCode, 201);
+
+    // 3. PATCH /api/domains/:id (domain-http.js): adding proxyRoutes -> 503; unrelated setting -> 200
+    const addChanges = { nginxSettings: { ...fx.domain.nginxSettings, proxyRoutes: [route] } };
+    const addPrev = (await owner.api('POST', `/api/domains/${fx.domain.id}/update-preview`, { changes: addChanges })).json.data;
+    const patchBlocked = await owner.api('PATCH', `/api/domains/${fx.domain.id}`, {
+      changes: addChanges,
+      previewDigest: addPrev.previewDigest,
+      confirmation: addPrev.confirmation,
+    });
+    assert.equal(patchBlocked.status, 503);
+    assert.equal(patchBlocked.json.error.code, 'docker_proxy_route_lock_unavailable');
+
+    const gzipChanges = { nginxSettings: { ...fx.domain.nginxSettings, gzip: true } };
+    const gzipPrev = (await owner.api('POST', `/api/domains/${fx.domain.id}/update-preview`, { changes: gzipChanges })).json.data;
+    assert.equal((await owner.api('PATCH', `/api/domains/${fx.domain.id}`, {
+      changes: gzipChanges,
+      previewDigest: gzipPrev.previewDigest,
+      confirmation: gzipPrev.confirmation,
+    })).status, 200);
+
+    // 4. DOMAIN_STAGE: empty proxyRoutes passes through cleanly; persisted proxyRoutes fails closed 503
+    const stageEmptyRes = await owner.api('POST', `/api/domains/${createEmptyAllowed.json.data.id}/stage`, {});
+    assert.equal(stageEmptyRes.status, 202);
+
+    const routedDomain = await fx.domainRegistry.createDomain({
+      serverId: fx.serverId,
+      websiteId: fx.website.id,
+      primaryDomain: 'routed-stage-lock.example.com',
+      targetType: 'static',
+      target: { root: fx.website.documentRoot, spaFallback: true },
+      nginxSettings: { proxyRoutes: [route] },
+    });
+    const stageBlocked = await owner.api('POST', `/api/domains/${routedDomain.id}/stage`, {});
+    assert.equal(stageBlocked.status, 503);
+    assert.equal(stageBlocked.json.error.code, 'docker_proxy_route_lock_unavailable');
+
+    // 5. PUT /api/docker/projects/:id -> 503
+    const putBlocked = await owner.api('PUT', `/api/docker/projects/${project.id}`, {
+      expectedRevision: project.revision,
+      document: COMPOSE_INITIAL,
+    });
+    assert.equal(putBlocked.status, 503);
+    assert.equal(putBlocked.json.error.code, 'docker_proxy_route_lock_unavailable');
+
+    // 6. POST /api/docker/projects/:id/operations/remove -> 503 (use fresh unreferenced project)
+    const unrefProject = (await owner.api('POST', '/api/docker/projects', {
+      serverId: fx.serverId,
+      projectName: 'lock_guard_remove',
+      document: 'services:\n  web:\n    image: nginx:alpine\n    ports:\n      - "127.0.0.1:13111:80/tcp"\n',
+    })).json.data.project;
+    const remPrev = (await owner.api('POST', `/api/docker/projects/${unrefProject.id}/operations/remove/preview`, {})).json.data;
+    const remBlocked = await owner.api('POST', `/api/docker/projects/${unrefProject.id}/operations/remove`, {
+      expectedPreviewDigest: remPrev.previewDigest,
+      confirmation: remPrev.confirmation,
+    });
+    assert.equal(remBlocked.status, 503);
+    assert.equal(remBlocked.json.error.code, 'docker_proxy_route_lock_unavailable');
+  }
+});
+
+test('assertOwnerProxyRouteAccess and isOwnerManagementAuth fail closed (401 on missing auth, 403 on malformed Owner permissions or non-Owner mutations) across all domain HTTP handlers', async (t) => {
+  const fx = await createRealFixture(t);
+  const owner = await fx.loginAs('owner');
+  const project = (await owner.api('POST', '/api/docker/projects', {
+    serverId: fx.serverId,
+    projectName: 'auth_guard_stack',
+    document: COMPOSE_INITIAL,
+  })).json.data.project;
+
+  const route = {
+    path: '/api',
+    projectId: project.id,
+    serviceName: 'api',
+    targetPort: 3000,
+    protocol: 'tcp',
+    upstreamHost: '127.0.0.1',
+    upstreamPort: 13000,
+    websocket: true,
+    stripPrefix: false,
+  };
+
+  // Attach route as real Owner so currentRoutes is non-empty on fx.domain
+  const attachChanges = { nginxSettings: { ...fx.domain.nginxSettings, proxyRoutes: [route] } };
+  const attachPrev = (await owner.api('POST', `/api/domains/${fx.domain.id}/update-preview`, { changes: attachChanges })).json.data;
+  assert.equal((await owner.api('PATCH', `/api/domains/${fx.domain.id}`, {
+    changes: attachChanges,
+    previewDigest: attachPrev.previewDigest,
+    confirmation: attachPrev.confirmation,
+  })).status, 200);
+
+  // Strict isOwnerManagementAuth requires Array permissions containing '*'
+  assert.equal(isOwnerManagementAuth({
+    user: { role: 'owner' },
+    access: { mode: 'management' },
+    security: { managementAllowed: true },
+  }), false);
+  assert.equal(isOwnerManagementAuth({
+    user: { role: 'owner' },
+    access: { mode: 'management', permissions: [] },
+    security: { managementAllowed: true },
+  }), false);
+  assert.equal(isOwnerManagementAuth({
+    user: { role: 'owner' },
+    access: { mode: 'management', permissions: ['domains:write'] },
+    security: { managementAllowed: true },
+  }), false);
+  assert.equal(isOwnerManagementAuth({
+    user: { role: 'owner' },
+    access: { mode: 'management', permissions: ['*'] },
+    security: { managementAllowed: true },
+  }), true);
+
+  // requireOwnerDockerAccess rejects malformed Owner permissions with 403
+  let dockerMiddlewareStatus = 200;
+  let dockerMiddlewareBody = null;
+  let dockerNextCalled = false;
+  requireOwnerDockerAccess(
+    {
+      auth: {
+        user: { id: 'o1', role: 'owner' },
+        access: { mode: 'management', permissions: ['domains:write'] },
+        security: { managementAllowed: true },
+      },
+    },
+    { status(c) { dockerMiddlewareStatus = c; return this; }, json(b) { dockerMiddlewareBody = b; return this; } },
+    () => { dockerNextCalled = true; },
+  );
+  assert.equal(dockerNextCalled, false);
+  assert.equal(dockerMiddlewareStatus, 403);
+  assert.equal(dockerMiddlewareBody.error.code, 'docker_owner_required');
+
+  // Direct assertOwnerProxyRouteAccess checks: missing/incomplete auth -> 401 BEFORE unchanged-route bypass
+  for (const missingAuth of [undefined, null, {}, { user: { role: 'owner' } }, { user: { role: 'owner' }, access: { mode: 'management', permissions: ['*'] } }]) {
+    assert.throws(
+      () => assertOwnerProxyRouteAccess({ auth: missingAuth }, [route], { proxyRoutes: [route] }),
+      (err) => err?.code === 'unauthorized' && err.status === 401,
+    );
+  }
+
+  const createHandler = createDomainHandler(fx.domainRegistry, {
+    localServerId: fx.serverId,
+    dockerComposeProjectRegistry: fx.projectRegistry,
+    jobRegistry: fx.jobRegistry,
+    siteMutationLock: fx.siteMutationLock,
+  });
+  const previewHandler = createDomainUpdatePreviewHandler(fx.domainRegistry, {
+    localServerId: fx.serverId,
+    dockerComposeProjectRegistry: fx.projectRegistry,
+    jobRegistry: fx.jobRegistry,
+  });
+  const updateHandler = createDomainUpdateHandler(fx.domainRegistry, {
+    localServerId: fx.serverId,
+    dockerComposeProjectRegistry: fx.projectRegistry,
+    jobRegistry: fx.jobRegistry,
+    siteMutationLock: fx.siteMutationLock,
+  });
+  const coreApp = createCoreApp({
+    registry: fx.serverRegistry,
+    domainRegistry: fx.domainRegistry,
+    websiteRegistry: fx.websiteRegistry,
+    applicationRegistry: fx.applicationRegistry,
+    jobRegistry: fx.jobRegistry,
+    dockerComposeProjectRegistry: fx.projectRegistry,
+    siteMutationLock: fx.siteMutationLock,
+    localServerId: fx.serverId,
+  });
+  const coreCreateHandler = coreApp.router.stack
+    .find((layer) => layer.route?.path === '/api/domains' && layer.route.methods.post)
+    .route.stack.at(-1).handle;
+
+  async function callHandler(handler, req) {
+    let capturedError = null;
+    const res = { statusCode: 200, body: null, status(c) { this.statusCode = c; return this; }, json(b) { this.body = b; return this; } };
+    try {
+      await handler(req, res, (err) => { capturedError = err; });
+    } catch (err) {
+      capturedError = err;
+    }
+    return { error: capturedError, res };
+  }
+
+  const createBody = {
+    serverId: fx.serverId,
+    websiteId: fx.website.id,
+    primaryDomain: 'no-auth-create.example.com',
+    targetType: 'static',
+    target: { root: fx.website.documentRoot, spaFallback: true },
+    nginxSettings: { proxyRoutes: [route] },
+  };
+  const unchangedChanges = { nginxSettings: { ...fx.domain.nginxSettings, gzip: true, proxyRoutes: [route] } };
+  const unchangedPrev = await fx.domainRegistry.previewDomainUpdate({ domainId: fx.domain.id, changes: unchangedChanges });
+  const mutatedChanges = { nginxSettings: { ...fx.domain.nginxSettings, proxyRoutes: [] } };
+  const mutatedPrev = await fx.domainRegistry.previewDomainUpdate({ domainId: fx.domain.id, changes: mutatedChanges });
+
+  // Missing request.auth -> 401 unauthorized across all 4 handlers (even for unchanged proxyRoutes!)
+  assert.equal((await callHandler(createHandler, { body: createBody })).error?.status, 401);
+  assert.equal((await callHandler(coreCreateHandler, { body: createBody })).error?.status, 401);
+  assert.equal((await callHandler(previewHandler, { params: { domainId: fx.domain.id }, body: { changes: unchangedChanges } })).error?.status, 401);
+  assert.equal((await callHandler(updateHandler, {
+    params: { domainId: fx.domain.id },
+    body: { changes: unchangedChanges, previewDigest: unchangedPrev.previewDigest, confirmation: unchangedPrev.confirmation },
+  })).error?.status, 401);
+
+  // Malformed Owner permissions & non-Owner roles -> 403 proxy_routes_owner_only on create or mutation
+  const malformedOwnerAuth = {
+    user: { id: 'o1', role: 'owner' },
+    access: { mode: 'management', permissions: ['domains:write'] },
+    security: { managementAllowed: true },
+  };
+  const customerAuth = {
+    user: { id: 'c1', role: 'site_manager', websiteIds: [fx.website.id] },
+    access: { mode: 'site_management', permissions: ['site:domains'], websiteIds: [fx.website.id] },
+    security: { managementAllowed: true },
+  };
+  for (const restrictedAuth of [malformedOwnerAuth, customerAuth]) {
+    const rCreate = await callHandler(createHandler, { auth: restrictedAuth, body: createBody });
+    assert.equal(rCreate.error?.status, 403);
+    assert.equal(rCreate.error?.code, 'proxy_routes_owner_only');
+
+    const rCoreCreate = await callHandler(coreCreateHandler, { auth: restrictedAuth, body: createBody });
+    assert.equal(rCoreCreate.error?.status, 403);
+    assert.equal(rCoreCreate.error?.code, 'proxy_routes_owner_only');
+
+    const rPrevMut = await callHandler(previewHandler, {
+      auth: restrictedAuth,
+      params: { domainId: fx.domain.id },
+      body: { changes: mutatedChanges },
+    });
+    assert.equal(rPrevMut.error?.status, 403);
+    assert.equal(rPrevMut.error?.code, 'proxy_routes_owner_only');
+
+    const rUpdMut = await callHandler(updateHandler, {
+      auth: restrictedAuth,
+      params: { domainId: fx.domain.id },
+      body: { changes: mutatedChanges, previewDigest: mutatedPrev.previewDigest, confirmation: mutatedPrev.confirmation },
+    });
+    assert.equal(rUpdMut.error?.status, 403);
+    assert.equal(rUpdMut.error?.code, 'proxy_routes_owner_only');
+
+    // Authenticated non-Owner / restricted actor CAN still preview with strictly unchanged proxyRoutes
+    const rPrevUnchanged = await callHandler(previewHandler, {
+      auth: restrictedAuth,
+      params: { domainId: fx.domain.id },
+      body: { changes: unchangedChanges },
+    });
+    assert.equal(rPrevUnchanged.error, null);
+    assert.equal(rPrevUnchanged.res.statusCode, 200);
+  }
+});
+
+test('DOMAIN_STAGE TOCTOU defense uses authoritative locked domain nginxSettings and rejects stale revision or concurrent route drift with 409', async (t) => {
+  const fx = await createRealFixture(t);
+  const owner = await fx.loginAs('owner');
+
+  const projectA = (await owner.api('POST', '/api/docker/projects', {
+    serverId: fx.serverId,
+    projectName: 'toctou_stack_a',
+    document: COMPOSE_INITIAL,
+  })).json.data.project;
+  const projectB = (await owner.api('POST', '/api/docker/projects', {
+    serverId: fx.serverId,
+    projectName: 'toctou_stack_b',
+    document: 'services:\n  api:\n    image: node:22-alpine\n    ports:\n      - "127.0.0.1:13002:3000/tcp"\n',
+  })).json.data.project;
+
+  const routeA = {
+    path: '/api',
+    projectId: projectA.id,
+    serviceName: 'api',
+    targetPort: 3000,
+    protocol: 'tcp',
+    upstreamHost: '127.0.0.1',
+    upstreamPort: 13000,
+    websocket: true,
+    stripPrefix: false,
+  };
+  const routeB = {
+    path: '/api',
+    projectId: projectB.id,
+    serviceName: 'api',
+    targetPort: 3000,
+    protocol: 'tcp',
+    upstreamHost: '127.0.0.1',
+    upstreamPort: 13002,
+    websocket: true,
+    stripPrefix: false,
+  };
+
+  // Persist routeA on real domainRegistry
+  const attachChanges = { nginxSettings: { ...fx.domain.nginxSettings, proxyRoutes: [routeA] } };
+  const attachPrev = (await owner.api('POST', `/api/domains/${fx.domain.id}/update-preview`, { changes: attachChanges })).json.data;
+  assert.equal((await owner.api('PATCH', `/api/domains/${fx.domain.id}`, {
+    changes: attachChanges,
+    previewDigest: attachPrev.previewDigest,
+    confirmation: attachPrev.confirmation,
+  })).status, 200);
+  const currentDomain = await fx.domainRegistry.getDomain(fx.domain.id);
+
+  // 1. Stale input.payload.nginxSettings cannot override authoritative lockedDomain.nginxSettings
+  const stagedJob = await fx.jobRegistry.enqueue({
+    serverId: fx.serverId,
+    type: 'domain.stage',
+    operation: OPERATIONS.DOMAIN_STAGE,
+    resourceType: 'domain',
+    resourceId: currentDomain.id,
+    payload: {
+      domainRevision: currentDomain.desiredRevision,
+      primaryDomain: currentDomain.primaryDomain,
+      aliases: currentDomain.aliases,
+      targetType: currentDomain.targetType,
+      target: currentDomain.target,
+      nginxSettings: { ...currentDomain.nginxSettings, proxyRoutes: [routeB] },
+      canonicalRedirect: currentDomain.canonicalRedirect,
+      httpsRedirect: currentDomain.httpsRedirect,
+    },
+  });
+  assert.deepEqual(stagedJob.payload.nginxSettings.proxyRoutes, [routeA]);
+  assert.equal(stagedJob.payload.domainRevision, currentDomain.desiredRevision);
+  await fx.baseJobRegistry.cancel(stagedJob.id);
+
+  // 2. Stale input.payload.domainRevision fails closed with 409 domain_stage_routing_drift
+  await assert.rejects(
+    fx.jobRegistry.enqueue({
+      serverId: fx.serverId,
+      type: 'domain.stage',
+      operation: OPERATIONS.DOMAIN_STAGE,
+      resourceType: 'domain',
+      resourceId: currentDomain.id,
+      payload: {
+        domainRevision: currentDomain.desiredRevision - 1,
+        primaryDomain: currentDomain.primaryDomain,
+        aliases: currentDomain.aliases,
+        targetType: currentDomain.targetType,
+        target: currentDomain.target,
+        nginxSettings: currentDomain.nginxSettings,
+        canonicalRedirect: currentDomain.canonicalRedirect,
+        httpsRedirect: currentDomain.httpsRedirect,
+      },
+    }),
+    (err) => err?.code === 'domain_stage_routing_drift' && err.status === 409,
+  );
+
+  // 3. Concurrent domain route drift between pre-lock read and in-lock re-read fails closed 409
+  const jobsBeforeRace = (await fx.baseJobRegistry.listJobs()).length;
+  let mutatedDuringLock = false;
+  const racingLock = {
+    withDockerProjectLocks(ids, action) {
+      return fx.siteMutationLock.withDockerProjectLocks(ids, async () => {
+        if (!mutatedDuringLock) {
+          mutatedDuringLock = true;
+          const nextChanges = { nginxSettings: { ...currentDomain.nginxSettings, proxyRoutes: [routeB] } };
+          const p = await fx.domainRegistry.previewDomainUpdate({ domainId: currentDomain.id, changes: nextChanges });
+          await fx.domainRegistry.updateDomain({
+            domainId: currentDomain.id,
+            changes: nextChanges,
+            previewDigest: p.previewDigest,
+            skipLock: true,
+          });
+        }
+        return action();
+      });
+    },
+  };
+  const racingStageRegistry = createDomainStageTargetJobRegistry({
+    registry: fx.baseJobRegistry,
+    domainRegistry: fx.domainRegistry,
+    websiteRegistry: fx.websiteRegistry,
+    dockerComposeProjectRegistry: fx.projectRegistry,
+    applicationRegistry: fx.applicationRegistry,
+    runtimeBindingRegistry: fx.runtimeBindingRegistry,
+    siteMutationLock: racingLock,
+  });
+
+  await assert.rejects(
+    racingStageRegistry.enqueue({
+      serverId: fx.serverId,
+      type: 'domain.stage',
+      operation: OPERATIONS.DOMAIN_STAGE,
+      resourceType: 'domain',
+      resourceId: currentDomain.id,
+      payload: {
+        domainRevision: currentDomain.desiredRevision,
+        primaryDomain: currentDomain.primaryDomain,
+        aliases: currentDomain.aliases,
+        targetType: currentDomain.targetType,
+        target: currentDomain.target,
+        nginxSettings: currentDomain.nginxSettings,
+        canonicalRedirect: currentDomain.canonicalRedirect,
+        httpsRedirect: currentDomain.httpsRedirect,
+      },
+    }),
+    (err) => err?.code === 'domain_stage_routing_drift' && err.status === 409,
+  );
+  assert.equal(mutatedDuringLock, true);
+  assert.equal((await fx.baseJobRegistry.listJobs()).length, jobsBeforeRace);
+});
+
+test('legacy Compose projects sharing a published host port allow unchanged routine edits, block new/changed port conflicts, block non-exclusive proxyRoutes (409), and allow binding once exclusive', async (t) => {
+  const sharedDocA = [
+    'services:',
+    '  web:',
+    '    image: nginx:1.25-alpine',
+    '    ports:',
+    '      - "127.0.0.1:18123:80/tcp"',
+    '',
+  ].join('\n');
+  const sharedDocB = [
+    'services:',
+    '  web:',
+    '    image: caddy:2-alpine',
+    '    ports:',
+    '      - "127.0.0.1:18123:80/tcp"',
+    '',
+  ].join('\n');
+  const thirdDocC = [
+    'services:',
+    '  web:',
+    '    image: httpd:2.4-alpine',
+    '    ports:',
+    '      - "127.0.0.1:18199:80/tcp"',
+    '',
+  ].join('\n');
+
+  let legacyAId = null;
+  let legacyBId = null;
+
+  const fx = await createRealFixture(t, {
+    seedProjectsFile: async ({ rootDir, projectsFilePath, masterKey, serverId, validateDockerCompose }) => {
+      // Create 3 real encrypted records in isolated temporary files using real docker compose CLI,
+      // then combine them into one legacy persisted store simulating pre-Slice-A port sharing.
+      const records = [];
+      for (const [name, doc] of [['legacy_a', sharedDocA], ['legacy_b', sharedDocB], ['legacy_c', thirdDocC]]) {
+        const tmpStore = path.join(rootDir, `seed-${name}.json`);
+        const reg = createDockerComposeProjectRegistry({
+          filePath: tmpStore,
+          masterKey,
+          serverExists: async () => true,
+        });
+        await reg.init();
+        const validation = await validateDockerCompose({
+          projectName: name,
+          document: doc,
+          environment: {},
+          interpolate: false,
+        });
+        const created = await reg.createProject({ serverId, projectName: name, document: doc, validation });
+        if (name === 'legacy_a') legacyAId = created.id;
+        if (name === 'legacy_b') legacyBId = created.id;
+        const parsed = JSON.parse(await readFile(tmpStore, 'utf8'));
+        records.push(...parsed.projects);
+      }
+      await writeFile(projectsFilePath, JSON.stringify({ version: 1, projects: records }, null, 2), { mode: 0o600 });
+    },
+  });
+
+  const owner = await fx.loginAs('owner');
+
+  // 1. Routine YAML edit on legacy_a (image + env, unchanged 127.0.0.1:18123:80/tcp) MUST SUCCEED
+  const routineDocA = [
+    'services:',
+    '  web:',
+    '    image: nginx:1.27-alpine',
+    '    environment:',
+    '      APP_ENV: production',
+    '    ports:',
+    '      - "127.0.0.1:18123:80/tcp"',
+    '',
+  ].join('\n');
+  const routineRes = await owner.api('PUT', `/api/docker/projects/${legacyAId}`, {
+    expectedRevision: 1,
+    document: routineDocA,
+  });
+  assert.equal(routineRes.status, 200);
+  assert.equal(routineRes.json.data.revision, 2);
+
+  // 2a. Widening 127.0.0.1:18123 -> 0.0.0.0:18123 collides with legacy_b -> 409 docker_compose_published_port_conflict
+  const widenRes = await owner.api('PUT', `/api/docker/projects/${legacyAId}`, {
+    expectedRevision: 2,
+    document: 'services:\n  web:\n    image: nginx:1.27-alpine\n    ports:\n      - "0.0.0.0:18123:80/tcp"\n',
+  });
+  assert.equal(widenRes.status, 409);
+  assert.equal(widenRes.json.error.code, 'docker_compose_published_port_conflict');
+
+  // 2b. Moving legacy_a to 127.0.0.1:18199 (held by legacy_c) -> 409 docker_compose_published_port_conflict
+  const collideCRes = await owner.api('PUT', `/api/docker/projects/${legacyAId}`, {
+    expectedRevision: 2,
+    document: 'services:\n  web:\n    image: nginx:1.27-alpine\n    ports:\n      - "127.0.0.1:18199:80/tcp"\n',
+  });
+  assert.equal(collideCRes.status, 409);
+  assert.equal(collideCRes.json.error.code, 'docker_compose_published_port_conflict');
+
+  // 3. Binding a /api proxyRoute to legacy_a's shared 127.0.0.1:18123 FAILS on create, update-preview, PATCH, and stage -> 409
+  const sharedRoute = {
+    path: '/api',
+    projectId: legacyAId,
+    serviceName: 'web',
+    targetPort: 80,
+    protocol: 'tcp',
+    upstreamHost: '127.0.0.1',
+    upstreamPort: 18123,
+    websocket: true,
+    stripPrefix: false,
+  };
+  const createSharedRes = await owner.api('POST', '/api/domains', {
+    serverId: fx.serverId,
+    websiteId: fx.website.id,
+    primaryDomain: 'shared-port.example.com',
+    targetType: 'static',
+    target: { root: fx.website.documentRoot, spaFallback: true },
+    nginxSettings: { proxyRoutes: [sharedRoute] },
+  });
+  assert.equal(createSharedRes.status, 409);
+  assert.equal(createSharedRes.json.error.code, 'docker_proxy_route_port_shared_across_projects');
+
+  const routeChanges = { nginxSettings: { ...fx.domain.nginxSettings, proxyRoutes: [sharedRoute] } };
+  const previewSharedRes = await owner.api('POST', `/api/domains/${fx.domain.id}/update-preview`, { changes: routeChanges });
+  assert.equal(previewSharedRes.status, 409);
+  assert.equal(previewSharedRes.json.error.code, 'docker_proxy_route_port_shared_across_projects');
+
+  const directPrev = await fx.domainRegistry.previewDomainUpdate({ domainId: fx.domain.id, changes: routeChanges });
+  const patchSharedRes = await owner.api('PATCH', `/api/domains/${fx.domain.id}`, {
+    changes: routeChanges,
+    previewDigest: directPrev.previewDigest,
+    confirmation: directPrev.confirmation,
+  });
+  assert.equal(patchSharedRes.status, 409);
+  assert.equal(patchSharedRes.json.error.code, 'docker_proxy_route_port_shared_across_projects');
+
+  const preExistingSharedDomain = await fx.domainRegistry.createDomain({
+    serverId: fx.serverId,
+    websiteId: fx.website.id,
+    primaryDomain: 'preexisting-shared.example.com',
+    targetType: 'static',
+    target: { root: fx.website.documentRoot, spaFallback: true },
+    nginxSettings: { proxyRoutes: [sharedRoute] },
+  });
+  const stageSharedRes = await owner.api('POST', `/api/domains/${preExistingSharedDomain.id}/stage`, {});
+  assert.equal(stageSharedRes.status, 409);
+  assert.equal(stageSharedRes.json.error.code, 'docker_proxy_route_port_shared_across_projects');
+
+  // 4. Move legacy_b to 127.0.0.1:18124 -> legacy_a's 127.0.0.1:18123 is now exclusive -> preview, PATCH, and stage SUCCEED!
+  const moveBRes = await owner.api('PUT', `/api/docker/projects/${legacyBId}`, {
+    expectedRevision: 1,
+    document: 'services:\n  web:\n    image: caddy:2-alpine\n    ports:\n      - "127.0.0.1:18124:80/tcp"\n',
+  });
+  assert.equal(moveBRes.status, 200);
+
+  const previewExclusiveRes = await owner.api('POST', `/api/domains/${fx.domain.id}/update-preview`, { changes: routeChanges });
+  assert.equal(previewExclusiveRes.status, 200);
+
+  const patchExclusiveRes = await owner.api('PATCH', `/api/domains/${fx.domain.id}`, {
+    changes: routeChanges,
+    previewDigest: previewExclusiveRes.json.data.previewDigest,
+    confirmation: previewExclusiveRes.json.data.confirmation,
+  });
+  assert.equal(patchExclusiveRes.status, 200);
+
+  const stageExclusiveRes = await owner.api('POST', `/api/domains/${fx.domain.id}/stage`, {});
+  assert.equal(stageExclusiveRes.status, 202);
+  const stagedExclusiveJob = await fx.baseJobRegistry.getJob(stageExclusiveRes.json.data.id);
+  assert.deepEqual(stagedExclusiveJob.payload.nginxSettings.proxyRoutes, [sharedRoute]);
 });

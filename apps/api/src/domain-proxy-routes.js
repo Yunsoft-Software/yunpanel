@@ -1,5 +1,6 @@
 import { OPERATIONS } from '@yunpanel/protocol';
 import { assertUuid } from '@yunpanel/shared';
+import { publishedPortsOverlap } from './docker-compose-project-registry.js';
 import { DomainRegistryError } from './domain-registry.js';
 import {
   ManagedComposeWebsiteBindingError,
@@ -26,7 +27,8 @@ export function isOwnerManagementAuth(auth) {
     auth?.user?.role === 'owner'
     && auth?.access?.mode === 'management'
     && auth?.security?.managementAllowed === true
-    && (!Array.isArray(auth?.access?.permissions) || auth.access.permissions.includes('*')),
+    && Array.isArray(auth?.access?.permissions)
+    && auth.access.permissions.includes('*'),
   );
 }
 
@@ -48,8 +50,15 @@ export function requireOwnerDockerAccess(request, response, next) {
 export function assertOwnerProxyRouteAccess(request, currentRoutes, nextSettings) {
   if (!nextSettings || typeof nextSettings !== 'object' || Array.isArray(nextSettings)) return;
   if (!Object.hasOwn(nextSettings, 'proxyRoutes')) return;
-  if (!request?.auth) return;
-  if (isOwnerManagementAuth(request.auth)) return;
+  const auth = request?.auth;
+  if (!auth?.user || !auth?.access || !auth?.security) {
+    throw new DomainRegistryError(
+      'unauthorized',
+      'Authenticated panel context is required.',
+      401,
+    );
+  }
+  if (isOwnerManagementAuth(auth)) return;
 
   const nextRoutes = nextSettings.proxyRoutes;
   if (currentRoutes === undefined) {
@@ -93,7 +102,18 @@ export async function withProxyRouteProjectLocks(
   ErrorClass = DomainRegistryError,
 ) {
   const ids = [...new Set((projectIds ?? []).filter((id) => typeof id === 'string' && id.length > 0))].sort();
-  if (!siteMutationLock || ids.length === 0) return action();
+  if (ids.length === 0) return action();
+  if (!siteMutationLock || (
+    typeof siteMutationLock.withDockerProjectLocks !== 'function'
+    && typeof siteMutationLock.withDockerProjectLock !== 'function'
+    && typeof siteMutationLock.withLock !== 'function'
+  )) {
+    throw new ErrorClass(
+      'docker_proxy_route_lock_unavailable',
+      'Docker project routing lock is unavailable',
+      503,
+    );
+  }
   try {
     if (typeof siteMutationLock.withDockerProjectLocks === 'function') {
       return await siteMutationLock.withDockerProjectLocks(ids, action);
@@ -105,14 +125,11 @@ export async function withProxyRouteProjectLocks(
       };
       return await acquire(0);
     }
-    if (typeof siteMutationLock.withLock === 'function') {
-      const acquire = (index) => {
-        if (index >= ids.length) return action();
-        return siteMutationLock.withLock({ resourceType: 'docker_project', resourceId: ids[index] }, () => acquire(index + 1));
-      };
-      return await acquire(0);
-    }
-    return await action();
+    const acquire = (index) => {
+      if (index >= ids.length) return action();
+      return siteMutationLock.withLock({ resourceType: 'docker_project', resourceId: ids[index] }, () => acquire(index + 1));
+    };
+    return await acquire(0);
   } catch (error) {
     if (error instanceof SiteMutationLockError || error?.name === 'SiteMutationLockError') {
       throw new ErrorClass(error.code, error.message, error.status ?? 409);
@@ -128,7 +145,18 @@ export async function verifyDomainProxyRoutes({
   jobRegistry = null,
 } = {}) {
   if (!Array.isArray(routes) || routes.length === 0) return [];
-  if (!dockerComposeProjectRegistry || typeof dockerComposeProjectRegistry.getProject !== 'function') {
+  if (!dockerComposeProjectRegistry
+    || typeof dockerComposeProjectRegistry.getProject !== 'function'
+    || typeof dockerComposeProjectRegistry.listProjects !== 'function') {
+    throw new DomainRegistryError(
+      'docker_project_registry_unavailable',
+      'Docker project registry is unavailable',
+      503,
+    );
+  }
+
+  const serverProjects = await dockerComposeProjectRegistry.listProjects({ serverId });
+  if (!Array.isArray(serverProjects)) {
     throw new DomainRegistryError(
       'docker_project_registry_unavailable',
       'Docker project registry is unavailable',
@@ -193,6 +221,23 @@ export async function verifyDomainProxyRoutes({
       throw new DomainRegistryError(
         'docker_proxy_route_binding_mismatch',
         'Sub-path proxy route upstream does not match the current Docker Compose published port binding',
+        409,
+      );
+    }
+
+    const sharedAcrossProjects = serverProjects.some((other) => {
+      if (!other || other.id === route.projectId || other.serverId !== serverId) return false;
+      return (other.services ?? []).some((service) => (
+        (service?.publishedPorts ?? []).some((published) => publishedPortsOverlap(
+          { hostIp: route.upstreamHost, publishedPort: route.upstreamPort, protocol: route.protocol },
+          published,
+        ))
+      ));
+    });
+    if (sharedAcrossProjects) {
+      throw new DomainRegistryError(
+        'docker_proxy_route_port_shared_across_projects',
+        'Sub-path proxy route requires a host port exclusively allocated to one Docker Compose project',
         409,
       );
     }
