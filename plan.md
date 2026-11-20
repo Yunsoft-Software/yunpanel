@@ -30,6 +30,17 @@ Node Passenger yeniden başlatması gerçek site Unix kullanıcısının süreci
 
 Bu kanıtlar özel test manifestlerinde sürüm ve kapsamıyla tutulur; aktif kurulum henüz değiştirilmedi. Önceki 320 tarayıcı sonucu eski dağıtımın bulgusudur. Paylaşılan DNS alanı/alt alan adı ve DNSSEC geri yükleme, geri yükleme sırasında process kesintisi, çalışan Node/Python ortamının fiziksel kabulü, WordPress klon/staging, gelişmiş DB/barındırma, posta/webmail ve tüm site/Docker temizliği açık kalır. Aşağıdaki bütün maddeler gerekli kabul, inceleme ve entegrasyon tamamlanana kadar açıktır.
 
+## 20 Kasım 2026 — Onaylanan Linux hosting pilotu ve Plesk geçişi
+
+İlk hedef Ubuntu 24.04 üzerinde yedekten kurtarılabilir ve Plesk’ten küçük dalgalarla taşınabilir bir panel. Mevcut Unix kullanıcı izolasyonu, site kurulum akışı, yedekleme, kalıcı işler ve normal HTTP/API doğrulamaları kullanılır.
+
+1. **Dış yedekten kurtarma.** Mevcut Restic/rclone üzerinden tek dış hedef, bir takvim ve bir saklama politikası. Depo erişim bilgisi ve YunPanel anahtarı kaynak makinenin dışında erişilebilir olmalı. Temiz Ubuntu VM’de yalnız dış yedekten bir site, SQL, posta kutusu ve panel yetkisi geri gelir. Kurtarma süresi ve geri yüklenen veri noktası ölçülür.
+2. **Plesk’ten kontrollü geçiş.** Operatörün onaylı, çevrimdışı dışa aktarımı mevcut salt okunur önizlemeye girer. Dosya için rsync, SQL için kaynak motorun dump aracı, posta için gerektiğinde imapsync kullanılır. Önce tek DB’li PHP sitesi, ardından postalı WordPress. DNS geçişinden önce hedef sağlık ve yetki kontrolleri, son eşitleme ve yeni yazıları da koruyan geri dönüş provası tamamlanır. Pilot kanıtı geldikten sonra mevcut önizlemeden kalıcı taşıma işi açılır.
+3. **Posta, DNS ve güvenlik.** Postfix ve Dovecot korunur. Otomatik yanıt Dovecot Sieve Vacation, izin ve engel listeleri kapsamlı Rspamd Multimap ile uygulanır. Kendi yetkili DNS’imiz için farklı ağda PowerDNS ikincil sunucu doğrulanır. WAF için mevcut Cloudflare yönetilen kuralları veya doğrudan barındırılan sitelerde gözlem modundan başlayan yerel CrowdSec AppSec seçilir.
+4. **Pilotun ardından genişleme.** WordPress staging’den canlıya seçici dosya ve tablo aktarımı. Sipariş ve üyelik verisi varsayılan olarak korunur. Çoklu DB, wildcard, ek SFTP ve gerçek müşteri kotaları doğrulanmış ihtiyaca göre genişletilir. Gelişmiş bayi ve abonelik, Windows ve geniş market ayrı fazlardır.
+
+Şu anda ayrı sunucu yok. [Yerel uygulama dilimleri](docs/gorevler/linux-hosting-pilot.md) ilerletilir. [Canlı kabul](todo.md#linux-hosting-pilotu-ve-plesk-geçişi) gerçek hedef ve ayrı dağıtım onayı geldiğinde tamamlanır. Son doğrulanmış `2003` kabulü [T883 kaydında](tasks/reopen/T883.md#8-docker-p2-canlı-kabulü--20-kasım-2026) durur.
+
 ## 24 Ekim 2026 — Yeni Mimari, Merkezi Shadcn UI/UX, Plesk Docker, Çoklu Linux ve Test Kararları (`24-10-2026` dalı)
 
 - [ ] **YP2-19 — Merkezi Tasarım Sistemi (`design-system` + `PanelKit`) ile Shadcn UI + Mikro-Efektli Arayüz ve Domain→Subdomain Görsel Ağaç Hiyerarşisi.** Eski çakışan çoklu CSS katmanları kaldırılır. Tüm tasarım tokenları, spotlight/border-beam/shimmer mikro-efektleri ve ortak bileşenler tek bir merkezi tasarım sisteminden (`apps/web/src/workspace/design-system/` ve `PanelKit.jsx`) sunulur; ileride tasarım kütüphanesi değiştirilmek istendiğinde sayfa kodlarına dokunmadan yalnız merkezi katman değiştirilerek geçiş yapılabilir. Web Siteleri ekranında her ana domain altında kendisine bağlı subdomain ve alias'lar hiyerarşik ağaç yapısında (uygulama, DB, Docker ve dosya kökü bilgileriyle) gösterilir.

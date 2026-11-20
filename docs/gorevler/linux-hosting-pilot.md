@@ -1,0 +1,27 @@
+# Linux hosting pilotu ve Plesk geçişi
+
+20 Kasım 2026 ürün onayı. Bu dilimler yerel kaynak ve araç doğrulaması içindir. Canlı geçiş ve kurtarma ölçütleri [kabul listesinde](../../todo.md#linux-hosting-pilotu-ve-plesk-geçişi) izlenir.
+
+### T936 · Dosya ve SQL taşıma paketini yerelde hazırla
+- **Bağımlı:** —
+- **Dosyalar:** `apps/api/src/plesk-offline-transfer.js`, `apps/api/test/plesk-offline-transfer.test.js`, `scripts/plesk-transfer.mjs`, `apps/api/test/plesk-transfer-cli.test.js`
+- **İş:** Mevcut salt okunur Plesk önizlemesine gelen kontrollü JSON ile aynı operatörün çıkardığı tek PHP site dosya ağacı ve tek SQL dump’ı için yerel, doğrulanabilir operatör hazırlığı. Normal site kurulum ve SQL bağlama sözleşmelerini kullanmaya hazır, kararlı ve kaynak kimliklerine bağlı bir çıktı üret. Kaynağa/uzak makineye bağlanma, DNS veya kayıt yazma, shell komutu çalıştırma yetkisini export’a verme. Canlı uygulama sonraki kabul diliminde.
+- **Kabul:** Gerçek geçici dosyalarla iki koşuda aynı girdi tekrar kullanılır. Yol kaçışı, symlink, yabancı girdi, değişmiş SQL/dosya ve dolu hedef fail-closed reddedilir. Kullanılır CLI ve okunur özet hazırdır.
+
+### T937 · Boş sunucu kurtarması için yerel hazırlanabilirliği doğrula
+- **Bağımlı:** —
+- **Dosyalar:** `apps/api/src/local-recovery-preflight.js`, `apps/api/test/local-recovery-preflight.test.js`, `scripts/local-migration-backup.mjs`, `apps/api/test/local-migration-backup-cli.test.js`, `docs/local-migration-backup.md`
+- **İş:** Mevcut migration yedeği doğrulama ve private restore stage hattından yararlan. Dış depodan indirilmiş doğrulanmış arşivin hazırlanabilirliğini kayıtlara yazmadan, yalnız yerel geçici dizinde ve redakte biçimde kontrol et. Restic/rclone sürecini ve YunPanel anahtarlarının ayrı erişim gereğini operatör akışına yaz. Paket üretimi ve canlı restore bu dilimin dışında.
+- **Kabul:** Gerçek arşiv, sahipsiz/bozuk arşiv, sürüm ya da kimlik uyuşmazlığı ve değişmeyen hedef kanıtı. Mevcut migration CLI regresyonları geçer. Canlı sunucuya başarı kaydı yazılmaz.
+
+### T938 · Dovecot otomatik yanıt ve Rspamd politika hazırlığı
+- **Bağımlı:** —
+- **Dosyalar:** `packages/config-templates/src/mail-vacation.js`, `packages/config-templates/src/mail-spam-policy.js`, `packages/config-templates/src/index.js`, `packages/config-templates/test/mail-vacation.test.js`, `packages/config-templates/test/mail-spam-policy.test.js`
+- **İş:** Dovecot/Pigeonhole Vacation ve Rspamd Multimap için yazılabilir, sınırlı, gerçek motorun derleyebileceği yapılandırma üret. Posta kutusu/alan adı sınırı, karakter kaçışları, olağan döngü önleme, standart DKIM/DMARC davranışı ve mevcut forwarding bozulmamalı. İlk dilim güvenli şablon ve kabul hazırlığıdır. Canlı paket kurulumu yok.
+- **Kabul:** Yasak girdiler dosya üretemez. Sieve ve Rspamd yapılandırmasının normal girdi siyasetini ve mail yönlendirmesiyle birlikte kullanılabilirliğini kaynak düzeyinde doğrula. Mevcut şablon regresyonları geçer. Gerçek hizmet varsa yalnız yerel testle kullan.
+
+### T939 · Plesk önizlemesinin Owner ve çıktı sınırını sıkılaştır
+- **Bağımlı:** —
+- **Dosyalar:** `apps/api/src/plesk-importer.js`, `apps/api/src/plesk-importer-http.js`, `apps/api/test/plesk-importer-local-auth.test.js`
+- **İş:** Önizleme Owner yönetim erişiminde kalır. TLS özel anahtarı, cron komutu ve ham JSON hata içeriği yanıta girmez. Tekrarlanan aynı güvenli envanter için özet kimliği kararlı kalır. Mevcut dışa aktarım veya site verisine yazılmaz.
+- **Kabul:** Geçici gerçek SQLite auth ve HTTP ile Owner erişimi ve site kullanıcısı reddi. Normal TLS/cron üstverisi okunabilir. Aynı girdi tekrarı aynı envanter özeti verir. Hatalı JSON ham girdi içeriğini açığa çıkarmaz.

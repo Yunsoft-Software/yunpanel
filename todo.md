@@ -1,5 +1,17 @@
 # YunPanel — Gerçek host ve tarayıcı kabulü
 
+## Linux hosting pilotu ve Plesk geçişi
+
+[Onaylanan plan](plan.md#20-kasım-2026--onaylanan-linux-hosting-pilotu-ve-plesk-geçişi) ve [yerel işler](docs/gorevler/linux-hosting-pilot.md) birbirini tamamlar. Mac üzerindeki dosya, SQLite, HTTP ve araç testleri Linux sistem servislerinin veya canlı taşımanın yerine geçmez.
+
+- [ ] Dış Restic/rclone yedeğinden izinli boş Ubuntu 24.04 VM’de panel hesabı/yetkisi, WordPress HTTP, gerçek SQL ve IMAP geri gelir. Kaynak makinenin kapalı olduğu varsayımıyla anahtar erişimi ve ölçülen kurtarma süresi kaydedilir.
+- [ ] Tek veritabanlı PHP ve postalı WordPress pilotlarında izinli Plesk dışa aktarımı, dosya/SQL/posta bütünlüğü, aynı girdinin tekrar işlenmesi, DNS öncesi test ve son eşitleme doğrulanır. Prova sırasında hedefte yeni yazılmış içerik ve postalar korunarak geri dönülür.
+- [ ] Sieve Vacation ve Rspamd Multimap gerçek Linux bileşenlerinde normal, hatalı ve kardeş posta kutusu senaryolarıyla doğrulanır. TLS, teslimat ve DKIM kontrolleri yapılır.
+- [ ] İkinci ağdaki PowerDNS, doğrulanmış bölge kopyasıyla birincil erişilebilirken ve yokken yetkili yanıt verir. Seçilen WAF normal login, yükleme ve API akışlarını korur. Ayar geri dönüşü sınanır.
+- [ ] Pilot kalıbı doğrulandıktan sonra WordPress staging’den seçici aktarımda üretim sipariş ve üyelik verisi korunur. Diğer çalışma ortamları kendi gerçek kabulünde izlenir.
+
+## Önceki kabul matrisi
+
 Güncel devam noktası: [12 Ekim güvenli durma ve devam kaydı](docs/checkpoint-2026-10-12.md). Kullanıcı isteğiyle çalışma durdu; `.28` paket `0.3.0-2026101141`, 8143/8143 kaynak testi, native queue/recovery temiz. Kalan test kaynakları, commitlenmemiş dilimler ve kabul sınırları bu kayıtta; aşağıdaki eski ara sonuçlar güncel kabul diye kullanılmaz.
 
 9–10 Ekim 2026. Aşağıdaki tam kabul kapıları açık; önceki checkbox veya Code Factory DONE kanıt değildir. Kullanıcı bu tur `.28` üzerinde izole gerçek kur/deneyip/kaldır testlerini açıkça onayladı. 10 Ekim ürün geliştirmesi onaylandı ve başladı; 11 Ekim yalnız `.28` temiz OS/YunPanel kurulumu ayrıca onaylandı ve tamamlandı. Başka hedef veya yeni deployment kapsamı ayrı onaya tabidir. `.44` kesinlikle kullanılmaz. Gerçek test sonuçları ve kapı sınırları [audit](docs/audit-2026-10-09.md) içindedir; geçen alt test bütün kapıyı kapatmaz.
