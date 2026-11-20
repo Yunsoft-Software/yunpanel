@@ -2,13 +2,21 @@ import { exportScopedCatalog, restoreScopedCatalog } from './scoped-registry-bac
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { MailTemplateError, normalizeMailboxAddress } from '@yunpanel/config-templates';
+import {
+  MailSpamPolicyTemplateError,
+  MailTemplateError,
+  MailVacationTemplateError,
+  normalizeMailboxAddress,
+  normalizeManagedMailboxSpamSenderLists,
+  normalizeManagedMailboxVacationPolicies,
+} from '@yunpanel/config-templates';
 import { assertUuid } from '@yunpanel/shared';
 import { normalizeEnvironmentMasterKey } from './application-environment-registry.js';
 import { hashMailboxPassword, mailboxPasswordInternals } from './mailbox-password.js';
 
 const STORE_VERSION = 1;
 const ALGORITHM = 'aes-256-gcm';
+const EMPTY_DELIVERY_POLICY = { vacation: null, allow: [], deny: [] };
 
 export class MailboxRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -109,6 +117,64 @@ function publicMailbox(record) {
   });
 }
 
+function normalizeDeliveryPolicy(mailbox, policy) {
+  if (!policy || typeof policy !== 'object' || Array.isArray(policy) || Object.keys(policy).length !== 3
+    || !['vacation', 'allow', 'deny'].every(field => Object.hasOwn(policy, field))) {
+    throw new MailboxRegistryError('mailbox_delivery_policy_input_invalid', 'Vacation, allow and deny are required');
+  }
+
+  const { vacation, allow, deny } = policy;
+  if (vacation !== null && (!vacation || typeof vacation !== 'object' || Array.isArray(vacation)
+    || Object.keys(vacation).length !== 2 || !['subject', 'body'].every(field => Object.hasOwn(vacation, field)))) {
+    throw new MailboxRegistryError('mail_vacation_policy_invalid', 'Vacation must be null or contain only subject and body');
+  }
+
+  try {
+    let normalizedVacation = null;
+    if (vacation !== null) {
+      const [{ subject, body }] = normalizeManagedMailboxVacationPolicies([mailbox], [{ mailbox, ...vacation }]);
+      normalizedVacation = { subject, body };
+    }
+    return { vacation: normalizedVacation, ...normalizeManagedMailboxSpamSenderLists(allow, deny) };
+  } catch (error) {
+    if (!(error instanceof MailTemplateError || error instanceof MailVacationTemplateError
+      || error instanceof MailSpamPolicyTemplateError)) throw error;
+    throw new MailboxRegistryError(error.code, 'Mailbox delivery policy contains invalid values');
+  }
+}
+
+function deliveryPolicyView(record) {
+  const { vacation, allow, deny } = record.deliveryPolicy ?? EMPTY_DELIVERY_POLICY;
+  return Object.freeze({
+    mailboxId: record.id,
+    revision: record.revision,
+    vacation: vacation === null ? null : Object.freeze({ ...vacation }),
+    allow: Object.freeze([...allow]),
+    deny: Object.freeze([...deny]),
+  });
+}
+
+function hasDeliveryPolicyContent(policy) {
+  return Boolean(policy && (policy.vacation !== null || policy.allow.length > 0 || policy.deny.length > 0));
+}
+
+function validateStoreEnvelope(snapshot) {
+  if (snapshot?.version !== STORE_VERSION || !Array.isArray(snapshot.mailboxes)
+    || Object.keys(snapshot).some(field => !['version', 'mailboxes', 'deliveryPolicyManaged'].includes(field))
+    || (Object.hasOwn(snapshot, 'deliveryPolicyManaged') && snapshot.deliveryPolicyManaged !== true)) {
+    throw new MailboxRegistryError('mailbox_state_invalid', 'Mailbox store is invalid', 409);
+  }
+}
+
+function mailboxStore(mailboxes, deliveryPolicyManaged) {
+  return {
+    version: STORE_VERSION,
+    mailboxes,
+    ...(deliveryPolicyManaged || mailboxes.some(record => hasDeliveryPolicyContent(record.deliveryPolicy))
+      ? { deliveryPolicyManaged: true } : {}),
+  };
+}
+
 function validateEnvelope(record) {
   for (const [field, bytes] of [['iv', 12], ['tag', 16]]) {
     if (typeof record[field] !== 'string') {
@@ -130,7 +196,8 @@ function validatePersisted(record) {
     'passwordUpdatedAt', 'createdAt', 'updatedAt',
   ]);
   if (!record || typeof record !== 'object' || Array.isArray(record)
-    || Object.keys(record).length !== fields.size || Object.keys(record).some((field) => !fields.has(field))
+    || Object.keys(record).length !== fields.size + Number(Object.hasOwn(record, 'deliveryPolicy'))
+    || Object.keys(record).some(field => field !== 'deliveryPolicy' && !fields.has(field))
     || typeof record.enabled !== 'boolean' || !Number.isSafeInteger(record.revision) || record.revision < 1) {
     throw new MailboxRegistryError('mailbox_state_invalid', 'Mailbox state is invalid', 409);
   }
@@ -139,7 +206,7 @@ function validatePersisted(record) {
     throw new MailboxRegistryError('mailbox_state_invalid', 'Mailbox address is not canonical', 409);
   }
   validateEnvelope(record);
-  return {
+  const validated = {
     id: uuid(record.id, 'mailboxId'),
     mailDomainId: uuid(record.mailDomainId, 'mailDomainId'),
     address: normalizedAddress,
@@ -152,6 +219,14 @@ function validatePersisted(record) {
     createdAt: timestamp(record.createdAt, 'createdAt'),
     updatedAt: timestamp(record.updatedAt, 'updatedAt'),
   };
+  if (Object.hasOwn(record, 'deliveryPolicy')) {
+    try { validated.deliveryPolicy = normalizeDeliveryPolicy(normalizedAddress, record.deliveryPolicy); }
+    catch (error) {
+      if (!(error instanceof MailboxRegistryError)) throw error;
+      throw new MailboxRegistryError('mailbox_state_invalid', 'Stored mailbox delivery policy is invalid', 409);
+    }
+  }
+  return validated;
 }
 
 export function createMailboxRegistry({
@@ -200,10 +275,7 @@ export function createMailboxRegistry({
     if (filePath) {
       try {
         const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.mailboxes)
-          || Object.keys(parsed).length !== 2 || Object.keys(parsed).some((field) => !['version', 'mailboxes'].includes(field))) {
-          throw new MailboxRegistryError('mailbox_state_invalid', 'Mailbox store is invalid', 409);
-        }
+        validateStoreEnvelope(parsed);
         const mailboxes = parsed.mailboxes.map(validatePersisted);
         if (new Set(mailboxes.map((record) => record.id)).size !== mailboxes.length
           || new Set(mailboxes.map((record) => record.address)).size !== mailboxes.length) {
@@ -214,7 +286,7 @@ export function createMailboxRegistry({
           assertAddressDomain(address(record.address), domain);
           decryptPasswordHash(key, record);
         }
-        state = { version: STORE_VERSION, mailboxes };
+        state = mailboxStore(mailboxes, parsed.deliveryPolicyManaged);
       } catch (error) {
         if (error?.code !== 'ENOENT') throw error;
         await persist(state);
@@ -285,6 +357,37 @@ export function createMailboxRegistry({
     return record ? publicMailbox(record) : null;
   }
 
+  async function getDeliveryPolicy(mailboxId) {
+    await ensureInitialized();
+    const normalizedId = uuid(mailboxId, 'mailboxId');
+    const record = state.mailboxes.find(candidate => candidate.id === normalizedId);
+    if (!record) throw new MailboxRegistryError('mailbox_not_found', 'Mailbox was not found', 404);
+    await requireManagedDomain(record.mailDomainId);
+    return deliveryPolicyView(record);
+  }
+
+  async function setDeliveryPolicy(mailboxId, { expectedRevision, vacation, allow, deny } = {}) {
+    await ensureInitialized();
+    const normalizedId = uuid(mailboxId, 'mailboxId');
+    const expected = revision(expectedRevision);
+    return mutate(async (next) => {
+      const record = next.mailboxes.find(candidate => candidate.id === normalizedId);
+      if (!record) throw new MailboxRegistryError('mailbox_not_found', 'Mailbox was not found', 404);
+      if (record.revision !== expected) throw new MailboxRegistryError('stale_mailbox_revision', 'Mailbox state changed; refresh and retry', 409);
+      await requireManagedDomain(record.mailDomainId);
+      const policy = normalizeDeliveryPolicy(record.address, { vacation, allow, deny });
+      if (hasDeliveryPolicyContent(policy)) {
+        record.deliveryPolicy = policy;
+        next.deliveryPolicyManaged = true;
+      } else {
+        delete record.deliveryPolicy;
+      }
+      record.revision += 1;
+      record.updatedAt = new Date(now()).toISOString();
+      return deliveryPolicyView(record);
+    });
+  }
+
   async function rotatePassword(mailboxId, { expectedRevision, password } = {}) {
     await ensureInitialized();
     const normalizedId = uuid(mailboxId, 'mailboxId');
@@ -352,6 +455,22 @@ export function createMailboxRegistry({
     return Object.freeze(accounts);
   }
 
+  async function materializeEnabledDeliveryPolicies() {
+    await ensureInitialized();
+    const policies = [];
+    for (const record of state.mailboxes.filter(candidate => candidate.enabled)
+      .sort((left, right) => left.address.localeCompare(right.address))) {
+      await requireManagedDomain(record.mailDomainId);
+      policies.push(Object.freeze({ address: record.address, ...deliveryPolicyView(record) }));
+    }
+    return Object.freeze(policies);
+  }
+
+  async function hasManagedDeliveryPolicies() {
+    await ensureInitialized();
+    return state.deliveryPolicyManaged === true;
+  }
+
   async function exportDomainBackup(mailDomainId) {
     await ensureInitialized();
     const id = uuid(mailDomainId, 'mailDomainId');
@@ -373,6 +492,7 @@ export function createMailboxRegistry({
         decryptPasswordHash(key, record);
       }
       next.mailboxes = records;
+      if (records.some(record => hasDeliveryPolicyContent(record.deliveryPolicy))) next.deliveryPolicyManaged = true;
       return records.filter(record => record.mailDomainId === id).map(publicMailbox);
     });
   }
@@ -382,10 +502,14 @@ export function createMailboxRegistry({
     createMailbox,
     listMailboxes,
     getMailbox,
+    getDeliveryPolicy,
+    setDeliveryPolicy,
     rotatePassword,
     setEnabled,
     deleteMailbox,
     materializeEnabledAccounts,
+    materializeEnabledDeliveryPolicies,
+    hasManagedDeliveryPolicies,
     exportDomainBackup,
     restoreDomainBackup,
   });
@@ -397,17 +521,12 @@ export function rewrapMailboxSnapshot(snapshot, { currentMasterKey, nextMasterKe
   if (!currentKey || !nextKey) {
     throw new MailboxRegistryError('secret_store_unavailable', 'Current and next master keys are required', 503);
   }
-  if (!snapshot || snapshot.version !== STORE_VERSION || !Array.isArray(snapshot.mailboxes)
-    || Object.keys(snapshot).length !== 2 || Object.keys(snapshot).some((field) => !['version', 'mailboxes'].includes(field))) {
-    throw new MailboxRegistryError('mailbox_state_invalid', 'Mailbox store is invalid', 409);
-  }
-  return {
-    version: STORE_VERSION,
-    mailboxes: snapshot.mailboxes.map((value) => {
-      const record = validatePersisted(value);
-      return { ...record, ...encryptPasswordHash(nextKey, record, decryptPasswordHash(currentKey, record)) };
-    }),
-  };
+  validateStoreEnvelope(snapshot);
+  const mailboxes = snapshot.mailboxes.map((value) => {
+    const record = validatePersisted(value);
+    return { ...record, ...encryptPasswordHash(nextKey, record, decryptPasswordHash(currentKey, record)) };
+  });
+  return mailboxStore(mailboxes, snapshot.deliveryPolicyManaged);
 }
 
 export const mailboxRegistryInternals = Object.freeze({

@@ -7,6 +7,7 @@ export { MailboxRegistryError };
 const CREATE_FIELDS = new Set(['mailDomainId', 'address', 'password']);
 const ROTATE_FIELDS = new Set(['expectedRevision', 'password']);
 const UPDATE_FIELDS = new Set(['expectedRevision', 'enabled']);
+const DELIVERY_POLICY_FIELDS = new Set(['expectedRevision', 'vacation', 'allow', 'deny']);
 const DELETE_FIELDS = new Set(['expectedRevision', 'confirmation']);
 const FINALIZE_DELETE_FIELDS = new Set(['expectedRevision', 'deleteJobId', 'confirmation']);
 
@@ -36,6 +37,11 @@ function asyncRoute(handler) {
     try { return await handler(request, response); }
     catch (error) { return next(error); }
   };
+}
+
+function requireDeliveryPolicyOwner(request, response, next) {
+  if (request.auth.user.role === 'owner' && request.auth.access.mode === 'management') return next();
+  return response.status(403).json({ error: { code: 'forbidden', message: 'Only the Owner can manage mailbox delivery policies.' } });
 }
 
 const noHostSideEffects = Object.freeze({ mailConfigurationChanged: false, mailDataChanged: false });
@@ -165,6 +171,23 @@ export function mountMailboxRoutes(app, {
     emptyQuery(request.query);
     return response.json({ data: await localMailbox(request.params.mailboxId) });
   }));
+
+  if (typeof mailboxRegistry.getDeliveryPolicy === 'function' && typeof mailboxRegistry.setDeliveryPolicy === 'function') {
+    // Use the same canonical path and UUID accepted by the backup guard and mutation audit.
+    const policyPath = /^\/api\/mailboxes\/(?<mailboxId>[0-9a-fA-F-]{36})\/delivery-policy\/?$/;
+    app.get(policyPath, requirePanelRouteAccess, requireDeliveryPolicyOwner, asyncRoute(async (request, response) => {
+      emptyQuery(request.query);
+      await localMailbox(request.params.mailboxId);
+      return response.json({ data: await mailboxRegistry.getDeliveryPolicy(request.params.mailboxId) });
+    }));
+
+    app.put(policyPath, requirePanelRouteAccess, requireDeliveryPolicyOwner, asyncRoute(async (request, response) => {
+      emptyQuery(request.query);
+      const body = exactBody(request.body, DELIVERY_POLICY_FIELDS, 'mailbox_delivery_policy_input_invalid');
+      await localMailbox(request.params.mailboxId);
+      return response.json({ data: await mailboxRegistry.setDeliveryPolicy(request.params.mailboxId, body) });
+    }));
+  }
 
   app.post('/api/mailboxes', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const body = exactBody(request.body, CREATE_FIELDS, 'mailbox_create_input_invalid');

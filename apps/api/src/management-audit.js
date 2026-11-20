@@ -25,6 +25,7 @@ export function classifyManagementMutation(method, pathname) {
   if (method === 'POST' && pathname === '/api/mail-domains') return { action: 'mail_domain.track', resourceType: 'mail_domain', resourceId: 'new' };
   if (method === 'POST' && pathname === '/api/mailboxes') return { action: 'mailbox.create', resourceType: 'mailbox', resourceId: 'new' };
   if ((parts = match(pathname, /^\/api\/mailboxes\/([^/]+)\/password$/)) && method === 'POST') return { action: 'mailbox.password.rotate', resourceType: 'mailbox', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/mailboxes\/([0-9a-fA-F-]{36})\/delivery-policy\/?$/)) && method === 'PUT') return { action: 'mailbox.delivery_policy.update', resourceType: 'mailbox', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/mailboxes\/([^/]+)$/)) && method === 'PATCH') return { action: 'mailbox.update', resourceType: 'mailbox', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/mailboxes\/([^/]+)$/)) && method === 'DELETE') return { action: 'mailbox.delete', resourceType: 'mailbox', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/mail-domains\/([^/]+)\/config-preview$/)) && method === 'POST') return { action: 'mail.configuration.preview', resourceType: 'mail_domain', resourceId: parts[0] };

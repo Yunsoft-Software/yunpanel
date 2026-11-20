@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { renderDovecotPasswdFile } from '@yunpanel/config-templates';
+import { createMailDomainRegistry } from '../src/mail-domain-registry.js';
 import {
   createMailboxRegistry,
   MailboxRegistryError,
@@ -162,4 +163,75 @@ test('rewraps encrypted mailbox hashes without changing public identity', async 
   await reopened.init();
   assert.deepEqual(await reopened.listMailboxes(), [created]);
   assert.equal(await verifyMailboxPassword('valid mailbox password', (await reopened.materializeEnabledAccounts())[0].passwordHash), true);
+});
+
+test('delivery policies keep mailbox revision, backup, disable, rotation and deletion semantics', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-mailbox-delivery-policy-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const domains = createMailDomainRegistry({ filePath: path.join(root, 'mail-domains.json') });
+  const domain = await domains.createMailDomain({ domainName: 'policy.example.test', managementMode: 'local' });
+  const filePath = path.join(root, 'mailboxes.json');
+  const masterKey = randomBytes(32);
+  const options = { filePath, masterKey, getMailDomain: domains.getMailDomain };
+  const registry = createMailboxRegistry(options);
+  const password = randomBytes(24).toString('hex');
+  const address = 'owner@policy.example.test';
+  const mailbox = await registry.createMailbox({ mailDomainId: domain.id, address, password });
+  const sibling = await registry.createMailbox({ mailDomainId: domain.id, address: 'sibling@policy.example.test', password });
+  const policy = { vacation: { subject: 'Bir süre uzaktayım', body: 'Dönünce yazacağım.' }, allow: [], deny: ['spam@example.test'] };
+
+  assert.equal(await registry.hasManagedDeliveryPolicies(), false);
+  await registry.setDeliveryPolicy(sibling.id, { expectedRevision: 1, vacation: null, allow: [], deny: [] });
+  const clearedBeforeUse = createMailboxRegistry(options);
+  assert.equal(await clearedBeforeUse.hasManagedDeliveryPolicies(), false);
+  const competing = await Promise.allSettled([
+    registry.setDeliveryPolicy(mailbox.id, { expectedRevision: 1, ...policy }),
+    registry.setDeliveryPolicy(mailbox.id, { expectedRevision: 1, ...policy }),
+  ]);
+  assert.equal(competing.filter(result => result.status === 'fulfilled').length, 1);
+  assert.equal(competing.find(result => result.status === 'rejected').reason.code, 'stale_mailbox_revision');
+  assert.deepEqual(await registry.getDeliveryPolicy(mailbox.id), { mailboxId: mailbox.id, revision: 2, ...policy });
+  assert.equal(await registry.hasManagedDeliveryPolicies(), true);
+  const passwordAfterRotation = randomBytes(24).toString('hex');
+  await registry.rotatePassword(mailbox.id, { expectedRevision: 2, password: passwordAfterRotation });
+  assert.deepEqual(await registry.materializeEnabledDeliveryPolicies(), [
+    { mailboxId: mailbox.id, address, revision: 3, ...policy },
+    { mailboxId: sibling.id, address: sibling.address, revision: 2, vacation: null, allow: [], deny: [] },
+  ]);
+  const backup = await registry.exportDomainBackup(domain.id);
+  assert.deepEqual(backup.records.find(record => record.id === mailbox.id).deliveryPolicy, policy);
+  const freshRegistry = createMailboxRegistry({ ...options, filePath: path.join(root, 'restored-mailboxes.json') });
+  assert.equal(await freshRegistry.hasManagedDeliveryPolicies(), false);
+  await freshRegistry.restoreDomainBackup(domain.id, backup);
+  assert.equal(await freshRegistry.hasManagedDeliveryPolicies(), true);
+
+  await registry.setEnabled(mailbox.id, { expectedRevision: 3, enabled: false });
+  assert.equal((await registry.materializeEnabledDeliveryPolicies()).some(item => item.mailboxId === mailbox.id), false);
+  await registry.setDeliveryPolicy(mailbox.id, { expectedRevision: 4, vacation: null, allow: [], deny: [] });
+  assert.equal((await registry.getDeliveryPolicy(mailbox.id)).vacation, null);
+  assert.equal(await registry.hasManagedDeliveryPolicies(), true);
+  const invalidBackup = structuredClone(backup);
+  invalidBackup.records.find(record => record.id === mailbox.id).deliveryPolicy.allow = ['not an address'];
+  await assert.rejects(registry.restoreDomainBackup(domain.id, invalidBackup), { code: 'mailbox_state_invalid' });
+  assert.equal((await registry.getDeliveryPolicy(mailbox.id)).revision, 5);
+  await registry.restoreDomainBackup(domain.id, backup);
+  const restored = await registry.getDeliveryPolicy(mailbox.id);
+  assert.ok(restored.revision > 5);
+  assert.deepEqual({ ...restored, revision: 3 }, { mailboxId: mailbox.id, revision: 3, ...policy });
+
+  const saved = JSON.parse(await readFile(filePath, 'utf8'));
+  const nextMasterKey = randomBytes(32);
+  const rewrapped = rewrapMailboxSnapshot(saved, { currentMasterKey: masterKey, nextMasterKey });
+  assert.equal(rewrapped.deliveryPolicyManaged, true);
+  assert.deepEqual(rewrapped.mailboxes.find(record => record.id === mailbox.id).deliveryPolicy, policy);
+  await writeFile(filePath, JSON.stringify(rewrapped));
+  const reopened = createMailboxRegistry({ ...options, masterKey: nextMasterKey });
+  assert.deepEqual(await reopened.getDeliveryPolicy(mailbox.id), restored);
+  const ownerAccount = (await reopened.materializeEnabledAccounts()).find(account => account.address === address);
+  assert.equal(await verifyMailboxPassword(passwordAfterRotation, ownerAccount.passwordHash), true);
+  await reopened.deleteMailbox(mailbox.id, { expectedRevision: restored.revision, confirmation: `delete-mailbox:${address}` });
+  assert.deepEqual((await reopened.materializeEnabledDeliveryPolicies()).map(item => item.mailboxId), [sibling.id]);
+  assert.equal(JSON.parse(await readFile(filePath, 'utf8')).mailboxes.some(record => record.id === mailbox.id), false);
+  const afterDeletion = createMailboxRegistry({ ...options, masterKey: nextMasterKey });
+  assert.equal(await afterDeletion.hasManagedDeliveryPolicies(), true);
 });
