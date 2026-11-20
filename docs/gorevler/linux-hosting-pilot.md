@@ -49,3 +49,33 @@ Sieve, mevcut yönlendirmeyle zincirde çalıştı. Kopyalı yönlendirme yerel 
 - **Dosyalar:** `apps/api/src/plesk-offline-transfer.js`, `apps/api/test/plesk-offline-transfer.test.js`, `scripts/plesk-transfer.mjs`, `scripts/build-deb.sh`
 - **İş:** CLI önizleme ve doğrulamayı koru. Açık staging eylemi ile yalnız doğrulanan HTML/PHP dosyaları, manifest ve SQL dump’ını sahipli boş hazırlık alanında güvenli biçimde kopyala. Kaynak dosyalar, gerçek barındırma ve veritabanı işlemleri kapsam dışı. Aynı içeriği ikinci kopya veya overwrite olmadan yönet.
 - **Kabul:** Gerçek geçici dosya ve CLI ile kopya içeriği ve hash eşleşir. Yanlış beklenen hash ve dolu hedef hiçbir mevcut veriyi değiştirmez. Kısmi kopya yayınlanmaz, test sonunda dış dizinler değişmez.
+
+### T942 · Posta kurallarını mevcut yapılandırma işlemine ekle
+- **Bağımlı:** T938
+- **Dosyalar:** `packages/config-templates/src/mail-forwarding.js`, `packages/config-templates/src/mail-submission.js`, `packages/config-templates/src/mail-vacation.js`, `packages/config-templates/src/mail-spam-policy.js`, `packages/config-templates/src/mail-apply-plan.js`, `packages/config-templates/src/index.js`, `packages/host-runtime/src/mail-config-manager.js`, `packages/host-runtime/src/mail-config-backup.js`, `packages/host-runtime/src/mail-config-activator.js`, `packages/host-runtime/src/mail-config-evidence-inspector.js`, `packages/config-templates/test/mail-submission.test.js`, `packages/config-templates/test/mail-apply-plan.test.js`, `packages/host-runtime/test/mail-config-activator.test.js`
+- **İş:** Yönetilen posta yapılandırmasında `previewManagedMailSubmissionConfiguration({ …, vacations, spamPolicies })` kullan. Otomatik yanıt mevcut Sieve dosyası ve derleme sözleşmesiyle birlikte çalışır. Rspamd kuralları mevcut backup, apply/configtest, izinler, geri alma ve işlem kimliğine dahil edilir. Başkasına ait Rspamd kuralları korunur. Ayar yokken mevcut sunucuların davranışı korunur, son kural kaldırılınca daha önce yönetilen kural etkin kalmaz.
+- **Kabul:** Yönetilen yapılandırma yalnız doğrulanmış kutular için değişir. Sieve derleme, izin, Rspamd configtest, başarısız uygulama sonrası geri dönüş ve yönetilmeyen dosya koruması kanıtlanır. Gerçek dosya ve motor testi kullan. Üretim veya .28 kurulumu bu işte yok.
+
+### T943 · Otomatik yanıt ve spam kurallarını posta kutusuna kaydet
+- **Bağımlı:** T938
+- **Dosyalar:** `apps/api/src/mailbox-registry.js`, `apps/api/src/mailbox-http.js`, `apps/api/test/mailbox-registry.test.js`, `apps/api/test/mailbox-delivery-policy-http.test.js`
+- **İş:** Kuralı mevcut posta kutusu kaydına geriye uyumlu olarak bağla ve normal yedek/silme yaşam döngüsünü kullan. Mevcut yerel kapsam denetimiyle yalnız Owner için `GET/PUT /api/mailboxes/:mailboxId/delivery-policy`. Yanıt `data: {mailboxId, revision, vacation, allow, deny}`, PUT `{expectedRevision, vacation, allow, deny}`. `vacation` null veya `{subject, body}`. Boş listeler ve null politikayı temizler. Mevcut revision, CSRF ve yetki korunur. `materializeEnabledDeliveryPolicies()` etkin kutular için ayrıca adresi döndürür.
+- **Kabul:** Gerçek yerel HTTP/auth ve dosya registry ile kaydet, tekrar oku, stale revision, başka rol reddi, bozuk liste reddi, temizleme ve eski kayıt okuma geçer. Genel posta kutusu listesi mesaj içeriğini döndürmez.
+
+### T944 · Posta kutusunda otomatik yanıt ve spam ayarlarını göster
+- **Bağımlı:** T943, T851
+- **Dosyalar:** `apps/web/src/workspace/MailboxesPanel.jsx`, `apps/web/src/workspace/MailboxDeliveryPolicyPanel.jsx`, `apps/web/src/workspace/mail-client.js`, `apps/web/test/mail-client.test.js`
+- **İş:** Mevcut posta kutusu ayarlarına Owner için Türkçe otomatik yanıt ve gönderen listeleri ekle. Ortak bileşenler ve mevcut posta değişikliği/uygulama akışını kullan. Kuralı okumada ve kaydetmede revision, yetki, bekleme ve hata durumlarını koru.
+- **Kabul:** Mevcut kota ve yönlendirme çalışır. Yeni form boş politika, mevcut kural, kaydetme ve temizlemeyi normal API ile yönetir. Derleme ve etkilenen istemci kontrolleri geçer.
+
+### T945 · Kalıcı posta kurallarını uygulama ve geri alma işine bağla
+- **Bağımlı:** T942, T943
+- **Dosyalar:** `apps/api/src/mail-configuration.js`, `apps/api/test/mail-configuration-delivery-policy.test.js`
+- **İş:** Posta kutusundan okunan etkin politikaları mevcut preview/apply/backup/rollback hattına ver. Ret, iş iptali, devre dışı kutu, yanlış alan adı ve stale plan korumaları kalır. Kamusal önizleme kuralın hassas içeriğini göstermeden değişikliği hash'e bağlar.
+- **Kabul:** Normal e-posta yapılandırma yolu gerçek geçici veriyle yeni kuralı planlar, devre dışı kutuyu dışarıda bırakır, kaydı değişen eski onayı reddeder ve mevcut posta verisini korur.
+
+### T946 · PowerDNS ikincil aktarımını yerelde doğrula
+- **Bağımlı:** —
+- **Dosyalar:** —
+- **İş:** Geçici Ubuntu'da iki ayrı PowerDNS işlem ve veri diziniyle mevcut mekanizmanın yerel provasını yap. Ağ veya .28 ayarı yok. Gerçek NOTIFY ve AXFR, yeni SOA seri numarası ve birincil kapalıyken ikincilden yetkili cevap ölçülür. Ayrı ağ kabulü açık kalır.
+- **Kabul:** Gerçek DNS sorgusu, ikincil kaynak dizini ve birincil işlem durumu birlikte kanıtlanır. Geçici kaynaklar temizlenir ve sonuç görev kaydına yazılır.
