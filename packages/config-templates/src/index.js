@@ -113,6 +113,9 @@ export {
   renderManagedMailboxForwardingSieve,
 } from './mail-forwarding.js';
 
+export { MailVacationTemplateError, previewManagedMailboxVacationSieve } from './mail-vacation.js';
+export { MailSpamPolicyTemplateError, previewManagedMailboxSpamPolicy } from './mail-spam-policy.js';
+
 export {
   MailSecurityTemplateError,
   mailSecurityTemplatePolicy,
