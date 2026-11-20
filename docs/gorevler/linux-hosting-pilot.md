@@ -25,3 +25,9 @@
 - **Dosyalar:** `apps/api/src/plesk-importer.js`, `apps/api/src/plesk-importer-http.js`, `apps/api/test/plesk-importer-local-auth.test.js`
 - **İş:** Önizleme Owner yönetim erişiminde kalır. TLS özel anahtarı, cron komutu ve ham JSON hata içeriği yanıta girmez. Tekrarlanan aynı güvenli envanter için özet kimliği kararlı kalır. Mevcut dışa aktarım veya site verisine yazılmaz.
 - **Kabul:** Geçici gerçek SQLite auth ve HTTP ile Owner erişimi ve site kullanıcısı reddi. Normal TLS/cron üstverisi okunabilir. Aynı girdi tekrarı aynı envanter özeti verir. Hatalı JSON ham girdi içeriğini açığa çıkarmaz.
+
+### T940 · Restic önbelleğini güvenli geçici çalışma alanına bağla
+- **Bağımlı:** —
+- **Dosyalar:** `packages/host-runtime/src/restic-manager.js`, `packages/host-runtime/test/restic-manager-native.test.js`
+- **İş:** Gerçek Restic 0.19.1, panelin kısıtlı alt süreç ortamında geçerli önbellek yolu bulamadığı için yedek almayı durduruyor. Süreç ortamını genişletmeden mevcut özel geçici dizinde açık cache yolu ver ve işlemden sonra kaldır.
+- **Kabul:** Sürümü ve hash’i doğrulanan gerçek Restic ile ayrı geçici repo, snapshot, %100 okuma ve kaynak dosya yolu yokken HTML ve SQLite verisinin temiz dizine dönüşü geçer. Mevcut Restic regresyonları geçer.
