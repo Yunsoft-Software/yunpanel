@@ -8,6 +8,10 @@ Ortak formun statik kopya regresyonu Chromium’da geçti. Dört PHP sitesi ve i
 
 Yerel 8.832 testlik tam koşu `e0022e9d` üzerinde, 54/54 Linux odak testi kurulan `c7422f91` üzerinde yapıldı. Paket 1905 tabanının lisans yapılandırmasını devraldı. Değiştirilen 28 dosyanın 26’sı yerel kaynakla birebir eşleşti. `index.js` ve `management-app.js` için 1905 tabanı üzerine aynı PHP kopya değişikliği uygulanarak paket hash’leri yeniden doğrulandı.
 
+### 20 Kasım 2026 — Docker P2 canlı kabulü
+
+Onaylı `0.3.0-2026112003` paketi (`fefcf567ae0a`) yalnız .28’e kuruldu. Docker `/api` alt yol proxy’si, güvenli tekil volume silme ve root olmayan container konsolu gerçek Chromium ve Firefox koşularında toplam **14/14** geçti. Test kaynakları temizlendi. Son okumada 6 container ve 16 volume önceki envanterle eşleşti. Panel API’si ve mevcut WordPress siteleri HTTP 200 döndü. [Kabul ve ham kanıt kaydı](../tasks/reopen/T883.md#8-docker-p2-canlı-kabulü--20-kasım-2026)
+
 ### 20 Kasım 2026 — T883 kesinti/terminal doğrulaması ve P2 ilerlemesi
 
 - **T883 canlı `.28` (`0.3.0-2026111906` / `c7422f91`, `mutation` lane, ayrı test kaynağı `08d73f62`, ön/son sağlık PID değişimsiz):** `15-native-source-removal-mutation.spec.js` Test 1 ve Test 2 **2/2 PASS** (oturum iptali sonrası yeni oturumla aynı günlükten devam + tarayıcı kapanışı sonrası worker tamamlama + 7/7 fiziksel temizlik + kardeş PHP 200). Sahipli terminal E2E (`terminal-bound-q1`) **PASS**: UI node-pty ve ttyd aç/UID+CWD/kapat, ikisi açıkken normal site kaldırma (`leaseCount=2`, `processCount=4`, `terminalDrain.verified=true`, fiziksel yokluk ve kardeş PHP+terminal korunumu) ile olağan kapatma+kaldırma eşzamanlılığı (0 ms ardışık ve paralel `DELETE 204` + `POST /removal 201` → `removed`, `zeroOpenUnderFence=true`) doğrulandı. Ayrıntı ve korunan açık sınırlar [T883 kaydında](../tasks/reopen/T883.md).
@@ -22,7 +26,7 @@ Yerel 8.832 testlik tam koşu `e0022e9d` üzerinde, 54/54 Linux odak testi kurul
 - **T883 onaylı `0.3.0-2026112001` & `0.3.0-2026112002` kurulumları, tek kontrollü API restart ve non-Python regresyon kabulü (`.local/p0-20261120/`):**
   - `0.3.0-2026112001` (`c0358499898a`): onaylı `.28` kurulum (`package-install-2001.json` `19285b97`), terminal E2E (`a80be1b0`) **PASS**, Native15 Test 1–2 (`f4022fd3`) **2/2 PASS** ve incelenmiş operatör (`restart-2001.py`) ile tek nazik `systemctl restart yunpanel-api.service` doğrulaması (Native15 Test 3, `VERIFIED.json` `62eef65b`, `oldPid=3087378 → newPid=3109469`, `4` yeni PID sonrası adım, `7/7` fiziksel yokluk, kardeş PHP 200, `AGENT_3: KABUL`) **PASS**.
   - `0.3.0-2026112002` (`64b15e8e84a4`, yerel `testSourceHead` ayrı): ortak cleanup değişikliğinin non-Python regresyonu (`t883-live-bound-2002/`, ikinci API/sistem restartı YOK, `AGENT_3: KABUL`) **PASS** — taze sahipli terminal açıkken kaldırma (`leaseCount=2`, `terminalDrain.verified=true`, fiziksel `0/0/0`, kardeş PHP 200) + 0 ms ardışık/paralel kapat+kaldır (`zeroOpenUnderFence=true`, `terminal-bound-2002-result.json` `534fdae2`) ve gerçek Chromium Native15 Test 1–2 (`2/2 PASS`, `apiRestartTested=false`, 7/7 fiziksel yokluk, `native15-t12-2002-summary.json` `5900a39f`); ön/son sağlık PID'leri sabit (`3187018`/`3187031`/`971550`, `NRestarts=0`), `dpkg=906` (`0dbd844f...`), `5/6/10/0/0`, `journalctl` `0` hata.
-  - **Korunan açık kanallar:** 16–17 Kasım yürütücü kök nedeni, önceki Native20 `HOLD 1/2`, 13.4/16.1/19.1/22.1 tarihsel eksik makbuzları, ani çökme/`SIGKILL` kanalları ve bilinen Docker container terminal konsol açığı (`dkr-04` beklenen `test.fail`) **AÇIK** tutulur; ayrıntı [T883 kaydında](../tasks/reopen/T883.md).
+  - **Korunan açık kanallar:** 16–17 Kasım yürütücü kök nedeni, önceki Native20 `HOLD 1/2`, 13.4/16.1/19.1/22.1 tarihsel eksik makbuzları, ani çökme/`SIGKILL` kanalları **AÇIK** tutulur; ayrıntı [T883 kaydında](../tasks/reopen/T883.md).
 
 ## 19 Kasım 2026 güncellemesi
 
