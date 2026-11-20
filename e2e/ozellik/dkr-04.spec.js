@@ -17,6 +17,7 @@ test.describe('DKR-04 Domain reverse-proxy bağlantısı ve container log/termin
   let createdProjectId = null;
   let createdDomainId = null;
   let createdWebsiteId = null;
+  let projectRemoved = false;
   let fullSubdomain = '';
   let hostProbe;
 
@@ -130,6 +131,7 @@ print(json.dumps({'content':open(p,'r',encoding='utf-8',errors='replace').read()
   });
 
   test.afterAll(async ({ browser }) => {
+    test.setTimeout(240_000);
     const cleanupErrors = [];
     // 1. Önce bağlı web sitesini temizle ve 404/Nginx yokluğunu doğrula
     if (createdDomainId || fullSubdomain) {
@@ -146,12 +148,15 @@ print(json.dumps({'content':open(p,'r',encoding='utf-8',errors='replace').read()
     }
 
     // 2. Projeyi panel arayüzünden kaldır ve container/proje yokluğunu doğrula
-    if (createdProjectId || projectName) {
+    if (!projectRemoved && (createdProjectId || projectName)) {
       const context = await browser.newContext({ ignoreHTTPSErrors: true });
       const page = await context.newPage();
       try {
         await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
         await removeDockerProject(page, createdProjectId, projectName);
+        if (createdProjectId) {
+          expect((await page.request.get(`/api/panel/docker/projects/${encodeURIComponent(createdProjectId)}`)).status()).toBe(404);
+        }
         expect(hostProbe.runArgvStdout(['docker', 'ps', '-a', '--filter', `name=${projectName}`, '--format', '{{.Names}}'])).toBe('');
       } catch (err) {
         cleanupErrors.push(`Docker project cleanup failed: ${err.message}`);
@@ -391,5 +396,25 @@ print(json.dumps({'content':open(p,'r',encoding='utf-8',errors='replace').read()
     // Docker detay sayfasında container terminal yüzeyi, terminal butonu veya terminal sekmesi aranır
     const terminalElement = page.locator('.ws-terminal-surface, section:has-text("Container terminali"), button:has-text("Terminal"), a:has-text("Terminal")');
     await expect(terminalElement).toBeVisible({ timeout: 4000 });
+  });
+
+  test('temizlik: bağlı subdomain ve Docker Compose projesi panel akışıyla kaldırılır ve fiziksel yokluk doğrulanır', async ({ page }) => {
+    expect(createdDomainId).toBeTruthy();
+    expect(createdProjectId).toBeTruthy();
+
+    const domainToRemove = createdDomainId;
+    const subdomainToRemove = fullSubdomain;
+    const projectToRemove = createdProjectId;
+
+    await removeWebsiteById(page, domainToRemove, subdomainToRemove);
+    createdDomainId = null;
+    createdWebsiteId = null;
+    fullSubdomain = '';
+
+    await removeDockerProject(page, projectToRemove, projectName);
+    expect((await page.request.get(`/api/panel/docker/projects/${encodeURIComponent(projectToRemove)}`)).status()).toBe(404);
+    expect(hostProbe.runArgvStdout(['docker', 'ps', '-a', '--filter', `name=${projectName}`, '--format', '{{.Names}}'])).toBe('');
+    createdProjectId = null;
+    projectRemoved = true;
   });
 });

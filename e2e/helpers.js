@@ -84,21 +84,34 @@ export async function removeDockerProjectViaApi(request, projectId) {
   try {
     const sessionRes = await request.get('/api/auth/session');
     if (!sessionRes.ok()) return false;
+    const origin = new URL(sessionRes.url()).origin;
     const sessionJson = await sessionRes.json();
     const csrfToken = sessionJson?.data?.csrfToken;
     if (!csrfToken) return false;
 
-    const previewRes = await request.post(`/api/docker/projects/${encodeURIComponent(projectId)}/operations/remove/preview`, {
-      headers: { 'x-csrf-token': csrfToken },
-      data: {},
-    });
-    if (!previewRes.ok()) return false;
-    const previewJson = await previewRes.json();
-    const preview = previewJson?.data;
+    const existing = await request.get(`/api/panel/docker/projects/${encodeURIComponent(projectId)}`);
+    if (existing.status() === 404) return true;
+
+    const headers = { Origin: origin, 'x-csrf-token': csrfToken };
+    let preview = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const previewRes = await request.post(`/api/panel/docker/projects/${encodeURIComponent(projectId)}/operations/remove/preview`, {
+        headers,
+        data: {},
+      });
+      if (previewRes.status() === 404) return true;
+      if (previewRes.status() === 409 && attempt < 3) {
+        await new Promise((r) => setTimeout(r, 2000));
+        continue;
+      }
+      if (!previewRes.ok()) return false;
+      preview = (await previewRes.json())?.data;
+      break;
+    }
     if (!preview?.previewDigest || !preview?.confirmation) return false;
 
-    const removeRes = await request.post(`/api/docker/projects/${encodeURIComponent(projectId)}/operations/remove`, {
-      headers: { 'x-csrf-token': csrfToken },
+    const removeRes = await request.post(`/api/panel/docker/projects/${encodeURIComponent(projectId)}/operations/remove`, {
+      headers,
       data: {
         expectedPreviewDigest: preview.previewDigest,
         confirmation: preview.confirmation,
@@ -106,13 +119,13 @@ export async function removeDockerProjectViaApi(request, projectId) {
     });
     if (removeRes.status() !== 202) return false;
 
-    // Poll until project is removed
-    for (let i = 0; i < 30; i++) {
+    // Poll until project is confirmed absent (404)
+    for (let i = 0; i < 60; i++) {
       await new Promise((r) => setTimeout(r, 1000));
-      const checkRes = await request.get(`/api/docker/projects/${encodeURIComponent(projectId)}`);
+      const checkRes = await request.get(`/api/panel/docker/projects/${encodeURIComponent(projectId)}`);
       if (checkRes.status() === 404) return true;
     }
-    return true;
+    return false;
   } catch {
     return false;
   }
@@ -169,10 +182,10 @@ export async function removeDockerProject(page, projectId, projectName = '') {
         await expect(modal).not.toBeVisible({ timeout: 15000 });
 
         // Wait until project removal job completes
-        for (let i = 0; i < 35; i++) {
+        for (let i = 0; i < 60; i++) {
           await page.waitForTimeout(1000);
           if (projectId) {
-            const check = await page.request.get(`/api/docker/projects/${encodeURIComponent(projectId)}`);
+            const check = await page.request.get(`/api/panel/docker/projects/${encodeURIComponent(projectId)}`);
             if (check.status() === 404) break;
           }
         }
