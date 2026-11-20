@@ -1,6 +1,6 @@
 # YunPanel — Onaylanan uygulama planı
 
-Güncel devam noktası: [12 Ekim güvenli durma ve devam kaydı](docs/checkpoint-2026-10-12.md). Kullanıcı isteğiyle çalışma durdu; `.28` paket `0.3.0-2026101141`, 8143/8143 kaynak testi, native queue/recovery temiz. Kalan test kaynakları, commitlenmemiş dilimler ve kabul sınırları bu kayıtta; aşağıdaki eski ara sonuçlar güncel kabul diye kullanılmaz.
+Güncel devam noktası [20 Kasım Linux hosting pilotu](#20-kasım-2026--onaylanan-linux-hosting-pilotu-ve-plesk-geçişi). [Yerel kanıt ve görev kayıtları](docs/gorevler/linux-hosting-pilot.md) ile [canlı kabul listesi](todo.md#linux-hosting-pilotu-ve-plesk-geçişi) burada izlenir. [12 Ekim durma kaydı](docs/checkpoint-2026-10-12.md) önceki çalışmanın geçmişidir.
 
 9–10 Ekim 2026. İlk denetim kaynağı: development@e997bdf9053cea895eba1e7ae947a3ec4fddf059.
 Kullanıcı `.28` üzerinde izole kur/deneyip/kaldır testlerini ve 10 Ekim bütün UI/UX ve kaynak işlerini onayladı. 11 Ekim yalnız `.28` işletim sistemi/verilerinin sıfırlanması ve YunPanel temiz kurulumu ayrıca onaylandı ve uygulandı. Diğer hedef veya yeni deployment kapsamı ayrı izne tabidir. Gerçek kabul ve bağımsız inceleme tamamlanmadan maddeler kapanmaz.

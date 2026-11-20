@@ -2,6 +2,14 @@
 
 20 Kasım 2026 ürün onayı. Bu dilimler yerel kaynak ve araç doğrulaması içindir. Canlı geçiş ve kurtarma ölçütleri [kabul listesinde](../../todo.md#linux-hosting-pilotu-ve-plesk-geçişi) izlenir.
 
+## 20 Kasım yerel Ubuntu kanıtı
+
+- **Kurtarma.** Geçici Ubuntu 24.04'te Restic 0.16.4 ve rclone 1.60.1, yerel bir rclone hedefine gerçek tar arşivi yazdı. Depo yüzde 100 okundu. Kaynak dizin taşındıktan sonra arşiv yeni dizinde açıldı. SHA-256, beklenen kaynak kimliği, dört arşiv kökü ve özel staging içindeki durum dosyası doğrulandı. Mac'te Restic 0.19.1 ile HTML ve SQLite, ayrıca gerçek cache izin hatası için 16/16 test geçti.
+- **Taşıma.** Yerel PHP 8.3 ve MariaDB 10.11 ile Plesk hazırlama komutu aynı baytları kopyaladı. PHP gerçek HTTP yanıtı verdi. Operatör SQL dökümünü yalnız hedef veritabanına yetkili hesapla yükledi. İki Türkçe satır okundu, kardeş veritabanı korundu ve ikinci staging isteği reddedildi. Ubuntu ARM64 paketi çıkarılarak iki CLI giriş noktası çalıştırıldı. [Operatör adımları](../operations.md#plesk-pilotu).
+- **Posta.** Dovecot gerçek Sieve motorunda Türkçe otomatik yanıt, yerel INBOX, kardeş kutu ve kendi adresinden gelen mesaj doğrulandı. Rspamd 3.8.1 gerçek taramada ilk statik liste biçimini yükledi ama puan üretmedi. Yerleşik statik haritayla tek alıcıya +5, kardeş ve çoklu alıcıya sıfır politika puanı, kimlik doğrulamalı gönderime puan dışı işaret doğrulandı. Ürün içinden ayar kaydı, uygulama ve geri alma ile SMTP/IMAP teslimatı açık.
+
+İlk canlı adım ayrı yedek hedefinde uzak depo ve kapalı kaynakla kurtarma provasıdır. Ardından yetkili Plesk dışa aktarımıyla PHP ve postalı WordPress pilotu, ayrı ağdan DNS ve WAF kabulü gelir.
+
 ### T936 · Dosya ve SQL taşıma paketini yerelde hazırla
 - **Bağımlı:** —
 - **Dosyalar:** `apps/api/src/plesk-offline-transfer.js`, `apps/api/test/plesk-offline-transfer.test.js`, `scripts/plesk-transfer.mjs`, `apps/api/test/plesk-transfer-cli.test.js`

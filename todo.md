@@ -2,7 +2,7 @@
 
 ## Linux hosting pilotu ve Plesk geçişi
 
-[Onaylanan plan](plan.md#20-kasım-2026--onaylanan-linux-hosting-pilotu-ve-plesk-geçişi) ve [yerel işler](docs/gorevler/linux-hosting-pilot.md) birbirini tamamlar. Mac üzerindeki dosya, SQLite, HTTP ve araç testleri Linux sistem servislerinin veya canlı taşımanın yerine geçmez.
+[Onaylanan plan](plan.md#20-kasım-2026--onaylanan-linux-hosting-pilotu-ve-plesk-geçişi) ve [yerel kanıt](docs/gorevler/linux-hosting-pilot.md#20-kasım-yerel-ubuntu-kanıtı) pilotu hazırlıyor. Aşağıdaki maddeler bağımsız ortamda sistem servisi, müşteri verisi ve canlı taşıma sonuçlarını izler.
 
 - [ ] Dış Restic/rclone yedeğinden izinli boş Ubuntu 24.04 VM’de panel hesabı/yetkisi, WordPress HTTP, gerçek SQL ve IMAP geri gelir. Kaynak makinenin kapalı olduğu varsayımıyla anahtar erişimi ve ölçülen kurtarma süresi kaydedilir.
 - [ ] Tek veritabanlı PHP ve postalı WordPress pilotlarında izinli Plesk dışa aktarımı, dosya/SQL/posta bütünlüğü, aynı girdinin tekrar işlenmesi, DNS öncesi test ve son eşitleme doğrulanır. Prova sırasında hedefte yeni yazılmış içerik ve postalar korunarak geri dönülür.
