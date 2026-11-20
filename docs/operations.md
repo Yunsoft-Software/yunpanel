@@ -21,9 +21,17 @@ Yerel geliştirme: npm run dev; API workspace ile aynı env üzerinde npm run au
 - Oluştur: /usr/local/bin/node /usr/lib/yunpanel/scripts/local-migration-backup.mjs create --confirm.
 - Doğrula: aynı script verify /var/backups/yunpanel/migration-<timestamp>.
 - Önizle: aynı script preview /var/backups/yunpanel/migration-<timestamp>.
+- Dış depodan indirilen kopya: `preflight <absolute-backup-directory> --expected-sha256 <sha256> --expected-server-id <uuid>`. Özeti ve kaynak kimliğini bağımsız kurtarma kaydından al. Çıktıyı aldıktan sonra private stage ayrı çalıştırılır.
 - Private stage: aynı script stage /var/backups/yunpanel/migration-<timestamp> --confirm; canlı uygulama değildir.
 
 Snapshot directory 0700, state.tar/manifest 0600; SHA-256/source allowlist/member graph/link escape/mode/ownership doğrulanır. Required missing source, symlink veya unsafe archive blocker'dır. ACL/xattr genişletilmiş metadata kabulü ayrıca gerekir. Preserve-current kaynaklar kayıp diye silinmez. Backup doğrulaması gerçek restore/DR kabulü değildir.
+
+## Plesk pilotu
+
+1. Operatörün yetkili dışa aktarımından özel bir dizin hazırla. `plesk.json` bir PHP sürümü ve bir MySQL veya MariaDB veritabanı içermeli. `site/` altında dışa aktarımdaki göreli document root ve site dosyaları, `database.sql` içinde kaynak veritabanının tek şema dökümü yer alır. Dosyalar aktarım kullanıcısına ait olmalı. Geçici verileri `0700` dizinde tut.
+2. Boş, aynı kullanıcıya ait bir hedef dizin oluştur. `node scripts/plesk-transfer.mjs --help` ile alanları kontrol et. Paketteki karşılığı `/usr/lib/yunpanel/scripts/plesk-transfer.mjs` yoludur. Aynı kaynak ve hedef alan adı, DB adı ve hedef sunucu UUID’siyle önce önizlemeyi al ve SHA-256 değerini kaydet.
+3. Aynı argümanlarla `stage` eylemini ve `--expect <sha256>` değerini kullan. `transfer.json` içindeki `bundleDirectory` kopyayı gösterir. Kopya PHP çalıştırmaz ve SQL uygulamaz. Pilot, kopyalanan dosyaları normal panel kurulumuyla açılan geçici siteye ve SQL’i yalnız o sitenin boş veritabanına taşıyarak sürer.
+4. DNS değişikliğinden önce HTTP, giriş ve SQL’i eski ve yeni ortamda karşılaştır. Posta varsa iki IMAP eşitlemesinden sonra klasör, ileti ve teslimatı doğrula. Geçiş sonrasında yeni yazıları da koruyan geri dönüşü pilotta dene. [Canlı kabul](../todo.md#linux-hosting-pilotu-ve-plesk-geçişi).
 
 ## İş kurtarma
 
