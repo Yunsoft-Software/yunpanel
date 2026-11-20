@@ -6,6 +6,8 @@ import { useUnsavedChanges } from './UnsavedChanges.jsx';
 
 const EMPTY_POLICY = { vacation: null, allow: [], deny: [] };
 const STALE = 'stale_mailbox_revision';
+const DISABLED_SAVED_NOTICE = 'Teslimat ayarları kaydedildi. Posta alan adı kapalı olduğu için alan adı etkinleştirildiğinde uygulanacak.';
+const DISABLED_INFO_NOTICE = 'Posta alan adı kapalı. Kaydedilen teslimat ayarları alan adı etkinleştirildiğinde uygulanır.';
 const ERRORS = {
   [STALE]: 'Posta kutusu değişti. Devam etmek için güncel ayarları yükleyin.',
   invalid_mailbox_address: 'Gönderici listelerindeki e-posta adreslerini kontrol edin.',
@@ -33,9 +35,20 @@ function senderList(value) {
   return [...new Set(value.split(/[\n,]/).map((address) => address.trim()).filter(Boolean))];
 }
 
-export default function MailboxDeliveryPolicyPanel({ mailbox, onChanged }) {
+function isDisabledNoChangeFailure(failure) {
+  return Boolean(
+    failure?.saved
+    && (failure.code === 'mail_domain_status_no_change' || failure.cause?.code === 'mail_domain_status_no_change'),
+  );
+}
+
+export default function MailboxDeliveryPolicyPanel({ mailbox, domainStatus = 'enabled', onChanged }) {
   const { id, mailDomainId } = mailbox;
   const change = useMailChange(mailDomainId);
+  const disabledDomain = domainStatus === 'disabled';
+  const prevDomainStatus = useRef(domainStatus);
+  const resetChange = useRef(change.reset);
+  resetChange.current = change.reset;
   const scope = useRef(null);
   const saving = useRef(false);
   const [editor, setEditor] = useState(null);
@@ -44,6 +57,7 @@ export default function MailboxDeliveryPolicyPanel({ mailbox, onChanged }) {
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
   const [confirm, setConfirm] = useState(null);
+  const [needsApply, setNeedsApply] = useState(false);
 
   const load = useCallback(async (signal) => {
     setLoading(true);
@@ -67,6 +81,22 @@ export default function MailboxDeliveryPolicyPanel({ mailbox, onChanged }) {
     return () => controller.abort();
   }, [load]);
 
+  useEffect(() => {
+    if (prevDomainStatus.current === domainStatus) return;
+    const previous = prevDomainStatus.current;
+    prevDomainStatus.current = domainStatus;
+    if (previous === 'disabled' && domainStatus === 'enabled') {
+      resetChange.current();
+      setNeedsApply(false);
+      setNotice((current) => (current === DISABLED_SAVED_NOTICE ? null : current));
+      setError((current) => (isDisabledNoChangeFailure(current) ? null : current));
+    } else if (domainStatus === 'disabled') {
+      resetChange.current();
+      setNeedsApply(false);
+      setError((current) => (current?.saved ? null : current));
+    }
+  }, [domainStatus]);
+
   const { draft, policy } = editor ?? {};
   const input = draft && {
     vacation: draft.enabled ? { subject: draft.subject, body: draft.body } : null,
@@ -79,7 +109,7 @@ export default function MailboxDeliveryPolicyPanel({ mailbox, onChanged }) {
   }));
   const stale = error?.code === STALE || Boolean(policy && mailbox.revision > policy.revision);
   const denied = [401, 403, 404].includes(error?.status ?? error?.cause?.status);
-  const pending = change.pending;
+  const pending = !disabledDomain && change.pending;
   useUnsavedChanges(dirty);
 
   function edit(field, value) {
@@ -96,19 +126,77 @@ export default function MailboxDeliveryPolicyPanel({ mailbox, onChanged }) {
     setError(null);
     setNotice(null);
     try {
+      if (disabledDomain) {
+        const result = await setMailboxDeliveryPolicy(id, { expectedRevision: policy.revision, ...nextPolicy }, { signal });
+        if (signal.aborted) return;
+        setEditor(editorFor(result));
+        change.reset();
+        setNeedsApply(false);
+        setNotice(DISABLED_SAVED_NOTICE);
+        onChanged?.();
+        return;
+      }
       await change(async () => {
         const result = await setMailboxDeliveryPolicy(id, { expectedRevision: policy.revision, ...nextPolicy }, { signal });
         if (!signal.aborted) setEditor(editorFor(result));
         return result;
       }, 'delivery-policy', { signal });
       if (signal.aborted) return;
-      setNotice('Teslimat ayarları kaydedildi.');
+      setNeedsApply(false);
+      setNotice('Teslimat ayarları kaydedildi ve posta hizmetine uygulandı.');
       onChanged?.();
     } catch (failure) {
       if (signal.aborted || failure.name === 'AbortError' || failure.cause?.name === 'AbortError') return;
+      if (isDisabledNoChangeFailure(failure)) {
+        change.reset();
+        setNeedsApply(false);
+        setError(null);
+        setNotice(DISABLED_SAVED_NOTICE);
+        onChanged?.();
+        return;
+      }
       if ([401, 403, 404].includes(failure.status ?? failure.cause?.status)) setEditor(null);
       setError(failure);
-      if (failure.saved) onChanged?.();
+      if (failure.saved) {
+        setNeedsApply(true);
+        onChanged?.();
+      }
+    } finally {
+      saving.current = false;
+      if (!signal.aborted) setBusy(false);
+    }
+  }
+
+  async function reapply() {
+    const signal = scope.current?.signal;
+    if (!policy || denied || stale || disabledDomain || saving.current || !signal || signal.aborted) return;
+    saving.current = true;
+    setBusy(true);
+    setConfirm(null);
+    setError(null);
+    setNotice(null);
+    try {
+      await change.reapply('delivery-policy', { signal });
+      if (signal.aborted) return;
+      setNeedsApply(false);
+      setNotice('Teslimat ayarları posta hizmetine uygulandı.');
+      onChanged?.();
+    } catch (failure) {
+      if (signal.aborted || failure.name === 'AbortError' || failure.cause?.name === 'AbortError') return;
+      if (isDisabledNoChangeFailure(failure)) {
+        change.reset();
+        setNeedsApply(false);
+        setError(null);
+        setNotice(DISABLED_SAVED_NOTICE);
+        onChanged?.();
+        return;
+      }
+      if ([401, 403, 404].includes(failure.status ?? failure.cause?.status)) setEditor(null);
+      setError(failure);
+      if (failure.saved) {
+        setNeedsApply(true);
+        onChanged?.();
+      }
     } finally {
       saving.current = false;
       if (!signal.aborted) setBusy(false);
@@ -117,19 +205,25 @@ export default function MailboxDeliveryPolicyPanel({ mailbox, onChanged }) {
 
   function reload() {
     setConfirm(null);
+    change.reset();
     const signal = scope.current?.signal;
     if (signal && !signal.aborted) void load(signal);
   }
 
-  let message = error && (ERRORS[error.code] ?? 'Teslimat ayarları işlenemedi.');
-  if (stale) message = ERRORS[STALE];
+  let message = error && (ERRORS[error.code] ?? ERRORS[error.cause?.code] ?? 'Teslimat ayarları işlenemedi.');
   if (error?.saved) message = 'Ayarlar kaydedildi. Posta hizmetine uygulanması tamamlanmadı.';
+  if (stale) {
+    message = (pending || needsApply || error?.saved)
+      ? 'Posta kutusu değişti. Güncel ayarları yükleyip yeniden uygulayın.'
+      : ERRORS[STALE];
+  }
   if (denied) message = 'Bu posta kutusunun teslimat ayarlarına erişilemiyor.';
 
   return <Section title="Otomatik yanıt ve spam ayarları">
     <div className="ws-section-body">
       <ErrorNotice error={message} />
       {notice && <p role="status">{notice}</p>}
+      {disabledDomain && configured && notice !== DISABLED_SAVED_NOTICE && <p className="ws-muted" role="status">{DISABLED_INFO_NOTICE}</p>}
       {(loading || busy) && <div className="ws-loading" role="status"><span className="ws-spinner" />{loading ? 'Teslimat ayarları yükleniyor…' : 'Teslimat ayarları işleniyor…'}</div>}
       {!loading && !busy && !denied && (!editor || stale) && <Button icon="refresh" onClick={() => dirty ? setConfirm('reload') : reload()}>Güncel ayarları yükle</Button>}
       {draft && !denied && <form className="ws-form" onSubmit={(event) => { event.preventDefault(); if (dirty) void save(input); }}>
@@ -146,10 +240,11 @@ export default function MailboxDeliveryPolicyPanel({ mailbox, onChanged }) {
           </div>
           <div className="ws-actions">
             <Button type="submit" variant="primary" disabled={!dirty}>Ayarları kaydet</Button>
+            {!dirty && !pending && needsApply && !disabledDomain && <Button type="button" onClick={reapply}>Posta hizmetine uygula</Button>}
             {configured && <Button type="button" variant="danger" onClick={() => setConfirm('clear')}>Ayarları temizle</Button>}
           </div>
         </fieldset>
-        {pending && !stale && <Button type="button" disabled={busy} onClick={() => save(input)}>Uygulamayı tamamla</Button>}
+        {pending && !stale && !disabledDomain && <Button type="button" disabled={busy} onClick={reapply}>Uygulamayı tamamla</Button>}
       </form>}
     </div>
     {confirm === 'clear' && <ConfirmDialog title="Teslimat ayarlarını temizle"

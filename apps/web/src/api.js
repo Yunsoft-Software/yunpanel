@@ -302,6 +302,32 @@ export function deleteDatabase(serverId, name) {
   });
 }
 
+function waitWithSignal(intervalMs, signal) {
+  if (!signal) return new Promise((resolve) => setTimeout(resolve, intervalMs));
+  if (signal.aborted) {
+    try {
+      signal.throwIfAborted();
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      try {
+        signal.throwIfAborted();
+      } catch (error) {
+        reject(error);
+      }
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, intervalMs);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 export async function waitForJob(jobId, { attempts = 300, intervalMs = 1000, signal } = {}) {
   const version = sessionVersion();
   let connectionFailures = 0;
@@ -324,7 +350,7 @@ export async function waitForJob(jobId, { attempts = 300, intervalMs = 1000, sig
       connectionFailures += 1;
       if (connectionFailures >= 30) throw error;
     }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    await waitWithSignal(intervalMs, signal);
   }
   throw new Error('Operation timed out');
 }

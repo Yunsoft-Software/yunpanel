@@ -12,12 +12,14 @@ import { createServer as createViteServer } from 'vite';
 import { createAuthenticatedApi } from '../../api/src/auth-http.js';
 import { createAuthStore } from '../../api/src/auth-store.js';
 import { createDomainRegistry } from '../../api/src/domain-registry.js';
+import { createJobRegistry } from '../../api/src/job-registry.js';
 import { createMailDomainRegistry } from '../../api/src/mail-domain-registry.js';
 import { createMailboxRegistry } from '../../api/src/mailbox-registry.js';
 import { createApp } from '../../api/src/management-app.js';
 import { createOwnerMfaPolicy } from '../../api/src/owner-mfa-policy.js';
 import { createServerRegistry } from '../../api/src/server-registry.js';
 import { createWebsiteRegistry } from '../../api/src/website-registry.js';
+import { waitForJob } from '../src/api.js';
 import {
   applyMailConfiguration,
   clearMailboxForwarding,
@@ -178,7 +180,23 @@ test('managed mail delivery diagnostics client routes and payloads', async (t) =
   setSession(null);
 });
 
-test('Owner can load, revise and clear mailbox delivery settings in Chromium', async (t) => {
+test('waitForJob aborts immediately during polling sleep without leaving a pending timer', async (t) => {
+  setSession({ csrfToken: 'csrf-wait' });
+  t.after(() => setSession(null));
+  const controller = new AbortController();
+  t.mock.method(globalThis, 'fetch', async () => {
+    setTimeout(() => controller.abort(), 15);
+    return ok({ id: 'job-abort', status: 'running' });
+  });
+  const started = Date.now();
+  await assert.rejects(
+    waitForJob('job-abort', { attempts: 5, intervalMs: 30_000, signal: controller.signal }),
+    (error) => error?.name === 'AbortError',
+  );
+  assert.ok(Date.now() - started < 2000, 'waitForJob should settle immediately on abort instead of waiting for intervalMs');
+});
+
+test('Owner manages mailbox delivery policy across disabled domain, enabled apply, validation errors, pending+stale recovery, clear, and site_manager isolation in Chromium', async (t) => {
   const directory = await mkdtemp(path.join(tmpdir(), 'yunpanel-mail-policy-browser-'));
   const masterKey = randomBytes(32);
   const store = createAuthStore({ filePath: path.join(directory, 'auth.sqlite'), masterKey });
@@ -211,9 +229,9 @@ test('Owner can load, revise and clear mailbox delivery settings in Chromium', a
   const domain = await mailDomainRegistry.createMailDomain({
     domainName: webDomain.primaryDomain, webDomainId: webDomain.id, managementMode: 'local',
   });
-  await mailDomainRegistry.transitionLocalStatus(domain.id, { expectedRevision: domain.revision, status: 'enabled' });
   const mailboxOptions = { filePath: path.join(directory, 'mailboxes.json'), masterKey, getMailDomain: mailDomainRegistry.getMailDomain };
   const mailboxRegistry = createMailboxRegistry(mailboxOptions);
+  const jobRegistry = createJobRegistry({ serverExists });
   const password = randomBytes(24).toString('hex');
   const mailbox = await mailboxRegistry.createMailbox({
     mailDomainId: domain.id, address: `owner@${domain.domainName}`, password,
@@ -224,6 +242,46 @@ test('Owner can load, revise and clear mailbox delivery settings in Chromium', a
   await store.users.create(owner.token, createOwnerMfaPolicy({ store, required: false }).requireManagement, {
     username: 'siteuser', password, role: 'site_manager', websiteIds: [website.id],
   });
+
+  async function completeNextMailConfigJob({ outcome = 'succeeded' } = {}) {
+    let claimed = null;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      claimed = await jobRegistry.claimNext(local.id);
+      if (claimed?.job) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.ok(claimed?.job, 'Expected a real queued mail.config.apply job');
+    const job = claimed.job;
+    if (outcome === 'failed') {
+      return jobRegistry.complete({
+        serverId: local.id,
+        jobId: job.id,
+        status: 'failed',
+        error: { code: 'mail_apply_failed', message: 'Posta hizmeti geçici olarak uygulanamadı.' },
+      });
+    }
+    const currentDomain = await mailDomainRegistry.getMailDomain(job.payload.mailDomainId);
+    const digest = '1'.repeat(64);
+    return jobRegistry.complete({
+      serverId: local.id,
+      jobId: job.id,
+      status: 'succeeded',
+      result: {
+        version: 3,
+        mailDomainId: job.payload.mailDomainId,
+        previousRevision: currentDomain.revision,
+        previousStatus: currentDomain.status,
+        desiredStatus: job.payload.desiredStatus,
+        previewDigest: job.payload.previewDigest,
+        configurationSha256: job.payload.configurationSha256,
+        planSha256: digest,
+        backupSha256: digest,
+        readinessSha256: digest,
+        applied: true,
+        sideEffects: true,
+      },
+    });
+  }
 
   vite = await createViteServer({
     root: fileURLToPath(new URL('../', import.meta.url)),
@@ -238,7 +296,9 @@ test('Owner can load, revise and clear mailbox delivery settings in Chromium', a
   await once(server, 'listening');
   const origin = `http://127.0.0.1:${server.address().port}`;
   api = createAuthenticatedApi({ store, publicOrigin: origin, development: true, ownerMfaRequired: false,
-    createHandler: () => createApp({ registry, websiteRegistry, domainRegistry, mailDomainRegistry, mailboxRegistry, localServerId: local.id }),
+    createHandler: () => createApp({
+      registry, websiteRegistry, domainRegistry, mailDomainRegistry, mailboxRegistry, jobRegistry, localServerId: local.id,
+    }),
   });
 
   browser = await chromium.launch();
@@ -249,34 +309,87 @@ test('Owner can load, revise and clear mailbox delivery settings in Chromium', a
     await page.locator('input[name="password"]').fill(password);
     await page.getByRole('button', { name: 'Giriş yap', exact: true }).click();
   }
+
   const page = await browser.newPage();
+  let configPreviewCount = 0;
+  let deliveryPutCount = 0;
+  page.on('request', (req) => {
+    if (req.url().endsWith(`/mail-domains/${domain.id}/config-preview`) && req.method() === 'POST') {
+      configPreviewCount += 1;
+    }
+    if (req.url().endsWith(`/mailboxes/${mailbox.id}/delivery-policy`) && req.method() === 'PUT') {
+      deliveryPutCount += 1;
+    }
+  });
+
   await signIn(page, 'owner');
-  const settings = page.getByRole('button', { name: 'Posta kutusu ayarları', exact: true });
+  // E2E uyumluluk kontrolü: Owner için buton adı 'Kota ve yönlendirme' olarak korunur
+  const settings = page.getByRole('button', { name: 'Kota ve yönlendirme', exact: true });
   await settings.click();
   await expect(page.getByRole('button', { name: 'Kotayı kaydet' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Yönlendirmeyi kaydet' })).toBeVisible();
+
   const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Otomatik yanıt ve spam ayarları' }) });
   const vacation = section.getByRole('checkbox', { name: 'Otomatik yanıtı etkinleştir' });
   const allowed = section.getByRole('textbox', { name: 'Güvenilen gönderenler' });
   const denied = section.getByRole('textbox', { name: 'Şüpheli gönderenler' });
+  const save = section.getByRole('button', { name: 'Ayarları kaydet' });
+  const pageRefresh = page.locator('header.ws-page-heading').getByRole('button', { name: 'Yenile', exact: true });
+  const nextWrite = () => page.waitForResponse(response => response.url().endsWith(`/mailboxes/${mailbox.id}/delivery-policy`)
+    && response.request().method() === 'PUT');
+
+  // (a) Kapalı posta alan adı (status: 'disabled'): PUT 200, config-preview çağrılmaz, form kilitlenmez
   await expect(vacation).not.toBeChecked();
   await expect(allowed).toHaveValue('');
   await expect(denied).toHaveValue('');
-  await allowed.fill('first@sender.example.test');
-  await mailboxRegistry.rotatePassword(mailbox.id, { expectedRevision: 1, password: randomBytes(24).toString('hex') });
-
-  const nextWrite = () => page.waitForResponse(response => response.url().endsWith(`/mailboxes/${mailbox.id}/delivery-policy`)
-    && response.request().method() === 'PUT');
-  const save = section.getByRole('button', { name: 'Ayarları kaydet' });
-  const stale = nextWrite();
+  await allowed.fill('disabled-rule@sender.example.test');
+  const disabledSave = nextWrite();
   await save.click();
-  assert.equal((await stale).status(), 409);
+  assert.equal((await disabledSave).status(), 200);
+  await expect(section.getByRole('status')).toContainText('Posta alan adı kapalı olduğu için alan adı etkinleştirildiğinde uygulanacak.');
+  await expect(section.getByRole('alert')).toHaveCount(0);
+  assert.equal(configPreviewCount, 0);
+  // Form kilitli değil: hemen tekrar düzenlenebilir ve temizlenebilir
+  await expect(allowed).toBeEnabled();
+  await section.getByRole('button', { name: 'Ayarları temizle' }).click();
+  const disabledClear = nextWrite();
+  await page.getByRole('dialog').getByRole('button', { name: 'Ayarları temizle' }).click();
+  assert.equal((await disabledClear).status(), 200);
+  assert.equal(configPreviewCount, 0);
+  await expect(allowed).toHaveValue('');
+  await expect(allowed).toBeEnabled();
+  assert.deepEqual(await createMailboxRegistry(mailboxOptions).getDeliveryPolicy(mailbox.id), {
+    mailboxId: mailbox.id, revision: 3, vacation: null, allow: [], deny: [],
+  });
+
+  // Kapalı alan adını etkinleştir ve sayfa Yenile ile durumun temizlendiğini doğrula
+  await mailDomainRegistry.transitionLocalStatus(domain.id, { expectedRevision: domain.revision, status: 'enabled' });
+  await pageRefresh.click();
+  await expect(section.getByText('Posta alan adı kapalı olduğu için alan adı etkinleştirildiğinde uygulanacak.')).toHaveCount(0);
+
+  // (b) Etkin posta alan adı: çakışan gönderen doğrulama hatası (mail_spam_sender_conflict)
+  await allowed.fill('conflict@sender.example.test');
+  await denied.fill('conflict@sender.example.test');
+  const conflictWrite = nextWrite();
+  await save.click();
+  assert.equal((await conflictWrite).status(), 400);
+  await expect(section.getByRole('alert')).toContainText('Bir gönderici iki listede birden yer alamaz.');
+  await expect(allowed).toBeEnabled();
+
+  // (b.2) stale_mailbox_revision 409 + Güncel ayarları yükle
+  await denied.fill('');
+  await allowed.fill('first@sender.example.test');
+  await mailboxRegistry.rotatePassword(mailbox.id, { expectedRevision: 3, password: randomBytes(24).toString('hex') });
+  const staleWrite = nextWrite();
+  await save.click();
+  assert.equal((await staleWrite).status(), 409);
   await expect(section.getByRole('alert')).toContainText('güncel ayarları yükleyin');
   await expect(save).toBeDisabled();
   await section.getByRole('button', { name: 'Güncel ayarları yükle' }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Ayarları yükle' }).click();
   await expect(allowed).toHaveValue('');
 
+  // (b.3) Mutlu yol: kural kaydet + gerçek config-preview 200 + config-apply 202 + gerçek job completion
   await vacation.check();
   await section.getByRole('textbox', { name: 'Yanıt konusu' }).fill('Ofis dışında');
   await section.getByRole('textbox', { name: 'Yanıt metni' }).fill('Dönünce yanıtlayacağım.');
@@ -284,33 +397,111 @@ test('Owner can load, revise and clear mailbox delivery settings in Chromium', a
   await denied.fill('second@sender.example.test');
   const saved = nextWrite();
   const preview = page.waitForResponse(response => response.url().endsWith(`/mail-domains/${domain.id}/config-preview`));
+  const apply = page.waitForResponse(response => response.url().endsWith(`/mail-domains/${domain.id}/config-apply`));
   await save.click();
   assert.equal((await saved).status(), 200);
   assert.equal((await preview).status(), 200);
+  assert.equal((await apply).status(), 202);
+  await completeNextMailConfigJob({ outcome: 'succeeded' });
+  await expect(section.getByRole('status')).toContainText('Teslimat ayarları kaydedildi ve posta hizmetine uygulandı.');
   const expected = {
-    mailboxId: mailbox.id, revision: 3, vacation: { subject: 'Ofis dışında', body: 'Dönünce yanıtlayacağım.' },
+    mailboxId: mailbox.id, revision: 5, vacation: { subject: 'Ofis dışında', body: 'Dönünce yanıtlayacağım.' },
     allow: ['first@sender.example.test'], deny: ['second@sender.example.test'],
   };
   assert.deepEqual(await createMailboxRegistry(mailboxOptions).getDeliveryPolicy(mailbox.id), expected);
-  await expect(section.getByText('Teslimat ayarları kaydedildi.')).toHaveCount(0);
 
+  // Paneli kapatıp yeniden açınca kayıtlı ayarlar geri gelir
   await settings.click();
   await expect(section).toHaveCount(0);
   await settings.click();
   await expect(section.getByRole('textbox', { name: 'Yanıt konusu' })).toHaveValue(expected.vacation.subject);
   await expect(allowed).toHaveValue(expected.allow[0]);
   await expect(denied).toHaveValue(expected.deny[0]);
+
+  // (c) pending -> Uygulamayı tamamla (taze retry, PUT tekrarı yok) -> stale + reload() + Posta hizmetine uygula
+  await allowed.fill('first@sender.example.test\nthird@sender.example.test');
+  const pendingPut = nextWrite();
+  const failedApply = page.waitForResponse(response => response.url().endsWith(`/mail-domains/${domain.id}/config-apply`));
+  await save.click();
+  assert.equal((await pendingPut).status(), 200);
+  assert.equal((await failedApply).status(), 202);
+  await completeNextMailConfigJob({ outcome: 'failed' });
+  await expect(section.getByRole('alert')).toContainText('Ayarlar kaydedildi. Posta hizmetine uygulanması tamamlanmadı.');
+  const completeBtn = section.getByRole('button', { name: 'Uygulamayı tamamla' });
+  await expect(completeBtn).toBeVisible();
+
+  // Failed job sonrası Uygulamayı tamamla: PUT tekrarlanmadan taze preview + apply (yeni job) üretir
+  const putsBeforeCompleteRetry = deliveryPutCount;
+  const retryPreview = page.waitForResponse(response => response.url().endsWith(`/mail-domains/${domain.id}/config-preview`));
+  const retryApply = page.waitForResponse(response => response.url().endsWith(`/mail-domains/${domain.id}/config-apply`));
+  await completeBtn.click();
+  assert.equal((await retryPreview).status(), 200);
+  assert.equal((await retryApply).status(), 202);
+  assert.equal(deliveryPutCount, putsBeforeCompleteRetry, 'Uygulamayı tamamla must not repeat PUT /delivery-policy');
+  await completeNextMailConfigJob({ outcome: 'failed' });
+  await expect(section.getByRole('alert')).toContainText('Ayarlar kaydedildi. Posta hizmetine uygulanması tamamlanmadı.');
+
+  // Başka bir işlem posta kutusu revizyonunu ilerletir -> stale mesajı error.saved mesajını ezmeden öne geçer
+  await mailboxRegistry.rotatePassword(mailbox.id, { expectedRevision: 6, password: randomBytes(24).toString('hex') });
+  await pageRefresh.click();
+  await expect(section.getByRole('alert')).toContainText('Posta kutusu değişti. Güncel ayarları yükleyip yeniden uygulayın.');
+  await expect(section.getByRole('button', { name: 'Güncel ayarları yükle' })).toBeVisible();
+
+  // Güncel ayarları yükle -> change.reset() ile form sessizce kilitli kalmaz, Posta hizmetine uygula çıkar
+  await section.getByRole('button', { name: 'Güncel ayarları yükle' }).click();
+  await expect(allowed).toBeEnabled();
+  await expect(allowed).toHaveValue('first@sender.example.test\nthird@sender.example.test');
+  const reapplyBtn = section.getByRole('button', { name: 'Posta hizmetine uygula' });
+  await expect(reapplyBtn).toBeVisible();
+
+  // Yeniden uygulama: PUT tekrarlanmadan taze config-preview + config-apply + gerçek job completion
+  const putsBeforeReapply = deliveryPutCount;
+  const freshPreview = page.waitForResponse(response => response.url().endsWith(`/mail-domains/${domain.id}/config-preview`));
+  const freshApply = page.waitForResponse(response => response.url().endsWith(`/mail-domains/${domain.id}/config-apply`));
+  await reapplyBtn.click();
+  assert.equal((await freshPreview).status(), 200);
+  assert.equal((await freshApply).status(), 202);
+  const detailAfterReapply = page.waitForResponse(response => response.url().includes(`/mailboxes?mailDomainId=${domain.id}`) && response.request().method() === 'GET');
+  await completeNextMailConfigJob({ outcome: 'succeeded' });
+  await expect(section.getByRole('status')).toContainText('Teslimat ayarları posta hizmetine uygulandı.');
+  await detailAfterReapply;
+  assert.equal(deliveryPutCount, putsBeforeReapply, 'Reapply must not repeat PUT /delivery-policy');
+
+  // (c.2) Yarış durumu: UI etkin sanırken sunucu eşzamanlı kapatılır -> PUT 200, preview 409 mail_domain_status_no_change yakalanır, kilit oluşmaz
+  await mailDomainRegistry.transitionLocalStatus(domain.id, { expectedRevision: 2, status: 'disabled' });
+  await allowed.fill('first@sender.example.test\nrace@sender.example.test');
+  const racePut = nextWrite();
+  const racePreview = page.waitForResponse(response => response.url().endsWith(`/mail-domains/${domain.id}/config-preview`));
+  const detailAfterRace = page.waitForResponse(response => response.url().includes(`/mailboxes?mailDomainId=${domain.id}`) && response.request().method() === 'GET');
+  await save.click();
+  assert.equal((await racePut).status(), 200);
+  assert.equal((await racePreview).status(), 409);
+  await expect(section.getByRole('status')).toContainText('Posta alan adı kapalı olduğu için alan adı etkinleştirildiğinde uygulanacak.');
+  await expect(section.getByRole('alert')).toHaveCount(0);
+  await expect(allowed).toBeEnabled();
+  await detailAfterRace;
+
+  // Alan adını tekrar etkinleştir ve temizleme + site_manager gizliliğini doğrula
+  await mailDomainRegistry.transitionLocalStatus(domain.id, { expectedRevision: 3, status: 'enabled' });
+  await pageRefresh.click();
+  await expect(section.getByText('Posta alan adı kapalı olduğu için alan adı etkinleştirildiğinde uygulanacak.')).toHaveCount(0);
+
+  // (d) Temizleme + kalıcı doğrulama + site_manager gizliliği
   await section.getByRole('button', { name: 'Ayarları temizle' }).click();
   const cleared = nextWrite();
+  const clearApply = page.waitForResponse(response => response.url().endsWith(`/mail-domains/${domain.id}/config-apply`));
   await page.getByRole('dialog').getByRole('button', { name: 'Ayarları temizle' }).click();
   assert.equal((await cleared).status(), 200);
+  assert.equal((await clearApply).status(), 202);
+  await completeNextMailConfigJob({ outcome: 'succeeded' });
+  await expect(section.getByRole('status')).toContainText('Teslimat ayarları kaydedildi ve posta hizmetine uygulandı.');
   assert.deepEqual(await createMailboxRegistry(mailboxOptions).getDeliveryPolicy(mailbox.id), {
-    mailboxId: mailbox.id, revision: 4, vacation: null, allow: [], deny: [],
+    mailboxId: mailbox.id, revision: 9, vacation: null, allow: [], deny: [],
   });
   await settings.click();
 
   const siteUser = await browser.newPage();
   await signIn(siteUser, 'siteuser');
-  await siteUser.getByRole('button', { name: 'Kota ve yönlendirme' }).click();
+  await siteUser.getByRole('button', { name: 'Kota ve yönlendirme', exact: true }).click();
   await expect(siteUser.getByRole('heading', { name: 'Otomatik yanıt ve spam ayarları' })).toHaveCount(0);
 });
