@@ -1486,10 +1486,8 @@ test('SCN-WEB-06a: buildNginxSubPathLocationBlock generates valid Nginx location
       websocket: preset.websocket,
     });
 
-    assert.ok(
-      block.includes(`# Alt yol yönlendirmesi: ${preset.path} -> Konteyner :${preset.innerPort} (Host ${preset.outerPort})`),
-    );
-    assert.ok(block.includes(`location ${preset.path} {`));
+    assert.ok(block.includes(`location = ${preset.path} {`));
+    assert.ok(block.includes(`location ^~ ${preset.path}/ {`));
     assert.ok(block.includes(`    proxy_pass http://${preset.outerPort};`));
     assert.ok(block.includes('    proxy_http_version 1.1;'));
     assert.ok(block.includes('    proxy_set_header Host $host;'));
@@ -1511,7 +1509,8 @@ test('SCN-WEB-06b: buildNginxSubPathLocationBlock normalizes relative paths and 
     outerPort: '14000',
     websocket: false,
   });
-  assert.ok(block.includes('location /v1/graphql {'));
+  assert.ok(block.includes('location = /v1/graphql {'));
+  assert.ok(block.includes('location ^~ /v1/graphql/ {'));
   assert.ok(block.includes('proxy_pass http://127.0.0.1:14000;'));
 
   const html = renderToStaticMarkup(
@@ -1519,11 +1518,22 @@ test('SCN-WEB-06b: buildNginxSubPathLocationBlock normalizes relative paths and 
       MemoryRouter,
       null,
       createElement(NginxSubPathProxyBuilder, {
-        domain: { id: DOMAIN_ID, primaryDomain: 'webrich.news', target: { upstreamPort: 13500 } },
+        domain: { id: DOMAIN_ID, serverId: 'srv-1', primaryDomain: 'webrich.news', target: { upstreamPort: 13500 } },
+        isOwner: true,
+        onChange: () => {},
+        projects: [{
+          id: '11111111-1111-4111-8111-111111111111',
+          serverId: 'srv-1',
+          projectName: 'api_stack',
+          services: [{
+            name: 'api',
+            publishedPorts: [{ hostIp: '127.0.0.1', publishedPort: 13500, targetPort: 3000, protocol: 'tcp' }],
+          }],
+        }],
       }),
     ),
   );
-  assert.ok(html.includes('proxy_pass http://127.0.0.1:13500;'));
+  assert.ok(html.includes('127.0.0.1:13500'));
   assert.ok(html.includes('href="/docker"'));
 });
 
@@ -1531,6 +1541,8 @@ test('SCN-WEB-06c: buildNginxSubPathLocationBlock blocks Nginx config injection 
   const maliciousPaths = [
     '',
     '   ',
+    '/',
+    '/.well-known',
     '/api; rm -rf /',
     '/api { return 200; }',
     '/api } location /pwn {',
@@ -1553,7 +1565,7 @@ test('SCN-WEB-06c: buildNginxSubPathLocationBlock blocks Nginx config injection 
         outerPort: '127.0.0.1:13000',
         websocket: true,
       }),
-      /Geçersiz Nginx alt yol \(location\) ifadesi/,
+      /alt yol/i,
       `Expected path ${JSON.stringify(badPath)} to be rejected`,
     );
   }
@@ -1568,17 +1580,19 @@ test('SCN-WEB-06d: buildNginxSubPathLocationBlock rejects out-of-range or malfor
         outerPort: '127.0.0.1:13000',
         websocket: true,
       }),
-      /Inner \(Konteyner\) portu 1–65535 aralığında olmalıdır/,
+      /Konteyner portu 1–65535 aralığında olmalıdır/,
       `Expected innerPort ${JSON.stringify(badInner)} to be rejected`,
     );
   }
 
   for (const badOuter of [
     '0',
+    '80',
     '-80',
     '65536',
     '99999',
     'abc',
+    '192.168.1.5:13000',
     '127.0.0.1:0',
     '127.0.0.1:70000',
     '127.0.0.1:99999',
@@ -1595,7 +1609,7 @@ test('SCN-WEB-06d: buildNginxSubPathLocationBlock rejects out-of-range or malfor
         outerPort: badOuter,
         websocket: true,
       }),
-      /Outer \(Yerel Host\) adresi geçerli bir host:port \(1–65535\) olmalıdır/,
+      /Yerel hedef adresi geçerli bir loopback adresi ve 1024–65535 portu olmalıdır/,
       `Expected outerPort ${JSON.stringify(badOuter)} to be rejected`,
     );
   }

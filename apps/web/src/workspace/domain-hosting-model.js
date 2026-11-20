@@ -21,7 +21,19 @@ function nginxSettings(domain, value) {
   const input = typeof value?.indexFiles === 'string' ? { ...value,
     indexFiles: value.indexFiles.trim() ? value.indexFiles.trim().split(/[\s,]+/) : null } : value;
   try { return normalizeNginxSettings(domain.targetType, input); }
-  catch { fail('hosting_draft_invalid', 'Web sunucusu ayarlarını kontrol edin. Başlangıç dosyaları benzersiz olmalı; hata sayfaları site içindeki HTML dosyalarına gitmeli ve başlangıç dosyasıyla aynı olmamalı. Sayılar belirtilen aralıkta, başlık adları benzersiz ve değerleri tek satır olmalı. Yönlendirmede kaynak / ile başlamalı, hedef site içi yol veya http(s) adresi olmalı.'); }
+  catch (error) {
+    const proxyMessages = {
+      nginx_proxy_route_protected_path_conflict: 'Alt yol proxy kuralı şifre korumalı bir dizinle çakışamaz.',
+      nginx_proxy_route_redirect_conflict: 'Alt yol proxy kuralı mevcut yönlendirme kuralıyla çakışamaz.',
+      nginx_proxy_route_error_page_conflict: 'Alt yol proxy kuralı özel hata sayfasıyla çakışamaz.',
+      duplicate_nginx_proxy_route: 'Aynı alt yol için birden fazla proxy kuralı tanımlanamaz.',
+      overlapping_nginx_proxy_routes: 'Alt yol proxy kuralları birbirini kapsayacak şekilde çakışamaz.',
+      invalid_nginx_proxy_route: 'Alt yol proxy kuralı geçersiz. Yol / ile başlamalı ve geçerli bir Docker servis portuna bağlanmalıdır.',
+      invalid_nginx_proxy_routes: 'En fazla 20 alt yol proxy kuralı tanımlanabilir.',
+    };
+    if (Object.hasOwn(proxyMessages, error?.code)) fail(error.code, proxyMessages[error.code]);
+    fail('hosting_draft_invalid', 'Web sunucusu ayarlarını kontrol edin. Başlangıç dosyaları benzersiz olmalı; hata sayfaları site içindeki HTML dosyalarına gitmeli ve başlangıç dosyasıyla aynı olmamalı. Sayılar belirtilen aralıkta, başlık adları benzersiz ve değerleri tek satır olmalı. Yönlendirmede kaynak / ile başlamalı, hedef site içi yol veya http(s) adresi olmalı.');
+  }
 }
 function redirectTarget(value) {
   try { return normalizeRedirectTarget(value); }

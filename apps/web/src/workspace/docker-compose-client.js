@@ -17,8 +17,8 @@ function integer(value, field, minimum, maximum) {
   return value;
 }
 
-export function listDockerProjects() {
-  return panelRequest('/docker/projects');
+export function listDockerProjects({ signal } = {}) {
+  return panelRequest('/docker/projects', signal ? { signal } : undefined);
 }
 
 export function getDockerProject(projectId) {
@@ -163,6 +163,33 @@ export function resolveDockerProxyRule({
     domainName: domainName || null,
     websocket: Boolean(websocket),
   });
+}
+
+export async function resolveServerDockerProxyRule({
+  domainId = null,
+  hostname = null,
+  projectId,
+  serviceName,
+  innerPort,
+  urlPath = '/',
+} = {}, { signal } = {}) {
+  if (typeof projectId !== 'string' || !projectId) throw new Error('dockerProjectId is required');
+  if (typeof serviceName !== 'string' || !serviceName) throw new Error('serviceName is required');
+  const resolvedInnerPort = integer(Number(innerPort), 'innerPort', 1, 65535);
+  const body = {
+    ...(domainId ? { domainId } : {}),
+    ...(hostname ? { hostname } : {}),
+    projectId,
+    serviceName,
+    innerPort: resolvedInnerPort,
+    urlPath,
+  };
+  const result = await panelRequest('/docker/proxy-rules/resolve', {
+    method: 'POST',
+    body,
+    signal,
+  });
+  return result?.data ?? result;
 }
 
 export function getDockerStorageBackup(projectId) {

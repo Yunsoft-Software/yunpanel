@@ -163,7 +163,8 @@ test('DomainHostingPanel sub-path reverse proxy builder generates valid Nginx lo
     outerPort: '127.0.0.1:13000',
     websocket: true,
   });
-  assert.match(blockWithWs, /location \/api \{/);
+  assert.match(blockWithWs, /location = \/api \{/);
+  assert.match(blockWithWs, /location \^~ \/api\/ \{/);
   assert.match(blockWithWs, /proxy_pass http:\/\/127\.0\.0\.1:13000;/);
   assert.match(blockWithWs, /proxy_http_version 1\.1;/);
   assert.match(blockWithWs, /proxy_set_header Upgrade \$http_upgrade;/);
@@ -175,7 +176,8 @@ test('DomainHostingPanel sub-path reverse proxy builder generates valid Nginx lo
     outerPort: '14000',
     websocket: false,
   });
-  assert.match(blockWithoutWs, /location \/graphql \{/);
+  assert.match(blockWithoutWs, /location = \/graphql \{/);
+  assert.match(blockWithoutWs, /location \^~ \/graphql\/ \{/);
   assert.match(blockWithoutWs, /proxy_pass http:\/\/127\.0\.0\.1:14000;/);
   assert.doesNotMatch(blockWithoutWs, /Upgrade \$http_upgrade/);
 
@@ -194,21 +196,33 @@ test('DomainHostingPanel sub-path reverse proxy builder generates valid Nginx lo
       createElement(NginxSubPathProxyBuilder, {
         domain: {
           id: 'dom-1',
+          serverId: 'srv-1',
           primaryDomain: 'jamstack.example.com',
           target: { upstreamPort: 13000 },
         },
+        isOwner: true,
+        onChange: () => {},
+        projects: [{
+          id: '11111111-1111-4111-8111-111111111111',
+          serverId: 'srv-1',
+          projectName: 'api_stack',
+          services: [{
+            name: 'api',
+            publishedPorts: [{ hostIp: '127.0.0.1', publishedPort: 13000, targetPort: 3000, protocol: 'tcp' }],
+          }],
+        }],
       }),
     ),
   );
 
-  assert.ok(builderHtml.includes('Nginx Reverse Proxy &amp; Alt Yol (Location) Kuralları'));
-  assert.ok(builderHtml.includes('URL Yolu'));
-  assert.ok(builderHtml.includes('Inner / Konteyner Portu'));
-  assert.ok(builderHtml.includes('Outer / Yerel Host Portu'));
-  assert.ok(builderHtml.includes('WebSocket (Upgrade)'));
-  assert.ok(builderHtml.includes('Docker Stack Bağla'));
+  assert.ok(builderHtml.includes('Alt yol proxy kuralları'));
+  assert.ok(builderHtml.includes('URL yolu'));
+  assert.ok(builderHtml.includes('Docker projesi'));
+  assert.ok(builderHtml.includes('Servis ve port'));
+  assert.ok(builderHtml.includes('WebSocket bağlantıları'));
+  assert.ok(builderHtml.includes('Docker Projeleri'));
   assert.ok(builderHtml.includes('href="/docker"'));
-  assert.ok(builderHtml.includes('proxy_pass http://127.0.0.1:13000;'));
+  assert.ok(builderHtml.includes('127.0.0.1:13000'));
 });
 
 test('SiteDetailPage surfaces "Web Sunucusu & Nginx" (hosting) and "Alan Adları & Yönlendirme" (domains) in overview tool cards', async () => {
