@@ -81,7 +81,7 @@ Sieve, mevcut yönlendirmeyle zincirde çalıştı. Kopyalı yönlendirme yerel 
 - **Kabul:** Gerçek DNS sorgusu, ikincil kaynak dizini ve birincil işlem durumu birlikte kanıtlanır. Geçici kaynaklar temizlenir ve sonuç görev kaydına yazılır.
 
 ### T947 · İsimli rclone hedefi için özel Restic yapılandırmasını aktar
-- **Bağımlı:** T937, T940
-- **Dosyalar:** `packages/host-runtime/src/restic-manager.js`, `packages/host-runtime/test/restic-manager-native.test.js`, `docs/local-migration-backup.md`
+- **Bağımlı:** T893, T937, T940
+- **Dosyalar:** `packages/host-runtime/src/restic-manager.js`, `packages/host-runtime/src/index.js`, `packages/host-runtime/test/restic-manager-native.test.js`, `apps/api/src/restic-repository-registry.js`, `apps/api/test/restic-repository-registry.test.js`, `docs/local-migration-backup.md`
 - **İş:** Restic izinli süreç ortamında operatörün seçtiği tek isimli rclone hesabını kullanabilsin. Yalnız açık yönetici yapılandırmasına, özel dosyaya ve rclone deposuna bağlı kalsın. Kimlik bilgisi genel ortamdan veya kullanıcı isteğinden alınmaz, çıktıya girmez ve özel geçici dosya işlem sonunda silinir.
 - **Kabul:** Gerçek Restic/rclone ile ayarsız ilk ret, izinli özel yapılandırmayla isimli depo init, snapshot, tam okuma ve geri yükleme. Genel izinli veya symlink dosyayı reddet. İşlem sonrası geçici parola ve yapılandırma dosyaları kalmaz. Uzak ağ kanıtı ayrı kabulde.

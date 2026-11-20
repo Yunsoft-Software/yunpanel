@@ -106,7 +106,20 @@ function normalizeRepository(repository) {
   if (typeof repository !== 'string' || repository.trim().length < 1) {
     throw new ResticError('restic_repository_invalid', 'Restic repository path or target is required');
   }
-  return repository.trim();
+  const normalized = repository.trim();
+  assertResticRcloneTarget(normalized);
+  return normalized;
+}
+
+export function assertResticRcloneTarget(repository) {
+  if (typeof repository !== 'string' || !repository.startsWith('rclone:')) return;
+  const explicitLocal = 'rclone::local:';
+  const controlCharacters = /[\u0000-\u001f\u007f]/u;
+  if (!controlCharacters.test(repository) && (
+    /^rclone:[A-Za-z0-9_-]{1,64}:[^\r\n]*$/u.test(repository)
+    || (repository.startsWith(explicitLocal) && path.isAbsolute(repository.slice(explicitLocal.length)))
+  )) return;
+  throw new ResticError('restic_rclone_target_invalid', 'Use a named rclone account and repository path', 400);
 }
 
 function normalizePassword(password) {

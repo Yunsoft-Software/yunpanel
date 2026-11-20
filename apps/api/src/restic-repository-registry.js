@@ -2,7 +2,7 @@ import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { assertUuid } from '@yunpanel/shared';
-import { createResticManager } from '@yunpanel/host-runtime';
+import { assertResticRcloneTarget, createResticManager } from '@yunpanel/host-runtime';
 import { normalizeEnvironmentMasterKey } from './application-environment-registry.js';
 import { createProcessStoreLock } from './process-store-lock.js';
 
@@ -121,17 +121,25 @@ function normalizeRetentionPolicy(policy) {
 }
 
 function publicRepository(record) {
+  let target = record.target;
+  let error = record.error ?? null;
+  try {
+    assertResticRcloneTarget(target);
+  } catch (invalidTarget) {
+    target = null;
+    error = invalidTarget.message;
+  }
   return Object.freeze({
     id: record.id,
     serverId: record.serverId,
     name: record.name,
     backend: record.backend,
-    target: record.target,
+    target,
     status: record.status,
     retentionPolicy: record.retentionPolicy ? Object.freeze({ ...record.retentionPolicy }) : null,
     lastCheckedAt: record.lastCheckedAt ?? null,
     lastSnapshotAt: record.lastSnapshotAt ?? null,
-    error: record.error ?? null,
+    error,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   });
@@ -238,6 +246,11 @@ export function createResticRepositoryRegistry({
     const resolvedTarget = target ?? (backend === 'local' ? path.join(localRepoBase, id) : null);
     if (!resolvedTarget || typeof resolvedTarget !== 'string' || resolvedTarget.trim().length < 1) {
       throw new ResticRepositoryRegistryError('restic_target_invalid', 'Repository target is required');
+    }
+    try {
+      assertResticRcloneTarget(resolvedTarget.trim());
+    } catch (error) {
+      throw new ResticRepositoryRegistryError(error.code, error.message, error.status);
     }
 
     const normalizedRetentionPolicy = normalizeRetentionPolicy(retentionPolicy);

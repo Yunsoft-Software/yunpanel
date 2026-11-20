@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -11,6 +11,27 @@ import {
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const repoId = '0bb78242-03a6-429f-9d17-7725c521437c';
+
+test('rclone targets cannot store connection options and an old target is not exposed', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-restic-repo-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const filePath = path.join(root, 'repositories.json');
+  const registry = createResticRepositoryRegistry({ filePath, masterKey: randomBytes(32) });
+  const input = { serverId, name: 'pilot', backend: 'rclone', password: randomBytes(24).toString('hex') };
+  const embedded = 'rclone:pilot,pass=local-private-marker:repo';
+  for (const target of [embedded, 'rclone::sftp,host=invalid.example.test:repo']) {
+    await assert.rejects(registry.createRepository({ ...input, target }), { code: 'restic_rclone_target_invalid' });
+  }
+  const created = await registry.createRepository({ ...input, target: 'rclone:pilot:repo' });
+  assert.equal(created.target, 'rclone:pilot:repo');
+  const old = JSON.parse(await readFile(filePath, 'utf8'));
+  old.repositories[0].target = embedded;
+  old.repositories[0].error = embedded;
+  await writeFile(filePath, JSON.stringify(old));
+  const read = await registry.getRepository(created.id);
+  assert.equal(read.target, null);
+  assert.doesNotMatch(JSON.stringify(read), /local-private-marker/);
+});
 
 function mockResticManager() {
   const calls = [];

@@ -419,6 +419,7 @@ export {
   cacheIsolationInternals,
 } from './cache-isolation-manager.js';
 export {
+  assertResticRcloneTarget,
   createResticManager,
   cleanOrphanedPasswordFiles,
   MINIMUM_RESTIC_VERSION,

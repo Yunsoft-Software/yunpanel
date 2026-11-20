@@ -108,6 +108,9 @@ test('a private administrator rclone configuration enables a named Restic reposi
     await symlink(rcloneConfigPath, linkedConfigPath);
 
     const noConfig = createResticManager({ resticPath, rcloneConfigPath: null });
+    for (const unsafe of ['rclone:pilot,pass=local-private-marker:repo', 'rclone::sftp,host=invalid.example.test:repo']) {
+      await assert.rejects(noConfig.init({ repository: unsafe, password }), { code: 'restic_rclone_target_invalid' });
+    }
     await assert.rejects(noConfig.init({ repository, password }), { code: 'restic_rclone_config_required' });
     const explicitLocalBackend = `rclone::local:${path.join(root, 'inline-repository')}`;
     assert.equal((await noConfig.init({ repository: explicitLocalBackend, password })).repository, explicitLocalBackend);
