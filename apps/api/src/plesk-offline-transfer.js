@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { lstat, open, readdir, realpath } from 'node:fs/promises';
+import { chmod, link, lstat, mkdir, mkdtemp, open, readdir, realpath, rm, unlink } from 'node:fs/promises';
 import { isIP } from 'node:net';
 import path from 'node:path';
 import { assertDomainName, assertUuid, isInfrastructureDatabase } from '@yunpanel/shared';
@@ -9,6 +9,7 @@ import { createPleskImporter } from './plesk-importer.js';
 const EXPORT_NAME = 'plesk.json';
 const SITE_NAME = 'site';
 const SQL_NAME = 'database.sql';
+const RECEIPT_NAME = 'transfer.json';
 const BUNDLE_ENTRIES = [SQL_NAME, EXPORT_NAME, SITE_NAME];
 const MAX_EXPORT_BYTES = 256 * 1024;
 const DIGEST_PATTERN = /^[a-f0-9]{64}$/;
@@ -56,6 +57,10 @@ function fingerprint(stat) {
   return [stat.dev, stat.ino, stat.mode, stat.uid, stat.size, stat.nlink, stat.mtimeNs, stat.ctimeNs].join(':');
 }
 
+function sameEntry(left, right) {
+  return left.dev === right.dev && left.ino === right.ino && left.uid === right.uid;
+}
+
 async function inspectEntry(filePath, uid) {
   const stat = await lstat(filePath, { bigint: true });
   if (!(stat.isDirectory() || stat.isFile()) || stat.uid !== BigInt(uid) || (stat.mode & 0o7022n) !== 0n
@@ -84,11 +89,12 @@ async function assertUnchanged(filePath, original) {
   }
 }
 
-async function readInput(filePath, stat, maxBytes = null) {
+async function readInput(filePath, stat, { maxBytes = null, destination, mode = 0o600 } = {}) {
   if (!stat.isFile()) fail('file_invalid', 'The bundle contains a non-file at a required file path');
   if (maxBytes !== null && stat.size > BigInt(maxBytes)) fail('export_too_large', 'The Plesk metadata file exceeds its size limit');
 
   const handle = await open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  let output;
   try {
     if (fingerprint(await handle.stat({ bigint: true })) !== fingerprint(stat)) {
       fail('content_changed', 'An input changed during inspection');
@@ -96,27 +102,33 @@ async function readInput(filePath, stat, maxBytes = null) {
     const hash = createHash('sha256');
     const chunks = [];
     let bytes = 0n;
+    if (destination) output = await open(destination, 'wx', 0o600);
     for await (const chunk of handle.createReadStream({ autoClose: false })) {
       bytes += BigInt(chunk.length);
       if (bytes > stat.size) fail('content_changed', 'An input grew during inspection');
       hash.update(chunk);
       if (maxBytes !== null) chunks.push(chunk);
+      if (output) await output.writeFile(chunk);
     }
     if (bytes !== stat.size || fingerprint(await handle.stat({ bigint: true })) !== fingerprint(stat)) {
       fail('content_changed', 'An input changed during inspection');
     }
     await assertUnchanged(filePath, stat);
+    if (output) {
+      await output.chmod(mode);
+      await output.sync();
+    }
     return {
       sha256: hash.digest('hex'),
       bytes: stat.size.toString(),
       ...(maxBytes === null ? {} : { content: Buffer.concat(chunks).toString('utf8') }),
     };
   } finally {
-    await handle.close();
+    await Promise.all([handle.close(), output?.close()]);
   }
 }
 
-async function inspectSite(sitePath, siteStat, documentRoot, uid) {
+async function inspectSite(sitePath, siteStat, documentRoot, uid, destination) {
   if (!siteStat.isDirectory()) fail('site_invalid', 'The bundle must contain a site directory');
   const digest = createHash('sha256');
   let files = 0;
@@ -124,28 +136,32 @@ async function inspectSite(sitePath, siteStat, documentRoot, uid) {
   let bytes = 0n;
   let documentRootFiles = 0;
 
-  async function walk(directory, relative, stat) {
+  async function walk(directory, relative, stat, copyDirectory) {
+    if (copyDirectory) await mkdir(copyDirectory, { mode: 0o700 });
     for (const name of (await readdir(directory)).sort()) {
       if (!safeName(name)) fail('entry_unsafe', 'The site contains an unsafe file or directory name');
       const childPath = path.join(directory, name);
       const childRelative = relative ? `${relative}/${name}` : name;
       const child = await inspectEntry(childPath, uid);
+      const copyPath = copyDirectory && path.join(copyDirectory, name);
+      const mode = child.mode & 0o777n;
       if (child.isDirectory()) {
         directories += 1;
-        digest.update(`${JSON.stringify(['directory', childRelative, String(child.mode & 0o777n)])}\n`);
-        await walk(childPath, childRelative, child);
+        digest.update(`${JSON.stringify(['directory', childRelative, String(mode)])}\n`);
+        await walk(childPath, childRelative, child, copyPath);
+        if (copyPath) await chmod(copyPath, Number(mode));
       } else {
-        const input = await readInput(childPath, child);
+        const input = await readInput(childPath, child, { destination: copyPath, mode: Number(mode) });
         files += 1;
         bytes += child.size;
         if (childRelative.startsWith(`${documentRoot}/`)) documentRootFiles += 1;
-        digest.update(`${JSON.stringify(['file', childRelative, String(child.mode & 0o777n), input.bytes, input.sha256])}\n`);
+        digest.update(`${JSON.stringify(['file', childRelative, String(mode), input.bytes, input.sha256])}\n`);
       }
     }
     await assertUnchanged(directory, stat);
   }
 
-  await walk(sitePath, '', siteStat);
+  await walk(sitePath, '', siteStat, destination);
   if (documentRootFiles === 0) {
     fail('site_invalid', 'Include the declared document root and site files in the bundle');
   }
@@ -188,7 +204,26 @@ function parseExport(content, serverId, sourceDomain, sourceDatabase) {
   return { phpVersion: site.runtime.phpVersion, documentRoot };
 }
 
-export async function previewPleskOfflineTransfer({
+async function inspectBundle(bundle, uid, { serverId, sourceDomain, sourceDatabase }, destination) {
+  if (JSON.stringify((await readdir(bundle.absolute)).sort()) !== JSON.stringify(BUNDLE_ENTRIES)) {
+    fail('layout_invalid', 'The bundle must contain only plesk.json, site/ and database.sql');
+  }
+  const exportPath = path.join(bundle.absolute, EXPORT_NAME);
+  const sitePath = path.join(bundle.absolute, SITE_NAME);
+  const sqlPath = path.join(bundle.absolute, SQL_NAME);
+  const copyPath = (name) => destination && path.join(destination, name);
+  const metadata = await readInput(exportPath, await inspectEntry(exportPath, uid), {
+    maxBytes: MAX_EXPORT_BYTES, destination: copyPath(EXPORT_NAME),
+  });
+  const runtime = parseExport(metadata.content, serverId, sourceDomain, sourceDatabase);
+  const site = await inspectSite(sitePath, await inspectEntry(sitePath, uid), runtime.documentRoot, uid, copyPath(SITE_NAME));
+  const sql = await readInput(sqlPath, await inspectEntry(sqlPath, uid), { destination: copyPath(SQL_NAME) });
+  if (sql.bytes === '0') fail('sql_empty', 'The database dump must be present and non-empty');
+  await assertUnchanged(bundle.absolute, bundle.stat);
+  return { runtime, files: { exportSha256: metadata.sha256, site, sql } };
+}
+
+async function inspectTransfer({
   bundleDirectory, stagingDirectory, serverId, sourceDomain, sourceDatabase,
   targetDomain, targetDatabase, expectedDigest,
 } = {}) {
@@ -215,25 +250,15 @@ export async function previewPleskOfflineTransfer({
       fail('directory_overlap', 'The bundle and staging directory must be separate');
     }
     if ((await readdir(staging.absolute)).length !== 0) fail('target_not_empty', 'Use an empty staging directory');
-    if (JSON.stringify((await readdir(bundle.absolute)).sort()) !== JSON.stringify(BUNDLE_ENTRIES)) {
-      fail('layout_invalid', 'The bundle must contain only plesk.json, site/ and database.sql');
-    }
-    const exportPath = path.join(bundle.absolute, EXPORT_NAME);
-    const sitePath = path.join(bundle.absolute, SITE_NAME);
-    const sqlPath = path.join(bundle.absolute, SQL_NAME);
-    const metadata = await readInput(exportPath, await inspectEntry(exportPath, uid), MAX_EXPORT_BYTES);
-    const runtime = parseExport(metadata.content, targetServer, sourceDomain, sourceDatabase);
-    const site = await inspectSite(sitePath, await inspectEntry(sitePath, uid), runtime.documentRoot, uid);
-    const sql = await readInput(sqlPath, await inspectEntry(sqlPath, uid));
-    if (sql.bytes === '0') fail('sql_empty', 'The database dump must be present and non-empty');
-    await assertUnchanged(bundle.absolute, bundle.stat);
+    const identity = { serverId: targetServer, sourceDomain, sourceDatabase };
+    const { runtime, files } = await inspectBundle(bundle, uid, identity);
     await assertUnchanged(staging.absolute, staging.stat);
 
     const preview = {
       version: 1,
       source: { domain: sourceDomain, database: sourceDatabase, ...runtime },
       target: { serverId: targetServer, domain: targetDomain, database: targetDatabase },
-      files: { exportSha256: metadata.sha256, site, sql },
+      files,
       readOnly: true,
     };
     const digest = createHash('sha256')
@@ -242,9 +267,105 @@ export async function previewPleskOfflineTransfer({
     if (expectedDigest !== undefined && digest !== expectedDigest) {
       fail('digest_mismatch', 'The bundle or target differs from the approved preview');
     }
-    return { ...preview, digest };
+    return { preview: { ...preview, digest }, bundle, staging, uid, identity };
   } catch (error) {
     if (error instanceof PleskOfflineTransferError) throw error;
     fail('input_unavailable', 'Could not read and verify the local bundle and staging directory');
+  }
+}
+
+export async function previewPleskOfflineTransfer(options) {
+  return (await inspectTransfer(options)).preview;
+}
+
+async function cleanupPrivateDirectory(directory, identity) {
+  if (!sameEntry(identity, await lstat(directory, { bigint: true }))) {
+    fail('staging_cleanup_failed', 'The private staging directory changed before cleanup');
+  }
+
+  async function makeRemovable(current) {
+    if (!(await lstat(current)).isDirectory()) return;
+    await chmod(current, 0o700);
+    for (const name of await readdir(current)) await makeRemovable(path.join(current, name));
+  }
+
+  await makeRemovable(directory);
+  await rm(directory, { recursive: true, force: true });
+}
+
+let stagingActive = false;
+
+// The operator CLI runs this in a dedicated process so relative writes stay on the verified directory inode.
+export async function stagePleskOfflineTransfer(options = {}) {
+  if (options.expectedDigest === undefined) fail('digest_required', 'Staging requires the digest of an approved preview');
+  if (stagingActive) fail('staging_busy', 'A staging operation is already active in this process');
+  stagingActive = true;
+  let initialDirectory;
+  let privateDirectory;
+  let privateIdentity;
+  let published = false;
+  try {
+    const { preview, bundle, staging, uid, identity } = await inspectTransfer(options);
+    initialDirectory = process.cwd();
+    process.chdir(staging.absolute);
+    await assertUnchanged('.', staging.stat);
+    privateDirectory = await mkdtemp('.transfer-');
+    privateIdentity = await inspectEntry(privateDirectory, uid);
+    const preparedPath = path.join(privateDirectory, 'bundle');
+    await mkdir(preparedPath, { mode: 0o700 });
+
+    const prepared = await inspectBundle(bundle, uid, identity, preparedPath);
+    const readback = await inspectBundle({ absolute: preparedPath, stat: await inspectEntry(preparedPath, uid) }, uid, identity);
+    if (JSON.stringify(prepared.files) !== JSON.stringify(preview.files)
+      || JSON.stringify(readback.files) !== JSON.stringify(preview.files)) {
+      fail('digest_mismatch', 'The staged files differ from the approved preview');
+    }
+    const receipt = {
+      version: 1,
+      status: 'ready',
+      digest: preview.digest,
+      source: preview.source,
+      target: preview.target,
+      files: preview.files,
+      bundleDirectory: preparedPath,
+    };
+    const marker = path.join(privateDirectory, '.receipt.pending');
+    const handle = await open(marker, 'wx', 0o600);
+    try {
+      await handle.writeFile(`${JSON.stringify(receipt, null, 2)}\n`, 'utf8');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    if (!sameEntry(staging.stat, (await canonicalDirectory(staging.absolute, uid)).stat)
+      || !sameEntry(privateIdentity, await inspectEntry(privateDirectory, uid))) {
+      fail('content_changed', 'The staging directory changed before publication');
+    }
+    const targetEntries = await readdir('.');
+    if (targetEntries.length !== 1 || targetEntries[0] !== privateDirectory) {
+      fail('target_not_empty', 'The staging directory is no longer empty');
+    }
+    await link(marker, RECEIPT_NAME);
+    published = true;
+    // Publication has succeeded even if removal of the private link is interrupted.
+    await unlink(marker).catch(() => {});
+    return receipt;
+  } catch (error) {
+    if (privateDirectory && privateIdentity && !published) {
+      try {
+        await cleanupPrivateDirectory(privateDirectory, privateIdentity);
+      } catch {
+        fail('staging_cleanup_failed', 'Staging failed and its private directory could not be removed');
+      }
+    }
+    if (error instanceof PleskOfflineTransferError) throw error;
+    if (error?.code === 'EEXIST') fail('target_not_empty', 'The staging directory is no longer empty');
+    fail('staging_failed', 'Could not copy and publish the approved local bundle');
+  } finally {
+    try {
+      if (initialDirectory) process.chdir(initialDirectory);
+    } finally {
+      stagingActive = false;
+    }
   }
 }

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import {
   PleskOfflineTransferError,
   previewPleskOfflineTransfer,
+  stagePleskOfflineTransfer,
 } from '../apps/api/src/plesk-offline-transfer.js';
 
 const flags = new Map([
@@ -17,15 +18,17 @@ const flags = new Map([
   ['--expect', 'expectedDigest'],
 ]);
 
-const usage = `Usage: node scripts/plesk-transfer.mjs --bundle-dir <path> --staging-dir <path>
+const usage = `Usage: node scripts/plesk-transfer.mjs [stage] --bundle-dir <path> --staging-dir <path>
        --server-id <target UUID> --source-domain <name> --source-database <name>
        --target-domain <name> --target-database <name> [--expect <SHA-256>]
 
 Use absolute, real paths to locally owned directories. The bundle must contain
 plesk.json (one PHP site with explicit version and one MySQL/MariaDB database),
 site/ (the tree containing the relative document root) and database.sql.
-The staging directory must already exist and be empty. Nothing is written.
-Use the digest in --expect for a second run to verify the same inputs and target.
+The staging directory must already exist and be empty. The default action only
+previews. Use --expect to verify an earlier preview. With stage, --expect is
+required, and transfer.json appears only after the private copy is verified.
+Read bundleDirectory in transfer.json relative to the staging directory.
 SQL content is hashed, not parsed or executed.`;
 
 function parseArguments(argv) {
@@ -48,17 +51,18 @@ async function main(argv) {
     console.log(usage);
     return;
   }
+  const staging = argv[0] === 'stage';
   let options;
   try {
-    options = parseArguments(argv);
+    options = parseArguments(staging ? argv.slice(1) : argv);
   } catch {
     console.error(usage);
     process.exitCode = 1;
     return;
   }
   try {
-    const preview = await previewPleskOfflineTransfer(options);
-    console.log(JSON.stringify(preview, null, 2));
+    const result = staging ? await stagePleskOfflineTransfer(options) : await previewPleskOfflineTransfer(options);
+    console.log(JSON.stringify(result, null, 2));
   } catch (error) {
     if (error instanceof PleskOfflineTransferError) console.error(`${error.code}: ${error.message}`);
     else console.error('Could not prepare the offline transfer');

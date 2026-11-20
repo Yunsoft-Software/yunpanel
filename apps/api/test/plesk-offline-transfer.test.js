@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { chmod, link, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, symlink, watch, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -11,6 +11,18 @@ import { previewPleskOfflineTransfer } from '../src/plesk-offline-transfer.js';
 const exec = promisify(execFile);
 const cli = fileURLToPath(new URL('../../../scripts/plesk-transfer.mjs', import.meta.url));
 const sql = 'CREATE TABLE messages (id INT PRIMARY KEY, body VARCHAR(80));\nINSERT INTO messages VALUES (1, "Türkçe içerik");\n';
+
+function cliArguments(options) {
+  return [
+    '--bundle-dir', options.bundleDirectory,
+    '--staging-dir', options.stagingDirectory,
+    '--server-id', options.serverId,
+    '--source-domain', options.sourceDomain,
+    '--source-database', options.sourceDatabase,
+    '--target-domain', options.targetDomain,
+    '--target-database', options.targetDatabase,
+  ];
+}
 
 async function createFixture(t) {
   const root = await mkdtemp(path.join(await realpath(tmpdir()), 'yunpanel-plesk-transfer-'));
@@ -141,16 +153,7 @@ test('refuses to inspect nonempty, linked or overlapping targets and incomplete 
 
 test('CLI emits JSON, verifies the digest and returns a nonzero result for a stale bundle', async (t) => {
   const { options, sqlPath } = await createFixture(t);
-  const args = [
-    cli,
-    '--bundle-dir', options.bundleDirectory,
-    '--staging-dir', options.stagingDirectory,
-    '--server-id', options.serverId,
-    '--source-domain', options.sourceDomain,
-    '--source-database', options.sourceDatabase,
-    '--target-domain', options.targetDomain,
-    '--target-database', options.targetDatabase,
-  ];
+  const args = [cli, ...cliArguments(options)];
   const first = await exec(process.execPath, args);
   assert.equal(first.stderr, '');
   const { digest } = JSON.parse(first.stdout);
@@ -160,4 +163,73 @@ test('CLI emits JSON, verifies the digest and returns a nonzero result for a sta
   await writeFile(sqlPath, 'SELECT 2;');
   await assert.rejects(verify(), (error) => error.code === 1 && error.stdout === ''
     && error.stderr.startsWith('plesk_transfer_digest_mismatch:'));
+});
+
+test('publishes one verified stage through the CLI without overwriting the copy or source', async (t) => {
+  const { options, indexPath, sqlPath } = await createFixture(t);
+  const { digest, files } = await previewPleskOfflineTransfer(options);
+  const args = [cli, 'stage', ...cliArguments(options), '--expect', digest];
+  const result = await exec(process.execPath, args);
+  const receipt = JSON.parse(result.stdout);
+  assert.equal(receipt.status, 'ready');
+  assert.equal(receipt.digest, digest);
+  assert.deepEqual(receipt.files, files);
+  assert.equal(receipt.target.database, options.targetDatabase);
+  const copied = path.join(options.stagingDirectory, receipt.bundleDirectory);
+  const readyPath = path.join(options.stagingDirectory, 'transfer.json');
+  assert.deepEqual(JSON.parse(await readFile(readyPath, 'utf8')), receipt);
+  for (const filename of ['plesk.json', 'database.sql', 'site/httpdocs/index.php', 'site/app-data.bin']) {
+    assert.deepEqual(await readFile(path.join(copied, filename)), await readFile(path.join(options.bundleDirectory, filename)));
+  }
+  assert.equal((await stat(copied)).mode & 0o777, 0o700);
+  assert.equal((await stat(path.join(copied, 'database.sql'))).mode & 0o777, 0o600);
+  assert.equal((await stat(path.join(copied, 'site/httpdocs/index.php'))).mode & 0o777, (await stat(indexPath)).mode & 0o777);
+  assert.equal(await readFile(sqlPath, 'utf8'), sql);
+  const after = await readdir(options.stagingDirectory);
+  await assert.rejects(exec(process.execPath, args), { code: 1, stderr: /plesk_transfer_target_not_empty/ });
+  assert.deepEqual(await readdir(options.stagingDirectory), after);
+  assert.deepEqual(JSON.parse(await readFile(readyPath, 'utf8')), receipt);
+});
+
+test('stage requires a current digest and preserves unrelated content at a nonempty target', async (t) => {
+  const { options } = await createFixture(t);
+  const args = [cli, 'stage', ...cliArguments(options)];
+  await assert.rejects(exec(process.execPath, args), { code: 1, stderr: /plesk_transfer_digest_required/ });
+  await assert.rejects(exec(process.execPath, [...args, '--expect', '0'.repeat(64)]), {
+    code: 1, stderr: /plesk_transfer_digest_mismatch/,
+  });
+  assert.deepEqual(await readdir(options.stagingDirectory), []);
+  const { digest } = await previewPleskOfflineTransfer(options);
+  const unrelated = path.join(options.stagingDirectory, 'transfer.json');
+  await writeFile(unrelated, 'preserve staged neighbour');
+  await assert.rejects(exec(process.execPath, [...args, '--expect', digest]), {
+    code: 1, stderr: /plesk_transfer_target_not_empty/,
+  });
+  assert.equal(await readFile(unrelated, 'utf8'), 'preserve staged neighbour');
+  assert.deepEqual(await readdir(options.stagingDirectory), ['transfer.json']);
+});
+
+test('a change after private staging starts prevents publication and cleans up only the private copy', async (t) => {
+  const { options, indexPath, sqlPath, documentRoot, root } = await createFixture(t);
+  // Force a multi-chunk, real copy between private directory creation and the SQL read.
+  await writeFile(path.join(documentRoot, 'asset.bin'), Buffer.alloc(32 * 1024 * 1024, 7), { mode: 0o600 });
+  const { digest } = await previewPleskOfflineTransfer(options);
+  const watcher = watch(options.stagingDirectory, { signal: AbortSignal.timeout(5000) });
+  const events = watcher.next();
+  const run = exec(process.execPath, [cli, 'stage', ...cliArguments(options), '--expect', digest]);
+  const finished = assert.rejects(run, { code: 1, stderr: /plesk_transfer_(digest_mismatch|content_changed)/ });
+  try {
+    const { value } = await events;
+    assert.match(String(value.filename), /^\.transfer-/);
+    assert.ok(!(await readdir(options.stagingDirectory)).includes('transfer.json'));
+    await writeFile(sqlPath, 'SELECT "replacement";');
+    await finished;
+  } finally {
+    await watcher.return();
+    await run.catch(() => {});
+  }
+  assert.deepEqual(await readdir(options.stagingDirectory), []);
+  assert.deepEqual((await readdir(root)).sort(), ['bundle', 'target']);
+  assert.equal(await readFile(indexPath, 'utf8'), '<?php echo "fixture-file-marker";');
+  assert.equal(await readFile(sqlPath, 'utf8'), 'SELECT "replacement";');
 });
