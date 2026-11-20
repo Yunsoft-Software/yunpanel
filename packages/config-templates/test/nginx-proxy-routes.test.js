@@ -154,3 +154,31 @@ test('redirect site rejects proxyRoutes during template rendering', () => {
     { code: 'invalid_nginx_settings' },
   );
 });
+
+test('disjoint protectedPaths (/admin/) and proxyRoutes (/api) render cleanly with auth_basic off for /api, while overlapping paths throw', () => {
+  const config = renderStaticSiteConfig({
+    primaryDomain: 'owned.example.com',
+    root: '/var/www/yunpanel/apps/owned/current',
+    nginxSettings: {
+      protectedPaths: [{ path: '/admin/', key: '0123456789abcdef' }],
+      proxyRoutes: [apiRoute],
+    },
+  });
+  // Map matches only ~^/admin/ and defaults to off, so /api and /api/... never inherit Basic Auth
+  assert.match(config, /map \$uri \$yp_auth_realm_[a-f0-9]{12} \{\n  default off;\n  "~\^\/admin\/" "Restricted";\n\}/);
+  assert.equal(config.includes('"~^/api/"'), false);
+  assert.match(config, /location = \/api \{/);
+  assert.match(config, /location \^~ \/api\/ \{/);
+
+  assert.throws(
+    () => renderStaticSiteConfig({
+      primaryDomain: 'owned.example.com',
+      root: '/var/www/yunpanel/apps/owned/current',
+      nginxSettings: {
+        protectedPaths: [{ path: '/api/', key: '0123456789abcdef' }],
+        proxyRoutes: [apiRoute],
+      },
+    }),
+    { code: 'nginx_proxy_route_protected_path_conflict' },
+  );
+});

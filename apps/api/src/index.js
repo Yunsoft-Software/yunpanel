@@ -56,7 +56,9 @@ import { createDatabaseBindingRegistry } from './database-binding-registry.js';
 import { createDatabaseCredentialApplyService } from './database-credential-apply-service.js';
 import { createDatabaseCredentialMaterializer } from './database-credential-materializer.js';
 import { createDatabaseCredentialRegistry } from './database-credential-registry.js';
+import { assertProjectUpdatePreservesProxyRoutes } from './domain-proxy-routes.js';
 import { createDomainRegistry } from './domain-registry.js';
+import { DockerComposeProjectRegistryError } from './docker-compose-project-registry.js';
 import { createDomainStageTargetJobRegistry } from './domain-stage-target-job-registry.js';
 import { createDomainSuspensionOperationRegistry } from './domain-suspension-operation-registry.js';
 import { createDomainSuspensionRuntime } from './domain-suspension-runtime.js';
@@ -346,6 +348,13 @@ await dockerWorkloadRegistry.init();
 const dockerComposeProjectBootstrap = createDockerComposeProjectRegistryBootstrap({
   env: process.env,
   serverRegistry: registry,
+  beforeUpdateProject: ({ current, next }) => assertProjectUpdatePreservesProxyRoutes({
+    project: current,
+    nextServices: next.services,
+    domainRegistry,
+    jobRegistry,
+    ErrorClass: DockerComposeProjectRegistryError,
+  }),
 });
 await dockerComposeProjectBootstrap.projectRegistry.init();
 const websiteRegistry = createWebsiteRegistry({
@@ -1115,6 +1124,7 @@ const dockerComposeRuntime = await createDockerComposeRuntime({
   jobRegistry,
   projectRegistry: dockerComposeProjectBootstrap.projectRegistry,
   websiteRegistry,
+  domainRegistry,
   projectBackupLocked,
 });
 const databaseCredentialApplyService = createDatabaseCredentialApplyService({
@@ -1360,6 +1370,9 @@ const listener = createAuthenticatedApi({
   }),
   createHandler: () => createDockerComposeApiHandler({
     runtime: dockerComposeRuntime,
+    domainRegistry,
+    jobRegistry,
+    siteMutationLock,
     localServerId,
     baseHandler: createApp({
       registry,

@@ -104,3 +104,50 @@ test('domain.stage rejects proxyRoutes on redirect targets', () => {
     },
   }));
 });
+
+test('domain.stage rejects overlapping protectedPaths and proxyRoutes while accepting disjoint ones', () => {
+  const key = '0123456789abcdef';
+  const target = { root: '/var/lib/yunpanel/apps/site/current', spaFallback: true };
+  assert.throws(() => createOperationEnvelope({
+    id: 'stage-proxy-protected-overlap',
+    operation: OPERATIONS.DOMAIN_STAGE,
+    payload: {
+      primaryDomain: 'static.example.com',
+      aliases: [],
+      targetType: 'static',
+      target,
+      nginxSettings: {
+        clientMaxBodySizeMb: null,
+        protectedPaths: [{ path: '/api/', key }],
+        proxyRoutes,
+        spaFallback: true,
+        staticAssetCacheSeconds: 604800,
+        headers: [],
+      },
+      canonicalRedirect: false,
+      httpsRedirect: false,
+      domainRevision: 2,
+    },
+  }));
+
+  const disjointSettings = normalizeNginxSettings('static', {
+    protectedPaths: [{ path: '/admin/', key }],
+    proxyRoutes,
+  });
+  const ok = createOperationEnvelope({
+    id: 'stage-proxy-protected-disjoint',
+    operation: OPERATIONS.DOMAIN_STAGE,
+    payload: {
+      primaryDomain: 'static.example.com',
+      aliases: [],
+      targetType: 'static',
+      target,
+      nginxSettings: disjointSettings,
+      canonicalRedirect: false,
+      httpsRedirect: false,
+      domainRevision: 2,
+    },
+  });
+  assert.deepEqual(ok.payload.nginxSettings.protectedPaths, [{ path: '/admin/', key }]);
+  assert.deepEqual(ok.payload.nginxSettings.proxyRoutes, proxyRoutes);
+});

@@ -748,6 +748,9 @@ async function applyReconciliation({
         checksum: job.result.checksum,
         configName: job.result.configName,
         ...(expectedRevision !== null ? { expectedRevision } : {}),
+        ...(job.payload?.nginxSettings && typeof job.payload.nginxSettings === 'object'
+          ? { proxyRoutes: Array.isArray(job.payload.nginxSettings.proxyRoutes) ? job.payload.nginxSettings.proxyRoutes : [] }
+          : {}),
       });
       await reconcilePassengerDomainStageBinding({
         job,

@@ -1,11 +1,20 @@
 import { OPERATIONS } from '@yunpanel/protocol';
 import { DockerComposeOperationsError } from './docker-compose-operations.js';
+import { assertProjectNotReferencedByProxyRoutes } from './domain-proxy-routes.js';
 
 const fail = (code, message) => new DockerComposeOperationsError(code, message, 409);
 
 // Physical down has a durable receipt before metadata retirement. Reconciliation
 // rechecks absence and resumes only deletion of the same pinned public records.
-export function createDockerComposeRemoval({ projectRegistry, environmentRegistry, credentialRegistry, websiteRegistry, observer } = {}) {
+export function createDockerComposeRemoval({
+  projectRegistry,
+  environmentRegistry,
+  credentialRegistry,
+  websiteRegistry,
+  domainRegistry = null,
+  jobRegistry = null,
+  observer,
+} = {}) {
   async function inspect({ projectId, projectName, serverId }) {
     if (typeof websiteRegistry?.listWebsites !== 'function' || typeof observer?.inspectRemoved !== 'function'
       || typeof projectRegistry?.removeProject !== 'function' || typeof environmentRegistry?.removeForProject !== 'function'
@@ -13,6 +22,25 @@ export function createDockerComposeRemoval({ projectRegistry, environmentRegistr
     const websites = await websiteRegistry.listWebsites({ serverId });
     if (!Array.isArray(websites)) throw fail('docker_compose_removal_inventory_unavailable', 'Website inventory is unavailable');
     if (websites.some(site => site.managedComposeBinding?.projectId === projectId)) throw fail('docker_compose_project_in_use', 'Remove the bound Websites before retiring this Compose project');
+    if (domainRegistry !== null && domainRegistry !== undefined) {
+      await assertProjectNotReferencedByProxyRoutes({
+        projectId,
+        serverId,
+        domainRegistry,
+        jobRegistry,
+        ErrorClass: DockerComposeOperationsError,
+        code: 'docker_compose_project_in_use',
+      });
+    } else if (jobRegistry !== null && jobRegistry !== undefined) {
+      await assertProjectNotReferencedByProxyRoutes({
+        projectId,
+        serverId,
+        domainRegistry: null,
+        jobRegistry,
+        ErrorClass: DockerComposeOperationsError,
+        code: 'docker_compose_project_in_use',
+      });
+    }
     if (!/^[a-z0-9][a-z0-9_-]{0,62}$/.test(projectName ?? '')) throw fail('docker_compose_removal_scope_invalid', 'Project identity is invalid');
     return { ready: true };
   }

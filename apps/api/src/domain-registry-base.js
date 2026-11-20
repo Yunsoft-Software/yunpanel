@@ -40,6 +40,12 @@ function normalizeWebsiteId(value) {
   catch { throw new DomainRegistryError('invalid_website_id', 'websiteId must be a valid Website UUID'); }
 }
 
+function cloneStoredProxyRoutes(routes) {
+  if (!Array.isArray(routes) || routes.length === 0) return null;
+  const normalized = settings('static', { proxyRoutes: routes }).proxyRoutes;
+  return normalized.map((route) => ({ ...route }));
+}
+
 function hydrateDomain(domain, sourceVersion = STORE_VERSION) {
   if (domain.websiteId === undefined) domain.websiteId = null;
   if (sourceVersion < 2) {
@@ -93,6 +99,19 @@ function hydrateDomain(domain, sourceVersion = STORE_VERSION) {
     || (domain.appliedChecksum !== null
       && (typeof domain.appliedChecksum !== 'string' || !SHA256_PATTERN.test(domain.appliedChecksum)))) {
     throw new DomainRegistryError('invalid_domain_state', 'Persisted Domain applied checksum is invalid', 409);
+  }
+  for (const [field, checksumField] of [['stagedProxyRoutes', 'stagedChecksum'], ['appliedProxyRoutes', 'appliedChecksum']]) {
+    if (domain[field] !== undefined) {
+      if (!Array.isArray(domain[field]) || domain[field].length === 0 || typeof domain[checksumField] !== 'string') {
+        throw new DomainRegistryError('invalid_domain_state', `Persisted Domain ${field} metadata is invalid`, 409);
+      }
+      let normalizedRoutes;
+      try { normalizedRoutes = normalizeNginxSettings('static', { proxyRoutes: domain[field] }).proxyRoutes; }
+      catch { throw new DomainRegistryError('invalid_domain_state', `Persisted Domain ${field} metadata is invalid`, 409); }
+      if (JSON.stringify(normalizedRoutes) !== JSON.stringify(domain[field])) {
+        throw new DomainRegistryError('invalid_domain_state', `Persisted Domain ${field} metadata is invalid`, 409);
+      }
+    }
   }
   if (domain.lastError !== null && (typeof domain.lastError !== 'string' || !/^[a-z0-9_]{1,120}$/.test(domain.lastError))) {
     throw new DomainRegistryError('invalid_domain_state', 'Persisted Domain error metadata is invalid', 409);
@@ -163,6 +182,12 @@ function publicDomain(domain) {
     aliases: [...domain.aliases],
     target: { ...domain.target },
     nginxSettings: structuredClone(domain.nginxSettings),
+    ...(Array.isArray(domain.stagedProxyRoutes)
+      ? { stagedProxyRoutes: domain.stagedProxyRoutes.map((route) => ({ ...route })) }
+      : {}),
+    ...(Array.isArray(domain.appliedProxyRoutes)
+      ? { appliedProxyRoutes: domain.appliedProxyRoutes.map((route) => ({ ...route })) }
+      : {}),
     parentDomainId: domain.parentDomainId ?? null,
     kind: domain.parentDomainId == null ? 'domain' : 'subdomain',
     diagnosis: diagnosis(domain),
@@ -632,6 +657,9 @@ export function createDomainRegistry({
           current: Object.freeze({
             ...domain.nginxSettings,
             headers: Object.freeze(domain.nginxSettings.headers.map((header) => Object.freeze({ ...header }))),
+            ...(Array.isArray(domain.nginxSettings.proxyRoutes)
+              ? { proxyRoutes: Object.freeze(domain.nginxSettings.proxyRoutes.map((route) => Object.freeze({ ...route }))) }
+              : {}),
           }),
           next: next.nginxSettings,
           changedFields: Object.freeze(Object.keys(next.nginxSettings)
@@ -692,6 +720,9 @@ export function createDomainRegistry({
     domain.nginxSettings = {
       ...preview.next.nginxSettings,
       headers: preview.next.nginxSettings.headers.map((header) => ({ ...header })),
+      ...(Array.isArray(preview.next.nginxSettings.proxyRoutes)
+        ? { proxyRoutes: preview.next.nginxSettings.proxyRoutes.map((route) => ({ ...route })) }
+        : {}),
     };
     domain.target = targetWithSettings(domain.targetType, preview.next.target ?? domain.target, domain.nginxSettings);
     if (preview.impact.certificate.detached) domain.certificateId = null;
@@ -700,6 +731,7 @@ export function createDomainRegistry({
     domain.stagedChecksum = null;
     domain.stagedConfigName = null;
     domain.lastStagedAt = null;
+    delete domain.stagedProxyRoutes;
     domain.state = 'draft';
     domain.lastError = null;
     domain.updatedAt = new Date(now()).toISOString();
@@ -757,7 +789,13 @@ export function createDomainRegistry({
       id: normalizedDomainId, serverId, websiteId: normalizedWebsiteId, primaryDomain: normalized.primary, parentDomainId,
       aliases: normalized.aliases, targetType,
       target: targetWithSettings(targetType, normalizedTarget, normalizedNginxSettings),
-      nginxSettings: { ...normalizedNginxSettings, headers: normalizedNginxSettings.headers.map((header) => ({ ...header })) },
+      nginxSettings: {
+        ...normalizedNginxSettings,
+        headers: normalizedNginxSettings.headers.map((header) => ({ ...header })),
+        ...(Array.isArray(normalizedNginxSettings.proxyRoutes)
+          ? { proxyRoutes: normalizedNginxSettings.proxyRoutes.map((route) => ({ ...route })) }
+          : {}),
+      },
       httpsMode, httpsRedirect, canonicalRedirect,
       certificateId: null, appliedPrimaryDomain: null, appliedChecksum: null,
       state: 'draft', desiredRevision: 1, stagedRevision: 0, stagedChecksum: null, stagedConfigName: null,
@@ -972,6 +1010,7 @@ export function createDomainRegistry({
     domain.stagedChecksum = null;
     domain.stagedConfigName = null;
     domain.lastStagedAt = null;
+    delete domain.stagedProxyRoutes;
     domain.state = 'draft';
     domain.lastError = null;
     domain.updatedAt = new Date(now()).toISOString();
@@ -1029,6 +1068,14 @@ export function createDomainRegistry({
         domain.stagedChecksum = checksum;
         domain.stagedConfigName = configName;
         domain.lastStagedAt = timestamp;
+        const provisionedRoutes = cloneStoredProxyRoutes(domain.nginxSettings?.proxyRoutes);
+        if (provisionedRoutes) {
+          domain.stagedProxyRoutes = provisionedRoutes;
+          domain.appliedProxyRoutes = provisionedRoutes.map((route) => ({ ...route }));
+        } else {
+          delete domain.stagedProxyRoutes;
+          delete domain.appliedProxyRoutes;
+        }
         domain.appliedRevision = domain.desiredRevision;
         domain.appliedChecksum = checksum;
         domain.appliedPrimaryDomain = domain.primaryDomain;
@@ -1093,10 +1140,12 @@ export function createDomainRegistry({
         domain.stagedChecksum = null;
         domain.stagedConfigName = null;
         domain.lastStagedAt = null;
+        delete domain.stagedProxyRoutes;
         domain.appliedRevision = 0;
         domain.appliedChecksum = null;
         domain.appliedPrimaryDomain = null;
         domain.lastAppliedAt = null;
+        delete domain.appliedProxyRoutes;
         domain.state = 'draft';
         domain.lastError = null;
         domain.updatedAt = timestamp;
@@ -1106,7 +1155,7 @@ export function createDomainRegistry({
     return Object.freeze(targets.map(({ domain }) => Object.freeze(publicDomain(domain))));
   }
 
-  async function markStaged(domainId, { checksum, configName, expectedRevision = null }) {
+  async function markStaged(domainId, { checksum, configName, expectedRevision = null, proxyRoutes = undefined }) {
     await ensureInitialized();
     const domain = requireDomain(state, domainId);
     if (expectedRevision !== null && domain.desiredRevision !== expectedRevision) {
@@ -1121,11 +1170,14 @@ export function createDomainRegistry({
     }
     if (typeof checksum !== 'string' || !SHA256_PATTERN.test(checksum)) throw new DomainRegistryError('invalid_staged_checksum', 'Staged domain checksum is invalid');
     if (typeof configName !== 'string' || configName.length < 1 || configName.length > 300) throw new DomainRegistryError('invalid_staged_config', 'Staged domain config name is invalid');
+    const stagedRoutes = cloneStoredProxyRoutes(proxyRoutes !== undefined ? proxyRoutes : domain.nginxSettings?.proxyRoutes);
     const timestamp = new Date(now()).toISOString();
     domain.stagedRevision = domain.desiredRevision;
     domain.stagedChecksum = checksum;
     domain.stagedConfigName = configName;
     domain.lastStagedAt = timestamp;
+    if (stagedRoutes) domain.stagedProxyRoutes = stagedRoutes;
+    else delete domain.stagedProxyRoutes;
     domain.state = 'staged';
     domain.lastError = null;
     domain.updatedAt = timestamp;
@@ -1149,6 +1201,11 @@ export function createDomainRegistry({
     domain.appliedRevision = domain.desiredRevision;
     domain.appliedChecksum = checksum;
     domain.appliedPrimaryDomain = domain.primaryDomain;
+    if (Array.isArray(domain.stagedProxyRoutes) && domain.stagedProxyRoutes.length > 0) {
+      domain.appliedProxyRoutes = domain.stagedProxyRoutes.map((route) => ({ ...route }));
+    } else {
+      delete domain.appliedProxyRoutes;
+    }
     domain.state = 'active';
     domain.lastAppliedAt = timestamp;
     domain.lastError = null;
@@ -1215,6 +1272,8 @@ export function createDomainRegistry({
       domain.suspensionOperationId = expectedOperationId;
       domain.suspendedAt = timestamp;
       domain.suspendedChecksum = expectedChecksum;
+      delete domain.stagedProxyRoutes;
+      delete domain.appliedProxyRoutes;
       domain.lastError = null;
       domain.updatedAt = timestamp;
       await persist();
@@ -1247,6 +1306,8 @@ export function createDomainRegistry({
       domain.suspensionOperationId = expectedOperationId;
       domain.suspendedAt = timestamp;
       domain.suspendedChecksum = expectedChecksum;
+      delete domain.stagedProxyRoutes;
+      delete domain.appliedProxyRoutes;
       domain.lastError = null;
       domain.updatedAt = timestamp;
       await persist();
@@ -1263,6 +1324,7 @@ export function createDomainRegistry({
     const timestamp = new Date(now()).toISOString();
     domain.state = 'suspended';
     domain.appliedChecksum = expectedChecksum;
+    delete domain.appliedProxyRoutes;
     domain.suspensionOperationId = expectedOperationId;
     domain.suspendedAt = timestamp;
     domain.suspendedChecksum = expectedChecksum;
@@ -1313,6 +1375,11 @@ export function createDomainRegistry({
     domain.suspensionOperationId = null;
     domain.suspendedAt = null;
     domain.suspendedChecksum = null;
+    if (Array.isArray(domain.stagedProxyRoutes) && domain.stagedProxyRoutes.length > 0) {
+      domain.appliedProxyRoutes = domain.stagedProxyRoutes.map((route) => ({ ...route }));
+    } else {
+      delete domain.appliedProxyRoutes;
+    }
     domain.lastSuspensionOperationId = expectedOperationId;
     domain.lastResumedAt = timestamp;
     domain.lastAppliedAt = timestamp;

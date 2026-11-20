@@ -1,4 +1,12 @@
 import { OPERATIONS } from '@yunpanel/protocol';
+import { NginxSettingsValidationError, normalizeNginxSettings } from '@yunpanel/shared';
+import { dockerComposeApiRequestContext } from './docker-compose-api-handler.js';
+import {
+  assertOwnerProxyRouteAccess,
+  proxyRouteProjectIds,
+  verifyDomainProxyRoutes,
+  withProxyRouteProjectLocks,
+} from './domain-proxy-routes.js';
 import { DomainRegistryError } from './domain-registry.js';
 import { SiteMutationLockError } from './site-mutation-lock.js';
 import { provisioningInProgress } from './website-provisioning-worker.js';
@@ -113,21 +121,58 @@ function localCreateServerId(requestedServerId, localServerId) {
 
 // Transport mapping is separate from validation and persistence so parent/Website
 // references and error propagation can be tested without a network listener.
-export function createDomainHandler(domainRegistry, { localServerId = null } = {}) {
+export function createDomainHandler(domainRegistry, {
+  localServerId = null,
+  dockerComposeProjectRegistry = null,
+  jobRegistry = null,
+  siteMutationLock = null,
+} = {}) {
+  const lock = siteMutationLock ?? domainRegistry?.siteMutationLock ?? null;
   return async (request, response, next) => {
     try {
-      const domain = await domainRegistry.createDomain({
-        serverId: localCreateServerId(request.body?.serverId, localServerId),
-        websiteId: request.body?.websiteId ?? null,
-        primaryDomain: request.body?.primaryDomain,
-        parentDomainId: request.body?.parentDomainId ?? null,
-        aliases: request.body?.aliases ?? [],
-        targetType: request.body?.targetType,
-        target: request.body?.target,
-        httpsMode: request.body?.httpsMode ?? 'off',
-        httpsRedirect: request.body?.httpsRedirect,
-        canonicalRedirect: request.body?.canonicalRedirect ?? false,
-        nginxSettings: request.body?.nginxSettings,
+      assertOwnerProxyRouteAccess(request, undefined, request.body?.nginxSettings);
+      const serverId = localCreateServerId(request.body?.serverId, localServerId);
+      const composeRegistry = dockerComposeProjectRegistry ?? request[dockerComposeApiRequestContext]?.projectRegistry ?? null;
+      const rawSettings = request.body?.nginxSettings;
+      const rawProxyRoutes = rawSettings && typeof rawSettings === 'object' && !Array.isArray(rawSettings)
+        ? rawSettings.proxyRoutes
+        : undefined;
+      let routesToVerify = [];
+      if (rawProxyRoutes !== undefined && rawProxyRoutes !== null
+        && ['static', 'proxy', 'passenger', 'php', 'python', 'redirect'].includes(request.body?.targetType)) {
+        try {
+          const normalized = normalizeNginxSettings(request.body.targetType, rawSettings);
+          routesToVerify = normalized.proxyRoutes ?? [];
+        } catch (error) {
+          if (error instanceof NginxSettingsValidationError) {
+            throw new DomainRegistryError(error.code, error.message);
+          }
+          throw error;
+        }
+      }
+      const projectIds = proxyRouteProjectIds(routesToVerify);
+      const domain = await withProxyRouteProjectLocks(lock, projectIds, async () => {
+        if (routesToVerify.length > 0) {
+          await verifyDomainProxyRoutes({
+            routes: routesToVerify,
+            serverId,
+            dockerComposeProjectRegistry: composeRegistry,
+            jobRegistry,
+          });
+        }
+        return domainRegistry.createDomain({
+          serverId,
+          websiteId: request.body?.websiteId ?? null,
+          primaryDomain: request.body?.primaryDomain,
+          parentDomainId: request.body?.parentDomainId ?? null,
+          aliases: request.body?.aliases ?? [],
+          targetType: request.body?.targetType,
+          target: request.body?.target,
+          httpsMode: request.body?.httpsMode ?? 'off',
+          httpsRedirect: request.body?.httpsRedirect,
+          canonicalRedirect: request.body?.canonicalRedirect ?? false,
+          nginxSettings: request.body?.nginxSettings,
+        });
       });
       return response.status(201).json({ data: domain });
     } catch (error) {
@@ -152,14 +197,31 @@ export function createDomainReparentPreviewHandler(domainRegistry, { localServer
   };
 }
 
-export function createDomainUpdatePreviewHandler(domainRegistry, { localServerId = null } = {}) {
+export function createDomainUpdatePreviewHandler(domainRegistry, {
+  localServerId = null,
+  dockerComposeProjectRegistry = null,
+  jobRegistry = null,
+} = {}) {
   return async (request, response, next) => {
     try {
       if (!domainRegistry || typeof domainRegistry.previewDomainUpdate !== 'function') {
         throw new DomainRegistryError('domain_update_unavailable', 'Domain update preview is unavailable', 503);
       }
-      await requireLocalDomain(domainRegistry, request.params.domainId, localServerId);
-      const preview = await domainRegistry.previewDomainUpdate({ domainId: request.params.domainId, ...assertUpdatePreviewBody(request.body) });
+      const domain = await requireLocalDomain(domainRegistry, request.params.domainId, localServerId);
+      const input = assertUpdatePreviewBody(request.body);
+      assertOwnerProxyRouteAccess(request, domain.nginxSettings?.proxyRoutes, input.changes?.nginxSettings);
+      const preview = await domainRegistry.previewDomainUpdate({ domainId: request.params.domainId, ...input });
+      const nextRoutes = preview.next?.nginxSettings?.proxyRoutes;
+      const routesChanged = preview.impact?.nginxSettings?.changedFields?.includes('proxyRoutes') === true;
+      if (routesChanged && Array.isArray(nextRoutes) && nextRoutes.length > 0) {
+        const composeRegistry = dockerComposeProjectRegistry ?? request[dockerComposeApiRequestContext]?.projectRegistry ?? null;
+        await verifyDomainProxyRoutes({
+          routes: nextRoutes,
+          serverId: domain.serverId,
+          dockerComposeProjectRegistry: composeRegistry,
+          jobRegistry,
+        });
+      }
       return response.json({ data: preview });
     } catch (error) {
       return next(error);
@@ -208,9 +270,14 @@ export function createDomainUpdateHandler(domainRegistry, dependencies = {}) {
       }
       const domain = await requireLocalDomain(domainRegistry, request.params.domainId, dependencies.localServerId ?? null);
       const input = assertUpdateApplyBody(request.body);
+      assertOwnerProxyRouteAccess(request, domain.nginxSettings?.proxyRoutes, input.changes?.nginxSettings);
       await assertDomainUpdateIdle(domain, dependencies);
 
+      const composeRegistry = dependencies.dockerComposeProjectRegistry ?? request[dockerComposeApiRequestContext]?.projectRegistry ?? null;
+
       const performUpdate = async () => {
+        const freshDomain = await requireLocalDomain(domainRegistry, request.params.domainId, dependencies.localServerId ?? null);
+        assertOwnerProxyRouteAccess(request, freshDomain.nginxSettings?.proxyRoutes, input.changes?.nginxSettings);
         const preview = await domainRegistry.previewDomainUpdate({ domainId: request.params.domainId, changes: input.changes });
         if (input.previewDigest !== preview.previewDigest) {
           throw new DomainRegistryError('domain_update_preview_stale', 'Domain routing state changed after preview; request a new preview', 409);
@@ -218,11 +285,26 @@ export function createDomainUpdateHandler(domainRegistry, dependencies = {}) {
         if (input.confirmation !== preview.confirmation) {
           throw new DomainRegistryError('domain_update_confirmation_required', `Confirm Domain update with ${preview.confirmation}`);
         }
-        return domainRegistry.updateDomain({
-          domainId: request.params.domainId,
-          changes: input.changes,
-          previewDigest: input.previewDigest,
-          skipLock: true,
+        const nextRoutes = preview.next?.nginxSettings?.proxyRoutes;
+        const routesChanged = preview.impact?.nginxSettings?.changedFields?.includes('proxyRoutes') === true;
+        const projectIds = routesChanged
+          ? proxyRouteProjectIds(freshDomain.nginxSettings?.proxyRoutes, nextRoutes)
+          : [];
+        return withProxyRouteProjectLocks(siteMutationLock, projectIds, async () => {
+          if (routesChanged && Array.isArray(nextRoutes) && nextRoutes.length > 0) {
+            await verifyDomainProxyRoutes({
+              routes: nextRoutes,
+              serverId: freshDomain.serverId,
+              dockerComposeProjectRegistry: composeRegistry,
+              jobRegistry: dependencies.jobRegistry ?? null,
+            });
+          }
+          return domainRegistry.updateDomain({
+            domainId: request.params.domainId,
+            changes: input.changes,
+            previewDigest: input.previewDigest,
+            skipLock: true,
+          });
         });
       };
 

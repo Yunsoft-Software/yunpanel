@@ -16,6 +16,11 @@ import {
   searchDockerCatalog,
   searchDockerCatalogLive,
 } from './docker-plesk-catalog.js';
+import {
+  assertProjectUpdatePreservesProxyRoutes,
+  requireOwnerDockerAccess,
+  withProxyRouteProjectLocks,
+} from './domain-proxy-routes.js';
 import { JobRegistryError } from './job-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 
@@ -142,6 +147,8 @@ export function mountDockerComposeRoutes(app, {
   dockerComposeObserver,
   validateDockerCompose,
   domainRegistry = null,
+  jobRegistry = null,
+  siteMutationLock = null,
   localServerId = null,
 } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function' || typeof app.put !== 'function') {
@@ -174,7 +181,7 @@ export function mountDockerComposeRoutes(app, {
   }
   if (typeof validateDockerCompose !== 'function') throw new Error('Docker Compose validator is required');
 
-  app.get('/api/docker/projects', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.get('/api/docker/projects', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
     if (Object.keys(request.query ?? {}).length !== 0) {
       throw new DockerComposeHttpError('docker_compose_query_invalid', 'Docker Compose project list does not accept query parameters');
     }
@@ -182,7 +189,7 @@ export function mountDockerComposeRoutes(app, {
     return response.json({ data: projects });
   }));
 
-  app.get('/api/docker/projects/:dockerProjectId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.get('/api/docker/projects/:dockerProjectId', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
     if (Object.keys(request.query ?? {}).length !== 0) {
       throw new DockerComposeHttpError('docker_compose_query_invalid', 'Docker Compose project detail does not accept query parameters');
     }
@@ -194,7 +201,7 @@ export function mountDockerComposeRoutes(app, {
     return response.json({ data: { project, environment, credentials } });
   }));
 
-  app.post('/api/docker/projects/validate', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.post('/api/docker/projects/validate', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
     const body = exactBody(
       request.body,
       ['serverId', 'projectName', 'document', 'environment'],
@@ -210,7 +217,7 @@ export function mountDockerComposeRoutes(app, {
     return response.json({ data: validation, sideEffects: false });
   }));
 
-  app.post('/api/docker/projects', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.post('/api/docker/projects', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
     const body = exactBody(
       request.body,
       ['serverId', 'projectName', 'document'],
@@ -233,29 +240,39 @@ export function mountDockerComposeRoutes(app, {
     return response.status(201).json({ data: { project, environment }, sideEffects: false });
   }));
 
-  app.put('/api/docker/projects/:dockerProjectId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.put('/api/docker/projects/:dockerProjectId', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
     const body = exactBody(request.body, ['expectedRevision', 'document'], 'Send expectedRevision and document');
     const current = await requireProject(dockerComposeProjectRegistry, request.params.dockerProjectId, localServerId);
-    const validation = await safeCall(() => validateDockerCompose({
-      projectName: current.projectName,
-      document: body.document,
-      environment: {},
-      interpolate: false,
-    }));
-    const project = await safeCall(() => dockerComposeProjectRegistry.updateProject(current.id, {
-      expectedRevision: body.expectedRevision,
-      document: body.document,
-      validation,
-    }));
+    const project = await withProxyRouteProjectLocks(siteMutationLock, [current.id], async () => {
+      const latest = await requireProject(dockerComposeProjectRegistry, current.id, localServerId);
+      const validation = await safeCall(() => validateDockerCompose({
+        projectName: latest.projectName,
+        document: body.document,
+        environment: {},
+        interpolate: false,
+      }));
+      await assertProjectUpdatePreservesProxyRoutes({
+        project: latest,
+        nextServices: validation.services,
+        domainRegistry,
+        jobRegistry,
+        ErrorClass: DockerComposeHttpError,
+      });
+      return safeCall(() => dockerComposeProjectRegistry.updateProject(latest.id, {
+        expectedRevision: body.expectedRevision,
+        document: body.document,
+        validation,
+      }));
+    }, DockerComposeHttpError);
     return response.json({ data: project, sideEffects: false });
   }));
 
-  app.get('/api/docker/projects/:dockerProjectId/environment', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.get('/api/docker/projects/:dockerProjectId/environment', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
     const project = await requireProject(dockerComposeProjectRegistry, request.params.dockerProjectId, localServerId);
     return response.json({ data: await safeCall(() => dockerComposeEnvironmentRegistry.getEnvironment(project.id)) });
   }));
 
-  app.put('/api/docker/projects/:dockerProjectId/environment', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.put('/api/docker/projects/:dockerProjectId/environment', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
     const body = exactBody(request.body, ['expectedRevision', 'variables'], 'Send expectedRevision and variables');
     const project = await requireProject(dockerComposeProjectRegistry, request.params.dockerProjectId, localServerId);
     const desired = await safeCall(() => dockerComposeProjectRegistry.materializeProject(project.id, {
@@ -274,7 +291,7 @@ export function mountDockerComposeRoutes(app, {
     return response.json({ data: environment, sideEffects: false });
   }));
 
-  app.post('/api/docker/projects/:dockerProjectId/validate', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.post('/api/docker/projects/:dockerProjectId/validate', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
     optionalEmptyBody(request.body);
     const project = await requireProject(dockerComposeProjectRegistry, request.params.dockerProjectId, localServerId);
     const [desired, environment] = await Promise.all([
@@ -297,7 +314,7 @@ export function mountDockerComposeRoutes(app, {
     });
   }));
 
-  app.get('/api/docker/projects/:dockerProjectId/history', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.get('/api/docker/projects/:dockerProjectId/history', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
     if (Object.keys(request.query ?? {}).length !== 0) {
       throw new DockerComposeHttpError('docker_compose_query_invalid', 'Docker Compose history does not accept query parameters');
     }
@@ -305,7 +322,7 @@ export function mountDockerComposeRoutes(app, {
     return response.json({ data: await safeCall(() => dockerComposeOperationsService.history({ projectId: project.id })) });
   }));
 
-  app.get('/api/docker/projects/:dockerProjectId/runtime', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.get('/api/docker/projects/:dockerProjectId/runtime', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
     if (Object.keys(request.query ?? {}).length !== 0) {
       throw new DockerComposeHttpError('docker_compose_query_invalid', 'Docker Compose runtime does not accept query parameters');
     }
@@ -313,7 +330,7 @@ export function mountDockerComposeRoutes(app, {
     return response.json({ data: await safeCall(() => dockerComposeObserver.inspect({ projectName: project.projectName })) });
   }));
 
-  app.get('/api/docker/projects/:dockerProjectId/diagnosis', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.get('/api/docker/projects/:dockerProjectId/diagnosis', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
     const query = diagnosisQuery(request.query);
     const project = await requireProject(dockerComposeProjectRegistry, request.params.dockerProjectId, localServerId);
     const diagnosis = await safeCall(() => diagnoseManagedComposeBinding({
@@ -330,7 +347,7 @@ export function mountDockerComposeRoutes(app, {
     return response.json({ data: diagnosis });
   }));
 
-  app.get('/api/docker/projects/:dockerProjectId/logs', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.get('/api/docker/projects/:dockerProjectId/logs', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
     const query = logQuery(request.query);
     const project = await requireProject(dockerComposeProjectRegistry, request.params.dockerProjectId, localServerId);
     return response.json({ data: await safeCall(() => dockerComposeObserver.logs({
@@ -340,7 +357,7 @@ export function mountDockerComposeRoutes(app, {
     })) });
   }));
 
-  app.post('/api/docker/projects/:dockerProjectId/operations/:action/preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.post('/api/docker/projects/:dockerProjectId/operations/:action/preview', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
     optionalEmptyBody(request.body);
     const project = await requireProject(dockerComposeProjectRegistry, request.params.dockerProjectId, localServerId);
     const preview = await safeCall(() => dockerComposeOperationsService.preview({
@@ -350,28 +367,31 @@ export function mountDockerComposeRoutes(app, {
     return response.json({ data: preview, sideEffects: false });
   }));
 
-  app.post('/api/docker/projects/:dockerProjectId/operations/:action', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.post('/api/docker/projects/:dockerProjectId/operations/:action', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
     const body = exactBody(
       request.body,
       ['expectedPreviewDigest', 'confirmation'],
       'Send expectedPreviewDigest and confirmation',
     );
     const project = await requireProject(dockerComposeProjectRegistry, request.params.dockerProjectId, localServerId);
-    const queued = await safeCall(() => dockerComposeOperationsService.queue({
+    const runQueue = () => safeCall(() => dockerComposeOperationsService.queue({
       projectId: project.id,
       action: request.params.action,
       expectedPreviewDigest: body.expectedPreviewDigest,
       confirmation: body.confirmation,
     }));
+    const queued = request.params.action === 'remove'
+      ? await withProxyRouteProjectLocks(siteMutationLock, [project.id], runQueue, DockerComposeHttpError)
+      : await runQueue();
     return response.status(202).json({ data: queued, sideEffects: false });
   }));
 
-  app.get('/api/docker/projects/:dockerProjectId/credentials', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.get('/api/docker/projects/:dockerProjectId/credentials', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
     const project = await requireProject(dockerComposeProjectRegistry, request.params.dockerProjectId, localServerId);
     return response.json({ data: await safeCall(() => dockerRegistryCredentialRegistry.listCredentials({ projectId: project.id })) });
   }));
 
-  app.put('/api/docker/projects/:dockerProjectId/credentials', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.put('/api/docker/projects/:dockerProjectId/credentials', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
     const body = exactBody(
       request.body,
       ['registryHost', 'expectedRevision', 'username', 'secret'],
@@ -405,10 +425,10 @@ export function mountDockerComposeRoutes(app, {
     });
   };
 
-  app.get('/api/docker/compose/projects/:dockerProjectId/document', requirePanelRouteAccess, asyncRoute(handleGetProjectDocument));
-  app.get('/api/docker/projects/:dockerProjectId/document', requirePanelRouteAccess, asyncRoute(handleGetProjectDocument));
+  app.get('/api/docker/compose/projects/:dockerProjectId/document', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(handleGetProjectDocument));
+  app.get('/api/docker/projects/:dockerProjectId/document', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(handleGetProjectDocument));
 
-  app.get('/api/docker/catalog', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.get('/api/docker/catalog', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
     const query = request.query ?? {};
     const live = query.live === '1' || query.live === 'true' || query.source === 'hub';
     const items = await safeCall(() => (
@@ -427,7 +447,7 @@ export function mountDockerComposeRoutes(app, {
     return response.json({ data: items, items, total: items.length, source: live ? 'docker_hub_live' : 'catalog' });
   }));
 
-  app.get('/api/docker/hub/search', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.get('/api/docker/hub/search', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
     const query = request.query ?? {};
     const items = await safeCall(() => searchDockerCatalogLive({
       q: query.q ?? '',
@@ -437,12 +457,12 @@ export function mountDockerComposeRoutes(app, {
     return response.json({ data: items, items, total: items.length, source: 'docker_hub_live' });
   }));
 
-  app.post('/api/docker/catalog/generate-compose', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.post('/api/docker/catalog/generate-compose', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
     const generated = await safeCall(() => generateComposeFromCatalogInput(request.body ?? {}));
     return response.json({ data: generated, sideEffects: false });
   }));
 
-  app.post('/api/docker/proxy-rules/resolve', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.post('/api/docker/proxy-rules/resolve', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
     const resolved = await safeCall(() => resolveDockerProxyRule(request.body ?? {}, {
       dockerComposeProjectRegistry,
       domainRegistry,
@@ -451,7 +471,7 @@ export function mountDockerComposeRoutes(app, {
     return response.json({ data: resolved, sideEffects: false });
   }));
 
-  app.get('/api/docker/one-click-apps', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.get('/api/docker/one-click-apps', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
     const query = request.query ?? {};
     const items = await safeCall(() => listEasypanelOneClickApps({
       q: query.q ?? '',
@@ -460,7 +480,7 @@ export function mountDockerComposeRoutes(app, {
     return response.json({ data: items, items, total: items.length });
   }));
 
-  app.post('/api/docker/one-click-apps/prepare', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.post('/api/docker/one-click-apps/prepare', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
     const result = await safeCall(() => prepareOneClickAppProvision(request.body ?? {}));
     return response.json({ data: result, sideEffects: false });
   }));

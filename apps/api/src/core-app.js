@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { assertApplicationWebsiteIdle } from './application-website-job-guard.js';
 import express from 'express';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { ApplicationValidationError, normalizeGitDeploymentTarget } from '@yunpanel/shared';
+import { ApplicationValidationError, NginxSettingsValidationError, normalizeGitDeploymentTarget, normalizeNginxSettings } from '@yunpanel/shared';
 import {
   createApplicationEnvironmentRegistry,
   ApplicationEnvironmentRegistryError,
@@ -10,6 +10,13 @@ import {
 import { createApplicationDeployQueue } from './application-deploy-queue.js';
 import { createApplicationRegistry, ApplicationRegistryError } from './application-registry.js';
 import { certificatePublicView, createCertificateRegistry, CertificateRegistryError } from './certificate-registry.js';
+import { dockerComposeApiRequestContext } from './docker-compose-api-handler.js';
+import {
+  assertOwnerProxyRouteAccess,
+  proxyRouteProjectIds,
+  verifyDomainProxyRoutes,
+  withProxyRouteProjectLocks,
+} from './domain-proxy-routes.js';
 import { createDomainRegistry, DomainRegistryError } from './domain-registry.js';
 import { createJobRegistry, jobPublicView, JobRegistryError } from './job-registry.js';
 import { DurableJobRegistryError } from './durable-job-registry.js';
@@ -874,6 +881,8 @@ export function createApp({
   }),
   applicationDeployQueue = null,
   websiteRegistry = null,
+  dockerComposeProjectRegistry = null,
+  siteMutationLock = null,
   customerLookup = null,
   deploymentDiagnosticsOptions = null,
   buildManifestPath = undefined,
@@ -1334,18 +1343,49 @@ export function createApp({
     if (localServerId !== null && requestedServerId !== null && requestedServerId !== localServerId) {
       throw new DomainRegistryError('local_server_required', 'Domains can be created only on this panel host', 404);
     }
-    const domain = await domainRegistry.createDomain({
-      serverId: localServerId ?? requestedServerId,
-      primaryDomain: request.body?.primaryDomain,
-      parentDomainId,
-      websiteId,
-      aliases: request.body?.aliases ?? [],
-      targetType: request.body?.targetType,
-      target: request.body?.target,
-      httpsMode: request.body?.httpsMode ?? 'off',
-      httpsRedirect: request.body?.httpsRedirect,
-      canonicalRedirect: request.body?.canonicalRedirect ?? false,
-      nginxSettings: request.body?.nginxSettings,
+    assertOwnerProxyRouteAccess(request, undefined, request.body?.nginxSettings);
+    const serverId = localServerId ?? requestedServerId;
+    const composeRegistry = dockerComposeProjectRegistry ?? request[dockerComposeApiRequestContext]?.projectRegistry ?? null;
+    const rawSettings = request.body?.nginxSettings;
+    const rawProxyRoutes = rawSettings && typeof rawSettings === 'object' && !Array.isArray(rawSettings)
+      ? rawSettings.proxyRoutes
+      : undefined;
+    let routesToVerify = [];
+    if (rawProxyRoutes !== undefined && rawProxyRoutes !== null
+      && ['static', 'proxy', 'passenger', 'php', 'python', 'redirect'].includes(request.body?.targetType)) {
+      try {
+        const normalized = normalizeNginxSettings(request.body.targetType, rawSettings);
+        routesToVerify = normalized.proxyRoutes ?? [];
+      } catch (error) {
+        if (error instanceof NginxSettingsValidationError) {
+          throw new DomainRegistryError(error.code, error.message);
+        }
+        throw error;
+      }
+    }
+    const projectIds = proxyRouteProjectIds(routesToVerify);
+    const domain = await withProxyRouteProjectLocks(siteMutationLock ?? domainRegistry?.siteMutationLock ?? null, projectIds, async () => {
+      if (routesToVerify.length > 0) {
+        await verifyDomainProxyRoutes({
+          routes: routesToVerify,
+          serverId,
+          dockerComposeProjectRegistry: composeRegistry,
+          jobRegistry,
+        });
+      }
+      return domainRegistry.createDomain({
+        serverId,
+        primaryDomain: request.body?.primaryDomain,
+        parentDomainId,
+        websiteId,
+        aliases: request.body?.aliases ?? [],
+        targetType: request.body?.targetType,
+        target: request.body?.target,
+        httpsMode: request.body?.httpsMode ?? 'off',
+        httpsRedirect: request.body?.httpsRedirect,
+        canonicalRedirect: request.body?.canonicalRedirect ?? false,
+        nginxSettings: request.body?.nginxSettings,
+      });
     });
     return response.status(201).json({ data: domain });
   });

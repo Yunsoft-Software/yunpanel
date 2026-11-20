@@ -54,3 +54,28 @@ test('wildcard permissions cannot elevate a read-only or unenrolled Owner contex
   assert.equal(run({ auth: { ...reader, access: { mode: 'read_only', permissions: ['*'] } }, method: 'POST', url: '/api/domains' }).status, 403);
   assert.equal(run({ auth: { ...owner, security: { managementAllowed: false } }, url: '/api/servers' }).status, 403);
 });
+
+test('site-scoped roles cannot access /api/docker/* while read_only retains GET /api/docker/workloads', () => {
+  for (const role of ['reseller', 'customer', 'site_manager']) {
+    const auth = {
+      user: { id: `${role}-1`, role },
+      security: { managementAllowed: true },
+      access: { mode: 'site_management', permissions: ['sites.manage'] },
+    };
+    for (const url of ['/api/docker', '/api/docker/projects', '/api/docker/proxy-rules/resolve', '/api/docker/workloads']) {
+      const result = run({ auth, method: 'GET', url });
+      assert.equal(result.next, false, `${role} should be denied ${url}`);
+      assert.equal(result.status, 403);
+    }
+  }
+  const dockerReader = {
+    ...reader,
+    access: {
+      mode: 'read_only',
+      permissions: [...reader.access.permissions, 'docker_workloads.read'],
+    },
+  };
+  assert.equal(run({ auth: dockerReader, method: 'GET', url: '/api/docker/workloads' }).next, true);
+  assert.equal(run({ auth: dockerReader, method: 'GET', url: '/api/docker/projects' }).status, 403);
+  assert.equal(run({ auth: dockerReader, method: 'POST', url: '/api/docker/proxy-rules/resolve' }).status, 403);
+});

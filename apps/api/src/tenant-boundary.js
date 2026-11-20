@@ -325,6 +325,10 @@ export function createTenantBoundaryMiddleware(options = {}) {
         throw denied('tenant_boundary_forbidden', 'Global backup management is outside tenant boundary.');
       }
 
+      if (/^\/api\/docker(?:\/|$)/.test(path)) {
+        throw denied('tenant_boundary_forbidden', 'Docker management is outside tenant boundary.');
+      }
+
       const isHostedPath = path === '/api/sites/hosted' || path.startsWith('/api/sites/hosted/');
       const isSitesPathWithCustomer = (
         path === '/api/sites'

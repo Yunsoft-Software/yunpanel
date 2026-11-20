@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { isIP } from 'node:net';
 import path from 'node:path';
 
 const PROJECT_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,62}$/;
@@ -10,7 +11,12 @@ const VOLUME_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
 const ALLOWED_BIND_HOSTS = new Set(['127.0.0.1', '0.0.0.0']);
 const ALLOWED_RESTART_POLICIES = new Set(['unless-stopped', 'always', 'on-failure', 'no']);
 const DNS_LABEL_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
-const URL_PATH_PATTERN = /^\/(?:[A-Za-z0-9._~:@!$&'()*+,;=-]+(?:\/[A-Za-z0-9._~:@!$&'()*+,;=-]+)*)?$/;
+const URL_PATH_PATTERN = /^\/(?:[A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9][A-Za-z0-9._-]*)*)?$/;
+const RESERVED_URL_PATH_PREFIXES = Object.freeze([
+  '/.well-known',
+  '/autodiscover',
+  '/mail/config-v1.1.xml',
+]);
 
 export class DockerPleskCatalogError extends Error {
   constructor(code, message, status = 400) {
@@ -714,10 +720,15 @@ function normalizeUrlPath(rawPath = '/') {
     throw new DockerPleskCatalogError('invalid_proxy_url_path', 'urlPath must be a string starting with /');
   }
   const trimmed = rawPath.trim();
-  if (!trimmed.startsWith('/') || trimmed.includes('..') || trimmed.includes('//') || !URL_PATH_PATTERN.test(trimmed)) {
+  if (!trimmed.startsWith('/') || trimmed.length > 128 || trimmed.includes('..') || trimmed.includes('//')
+    || !URL_PATH_PATTERN.test(trimmed)) {
     throw new DockerPleskCatalogError('invalid_proxy_url_path', 'urlPath must be a normalized URL path starting with /');
   }
-  return trimmed.length > 1 && trimmed.endsWith('/') ? trimmed.slice(0, -1) : trimmed;
+  const lower = trimmed.toLowerCase();
+  if (RESERVED_URL_PATH_PREFIXES.some((reserved) => lower === reserved || lower.startsWith(`${reserved}/`))) {
+    throw new DockerPleskCatalogError('invalid_proxy_url_path', 'urlPath cannot use a reserved system prefix');
+  }
+  return trimmed;
 }
 
 export async function resolveDockerProxyRule(
@@ -764,6 +775,7 @@ export async function resolveDockerProxyRule(
   let resolvedServiceName = input.serviceName ?? null;
   let resolvedInnerPort = input.innerPort ?? input.targetPort ?? null;
   let resolvedOuterPort = input.outerPort ?? input.publishedPort ?? null;
+  let resolvedUpstreamHost = '127.0.0.1';
 
   if (project) {
     const services = Array.isArray(project.services) ? project.services : [];
@@ -795,28 +807,48 @@ export async function resolveDockerProxyRule(
         409,
       );
     }
-    const chosen = matches.find((port) => port.hostIp === '127.0.0.1') ?? matches[0];
-    if (
-      chosen.hostIp !== null
-      && chosen.hostIp !== undefined
-      && chosen.hostIp !== '127.0.0.1'
-      && chosen.hostIp !== '0.0.0.0'
-      && chosen.hostIp !== '::1'
-      && chosen.hostIp !== '::'
-    ) {
+    if (matches.length > 1) {
       throw new DockerPleskCatalogError(
-        'docker_proxy_binding_not_loopback',
-        'Container port must be bound to 127.0.0.1 or wildcard to proxy safely',
+        'docker_proxy_port_ambiguous',
+        `Service "${resolvedServiceName}" publishes inner port ${resolvedInnerPort}/tcp more than once`,
         409,
       );
     }
+    const chosen = matches[0];
+    let normalizedHost = chosen.hostIp ?? null;
+    if (normalizedHost === null || normalizedHost === '0.0.0.0') normalizedHost = '127.0.0.1';
+    else if (normalizedHost === '::') normalizedHost = '::1';
+    const hostFamily = typeof normalizedHost === 'string' ? isIP(normalizedHost) : 0;
+    const isLoopback = hostFamily === 4 ? normalizedHost.startsWith('127.') : hostFamily === 6 && normalizedHost === '::1';
+    if (!isLoopback) {
+      throw new DockerPleskCatalogError(
+        'docker_proxy_binding_not_loopback',
+        'Container port must be bound to 127.0.0.1, ::1 or wildcard to proxy safely',
+        409,
+      );
+    }
+    resolvedUpstreamHost = normalizedHost;
     resolvedOuterPort = normalizePort(chosen.publishedPort, 'outer_port');
+    if (resolvedOuterPort < 1024 || resolvedOuterPort > 65535) {
+      throw new DockerPleskCatalogError(
+        'docker_proxy_port_privileged',
+        'Published host port must be between 1024 and 65535',
+        409,
+      );
+    }
   } else {
     if (typeof resolvedServiceName !== 'string' || !SERVICE_NAME_PATTERN.test(resolvedServiceName)) {
       throw new DockerPleskCatalogError('invalid_service_name', 'serviceName is required');
     }
     resolvedInnerPort = normalizePort(resolvedInnerPort, 'inner_port');
     resolvedOuterPort = normalizePort(resolvedOuterPort, 'outer_port');
+    if (resolvedOuterPort < 1024 || resolvedOuterPort > 65535) {
+      throw new DockerPleskCatalogError(
+        'docker_proxy_port_privileged',
+        'Published host port must be between 1024 and 65535',
+        409,
+      );
+    }
   }
 
   return Object.freeze({
@@ -830,7 +862,7 @@ export async function resolveDockerProxyRule(
     targetPort: resolvedInnerPort,
     outerPort: resolvedOuterPort,
     publishedPort: resolvedOuterPort,
-    upstreamHost: '127.0.0.1',
+    upstreamHost: resolvedUpstreamHost,
     upstreamPort: resolvedOuterPort,
     websocket: true,
     protocol: 'tcp',

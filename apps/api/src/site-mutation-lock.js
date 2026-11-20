@@ -3,7 +3,7 @@ import { mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const TYPES = new Set(['application', 'website', 'domain']);
+const TYPES = new Set(['application', 'website', 'domain', 'docker_project']);
 
 export class SiteMutationLockError extends Error {
   constructor(code, message, status = 409) {
@@ -164,6 +164,22 @@ export function createSiteMutationLock({
     return withLock({ resourceType: 'domain', resourceId: domainId }, action);
   }
 
+  function withDockerProjectLock(projectId, action) {
+    return withLock({ resourceType: 'docker_project', resourceId: projectId }, action);
+  }
+
+  async function withDockerProjectLocks(projectIds, action) {
+    if (typeof action !== 'function') {
+      throw new SiteMutationLockError('site_mutation_lock_action_invalid', 'Site mutation lock action is invalid', 400);
+    }
+    const ids = [...new Set((projectIds ?? []).map((id) => safeId(id, 'dockerProjectId')))].sort();
+    const acquire = (index) => {
+      if (index >= ids.length) return action();
+      return withDockerProjectLock(ids[index], () => acquire(index + 1));
+    };
+    return acquire(0);
+  }
+
   async function withSiteLock(identity = {}, action) {
     const applicationId = typeof identity?.applicationId === 'string' && identity.applicationId.trim() ? identity.applicationId.trim() : null;
     const websiteId = typeof identity?.websiteId === 'string' && identity.websiteId.trim() ? identity.websiteId.trim() : null;
@@ -174,7 +190,15 @@ export function createSiteMutationLock({
     throw new SiteMutationLockError('site_mutation_lock_identity_invalid', 'Application, Website, or Domain identity is required', 400);
   }
 
-  return Object.freeze({ withLock, withApplicationLock, withWebsiteLock, withDomainLock, withSiteLock });
+  return Object.freeze({
+    withLock,
+    withApplicationLock,
+    withWebsiteLock,
+    withDomainLock,
+    withDockerProjectLock,
+    withDockerProjectLocks,
+    withSiteLock,
+  });
 }
 
 export const siteMutationLockInternals = Object.freeze({

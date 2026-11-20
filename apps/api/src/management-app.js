@@ -528,6 +528,7 @@ export function createApp(allOptions = {}) {
     dnsHostingRegistry,
     dnsProviderCredentialRegistry,
     websiteRegistry,
+    siteMutationLock,
     customerLookup,
   });
   const app = express();
@@ -749,11 +750,11 @@ export function createApp(allOptions = {}) {
     localServerId,
     certificateMaterialGc,
   });
-  app.post('/api/domains', requirePanelRouteAccess, createDomainHandler(domainRegistry, { localServerId }));
-  app.post('/api/domains/:domainId/update-preview', requirePanelRouteAccess, createDomainUpdatePreviewHandler(domainRegistry, { localServerId }));
-  app.patch('/api/domains/:domainId', requirePanelRouteAccess, createDomainUpdateHandler(domainRegistry, { jobRegistry, certificateRegistry, localServerId, provisioningRegistry: websiteProvisioningRuntime?.registry ?? null }));
+  app.post('/api/domains', requirePanelRouteAccess, createDomainHandler(domainRegistry, { localServerId, dockerComposeProjectRegistry, jobRegistry, siteMutationLock }));
+  app.post('/api/domains/:domainId/update-preview', requirePanelRouteAccess, createDomainUpdatePreviewHandler(domainRegistry, { localServerId, dockerComposeProjectRegistry, jobRegistry }));
+  app.patch('/api/domains/:domainId', requirePanelRouteAccess, createDomainUpdateHandler(domainRegistry, { jobRegistry, certificateRegistry, localServerId, provisioningRegistry: websiteProvisioningRuntime?.registry ?? null, dockerComposeProjectRegistry, siteMutationLock }));
   app.post('/api/domains/:domainId/reparent-preview', requirePanelRouteAccess, createDomainReparentPreviewHandler(domainRegistry, { localServerId }));
-  app.post('/api/domains/:domainId/reparent', requirePanelRouteAccess, createDomainReparentHandler(domainRegistry, { localServerId }));
+  app.post('/api/domains/:domainId/reparent', requirePanelRouteAccess, createDomainReparentHandler(domainRegistry, { localServerId, siteMutationLock }));
   if (domainSuspensionRuntime) {
     mountDomainSuspensionRoutes(app, { runtime: domainSuspensionRuntime });
   }

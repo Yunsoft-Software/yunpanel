@@ -15,6 +15,9 @@ export class DockerComposeApiHandlerError extends Error {
 export function createDockerComposeApiHandler({
   baseHandler,
   runtime,
+  domainRegistry = null,
+  jobRegistry = null,
+  siteMutationLock = null,
   localServerId = null,
 } = {}) {
   if (typeof baseHandler !== 'function'
@@ -37,6 +40,9 @@ export function createDockerComposeApiHandler({
     dockerComposeOperationsService: runtime.operationsService,
     dockerComposeObserver: runtime.observer,
     validateDockerCompose: runtime.validateDockerCompose,
+    domainRegistry,
+    jobRegistry,
+    siteMutationLock,
     localServerId,
   });
   mountDockerStorageBackupRoutes(app, {

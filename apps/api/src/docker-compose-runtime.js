@@ -60,6 +60,7 @@ function assertProjectRegistry(projectRegistry) {
 export function createDockerComposeProjectRegistryBootstrap({
   env = process.env,
   serverRegistry,
+  beforeUpdateProject = null,
 } = {}) {
   if (!env || typeof env !== 'object' || Array.isArray(env)) {
     throw new DockerComposeRuntimeError(
@@ -73,6 +74,7 @@ export function createDockerComposeProjectRegistryBootstrap({
     filePath: paths.projects,
     masterKey: env.YUNPANEL_SECRET_MASTER_KEY,
     serverExists: async (serverId) => Boolean(await serverRegistry.getServer(serverId)),
+    beforeUpdateProject,
   });
   return Object.freeze({ paths, projectRegistry });
 }
@@ -112,6 +114,7 @@ export async function createDockerComposeRuntime({
   jobRegistry,
   projectRegistry: providedProjectRegistry = null,
   websiteRegistry = null,
+  domainRegistry = null,
   projectBackupLocked = async () => false,
   validateDockerCompose = createDockerComposeValidator(),
   observer = createDockerComposeObserver(),
@@ -157,7 +160,15 @@ export async function createDockerComposeRuntime({
   });
   await credentialRegistry.init();
 
-  const removal = createDockerComposeRemoval({ projectRegistry, environmentRegistry, credentialRegistry, websiteRegistry, observer });
+  const removal = createDockerComposeRemoval({
+    projectRegistry,
+    environmentRegistry,
+    credentialRegistry,
+    websiteRegistry,
+    domainRegistry,
+    jobRegistry,
+    observer,
+  });
   const operationsService = createDockerComposeOperationsService({
     inspectRemoval: removal.inspect,
     projectRegistry,

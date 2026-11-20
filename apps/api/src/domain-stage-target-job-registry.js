@@ -2,6 +2,11 @@ import { createPhpFpmSiteManager } from '@yunpanel/host-runtime';
 import { createServiceUmaskManager } from '@yunpanel/host-runtime/service-umask-manager';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { domainNginxSettingsForTarget } from './domain-nginx-settings.js';
+import {
+  proxyRouteProjectIds,
+  verifyDomainProxyRoutes,
+  withProxyRouteProjectLocks,
+} from './domain-proxy-routes.js';
 import { DomainRegistryError } from './domain-registry.js';
 import { resolveWebsiteDomainTarget } from './website-domain-target.js';
 
@@ -90,41 +95,50 @@ export function createDomainStageTargetJobRegistry({
       if (website?.applicationId !== lockedApplicationId) throw new DomainRegistryError('passenger_runtime_binding_drift', 'Domain Application changed while acquiring its routing lock', 409);
     }
     await assertPassengerMigrationIdle(registry);
-    const resolved = await resolveWebsiteDomainTarget({
-      domain,
-      websiteRegistry,
-      dockerComposeProjectRegistry,
-      applicationRegistry,
-      runtimeBindingRegistry,
-      phpFpmSiteManager,
-      serviceUmaskManager,
-      allowPassengerDomainAttachment: true,
-    });
-    if (resolved.source === 'passenger') {
-      if (resolved.passengerAttachment && lockedApplicationId === null) {
-        throw new DomainRegistryError('passenger_domain_attachment_lock_unavailable', 'New Passenger Domain attachment requires the site routing lock', 503);
-      }
-      for (const job of await registry.listJobs()) {
-        if (job.operation !== OPERATIONS.DOMAIN_STAGE || job.payload?.targetType !== 'passenger'
-          || !['queued', 'running'].includes(job.status) || job.serverId !== domain.serverId) continue;
-        const queuedDomain = await domainRegistry.getDomain(job.resourceId);
-        if (queuedDomain?.websiteId === domain.websiteId) {
-          throw new DomainRegistryError('passenger_domain_routing_busy', 'Wait for this Website Domain preparation to finish before preparing another Domain', 409);
+    const proxyRouteProjects = proxyRouteProjectIds(domain.nginxSettings?.proxyRoutes);
+    return withProxyRouteProjectLocks(siteMutationLock, proxyRouteProjects, async () => {
+      await verifyDomainProxyRoutes({
+        routes: domain.nginxSettings?.proxyRoutes,
+        serverId: domain.serverId,
+        dockerComposeProjectRegistry,
+        jobRegistry: registry,
+      });
+      const resolved = await resolveWebsiteDomainTarget({
+        domain,
+        websiteRegistry,
+        dockerComposeProjectRegistry,
+        applicationRegistry,
+        runtimeBindingRegistry,
+        phpFpmSiteManager,
+        serviceUmaskManager,
+        allowPassengerDomainAttachment: true,
+      });
+      if (resolved.source === 'passenger') {
+        if (resolved.passengerAttachment && lockedApplicationId === null) {
+          throw new DomainRegistryError('passenger_domain_attachment_lock_unavailable', 'New Passenger Domain attachment requires the site routing lock', 503);
+        }
+        for (const job of await registry.listJobs()) {
+          if (job.operation !== OPERATIONS.DOMAIN_STAGE || job.payload?.targetType !== 'passenger'
+            || !['queued', 'running'].includes(job.status) || job.serverId !== domain.serverId) continue;
+          const queuedDomain = await domainRegistry.getDomain(job.resourceId);
+          if (queuedDomain?.websiteId === domain.websiteId) {
+            throw new DomainRegistryError('passenger_domain_routing_busy', 'Wait for this Website Domain preparation to finish before preparing another Domain', 409);
+          }
         }
       }
-    }
-    // Attachment authority is produced here, never accepted from a caller.
-    const { passengerAttachment: _callerAttachment, ...payload } = input.payload ?? {};
-    return registry.enqueue({
-      ...input,
-      payload: {
-        ...payload,
-        domainRevision: domain.desiredRevision,
-        targetType: resolved.targetType,
-        target: resolved.target,
-        nginxSettings: resolvedNginxSettings(domain, resolved, input.payload?.nginxSettings),
-        ...(resolved.passengerAttachment ? { passengerAttachment: resolved.passengerAttachment } : {}),
-      },
+      // Attachment authority is produced here, never accepted from a caller.
+      const { passengerAttachment: _callerAttachment, ...payload } = input.payload ?? {};
+      return registry.enqueue({
+        ...input,
+        payload: {
+          ...payload,
+          domainRevision: domain.desiredRevision,
+          targetType: resolved.targetType,
+          target: resolved.target,
+          nginxSettings: resolvedNginxSettings(domain, resolved, input.payload?.nginxSettings),
+          ...(resolved.passengerAttachment ? { passengerAttachment: resolved.passengerAttachment } : {}),
+        },
+      });
     });
   }
 

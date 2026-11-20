@@ -1,6 +1,7 @@
 import { BackupManifestError } from './backup-manifest.js';
 import { DockerComposeProjectRegistryError } from './docker-compose-project-registry.js';
 import { createDockerStorageBackupView } from './docker-storage-backup-view.js';
+import { requireOwnerDockerAccess } from './domain-proxy-routes.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 
 export class DockerStorageBackupHttpError extends Error {
@@ -50,7 +51,7 @@ export function mountDockerStorageBackupRoutes(app, {
     throw new TypeError('localServerId must be a non-empty string when provided');
   }
 
-  app.get('/api/docker/projects/:dockerProjectId/storage-backup', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.get('/api/docker/projects/:dockerProjectId/storage-backup', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
     if (Object.keys(request.query ?? {}).length !== 0) {
       throw new DockerStorageBackupHttpError(
         'docker_storage_backup_query_invalid',

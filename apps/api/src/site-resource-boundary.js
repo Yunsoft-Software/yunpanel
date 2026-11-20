@@ -316,7 +316,7 @@ export function createSiteResourceBoundary(options = {}) {
         if (!(await sites()).some((v) => v.applicationId === decodeId(match[1]))) throw new ScopeError(); return next();
       }
       if (path === '/api/phpmyadmin-gateway-access' && readOnly(method)) return next();
-      if (/^\/api\/(?:mail(?:\/|$)|mail-service-identity|roundcube|panel\/settings|system\/packages|backups(?:\/|$))/.test(path)) throw new ScopeError();
+      if (/^\/api\/(?:docker(?:\/|$)|mail(?:\/|$)|mail-service-identity|roundcube|panel\/settings|system\/packages|backups(?:\/|$))/.test(path)) throw new ScopeError();
       if (/^\/api\/audit(?:\/|$)/.test(path)) {
         if (actorTenant.isLegacySiteManager) throw new ScopeError();
         return next();

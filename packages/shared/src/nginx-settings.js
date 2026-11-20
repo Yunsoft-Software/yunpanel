@@ -382,6 +382,21 @@ export function normalizeNginxSettings(targetType, value = {}, base = null) {
       throw new NginxSettingsValidationError('nginx_proxy_route_error_page_conflict', 'A proxy route path cannot overlap an internal error page');
     }
   }
+  const normalizedProtectedPaths = Object.hasOwn(merged, 'protectedPaths') ? protectedPaths(merged.protectedPaths) : undefined;
+  if (routes?.length && normalizedProtectedPaths?.length) {
+    const hasProtectedConflict = routes.some((route) => {
+      const routeSlash = `${route.path}/`;
+      return normalizedProtectedPaths.some((entry) => (
+        entry.path === routeSlash || entry.path.startsWith(routeSlash) || routeSlash.startsWith(entry.path)
+      ));
+    });
+    if (hasProtectedConflict) {
+      throw new NginxSettingsValidationError(
+        'nginx_proxy_route_protected_path_conflict',
+        'A proxy route cannot overlap a password-protected directory',
+      );
+    }
+  }
   const common = {
     clientMaxBodySizeMb: optionalInteger(merged.clientMaxBodySizeMb, 'clientMaxBodySizeMb', 1, 1024),
     ...(Object.hasOwn(merged, 'preferredDomain') ? { preferredDomain: preferredDomain(merged.preferredDomain) } : {}),
@@ -389,7 +404,7 @@ export function normalizeNginxSettings(targetType, value = {}, base = null) {
     ...fileSettings,
     ...(rules !== undefined ? { redirectRules: rules } : {}),
     ...(Object.hasOwn(merged, 'gzip') ? { gzip: boolean(merged.gzip, 'gzip') } : {}),
-    ...(Object.hasOwn(merged, 'protectedPaths') ? { protectedPaths: protectedPaths(merged.protectedPaths) } : {}),
+    ...(normalizedProtectedPaths !== undefined ? { protectedPaths: normalizedProtectedPaths } : {}),
     ...(Object.hasOwn(merged, 'serviceOverride') ? { serviceOverride: serviceOverride(merged.serviceOverride) } : {}),
     ...(routes !== undefined ? { proxyRoutes: routes } : {}),
   };

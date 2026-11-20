@@ -76,6 +76,50 @@ function canonicalIp(value) {
   }
 }
 
+function publishedHostsOverlap(leftHostIp, rightHostIp) {
+  if (leftHostIp === null || rightHostIp === null) return true;
+  if (leftHostIp === rightHostIp) return true;
+  const leftFamily = isIP(leftHostIp);
+  const rightFamily = isIP(rightHostIp);
+  if (leftHostIp === '0.0.0.0' && rightFamily === 4) return true;
+  if (rightHostIp === '0.0.0.0' && leftFamily === 4) return true;
+  if (leftHostIp === '::' && rightFamily === 6) return true;
+  if (rightHostIp === '::' && leftFamily === 6) return true;
+  return false;
+}
+
+function collectProjectPublishedPorts(services) {
+  const result = [];
+  for (const service of services ?? []) {
+    for (const port of service?.publishedPorts ?? []) {
+      result.push({ serviceName: service.name, ...port });
+    }
+  }
+  return result;
+}
+
+function assertNoPublishedPortConflict(projects, { serverId, excludeProjectId = null, services }) {
+  const requested = collectProjectPublishedPorts(services);
+  if (requested.length === 0) return;
+  for (const other of projects) {
+    if (!other || other.serverId !== serverId || other.id === excludeProjectId) continue;
+    const existing = collectProjectPublishedPorts(other.services);
+    for (const candidate of requested) {
+      for (const bound of existing) {
+        if (candidate.publishedPort === bound.publishedPort
+          && candidate.protocol === bound.protocol
+          && publishedHostsOverlap(candidate.hostIp, bound.hostIp)) {
+          throw new DockerComposeProjectRegistryError(
+            'docker_compose_published_port_conflict',
+            `Published host port ${candidate.hostIp ?? '*'}:${candidate.publishedPort}/${candidate.protocol} is already allocated by Compose project "${other.projectName}"`,
+            409,
+          );
+        }
+      }
+    }
+  }
+}
+
 function normalizePublishedPorts(value, code = 'docker_compose_validation_invalid') {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.length > MAX_SERVICE_PORTS) {
@@ -369,14 +413,26 @@ export function createDockerComposeProjectRegistry({
   masterKey = process.env.YUNPANEL_SECRET_MASTER_KEY,
   now = () => Date.now(),
   serverExists = async () => true,
+  beforeUpdateProject = null,
 } = {}) {
-  if (typeof now !== 'function' || typeof serverExists !== 'function') {
+  if (typeof now !== 'function' || typeof serverExists !== 'function'
+    || (beforeUpdateProject !== null && typeof beforeUpdateProject !== 'function')) {
     throw new DockerComposeProjectRegistryError('docker_compose_project_dependencies_invalid', 'Docker Compose project registry dependencies are invalid', 503);
   }
   const encryptionKey = normalizeMasterKey(masterKey);
   let state = { version: STORE_VERSION, projects: [] };
   let initialized = false;
   let writeChain = Promise.resolve();
+  let mutationChain = Promise.resolve();
+
+  function withMutation(action) {
+    const run = mutationChain.catch(() => {}).then(async () => {
+      await ensureInitialized();
+      return action();
+    });
+    mutationChain = run.then(() => {}, () => {});
+    return run;
+  }
 
   async function persist() {
     if (!filePath) return;
@@ -458,6 +514,7 @@ export function createDockerComposeProjectRegistry({
     if (state.projects.some((project) => project.serverId === normalizedServerId && project.projectName === name)) {
       throw new DockerComposeProjectRegistryError('docker_compose_project_name_conflict', 'Docker Compose project name is already used on this server', 409);
     }
+    assertNoPublishedPortConflict(state.projects, { serverId: normalizedServerId, services: summary.services });
     const timestamp = new Date(now()).toISOString();
     const revision = 1;
     const record = {
@@ -490,6 +547,14 @@ export function createDockerComposeProjectRegistry({
       throw new DockerComposeProjectRegistryError('docker_compose_document_invalid', 'Docker Compose project document is required');
     }
     const summary = normalizeValidation(validation, project.projectName, document);
+    assertNoPublishedPortConflict(state.projects, {
+      serverId: project.serverId,
+      excludeProjectId: project.id,
+      services: summary.services,
+    });
+    if (typeof beforeUpdateProject === 'function') {
+      await beforeUpdateProject({ current: publicProject(project), next: summary });
+    }
     const revision = project.revision + 1;
     Object.assign(project, summary, {
       revision,
@@ -556,9 +621,9 @@ export function createDockerComposeProjectRegistry({
 
   return Object.freeze({
     init,
-    createProject,
-    updateProject,
-    removeProject,
+    createProject: (input) => withMutation(() => createProject(input)),
+    updateProject: (projectId, input) => withMutation(() => updateProject(projectId, input)),
+    removeProject: (projectId, input) => withMutation(() => removeProject(projectId, input)),
     getProject,
     getProjectDocument,
     listProjects,

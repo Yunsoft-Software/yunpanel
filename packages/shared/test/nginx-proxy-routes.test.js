@@ -256,3 +256,42 @@ test('proxyRoutes detects cross-field conflicts with redirectRules and errorPage
   });
   assert.equal(ok.proxyRoutes.length, 1);
 });
+
+test('proxyRoutes rejects overlapping protectedPaths (exact, parent, child) while allowing disjoint paths', () => {
+  const key = '0123456789abcdef';
+
+  // Exact overlap: protected /api/ + proxy /api
+  assert.throws(
+    () => normalizeNginxSettings('static', {
+      protectedPaths: [{ path: '/api/', key }],
+      proxyRoutes: [route({ path: '/api' })],
+    }),
+    { code: 'nginx_proxy_route_protected_path_conflict' },
+  );
+
+  // Protected parent contains proxy route: protected /admin/ + proxy /admin/api
+  assert.throws(
+    () => normalizeNginxSettings('static', {
+      protectedPaths: [{ path: '/admin/', key }],
+      proxyRoutes: [route({ path: '/admin/api' })],
+    }),
+    { code: 'nginx_proxy_route_protected_path_conflict' },
+  );
+
+  // Proxy route contains protected child: protected /api/secret/ + proxy /api
+  assert.throws(
+    () => normalizeNginxSettings('static', {
+      protectedPaths: [{ path: '/api/secret/', key }],
+      proxyRoutes: [route({ path: '/api' })],
+    }),
+    { code: 'nginx_proxy_route_protected_path_conflict' },
+  );
+
+  // Disjoint paths coexist cleanly (/admin/ protected + /api and /api2 proxied)
+  const disjoint = normalizeNginxSettings('static', {
+    protectedPaths: [{ path: '/admin/', key }, { path: '/api2/', key: 'fedcba9876543210' }],
+    proxyRoutes: [route({ path: '/api' })],
+  });
+  assert.equal(disjoint.protectedPaths.length, 2);
+  assert.equal(disjoint.proxyRoutes.length, 1);
+});

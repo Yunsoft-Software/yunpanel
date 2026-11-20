@@ -41,7 +41,8 @@ function routeFixture(projectValue = project()) {
   assert.equal(routes.length, 1);
   assert.equal(routes[0].path, '/api/docker/projects/:dockerProjectId/storage-backup');
   assert.equal(routes[0].handlers[0], requirePanelRouteAccess);
-  return routes[0].handlers[1];
+  assert.equal(typeof routes[0].handlers[1], 'function');
+  return routes[0].handlers.at(-1);
 }
 
 async function invoke(handler, { id = projectId, query = {} } = {}) {
@@ -107,4 +108,30 @@ test('Docker storage backup policy route fails closed on invalid persisted stora
       message: 'Docker storage backup state is invalid',
     },
   });
+});
+
+test('Docker storage backup policy route enforces Owner-only middleware after requirePanelRouteAccess', () => {
+  const routes = [];
+  const app = { get(path, ...handlers) { routes.push({ path, handlers }); } };
+  mountDockerStorageBackupRoutes(app, {
+    dockerComposeProjectRegistry: { async getProject() { return project(); } },
+    localServerId: serverId,
+  });
+  const ownerGuard = routes[0].handlers[1];
+  const runGuard = (auth) => {
+    const result = { next: false, status: null, body: null };
+    ownerGuard(
+      { auth },
+      { status(code) { result.status = code; return this; }, json(body) { result.body = body; return this; } },
+      () => { result.next = true; },
+    );
+    return result;
+  };
+  assert.equal(runGuard({ user: { role: 'owner' }, access: { mode: 'management', permissions: ['*'] }, security: { managementAllowed: true } }).next, true);
+  for (const role of ['reseller', 'customer', 'site_manager', 'read_only']) {
+    const denied = runGuard({ user: { role }, access: { mode: role === 'read_only' ? 'read_only' : 'site_management', permissions: [] }, security: { managementAllowed: role !== 'read_only' } });
+    assert.equal(denied.next, false);
+    assert.equal(denied.status, 403);
+    assert.equal(denied.body.error.code, 'docker_owner_required');
+  }
 });
