@@ -44,9 +44,11 @@ function rejectUpgrade(socket, status) {
 }
 
 function auditResource(target) {
-  return target.scope === 'server'
-    ? { resourceType: 'server', resourceId: target.serverId, scope: 'server' }
-    : { resourceType: 'website', resourceId: target.websiteId, scope: 'site' };
+  if (target.scope === 'server') return { resourceType: 'server', resourceId: target.serverId, scope: 'server' };
+  if (target.scope === 'docker_container') {
+    return { resourceType: 'docker_project', resourceId: target.dockerProjectId, scope: 'docker_container' };
+  }
+  return { resourceType: 'website', resourceId: target.websiteId, scope: 'site' };
 }
 
 function requireTerminalTargetAccess(session, target, licenseEntitlementService = null) {
@@ -57,6 +59,15 @@ function requireTerminalTargetAccess(session, target, licenseEntitlementService 
     && session?.security?.managementAllowed === true;
   if (target?.scope === 'server') {
     if (!owner) throw new AuthError('terminal_server_forbidden', 'Only server owner can access root terminal.', 403);
+    return session;
+  }
+  if (target?.scope === 'docker_container') {
+    const ownerWithWildcard = owner
+      && Array.isArray(session?.access?.permissions)
+      && session.access.permissions.includes('*');
+    if (!ownerWithWildcard) {
+      throw new AuthError('terminal_docker_container_forbidden', 'Only server owner can access container console.', 403);
+    }
     return session;
   }
   const hasSiteRole = ['site_manager', 'reseller', 'customer'].includes(session?.user?.role)
@@ -224,6 +235,8 @@ export function createTerminalWebSocketServer({
       sessionId: record.sessionId,
       userId: record.userId,
       websiteId: record.target.scope === 'site' ? record.target.websiteId : null,
+      dockerProjectId: record.target.scope === 'docker_container' ? record.target.dockerProjectId : null,
+      containerId: record.target.scope === 'docker_container' ? record.target.containerId : null,
       terminate: (reason) => terminate(record, reason, 4001, { type: 'revoked', reason }),
     }).unregister;
     websocket.on('message', (data, isBinary) => {
@@ -293,6 +306,9 @@ export function createTerminalWebSocketServer({
       try {
         const current = reauthorize(record.rawToken, { sessionId: record.sessionId, userId: record.userId });
         requireTerminalTargetAccess(current, record.target, licenseEntitlementService);
+        if (record.target.scope === 'docker_container' && typeof liveSessions.assertDockerProjectOpen === 'function') {
+          liveSessions.assertDockerProjectOpen(record.target.dockerProjectId);
+        }
       } catch {
         terminate(record, 'session_revoked', 4001, { type: 'revoked', reason: 'session_revoked' });
       }

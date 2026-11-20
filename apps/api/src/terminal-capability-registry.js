@@ -1,6 +1,25 @@
 import { createHash, randomBytes } from 'node:crypto';
 
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const PROJECT_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,62}$/;
+const SERVICE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/;
+const CONTAINER_ID_PATTERN = /^[a-f0-9]{64}$/;
+const ALLOWED_CONTAINER_SHELLS = new Set(['/bin/bash', '/bin/sh']);
+const DOCKER_CONTAINER_TARGET_KEYS = Object.freeze([
+  'scope',
+  'serverId',
+  'dockerProjectId',
+  'projectName',
+  'serviceName',
+  'containerId',
+  'containerName',
+  'user',
+  'uid',
+  'gid',
+  'cwd',
+  'shell',
+]);
 const DEFAULT_TTL_MS = 30_000;
 const DEFAULT_LIMIT = 100;
 
@@ -43,6 +62,42 @@ function normalizeTarget(value) {
     }
     return Object.freeze({ ...common, websiteId: boundedIdentity(value.websiteId, 'websiteId') });
   }
+  if (value.scope === 'docker_container') {
+    const keys = Object.keys(value);
+    if (keys.length !== DOCKER_CONTAINER_TARGET_KEYS.length
+      || keys.some((key) => !DOCKER_CONTAINER_TARGET_KEYS.includes(key))) {
+      throw new TerminalCapabilityError('terminal_target_invalid', 'Container console target is invalid');
+    }
+    const dockerProjectId = boundedIdentity(value.dockerProjectId, 'dockerProjectId');
+    const projectName = boundedIdentity(value.projectName, 'projectName');
+    const serviceName = boundedIdentity(value.serviceName, 'serviceName');
+    const containerId = boundedIdentity(value.containerId, 'containerId');
+    const containerName = boundedIdentity(value.containerName, 'containerName');
+    const shell = boundedIdentity(value.shell, 'shell');
+    const { uid, gid } = value;
+    if (!UUID_PATTERN.test(dockerProjectId)
+      || !PROJECT_NAME_PATTERN.test(projectName)
+      || !SERVICE_NAME_PATTERN.test(serviceName)
+      || !CONTAINER_ID_PATTERN.test(containerId)
+      || !Number.isSafeInteger(uid) || uid < 1 || uid > 2_147_483_647
+      || !Number.isSafeInteger(gid) || gid < 1 || gid > 2_147_483_647
+      || common.user !== `${uid}:${gid}`
+      || !common.cwd.startsWith('/')
+      || !ALLOWED_CONTAINER_SHELLS.has(shell)) {
+      throw new TerminalCapabilityError('terminal_target_invalid', 'Container console target is invalid');
+    }
+    return Object.freeze({
+      ...common,
+      dockerProjectId,
+      projectName,
+      serviceName,
+      containerId,
+      containerName,
+      uid,
+      gid,
+      shell,
+    });
+  }
   throw new TerminalCapabilityError('terminal_target_invalid', 'Terminal scope is invalid');
 }
 
@@ -64,10 +119,23 @@ export function createTerminalCapabilityRegistry({
   const capabilities = new Map();
 
   function assertOpen(target) {
-    if (target.scope !== 'site' || !liveSessions) return;
-    try { liveSessions.assertWebsiteOpen(target.websiteId); }
-    catch (error) { throw new TerminalCapabilityError(error.code ?? 'terminal_website_removing',
-      error.code === 'terminal_website_removing' ? 'Site siliniyor' : 'Terminal kullanılamıyor', error.status ?? 409); }
+    if (!liveSessions) return;
+    if (target.scope === 'site') {
+      try { liveSessions.assertWebsiteOpen(target.websiteId); }
+      catch (error) { throw new TerminalCapabilityError(error.code ?? 'terminal_website_removing',
+        error.code === 'terminal_website_removing' ? 'Site siliniyor' : 'Terminal kullanılamıyor', error.status ?? 409); }
+      return;
+    }
+    if (target.scope === 'docker_container' && typeof liveSessions.assertDockerProjectOpen === 'function') {
+      try { liveSessions.assertDockerProjectOpen(target.dockerProjectId); }
+      catch (error) {
+        throw new TerminalCapabilityError(
+          error.code ?? 'terminal_docker_project_busy',
+          error.code === 'terminal_docker_project_busy' ? 'Docker projesi durduruluyor veya kaldırılıyor' : 'Terminal kullanılamıyor',
+          error.status ?? 409,
+        );
+      }
+    }
   }
 
   function remove(key) {
@@ -106,6 +174,8 @@ export function createTerminalCapabilityRegistry({
         sessionId: normalizedSessionId,
         userId: normalizedUserId,
         websiteId: normalizedTarget.scope === 'site' ? normalizedTarget.websiteId : null,
+        dockerProjectId: normalizedTarget.scope === 'docker_container' ? normalizedTarget.dockerProjectId : null,
+        containerId: normalizedTarget.scope === 'docker_container' ? normalizedTarget.containerId : null,
         terminate: () => remove(key),
       }).unregister;
     }

@@ -1,4 +1,8 @@
-import { DockerComposeObserverError, DockerComposeValidationError } from '@yunpanel/host-runtime';
+import {
+  DockerComposeObserverError,
+  DockerComposeValidationError,
+  DockerContainerConsoleInspectorError,
+} from '@yunpanel/host-runtime';
 import { DockerComposeProjectRegistryError } from './docker-compose-project-registry.js';
 import { DockerComposeEnvironmentRegistryError } from './docker-compose-environment-registry.js';
 import { DockerComposeOperationsError } from './docker-compose-operations.js';
@@ -37,6 +41,7 @@ export class DockerComposeHttpError extends Error {
 const KNOWN_ERRORS = Object.freeze([
   DockerComposeValidationError,
   DockerComposeObserverError,
+  DockerContainerConsoleInspectorError,
   DockerComposeProjectRegistryError,
   DockerComposeEnvironmentRegistryError,
   DockerComposeOperationsError,
@@ -164,6 +169,7 @@ export function mountDockerComposeRoutes(app, {
   dockerRegistryCredentialRegistry,
   dockerComposeOperationsService,
   dockerComposeObserver,
+  dockerContainerConsoleInspector = null,
   validateDockerCompose,
   domainRegistry = null,
   jobRegistry = null,
@@ -352,6 +358,40 @@ export function mountDockerComposeRoutes(app, {
     }
     const project = await requireProject(dockerComposeProjectRegistry, request.params.dockerProjectId, localServerId);
     return response.json({ data: await safeCall(() => dockerComposeObserver.inspect({ projectName: project.projectName })) });
+  }));
+
+  app.get('/api/docker/projects/:dockerProjectId/console-targets', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
+    if (Object.keys(request.query ?? {}).length !== 0) {
+      throw new DockerComposeHttpError('docker_compose_query_invalid', 'Docker Compose console targets do not accept query parameters');
+    }
+    if (!dockerContainerConsoleInspector || typeof dockerContainerConsoleInspector.listProjectConsoleTargets !== 'function') {
+      throw new DockerComposeHttpError('terminal_docker_console_unavailable', 'Container console inspector is unavailable', 503);
+    }
+    const project = await requireProject(dockerComposeProjectRegistry, request.params.dockerProjectId, localServerId);
+    const runtime = await safeCall(() => dockerComposeObserver.inspect({ projectName: project.projectName }));
+    const allowedVolumes = Array.isArray(project.volumeDetails)
+      ? project.volumeDetails
+        .filter((entry) => entry && entry.external !== true && entry.scope === 'project'
+          && typeof entry.name === 'string' && entry.runtimeName === `${project.projectName}_${entry.name}`)
+        .map((entry) => entry.name)
+      : (Array.isArray(project.volumes) ? project.volumes.filter((name) => typeof name === 'string') : []);
+    const targets = await safeCall(() => dockerContainerConsoleInspector.listProjectConsoleTargets({
+      projectId: project.id,
+      projectName: project.projectName,
+      allowedServices: (project.services ?? []).map((service) => service.name),
+      allowedVolumes,
+      containers: runtime.containers ?? [],
+    }));
+    return response.json({
+      data: {
+        version: 1,
+        projectId: project.id,
+        projectName: project.projectName,
+        runtimeStatus: runtime.status,
+        targets,
+      },
+      sideEffects: false,
+    });
   }));
 
   app.get('/api/docker/projects/:dockerProjectId/diagnosis', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {

@@ -524,6 +524,10 @@ export function createTenantBoundaryMiddleware(options = {}) {
           if (!actorTenant.isOwner) {
             throw denied('terminal_server_forbidden', 'Only server owner can access root terminal.');
           }
+        } else if (body?.scope === 'docker_container') {
+          if (!actorTenant.isOwner) {
+            throw denied('terminal_docker_container_forbidden', 'Only server owner can access container console.');
+          }
         } else if (body?.scope === 'site') {
           const targetWebsiteId = body.websiteId;
           if (!targetWebsiteId) {

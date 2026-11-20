@@ -88,6 +88,7 @@ export function createLocalDockerComposeOperation({
   manager = createDockerComposeManager(),
   receiptStore = createDockerComposeOperationReceiptStore(),
   siteMutationLock = null,
+  liveSessions = null,
   authorizeRemoval = async () => { throw new LocalDockerComposeOperationError('docker_compose_removal_unavailable', 'Removal scope inspector is required'); },
   finalizeRemoval = async () => { throw new LocalDockerComposeOperationError('docker_compose_removal_unavailable', 'Removal finalizer is required'); },
 } = {}) {
@@ -111,7 +112,17 @@ export function createLocalDockerComposeOperation({
       if (bundle.projectName !== payload.projectName || typeof manager.remove !== 'function') throw new LocalDockerComposeOperationError('docker_compose_removal_unavailable', 'Removal target is unavailable');
       await authorizeRemoval(payload, context);
     }
-    const safeResult = confirmResult(await manager[action](bundle), payload, action);
+    const fenceConsole = ['stop', 'restart', 'remove'].includes(action)
+      && typeof liveSessions?.fenceDockerProject === 'function';
+    const consoleFence = fenceConsole
+      ? liveSessions.fenceDockerProject(payload.projectId, `docker_compose_${action}`)
+      : null;
+    let safeResult;
+    try {
+      safeResult = confirmResult(await manager[action](bundle), payload, action);
+    } finally {
+      consoleFence?.release?.();
+    }
     try {
       await receiptStore.write({
         serverId: context.serverId,

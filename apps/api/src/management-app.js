@@ -1410,6 +1410,8 @@ export function createApp(allOptions = {}) {
     terminalCapabilityRegistry,
     serverRegistry: registry,
     websiteRegistry,
+    dockerComposeProjectRegistry,
+    dockerContainerConsoleInspector: options.dockerContainerConsoleInspector ?? null,
     localServerId,
     licenseEntitlementService,
   });

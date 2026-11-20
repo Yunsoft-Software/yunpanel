@@ -12,11 +12,16 @@ export function createLiveSessionRegistry({ requireGenerationBoundary = false, g
   const connections = new Map();
   const leases = new Map();
   const fences = new Map();
+  const dockerProjectFences = new Map();
   const generationId = randomUUID();
   let recoverWebsiteLease = null;
 
   const failure = (code, status = 503) => Object.assign(new Error(
-    code === 'terminal_website_removing' ? 'Site siliniyor' : 'Terminal kapatılamadı',
+    code === 'terminal_website_removing'
+      ? 'Site siliniyor'
+      : code === 'terminal_docker_project_busy'
+        ? 'Docker projesi durduruluyor veya kaldırılıyor'
+        : 'Terminal kapatılamadı',
   ), { name: 'TerminalLifecycleError', code, status });
   const digest = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
@@ -76,6 +81,12 @@ export function createLiveSessionRegistry({ requireGenerationBoundary = false, g
     const id = identity(websiteId, 'websiteId');
     if (fences.has(id)) throw failure('terminal_website_removing', 409);
     requireGeneration();
+    return true;
+  }
+
+  function assertDockerProjectOpen(dockerProjectId) {
+    const id = identity(dockerProjectId, 'dockerProjectId');
+    if (dockerProjectFences.has(id)) throw failure('terminal_docker_project_busy', 409);
     return true;
   }
 
@@ -281,11 +292,14 @@ export function createLiveSessionRegistry({ requireGenerationBoundary = false, g
     return connections.delete(connectionId);
   }
 
-  function register({ sessionId, userId, websiteId = null, terminate } = {}) {
+  function register({ sessionId, userId, websiteId = null, dockerProjectId = null, containerId = null, terminate } = {}) {
     const normalizedSessionId = identity(sessionId, 'sessionId');
     const normalizedUserId = identity(userId, 'userId');
     const normalizedWebsiteId = websiteId === null ? null : identity(websiteId, 'websiteId');
+    const normalizedDockerProjectId = dockerProjectId === null ? null : identity(dockerProjectId, 'dockerProjectId');
+    const normalizedContainerId = containerId === null ? null : identity(containerId, 'containerId');
     if (normalizedWebsiteId !== null) assertWebsiteOpen(normalizedWebsiteId);
+    if (normalizedDockerProjectId !== null) assertDockerProjectOpen(normalizedDockerProjectId);
     if (typeof terminate !== 'function') throw new TypeError('Live session terminate callback is required');
     const connectionId = randomUUID();
     connections.set(connectionId, {
@@ -293,6 +307,8 @@ export function createLiveSessionRegistry({ requireGenerationBoundary = false, g
       sessionId: normalizedSessionId,
       userId: normalizedUserId,
       websiteId: normalizedWebsiteId,
+      dockerProjectId: normalizedDockerProjectId,
+      containerId: normalizedContainerId,
       terminate,
     });
     return Object.freeze({ connectionId, unregister: () => remove(connectionId) });
@@ -309,9 +325,42 @@ export function createLiveSessionRegistry({ requireGenerationBoundary = false, g
     return count;
   }
 
+  function revokeDockerProject(dockerProjectId, reason = 'docker_project_lifecycle') {
+    const normalized = identity(dockerProjectId, 'dockerProjectId');
+    return terminateWhere((connection) => connection.dockerProjectId === normalized, reason);
+  }
+
+  function fenceDockerProject(dockerProjectId, reason = 'docker_project_lifecycle') {
+    const normalized = identity(dockerProjectId, 'dockerProjectId');
+    const current = dockerProjectFences.get(normalized);
+    if (current) {
+      current.count += 1;
+      current.reason = reason;
+    } else {
+      dockerProjectFences.set(normalized, { count: 1, reason });
+    }
+    const revoked = revokeDockerProject(normalized, reason);
+    let released = false;
+    return Object.freeze({
+      revoked,
+      release() {
+        if (released) return false;
+        released = true;
+        const entry = dockerProjectFences.get(normalized);
+        if (!entry) return false;
+        entry.count -= 1;
+        if (entry.count <= 0) dockerProjectFences.delete(normalized);
+        return true;
+      },
+    });
+  }
+
   return {
     register,
     assertWebsiteOpen,
+    assertDockerProjectOpen,
+    fenceDockerProject,
+    revokeDockerProject,
     beginWebsiteOpen,
     reserveWebsiteRemoval,
     commitWebsiteRemoval,

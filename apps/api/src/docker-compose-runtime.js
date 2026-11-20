@@ -2,6 +2,7 @@ import path from 'node:path';
 import {
   createDockerComposeObserver,
   createDockerComposeValidator,
+  createDockerContainerConsoleInspector,
   createDockerVolumeManager,
 } from '@yunpanel/host-runtime';
 import { DOCKER_COMPOSE_OPERATIONS, DOCKER_VOLUME_OPERATIONS } from '@yunpanel/protocol';
@@ -142,11 +143,13 @@ export async function createDockerComposeRuntime({
   websiteRegistry = null,
   domainRegistry = null,
   siteMutationLock = null,
+  liveSessions = null,
   projectBackupLocked = async () => false,
   validateDockerCompose = createDockerComposeValidator(),
   observer = createDockerComposeObserver(),
   receiptStore = createDockerComposeOperationReceiptStore(),
   volumeManager = createDockerVolumeManager(),
+  containerConsoleInspector = createDockerContainerConsoleInspector(),
   volumeReceiptStore = createDockerVolumeOperationReceiptStore(
     env?.YUNPANEL_DOCKER_VOLUME_RECEIPT_ROOT ? { root: env.YUNPANEL_DOCKER_VOLUME_RECEIPT_ROOT } : undefined,
   ),
@@ -218,6 +221,7 @@ export async function createDockerComposeRuntime({
     materialize,
     receiptStore,
     siteMutationLock,
+    liveSessions,
     authorizeRemoval: removal.authorize,
     finalizeRemoval: removal.finalize,
   });
@@ -259,6 +263,7 @@ export async function createDockerComposeRuntime({
     operationsService,
     volumeOperationsService,
     volumeManager,
+    containerConsoleInspector,
     volumeReceiptStore,
     localVolumeOperation,
     validateDockerCompose,

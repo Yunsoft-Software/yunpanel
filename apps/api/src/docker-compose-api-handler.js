@@ -40,6 +40,7 @@ export function createDockerComposeApiHandler({
     dockerRegistryCredentialRegistry: runtime.credentialRegistry,
     dockerComposeOperationsService: runtime.operationsService,
     dockerComposeObserver: runtime.observer,
+    dockerContainerConsoleInspector: runtime.containerConsoleInspector ?? null,
     validateDockerCompose: runtime.validateDockerCompose,
     domainRegistry,
     jobRegistry,
@@ -65,7 +66,10 @@ export function createDockerComposeApiHandler({
   });
   app.use((request, response, next) => {
     Object.defineProperty(request, dockerComposeApiRequestContext, {
-      value: Object.freeze({ projectRegistry: runtime.projectRegistry }),
+      value: Object.freeze({
+        projectRegistry: runtime.projectRegistry,
+        containerConsoleInspector: runtime.containerConsoleInspector ?? null,
+      }),
       enumerable: false,
       configurable: false,
       writable: false,

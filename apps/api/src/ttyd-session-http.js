@@ -41,6 +41,13 @@ export function mountTtydSessionRoutes(app, {
       sessionId: auth.id,
       userId: auth.user.id,
     });
+    if (consumed.target?.scope === 'docker_container') {
+      throw new TtydSessionError(
+        'ttyd_docker_container_unsupported',
+        'Docker container console is not supported on ttyd sessions',
+        409,
+      );
+    }
     const session = await ttydSessionManager.start({
       ownerSessionId: auth.id,
       userId: auth.user.id,

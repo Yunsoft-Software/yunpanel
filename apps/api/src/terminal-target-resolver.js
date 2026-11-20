@@ -1,5 +1,12 @@
+import { randomBytes } from 'node:crypto';
+import { buildContainerConsoleExecArgs } from './docker-container-console-cleanup.js';
+
 const SHELL_PATH = '/bin/bash';
 const RUNUSER_PATH = '/usr/sbin/runuser';
+const DOCKER_PATHS = Object.freeze(['/usr/bin/docker', '/usr/local/bin/docker']);
+const DOCKER_LOCAL_SOCKET = 'unix:///var/run/docker.sock';
+const ALLOWED_CONTAINER_SHELLS = new Set(['/bin/bash', '/bin/sh']);
+const CONTAINER_ID_PATTERN = /^[a-f0-9]{64}$/;
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
 const APPLICATION_ID = '[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 const RELEASE_ID = APPLICATION_ID;
@@ -47,26 +54,87 @@ function parseManagedAccount(passwdText, user, errorFactory = defaultError) {
   return Object.freeze({ user, home, uid, gid });
 }
 
-function validateTerminalTargetShape(target, errorFactory = defaultError) {
+function validateTerminalTargetShape(target, errorFactory = defaultError, { allowDockerContainer = false } = {}) {
   if (!target || typeof target !== 'object' || Array.isArray(target)) {
     throw errorFactory('terminal_target_invalid', 'Terminal target is invalid');
   }
   if (target.scope === 'server' && target.user === 'root' && target.cwd === '/root') return;
   if (target.scope === 'site' && APP_USER_PATTERN.test(target.user ?? '') && SITE_CURRENT_PATTERN.test(target.cwd ?? '')) return;
+  if (allowDockerContainer
+    && target.scope === 'docker_container'
+    && CONTAINER_ID_PATTERN.test(target.containerId ?? '')
+    && Number.isSafeInteger(target.uid) && target.uid >= 1 && target.uid <= 2_147_483_647
+    && Number.isSafeInteger(target.gid) && target.gid >= 1 && target.gid <= 2_147_483_647
+    && target.user === `${target.uid}:${target.gid}`
+    && typeof target.cwd === 'string' && target.cwd.startsWith('/') && target.cwd.length <= 256 && !/[\u0000-\u001f\u007f]/.test(target.cwd)
+    && ALLOWED_CONTAINER_SHELLS.has(target.shell)) return;
   throw errorFactory('terminal_target_invalid', 'Terminal target is invalid');
+}
+
+function dockerContainerEnvironment() {
+  return Object.freeze({
+    COLORTERM: 'truecolor',
+    DOCKER_CONFIG: '/nonexistent',
+    DOCKER_HOST: DOCKER_LOCAL_SOCKET,
+    HOME: '/nonexistent',
+    LANG: 'C.UTF-8',
+    PATH: '/usr/local/bin:/usr/bin:/bin',
+    TERM: 'xterm-256color',
+  });
+}
+
+async function resolveDockerBinary(statFn, errorFactory) {
+  for (const candidate of DOCKER_PATHS) {
+    try {
+      const info = await statFn(candidate);
+      if (info?.isFile?.()) return candidate;
+    } catch { /* Continue through fixed executable allowlist. */ }
+  }
+  throw errorFactory('terminal_docker_binary_unavailable', 'Docker CLI is not available on this host', 503);
 }
 
 export async function resolveTerminalTarget(target, {
   statFn,
   realpathFn,
   readPasswd,
+  allowDockerContainer = false,
+  consoleSessionId = null,
   errorFactory = defaultError,
 } = {}) {
   if (typeof statFn !== 'function' || typeof realpathFn !== 'function' || typeof readPasswd !== 'function'
     || typeof errorFactory !== 'function') {
     throw new TypeError('Terminal target resolver dependencies are invalid');
   }
-  validateTerminalTargetShape(target, errorFactory);
+  validateTerminalTargetShape(target, errorFactory, { allowDockerContainer });
+
+  if (target.scope === 'docker_container') {
+    const dockerBinary = await resolveDockerBinary(statFn, errorFactory);
+    const sessionToken = typeof consoleSessionId === 'string' && /^[a-f0-9]{32}$/.test(consoleSessionId)
+      ? consoleSessionId
+      : randomBytes(16).toString('hex');
+    const execArgs = buildContainerConsoleExecArgs({
+      containerId: target.containerId,
+      uid: target.uid,
+      gid: target.gid,
+      cwd: target.cwd,
+      shell: target.shell,
+      consoleSessionId: sessionToken,
+    });
+    return Object.freeze({
+      file: dockerBinary,
+      args: execArgs,
+      user: target.user,
+      uid: target.uid,
+      gid: target.gid,
+      hostPrivilegeDrop: false,
+      consoleSessionId: sessionToken,
+      home: '/nonexistent',
+      cwd: '/',
+      env: dockerContainerEnvironment(),
+      directFile: dockerBinary,
+      directArgs: execArgs,
+    });
+  }
 
   let info;
   try { info = await statFn(target.cwd); }

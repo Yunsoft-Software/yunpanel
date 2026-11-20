@@ -1126,6 +1126,7 @@ const dockerComposeRuntime = await createDockerComposeRuntime({
   websiteRegistry,
   domainRegistry,
   siteMutationLock,
+  liveSessions,
   projectBackupLocked,
 });
 const databaseCredentialApplyService = createDatabaseCredentialApplyService({
@@ -1460,6 +1461,7 @@ const listener = createAuthenticatedApi({
       roundcubeDomainMappingRegistry,
       roundcubeDomainMappingService,
       dockerWorkloadRegistry,
+      dockerContainerConsoleInspector: dockerComposeRuntime.containerConsoleInspector,
       applicationEnvironmentRegistry,
       applicationDeployQueue,
       journalLogReader,

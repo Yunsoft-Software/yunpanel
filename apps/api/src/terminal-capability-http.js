@@ -1,9 +1,23 @@
 import path from 'node:path';
+import { DockerContainerConsoleInspectorError } from '@yunpanel/host-runtime';
+import { dockerComposeApiRequestContext } from './docker-compose-api-handler.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { TerminalCapabilityError } from './terminal-capability-registry.js';
 
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
+const CONTAINER_ID_PATTERN = /^[a-f0-9]{64}$/;
 const SITE_ROOTS = ['/var/www/yunpanel/apps/', '/var/lib/yunpanel/apps/'];
+
+function projectScopedVolumeKeys(project) {
+  const details = Array.isArray(project?.volumeDetails) ? project.volumeDetails : null;
+  if (details) {
+    return details
+      .filter((entry) => entry && entry.external !== true && entry.scope === 'project'
+        && typeof entry.name === 'string' && entry.runtimeName === `${project.projectName}_${entry.name}`)
+      .map((entry) => entry.name);
+  }
+  return Array.isArray(project?.volumes) ? project.volumes.filter((name) => typeof name === 'string') : [];
+}
 
 function exactBody(body, fields) {
   return body && typeof body === 'object' && !Array.isArray(body)
@@ -42,6 +56,8 @@ export function mountTerminalCapabilityRoutes(app, {
   terminalCapabilityRegistry,
   serverRegistry,
   websiteRegistry,
+  dockerComposeProjectRegistry = null,
+  dockerContainerConsoleInspector = null,
   localServerId,
   licenseEntitlementService = null,
 } = {}) {
@@ -98,8 +114,79 @@ export function mountTerminalCapabilityRoutes(app, {
         user: website.unixUser,
         cwd: managedSiteCwd(website),
       };
+    } else if (request.body?.scope === 'docker_container'
+      && exactBody(request.body, ['scope', 'dockerProjectId', 'containerId'])) {
+      const isOwnerManagement = auth.user.role === 'owner'
+        && auth.access?.mode === 'management'
+        && auth.security?.managementAllowed === true
+        && Array.isArray(auth.access?.permissions)
+        && auth.access.permissions.includes('*');
+      if (!isOwnerManagement) {
+        throw new TerminalCapabilityError(
+          'terminal_docker_container_forbidden',
+          'Only server owner can access container console',
+          403,
+        );
+      }
+      const resolvedProjectRegistry = request[dockerComposeApiRequestContext]?.projectRegistry ?? dockerComposeProjectRegistry;
+      const resolvedConsoleInspector = request[dockerComposeApiRequestContext]?.containerConsoleInspector ?? dockerContainerConsoleInspector;
+      if (!resolvedProjectRegistry || typeof resolvedProjectRegistry.getProject !== 'function'
+        || !resolvedConsoleInspector || typeof resolvedConsoleInspector.inspectContainer !== 'function') {
+        throw new TerminalCapabilityError(
+          'terminal_docker_console_unavailable',
+          'Container console is not available on this server',
+          503,
+        );
+      }
+      if (typeof request.body.containerId !== 'string' || !CONTAINER_ID_PATTERN.test(request.body.containerId)) {
+        throw new TerminalCapabilityError(
+          'container_console_id_invalid',
+          'Docker container ID must be a 64-character hex identifier',
+          400,
+        );
+      }
+      let project;
+      try {
+        project = await resolvedProjectRegistry.getProject(request.body.dockerProjectId);
+      } catch {
+        throw new TerminalCapabilityError('docker_compose_project_not_found', 'Docker Compose project was not found', 404);
+      }
+      if (!project) {
+        throw new TerminalCapabilityError('docker_compose_project_not_found', 'Docker Compose project was not found', 404);
+      }
+      localTarget(project.serverId, localServerId);
+      let inspected;
+      try {
+        inspected = await resolvedConsoleInspector.inspectContainer({
+          projectId: project.id,
+          projectName: project.projectName,
+          allowedServices: (project.services ?? []).map((service) => service.name),
+          allowedVolumes: projectScopedVolumeKeys(project),
+          containerId: request.body.containerId,
+          probeShell: true,
+        });
+      } catch (error) {
+        if (error instanceof DockerContainerConsoleInspectorError) {
+          throw new TerminalCapabilityError(error.code, error.message, error.status ?? 409);
+        }
+        throw error;
+      }
+      target = {
+        scope: 'docker_container',
+        serverId: project.serverId,
+        dockerProjectId: project.id,
+        projectName: inspected.projectName,
+        serviceName: inspected.serviceName,
+        containerId: inspected.containerId,
+        containerName: inspected.containerName,
+        user: inspected.user,
+        uid: inspected.uid,
+        gid: inspected.gid,
+        cwd: inspected.cwd,
+        shell: inspected.shell,
+      };
     } else {
-      throw new TerminalCapabilityError('terminal_capability_request_invalid', 'Choose exactly one local Server or Website terminal target');
+      throw new TerminalCapabilityError('terminal_capability_request_invalid', 'Choose exactly one local Server, Website or Container terminal target');
     }
 
     return response.status(201).json({
@@ -108,4 +195,4 @@ export function mountTerminalCapabilityRoutes(app, {
   });
 }
 
-export const terminalCapabilityHttpInternals = Object.freeze({ managedSiteCwd, localTarget });
+export const terminalCapabilityHttpInternals = Object.freeze({ managedSiteCwd, localTarget, projectScopedVolumeKeys });

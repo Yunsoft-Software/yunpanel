@@ -7,6 +7,7 @@ import {
   resolveTerminalTarget,
   terminalTargetInternals,
 } from './terminal-target-resolver.js';
+import { cleanupDockerContainerExec } from './docker-container-console-cleanup.js';
 
 const DEFAULT_COLS = 120;
 const DEFAULT_ROWS = 30;
@@ -458,6 +459,18 @@ export function createTerminalProcessManager({
     }
     const size = dimensions(cols, rows);
     const websiteId = target?.scope === 'site' ? target.websiteId : null;
+    const dockerProjectId = target?.scope === 'docker_container' ? target.dockerProjectId : null;
+    if (dockerProjectId !== null && typeof liveSessions?.assertDockerProjectOpen === 'function') {
+      try {
+        liveSessions.assertDockerProjectOpen(dockerProjectId);
+      } catch (error) {
+        throw new TerminalProcessError(
+          error.code ?? 'terminal_docker_project_busy',
+          error.code === 'terminal_docker_project_busy' ? 'Docker projesi durduruluyor veya kaldırılıyor' : 'Terminal kullanılamıyor',
+          error.status ?? 409,
+        );
+      }
+    }
     let child, seed, lifecycle, initialization, lease, cancelled = false, completeOpen, spawnAttempted = false;
     const opened = new Promise(resolve => { completeOpen = resolve; });
     const drain = async (options) => {
@@ -487,6 +500,7 @@ export function createTerminalProcessManager({
       statFn,
       realpathFn,
       readPasswd,
+      allowDockerContainer: true,
       errorFactory: (code, message, status) => new TerminalProcessError(code, message, status),
     });
 
@@ -517,11 +531,20 @@ export function createTerminalProcessManager({
 
     let closed = false;
     let exited = false;
+    let containerCleanupStarted = false;
     let forceTimer = null;
     let dataSubscription;
     let exitSubscription;
     let childExitResolve;
     const childExit = new Promise(resolve => { childExitResolve = resolve; });
+    const triggerContainerCleanup = () => {
+      if (containerCleanupStarted || target?.scope !== 'docker_container' || !resolved.consoleSessionId) return;
+      containerCleanupStarted = true;
+      void cleanupDockerContainerExec({
+        containerId: target.containerId,
+        consoleSessionId: resolved.consoleSessionId,
+      }).catch(() => {});
+    };
     dataSubscription = child.onData((data) => {
       if (!closed && typeof data === 'string') onData(data);
     });
@@ -534,6 +557,7 @@ export function createTerminalProcessManager({
       exitSubscription?.dispose?.();
       childExitResolve();
       if (lease) void drain().catch((error) => reportDrainError(websiteId, error));
+      triggerContainerCleanup();
       onExit({ exitCode: Number.isInteger(event?.exitCode) ? event.exitCode : null, signal: Number.isInteger(event?.signal) ? event.signal : null });
     });
     if (lease) {
@@ -559,6 +583,7 @@ export function createTerminalProcessManager({
       closed = true;
       if (lease) { void drain().catch((error) => reportDrainError(websiteId, error)); return true; }
       signal('SIGHUP');
+      triggerContainerCleanup();
       if (!exited) {
         forceTimer = setTimer(() => { if (!exited) signal('SIGKILL'); }, killGraceMs);
         forceTimer?.unref?.();
