@@ -68,7 +68,7 @@ function stagedResult(value = backupDirectory, overrides = {}) {
   };
 }
 
-test('migration backup CLI accepts only exact create, verify, preview and confirmed stage syntax', () => {
+test('migration backup CLI accepts only exact create, verify, preview, confirmed stage and preflight syntax', () => {
   assert.deepEqual(parseLocalMigrationBackupArguments(['create', '--confirm']), { action: 'create', confirm: true });
   assert.deepEqual(parseLocalMigrationBackupArguments(['verify', backupDirectory]), { action: 'verify', backupDirectory });
   assert.deepEqual(parseLocalMigrationBackupArguments(['preview', backupDirectory]), { action: 'preview', backupDirectory });
@@ -82,6 +82,10 @@ test('migration backup CLI accepts only exact create, verify, preview and confir
   assert.throws(() => parseLocalMigrationBackupArguments(['stage', 'relative/path', '--confirm']), /Usage:/);
   assert.throws(() => parseLocalMigrationBackupArguments(['restore', backupDirectory]), /Usage:/);
   assert.throws(() => parseLocalMigrationBackupArguments(['verify', backupDirectory, '--confirm']), /Usage:/);
+  assert.throws(() => parseLocalMigrationBackupArguments(['preflight', backupDirectory]), /Usage:/);
+  assert.throws(() => parseLocalMigrationBackupArguments([
+    'preflight', 'relative/path', '--expected-sha256', 'a'.repeat(64), '--expected-server-id', 'id',
+  ]), /Usage:/);
 });
 
 test('packaged migration backup CLI requires root and refuses non-packaged execution', async () => {

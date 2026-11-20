@@ -12,12 +12,13 @@ import {
   localMigrationRestoreStageInternals,
   stageLocalMigrationRestore,
 } from '../apps/api/src/local-migration-restore-stage.js';
+import { preflightLocalRecoveryBackup } from '../apps/api/src/local-recovery-preflight.js';
 
 const scriptPath = fileURLToPath(import.meta.url);
 const PACKAGED_SCRIPT_ROOT = '/usr/lib/yunpanel/scripts';
 const BACKUP_ROOT = localMigrationBackupInternals.defaultRoot;
 const STAGE_ROOT = localMigrationRestoreStageInternals.defaultStageRoot;
-const USAGE = 'Usage: local-migration-backup.mjs create --confirm | verify <absolute-backup-directory> | preview <absolute-backup-directory> | stage <absolute-backup-directory> --confirm';
+const USAGE = 'Usage: local-migration-backup.mjs create --confirm | verify <absolute-backup-directory> | preview <absolute-backup-directory> | stage <absolute-backup-directory> --confirm | preflight <absolute-backup-directory> --expected-sha256 <sha256> --expected-server-id <uuid>';
 
 export function parseLocalMigrationBackupArguments(argv) {
   if (!Array.isArray(argv)) throw new Error(USAGE);
@@ -30,6 +31,15 @@ export function parseLocalMigrationBackupArguments(argv) {
   if (argv.length === 3 && argv[0] === 'stage' && typeof argv[1] === 'string'
     && path.isAbsolute(argv[1]) && argv[2] === '--confirm') {
     return { action: 'stage', backupDirectory: path.resolve(argv[1]), confirm: true };
+  }
+  if (argv.length === 6 && argv[0] === 'preflight' && argv[2] === '--expected-sha256' && argv[4] === '--expected-server-id'
+    && typeof argv[1] === 'string' && path.isAbsolute(argv[1])) {
+    return {
+      action: 'preflight',
+      backupDirectory: path.resolve(argv[1]),
+      expectedSha256: argv[3],
+      expectedServerId: argv[5],
+    };
   }
   throw new Error(USAGE);
 }
@@ -172,6 +182,12 @@ export async function runLocalMigrationBackupCli({
   stdout = process.stdout,
 } = {}) {
   const parsed = parseLocalMigrationBackupArguments(argv);
+  if (parsed.action === 'preflight') {
+    if (!stdout || typeof stdout.write !== 'function') throw new Error('Migration backup CLI dependencies are invalid');
+    const result = await preflightLocalRecoveryBackup(parsed);
+    stdout.write(`${JSON.stringify({ action: 'preflight', ...result })}\n`);
+    return result;
+  }
   const packaged = isPackagedMigrationBackupScript(filePath);
   assertPackagedMigrationBackupRoot({ packaged, uid });
   if (typeof createBackup !== 'function' || typeof verifyBackup !== 'function' || typeof previewRestore !== 'function'

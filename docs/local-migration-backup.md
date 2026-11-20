@@ -16,3 +16,18 @@ local-migration-backup.mjs verify /var/backups/yunpanel/migration-<timestamp>
 local-migration-backup.mjs preview /var/backups/yunpanel/migration-<timestamp>
 local-migration-backup.mjs stage /var/backups/yunpanel/migration-<timestamp> --confirm
 ```
+
+## Dış yedekten gelen arşivi yerelde doğrulama
+
+Yetkili operatör, şifreli Restic deposu için mevcut rclone uzak hedeflerinden birini seçer. İlk provada bir uzak hedef ve bir saklama politikası kullanılır. Restic parolası, depo erişimi ve YunPanel ana şifreleme anahtarı için kaynak makineye bağımlı olmayan bir kurtarma yolu sağlanır.
+
+Arşivin SHA-256 değeri, kaynak sunucu kimliği ve YunPanel paket sürümü yedek alınırken ayrı kurtarma kaydında saklanır. Restic ile geri alınan `state.tar` ve `manifest.json`, operatöre ait özel bir geçici dizine yerleştirilir. Arşivin yapısını ve kimliğini kayıtlara uygulamadan kontrol etmek için yerel kaynak ağacında aşağıdaki komut kullanılabilir.
+
+```bash
+node scripts/local-migration-backup.mjs preflight "$SNAPSHOT_DIR" \
+  --expected-sha256 "$ARCHIVE_SHA256" --expected-server-id "$SOURCE_SERVER_ID"
+```
+
+Komut manifest sürümünü, dosya listesinin kayıtlı kaynaklarla sınırlı olduğunu ve arşivin SHA-256 değerini doğrular. Arşivdeki yerel sunucu bağını kaydedilen kaynak kimliğiyle karşılaştırır. JSON sonuç yalnız kontrol durumunu ve kaynak sayısını içerir. Paket sürümü boş VM’de kurulumdan önce ayrı kurtarma kaydıyla eşleştirilir.
+
+Bu kontrol panel durum arşivini kapsar. Boş VM kabulünde site dosyaları, gerçek SQL içeriği ve posta yedeği de geri alınır. Paketli `preview` ve özel `stage` adımlarından sonra HTTP, SQL, IMAP ve kullanıcı erişimi doğrulanır. Bu kabul, dış depoya erişim ve ayrı temiz Ubuntu ortamı gerektirir.
