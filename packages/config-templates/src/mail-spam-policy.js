@@ -61,7 +61,8 @@ function renderRule(symbol, selector, values, { score, condition, delimiter } = 
     `${symbol} {`,
     '  type = "selector";',
     `  selector = ${JSON.stringify(selector)};`,
-    `  map = ${JSON.stringify(values)};`,
+    // Rspamd Multimap expects the asynchronous callback of a native map.
+    `  map = { url = "static"; data = ${JSON.stringify(values)}; };`,
     `  score = ${score};`,
   ];
   if (delimiter) lines.push(`  delimiter = "${delimiter}";`);

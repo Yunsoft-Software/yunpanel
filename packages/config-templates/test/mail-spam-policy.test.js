@@ -12,10 +12,10 @@ test('renders static Rspamd score maps for one envelope recipient and one sender
   assert.equal(preview.sensitive, true);
   assert.equal(preview.bytes, Buffer.byteLength(preview.content));
   assert.deepEqual(preview.counts, { allow: 1, deny: 1 });
-  assert.match(preview.content, /YUNPANEL_MAIL_POLICY_AUTHENTICATED \{\n  type = "selector";\n  selector = "user\.id\('present'\)";\n  map = \["present"\];\n  score = 0;/);
+  assert.match(preview.content, /YUNPANEL_MAIL_POLICY_AUTHENTICATED \{\n  type = "selector";\n  selector = "user\.id\('present'\)";\n  map = \{ url = "static"; data = \["present"\]; \};\n  score = 0;/);
   assert.ok(preview.content.includes('selector = "id(\'mailbox\');rcpts(\'smtp\'):addr.lower.join(\',\');from(\'mime\'):addr.lower";'));
-  assert.match(preview.content, /map = \["mailbox\|owner@example\.com\|friend@external\.test"\];\n  score = -1;\n  delimiter = "\|";\n  require_symbols = "!YUNPANEL_MAIL_POLICY_AUTHENTICATED & DMARC_POLICY_ALLOW";/);
-  assert.match(preview.content, /map = \["mailbox\|owner@example\.com\|sender@elsewhere\.test"\];\n  score = 5;\n  delimiter = "\|";\n  require_symbols = "!YUNPANEL_MAIL_POLICY_AUTHENTICATED";/);
+  assert.match(preview.content, /map = \{ url = "static"; data = \["mailbox\|owner@example\.com\|friend@external\.test"\]; \};\n  score = -1;\n  delimiter = "\|";\n  require_symbols = "!YUNPANEL_MAIL_POLICY_AUTHENTICATED & DMARC_POLICY_ALLOW";/);
+  assert.match(preview.content, /map = \{ url = "static"; data = \["mailbox\|owner@example\.com\|sender@elsewhere\.test"\]; \};\n  score = 5;\n  delimiter = "\|";\n  require_symbols = "!YUNPANEL_MAIL_POLICY_AUTHENTICATED";/);
   assert.doesNotMatch(preview.content, /\b(?:action|apply|regexp)\s*=/);
   assert.doesNotMatch(preview.content, /other@example\.com|,owner@example\.com/);
 });
