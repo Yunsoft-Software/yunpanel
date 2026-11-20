@@ -228,6 +228,7 @@ export function createResticManager({
     activeSecretDirs.add(secretDirectory);
     registerProcessHooks();
     const secretPath = path.join(secretDirectory, 'password');
+    const cachePath = path.join(secretDirectory, 'cache');
     try {
       const handle = await open(secretPath, 'wx', 0o600);
       try {
@@ -236,7 +237,11 @@ export function createResticManager({
         await handle.close();
       }
       return await runCommand(binary, args, {
-        env: { RESTIC_REPOSITORY: target, RESTIC_PASSWORD_FILE: secretPath },
+        env: {
+          RESTIC_REPOSITORY: target,
+          RESTIC_PASSWORD_FILE: secretPath,
+          RESTIC_CACHE_DIR: cachePath,
+        },
         timeout,
       });
     } catch (error) {
@@ -244,6 +249,7 @@ export function createResticManager({
     } finally {
       activeSecretDirs.delete(secretDirectory);
       await unlink(secretPath).catch((error) => { if (error.code !== 'ENOENT') throw error; });
+      await rm(cachePath, { recursive: true, force: true });
       await rmdir(secretDirectory).catch(() => {});
     }
   }
