@@ -386,7 +386,7 @@ print(json.dumps({'content':open(p,'r',encoding='utf-8',errors='replace').read()
     expect(errorText.toLowerCase()).toMatch(/already bound|bağlı|çakışma|conflict|managed_compose_binding|önizleme doğrulanamadı/);
   });
 
-  test('container konsolu: non-root oturum açılır, komut ve resize çalışır, kapatma ve container durdurma sonrası süreçler temizlenir', async ({ page }) => {
+  test('container konsolu: non-root oturum açılır, komut/resize/kapatma/live-auth-revoke/durdurma sonrası süreçler temizlenir', async ({ page, browser }) => {
     expect(createdProjectId).toBeTruthy();
 
     function inspectContainerIdAndProcesses(name) {
@@ -412,6 +412,7 @@ print(json.dumps({'containerId':cid,'containerName':cname,'status':status,'top':
 
     const consoleMarker = `dkr04_${timestamp}`;
     const closeSessionTag = `DKR04_CLOSE_${timestamp}`;
+    const revokeSessionTag = `DKR04_REVOKE_${timestamp}`;
     const stopSessionTag = `DKR04_STOP_${timestamp}`;
     const outputs = [];
     const sentResizes = [];
@@ -479,7 +480,8 @@ print(json.dumps({'containerId':cid,'containerName':cname,'status':status,'top':
     ).toBe(true);
 
     // 4. Oturum içi benzersiz süreci başlat ve hem konteynerde hem host'ta varlığını doğrula
-    await page.keyboard.type(`sh -c 'sleep 60' "${closeSessionTag}"`);
+    // (İki komutlu "sleep 60; true" BusyBox sh tail-call exec optimizasyonunu engelleyip arg0 etiketini korur.)
+    await page.keyboard.type(`sh -c 'sleep 60; true' "${closeSessionTag}"`);
     await page.keyboard.press('Enter');
     await expect.poll(() => {
       const info = inspectContainerIdAndProcesses(projectName);
@@ -495,17 +497,90 @@ print(json.dumps({'containerId':cid,'containerName':cname,'status':status,'top':
 
     await expect.poll(() => {
       const info = inspectContainerIdAndProcesses(projectName);
-      return !info.top.includes(closeSessionTag) && !info.top.includes('/bin/sh') && info.hostExec.length === 0;
+      return !info.top.includes(closeSessionTag)
+        && !info.top.includes('sleep 60')
+        && !info.top.includes('/bin/sh')
+        && info.hostExec.length === 0;
     }, { timeout: 25_000, intervals: [1000, 2000] }).toBe(true);
 
-    // 6. Konsol açıkken proje durdurulduğunda (stop) bağlantının kapandığını ve süreçlerin temizlendiğini doğrula
+    // 6. Canlı oturum iptali (live auth revoke): e2e/.auth cache'ine dokunmadan taze context'te ayrı Owner oturumu aç,
+    // açık konsolu logout ile hemen kes, süreç temizliğini ve ana page oturumunun hâlâ 200 kaldığını doğrula
+    const primarySessionBefore = await page.request.get('/api/auth/session');
+    expect(primarySessionBefore.status()).toBe(200);
+    const primarySessionId = (await primarySessionBefore.json())?.data?.id;
+    expect(primarySessionId).toBeTruthy();
+
+    const revokeContext = await browser.newContext({ ignoreHTTPSErrors: true });
+    const revokePage = await revokeContext.newPage();
+    try {
+      await revokePage.goto('/');
+      const revokeAuthForm = revokePage.locator('form.auth-form');
+      await expect(revokeAuthForm).toBeVisible({ timeout: 15_000 });
+      await revokePage.fill('input[name="username"]', OWNER_USERNAME);
+      await revokePage.fill('input[name="password"]', OWNER_PASSWORD);
+      await revokePage.click('button.auth-primary');
+      await expect(revokePage.locator('.auth-sessionbar')).toBeVisible({ timeout: 15_000 });
+
+      const revokeSessionRes = await revokePage.request.get('/api/auth/session');
+      expect(revokeSessionRes.status()).toBe(200);
+      const revokeOrigin = new URL(revokeSessionRes.url()).origin;
+      const revokeSession = (await revokeSessionRes.json())?.data;
+      expect(revokeSession?.id).toBeTruthy();
+      expect(revokeSession.id).not.toBe(primarySessionId);
+      expect(revokeSession?.csrfToken).toBeTruthy();
+
+      await revokePage.goto(`/docker/${encodeURIComponent(createdProjectId)}`);
+      const revRuntime = revokePage.locator('section').filter({ has: revokePage.locator('h2:text-is("Runtime")') });
+      await expect(revRuntime.getByRole('button', { name: 'Konsolu aç', exact: true }).first()).toBeVisible({ timeout: 15_000 });
+      await revRuntime.getByRole('button', { name: 'Konsolu aç', exact: true }).first().click();
+
+      const revConsole = revokePage.locator('section').filter({ has: revokePage.getByRole('heading', { name: 'Konteyner konsolu', exact: true }) });
+      await expect(revConsole).toBeVisible({ timeout: 15_000 });
+      await revConsole.getByRole('button', { name: /Terminali aç|Yeniden bağlan/ }).click();
+      await expect(revConsole.getByRole('status')).toHaveText('Bağlı', { timeout: 20_000 });
+
+      await revConsole.locator('.ws-terminal-surface').click();
+      await revokePage.keyboard.type(`sh -c 'sleep 60; true' "${revokeSessionTag}"`);
+      await revokePage.keyboard.press('Enter');
+      await expect.poll(() => {
+        const info = inspectContainerIdAndProcesses(projectName);
+        return info.top.includes(revokeSessionTag) && info.hostExec.length > 0;
+      }, { timeout: 15_000, intervals: [500, 1000] }).toBe(true);
+
+      const logoutRes = await revokePage.request.post('/api/auth/logout', {
+        headers: { Origin: revokeOrigin, 'x-csrf-token': revokeSession.csrfToken },
+      });
+      expect(logoutRes.status()).toBe(204);
+
+      await expect.poll(async () => {
+        if (!(await revConsole.isVisible().catch(() => false))) return 'panel-closed';
+        const statusText = (await revConsole.getByRole('status').textContent().catch(() => ''))?.trim() ?? '';
+        return statusText !== 'Bağlı' ? statusText : 'still-open';
+      }, { timeout: 15_000, intervals: [500, 1000] }).not.toBe('still-open');
+
+      await expect.poll(() => {
+        const info = inspectContainerIdAndProcesses(projectName);
+        return !info.top.includes(revokeSessionTag)
+          && !info.top.includes('sleep 60')
+          && !info.top.includes('/bin/sh')
+          && info.hostExec.length === 0;
+      }, { timeout: 25_000, intervals: [1000, 2000] }).toBe(true);
+    } finally {
+      await revokeContext.close().catch(() => {});
+    }
+
+    const primarySessionAfter = await page.request.get('/api/auth/session');
+    expect(primarySessionAfter.status()).toBe(200);
+    expect((await primarySessionAfter.json())?.data?.id).toBe(primarySessionId);
+
+    // 7. Konsol açıkken proje durdurulduğunda (stop) bağlantının kapandığını ve süreçlerin temizlendiğini doğrula
     await runtimeSection.getByRole('button', { name: 'Konsolu aç', exact: true }).first().click();
     await expect(consoleSection).toBeVisible({ timeout: 15_000 });
     await consoleSection.getByRole('button', { name: /Terminali aç|Yeniden bağlan/ }).click();
     await expect(consoleSection.getByRole('status')).toHaveText('Bağlı', { timeout: 20_000 });
 
     await consoleSection.locator('.ws-terminal-surface').click();
-    await page.keyboard.type(`sh -c 'sleep 60' "${stopSessionTag}"`);
+    await page.keyboard.type(`sh -c 'sleep 60; true' "${stopSessionTag}"`);
     await page.keyboard.press('Enter');
     await expect.poll(() => {
       const info = inspectContainerIdAndProcesses(projectName);
