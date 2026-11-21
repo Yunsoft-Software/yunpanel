@@ -2025,3 +2025,66 @@
     ℹ duration_ms 234.302875
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T949 · Doğrulama: test — Owner resolves proxy rule by domainId via real auth/CSRF, updates domain with prox
+- **Bağımlı:** —
+- **Dosyalar:** —
+- **Kaynak:** QA · 2026-11-22 00:35
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    Başarısız testler:
+    - Owner resolves proxy rule by domainId via real auth/CSRF, updates domain with proxyRoutes + disjoint protectedPaths, stages via real protocol, and renders exact Nginx config
+    - Compose reverse-reference protection blocks breaking edits and removal while referenced by active domain, staged/applied live Nginx, or pending stage/activate jobs, allows non-breaking edits, and unblocks after clean activation
+    - pending queued DOMAIN_STAGE job blocks breaking Compose edit and removal even if domain draft was cleared
+    - shared per-project lock prevents concurrent races between Compose update and Domain proxyRoutes update/stage
+    - missing or incomplete siteMutationLock fails closed with 503 across all 6 proxyRoutes and Compose lock callers while empty proxyRoutes pass through
+    - legacy Compose projects sharing a published host port allow unchanged routine edits, block new/changed port conflicts, block non-exclusive proxyRoutes (409), and allow binding once exclusive
+    - a site owner forwards an old name to their own site and stages it; another tenant's site is refused
+    - hosting site create service preserves verified website and allocation when provisioning registration fails
+    - Staging E2E: Data migration and rollback procedures for customer and website entities ensure consistent state without orphan records
+    - stop answers 503, archive forwards to billing, and active serves the application again
+    
+    iles without allocating a localhost port (0.294333ms)
+    ✔ rejects shell fragments, unsafe entry files, ports and health URLs (0.152917ms)
+    ✔ normalizes complete Node deployment specs (0.373292ms)
+    ✔ normalizes fixed Node process actions against a managed release (1.134334ms)
+    ✔ Passenger release snapshots carry exact site, runtime and routing revisions without a port (1.267458ms)
+    ✔ Passenger release snapshots reject systemd ports, arbitrary commands and public secrets (0.485459ms)
+    ✔ Passenger snapshots reject missing or ambiguous authorities and unsupported revisions (0.546709ms)
+    ✔ proxy hosts canonicalize DNS, IDN, IPv4 and IPv6 without accepting URLs (8.043291ms)
+    ✔ proxy hosts reject schemes, paths, credentials and config control characters (0.299166ms)
+    ✔ normalizePythonRuntimeConfig applies canonical defaults (0.705292ms)
+    ✔ normalizePythonRuntimeConfig accepts valid custom options (0.214416ms)
+    ✔ normalizePythonRuntimeConfig rejects unsupported versions or app servers (0.247375ms)
+    ✔ normalizePythonRuntimeConfig rejects invalid entry points or workers (0.130417ms)
+    ✔ normalizePythonRuntimeConfig enforces port requirements when requested (0.09025ms)
+    ✔ normalizePythonApplicationSpec normalizes complete spec (1.145875ms)
+    ✔ normalizePythonApplicationSpec rejects invalid fields (0.093625ms)
+    ✔ normalizes python rollback, restart, and status specs (0.188ms)
+    ✔ a redirect target keeps the URL and defaults to a permanent redirect that keeps the path (0.983708ms)
+    ✔ redirect URLs that could break out of the nginx directive or mislead are refused (0.469083ms)
+    ✔ redirect Domains accept only settings that apply to a redirect response (0.41075ms)
+    ✔ tenant constants and role classification predicates (0.861292ms)
+    ✔ assertTenantIdentifier and isValidTenantIdentifier (0.82775ms)
+    ✔ normalizeResellerAccount validates reseller models and enforces no nesting (0.225417ms)
+    ✔ normalizeCustomerAccount validates customer under reseller and direct Owner customer (0.156625ms)
+    ✔ normalizeHostingAccount delegates and verifies expectedKind (0.117916ms)
+    ✔ normalizeWebsiteOwnership validates website-to-customer ownership projection (0.121834ms)
+    ✔ createTenantContext builds accurate tenant context for all roles (0.213584ms)
+    ✔ resolveEntityTenantScope maps all entity types to their tenant scope (0.232167ms)
+    ✔ assertTenantAccess enforces boundaries across Owner, Reseller, Customer, and legacy SM (0.386292ms)
+    ✔ filterByTenantBoundary filters resources according to actor tenant boundary (0.215958ms)
+    ✔ resolveEntityTenantScope handles application, database, mail_alias, job variations and lookup errors (0.222792ms)
+    ✔ assertTenantAccess negative scenarios: cross-tenant data leakage prevention (0.29775ms)
+    ✔ filterByTenantBoundary negative scenarios: prevents cross-tenant data leakage in collections (0.523083ms)
+    ✔ tenant context creation and account normalization security edge cases (0.203375ms)
+    ℹ tests 79
+    ℹ suites 0
+    ℹ pass 79
+    ℹ fail 0
+    ℹ cancelled 0
+    ℹ skipped 0
+    ℹ todo 0
+    ℹ duration_ms 248.919083
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.

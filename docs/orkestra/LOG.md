@@ -330,3 +330,4 @@
 - 2026-11-21 18:56 orchestrator: verify 491a7bfa..8adbb4d8: ok, yeniden açılan -, bulgu -
 - 2026-11-21 19:50 orchestrator: verify 8adbb4d8..2c4510f3: failed, yeniden açılan -, bulgu ['T948']
 - 2026-11-21 19:54 orchestrator: verify 8adbb4d8..a6d3ca77: ok, yeniden açılan -, bulgu -
+- 2026-11-22 00:35 orchestrator: verify a6d3ca77..fe4eea2c: failed, yeniden açılan -, bulgu ['T949']
