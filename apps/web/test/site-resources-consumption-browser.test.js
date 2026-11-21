@@ -262,8 +262,8 @@ test('Real Playwright Chromium E2E (Zero Mocks): Site Kaynakları discoverabilit
     assert.match(panelText, /Son ölçüm:/);
     assert.match(panelText, /Aktif sürüm içerik kökü/);
     assert.match(panelText, /Uygulanmıyor/);
-    assert.match(panelText, /Tanımlı Limit Aşıldı/);
-    assert.match(panelText, /otomatik site durdurma veya erişim engellemesi uygulanmaz/);
+    assert.match(panelText, /Kota Limiti Aşıldı/);
+    assert.match(panelText, /uygulanan bir kaynak sınırı aşılmıştır/);
     assert.match(panelText, /Nginx erişim günlüğü kapalı/);
 
     const diskRowText = await ownerPage.locator('tr[data-consumption-metric="diskSpaceMb"]').innerText();
@@ -275,7 +275,8 @@ test('Real Playwright Chromium E2E (Zero Mocks): Site Kaynakları discoverabilit
     const dbRowText = await ownerPage.locator('tr[data-consumption-metric="databases"]').innerText();
     assert.match(dbRowText, /\b2\b/);
     assert.match(dbRowText, /Hesap kotası/);
-    assert.match(dbRowText, /Uygulanmıyor/);
+    assert.match(dbRowText, /Hesap geneli veritabanı sınırı/);
+    assert.match(dbRowText, /Aşıldı/);
 
     const trafficRowText = await ownerPage.locator('tr[data-consumption-metric="trafficMb"]').innerText();
     assert.match(trafficRowText, /Ölçülemiyor/);

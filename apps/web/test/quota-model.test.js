@@ -248,11 +248,11 @@ test('buildCustomerQuotaSnapshot and buildResellerAccountQuotaMetrics reflect qu
   assert.equal(allEnforced.disk.enforced, true);
   assert.equal(allEnforced.disk.summaryText, '125.25 MB / 500 MB');
   assert.equal(allEnforced.disk.remaining, 374.75);
-  assert.match(allEnforced.disk.detailText, /Yalnızca panel dosya yazma yollarında uygulanır; terminal ve PHP yazmaları işletim sistemi kotası değildir/);
+  assert.match(allEnforced.disk.detailText, /Dosya Yöneticisi yazmalarında uygulanır/);
   assert.equal(allEnforced.traffic.enforced, true);
   assert.equal(allEnforced.traffic.status, 'near_limit');
   assert.equal(allEnforced.traffic.summaryText, '1800.5 MB / 2048 MB');
-  assert.match(allEnforced.traffic.detailText, /Aylık eşikte yönetilen site HTTP isteklerini sınırlar; ay başında otomatik açılır/);
+  assert.match(allEnforced.traffic.detailText, /Aylık trafik sınırında uygulanır; ay başında açılır/);
   assert.equal(allEnforced.databases.isFull, true);
   assert.match(allEnforced.measurementLabel, /^Son ölçüm: /);
 

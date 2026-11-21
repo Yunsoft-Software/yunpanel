@@ -425,8 +425,8 @@ test('Real Playwright Chromium E2E: Owner, Reseller and Customer first-screen gu
     const quotaDialog = resellerPage.getByRole('dialog');
     await quotaDialog.waitFor({ timeout: 5_000 });
     const quotaDialogText = await quotaDialog.textContent();
-    assert.match(quotaDialogText, /Web Sitesi Kotası yeni site tahsisinde \(bekleyen tahsisler dahil\), Veritabanı Kotası ise yeni veritabanı oluşturma, bağlama ve WordPress kurulumlarında uygulanır/);
-    assert.match(quotaDialogText, /Disk yazma kotası ve aylık trafik sınırı isteğe bağlıdır/);
+    assert.match(quotaDialogText, /Web sitesi ve veritabanı kotaları yeni işlemlerde otomatik uygulanır/);
+    assert.match(quotaDialogText, /Disk ve aylık trafik sınırlarını aşağıdan açıp kapatabilirsiniz/);
     const resellerDiskToggle = quotaDialog.getByRole('checkbox', { name: /Disk yazma kotasını uygula/ });
     assert.equal(await resellerDiskToggle.isDisabled(), true);
     await quotaDialog.getByLabel(/Web Sitesi Kotası/).fill('1');

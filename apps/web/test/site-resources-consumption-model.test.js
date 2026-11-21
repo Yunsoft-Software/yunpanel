@@ -93,31 +93,31 @@ test('formatEnforcedScopeNote, formatTrafficGuardWarning, and formatDiskSharedRo
   );
   assert.equal(
     formatEnforcedScopeNote('diskSpaceMb', { enforcedLimit: 500, enforcementMode: 'managed_write_guard' }),
-    'Yalnızca panel dosya yazmaları (işletim sistemi kotası değil)',
+    'Dosya Yöneticisi yazmaları',
   );
   assert.equal(
     formatEnforcedScopeNote('diskSpaceMb', { enforcedLimit: 500 }),
-    'Yalnızca panel dosya yazmaları (işletim sistemi kotası değil)',
+    'Dosya Yöneticisi yazmaları',
   );
   assert.equal(
     formatEnforcedScopeNote('diskSpaceMb', { enforcedLimit: 500, enforcementMode: 'native_quota_available' }),
-    'İşletim sistemi disk kotası',
+    'Sunucu disk kotası',
   );
   assert.equal(
     formatEnforcedScopeNote('trafficMb', { enforcedLimit: 10240 }),
-    'Aylık HTTP sınırı (ay başında açılır)',
+    'Aylık trafik sınırı · ay başında açılır',
   );
 
   assert.equal(
     formatTrafficGuardWarning('trafficMb', { enforcedLimit: 10240, trafficGuardReady: false }),
-    'HTTP 429 koruması için site Nginx yapılandırmasını yeniden uygulayın',
+    'Trafik sınırının etkinleşmesi için site ayarlarını yeniden uygulayın',
   );
   assert.equal(formatTrafficGuardWarning('trafficMb', { enforcedLimit: 10240, trafficGuardReady: true }), null);
   assert.equal(formatTrafficGuardWarning('trafficMb', { enforcedLimit: null, trafficGuardReady: false }), null);
 
-  assert.match(
+  assert.equal(
     formatDiskSharedRootNote('diskSpaceMb', { reasonCode: 'shared_root_overlap' }),
-    /Paylaşımlı veya iç içe site köklerinde.*503/,
+    'Paylaşımlı klasörlerde dosya yazılamaz. Dosyaları silebilirsiniz.',
   );
   assert.equal(formatDiskSharedRootNote('diskSpaceMb', { reasonCode: 'root_missing' }), null);
 });
@@ -168,8 +168,8 @@ test('CustomerQuotaDialog renders disabled opt-in toggles when disk/traffic limi
   );
   assert.match(emptyHtml, /Disk yazma kotasını uygula/);
   assert.match(emptyHtml, /Aylık trafik sınırını uygula/);
-  assert.match(emptyHtml, /Yalnızca panelin ölçülebilen ve tekil kökleri ayrışan dosya yazma yollarında uygulanır; iç içe\/paylaşımlı köklerde yazma güvenli hata ile durdurulur/);
-  assert.match(emptyHtml, /ay başında otomatik açılır veya bu seçenek kapatılarak hemen geri alınır/);
+  assert.match(emptyHtml, /Dosya kotası, Dosya Yöneticisi’ndeki yazma işlemlerini kapsar\. Paylaşımlı klasörlerde dosya yazılamaz\. Dosyaları silebilirsiniz\./);
+  assert.match(emptyHtml, /Aylık limite ulaşıldığında sitenin yeni isteklerini sınırlar; ay başında otomatik açılır veya kapatılarak geri alınır\./);
   // Both checkboxes must be disabled when limits are empty
   const disabledCheckboxes = emptyHtml.match(/<input type="checkbox" disabled=""/g) ?? [];
   assert.equal(disabledCheckboxes.length, 2);

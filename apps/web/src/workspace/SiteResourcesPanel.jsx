@@ -85,24 +85,24 @@ export function formatEnforcedScopeNote(key, item) {
   if (key === 'databases') return 'Hesap geneli veritabanı sınırı';
   if (key === 'diskSpaceMb') {
     return item.enforcementMode === 'native_quota_available'
-      ? 'İşletim sistemi disk kotası'
-      : 'Yalnızca panel dosya yazmaları (işletim sistemi kotası değil)';
+      ? 'Sunucu disk kotası'
+      : 'Dosya Yöneticisi yazmaları';
   }
-  if (key === 'trafficMb') return 'Aylık HTTP sınırı (ay başında açılır)';
+  if (key === 'trafficMb') return 'Aylık trafik sınırı · ay başında açılır';
   return null;
 }
 
 export function formatTrafficGuardWarning(key, item) {
   if (key !== 'trafficMb' || !item || item.enforcedLimit === null || item.enforcedLimit === undefined) return null;
   if (item.trafficGuardReady === false) {
-    return 'HTTP 429 koruması için site Nginx yapılandırmasını yeniden uygulayın';
+    return 'Trafik sınırının etkinleşmesi için site ayarlarını yeniden uygulayın';
   }
   return null;
 }
 
 export function formatDiskSharedRootNote(key, item) {
   if (key !== 'diskSpaceMb' || item?.reasonCode !== 'shared_root_overlap') return null;
-  return 'Paylaşımlı veya iç içe site köklerinde disk yazma kotası kontrolsüz yazmaya izin vermez; panel yazmaları güvenli hata (503) ile durdurulur.';
+  return 'Paylaşımlı klasörlerde dosya yazılamaz. Dosyaları silebilirsiniz.';
 }
 
 export function resolveConsumptionBadge(key, item, unmeasuredLabel = 'Ölçülemedi') {
@@ -203,7 +203,7 @@ function SiteConsumptionWorkspace({ domain, website }) {
   const renderMetricRow = ([key, label, isPrimary]) => {
     const item = metrics[key];
     if (!item) return null;
-    const isUnmeasured = item.unknown || item.measured === null;
+    const isUnmeasured = item.unknown || item.measured === null || item.measured === undefined;
     const isUnavailableSource = key === 'trafficMb' || !isPrimary || item.reasonCode === 'traffic_source_unavailable';
     const measuredText = formatMeasuredDisplay(key, item);
     const unmeasuredLabel = isUnavailableSource ? 'Ölçülemiyor' : 'Ölçülemedi';
@@ -326,7 +326,7 @@ function SiteConsumptionWorkspace({ domain, website }) {
           </div>
         )}
         <p className="ws-muted" style={{ marginTop: '0.75rem', fontSize: '0.85rem' }}>
-          Ölçülemeyen kaynaklar sıfır gösterilmez. Web sitesi ve veritabanı kotaları hesap genelinde otomatik uygulanır. İsteğe bağlı disk yazma kotası yalnızca ölçülebilir ve tekil site köklerinde panel dosya yazma yollarında geçerlidir; paylaşımlı veya iç içe köklerde yazmalar kontrolsüz bırakılmaz ve güvenli hata (503) ile durdurulur; terminal, PHP ve harici yazmalar işletim sistemi kotası değildir. İsteğe bağlı aylık trafik sınırı yalnızca yönetilen sitenin yeni HTTP isteklerini sınırlar ve ay başında otomatik olarak açılır.
+          Ölçülemeyen kaynaklar sıfır gösterilmez. Dosya kotası, Dosya Yöneticisi’ndeki yazma işlemlerini kapsar; paylaşımlı klasörlerde dosya yazılamaz, dosyaları silebilirsiniz. Aylık trafik sınırı ay başında otomatik açılır.
         </p>
       </div>
     </Section>

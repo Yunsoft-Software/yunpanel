@@ -114,7 +114,7 @@ export function CustomerQuotaDialog({ account, reseller = null, client, onClose,
               <strong>{account.username}</strong> müşterisine ayrılacak barındırma kaynak kotalarını belirleyin. Sınırsız yapmak için ilgili alanı boş bırakın.
             </p>
             <p className="ws-muted">
-              Web Sitesi Kotası yeni site tahsisinde (bekleyen tahsisler dahil), Veritabanı Kotası ise yeni veritabanı oluşturma, bağlama ve WordPress kurulumlarında uygulanır. Disk yazma kotası ve aylık trafik sınırı isteğe bağlıdır; aşağıdaki seçeneklerle açılıp kapatılabilir.
+              Web sitesi ve veritabanı kotaları yeni işlemlerde otomatik uygulanır. Disk ve aylık trafik sınırlarını aşağıdan açıp kapatabilirsiniz.
             </p>
             {reseller?.limits?.maxWebsites !== null && reseller?.limits?.maxWebsites !== undefined && (
               <p className="ws-muted">Maksimum bayi site limitiniz: {reseller.limits.maxWebsites} web sitesi.</p>
@@ -159,7 +159,7 @@ export function CustomerQuotaDialog({ account, reseller = null, client, onClose,
               <span>
                 <strong>Disk yazma kotasını uygula</strong>
                 <span className="ws-field-hint" style={{ display: 'block', marginTop: '0.2rem' }}>
-                  Yalnızca panelin ölçülebilen ve tekil kökleri ayrışan dosya yazma yollarında uygulanır; iç içe/paylaşımlı köklerde yazma güvenli hata ile durdurulur. Terminal, PHP ve harici yazmalar işletim sistemi sert kotası değildir; silme işlemleri her zaman açıktır.
+                  Dosya kotası, Dosya Yöneticisi’ndeki yazma işlemlerini kapsar. Paylaşımlı klasörlerde dosya yazılamaz. Dosyaları silebilirsiniz.
                 </span>
               </span>
             </label>
@@ -183,7 +183,7 @@ export function CustomerQuotaDialog({ account, reseller = null, client, onClose,
               <span>
                 <strong>Aylık trafik sınırını uygula</strong>
                 <span className="ws-field-hint" style={{ display: 'block', marginTop: '0.2rem' }}>
-                  Aylık eşikte yalnızca ilgili yönetilen sitenin yeni HTTP isteklerini sınırlar; ay başında otomatik açılır veya bu seçenek kapatılarak hemen geri alınır.
+                  Aylık limite ulaşıldığında sitenin yeni isteklerini sınırlar; ay başında otomatik açılır veya kapatılarak geri alınır.
                 </span>
               </span>
             </label>

@@ -2,8 +2,8 @@ import { formatDate, siteHref } from './site-model.js';
 
 const WEBSITES_ENFORCEMENT_NOTE = 'Yeni site tahsisinde uygulanır';
 const DATABASES_ENFORCEMENT_NOTE = 'Yeni veritabanı oluşturma, bağlama ve WordPress kurulumlarında uygulanır';
-const DISK_ENFORCEMENT_NOTE = 'Yalnızca panel dosya yazma yollarında uygulanır; terminal ve PHP yazmaları işletim sistemi kotası değildir';
-const TRAFFIC_ENFORCEMENT_NOTE = 'Aylık eşikte yönetilen site HTTP isteklerini sınırlar; ay başında otomatik açılır';
+const DISK_ENFORCEMENT_NOTE = 'Dosya Yöneticisi yazmalarında uygulanır';
+const TRAFFIC_ENFORCEMENT_NOTE = 'Aylık trafik sınırında uygulanır; ay başında açılır';
 
 function isFiniteNonNegative(value) {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
