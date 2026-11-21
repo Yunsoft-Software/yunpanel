@@ -125,8 +125,8 @@ export function createHostingSiteCreateService({
       }
       dbReservation = await reserveDbQuota(reservePayload);
     }
-    let allocation;
-    let website;
+    let completedAllocation;
+    let verifiedWebsite;
     let created = false;
     let siteAdmin = null;
     let siteAdminError = null;
@@ -159,17 +159,21 @@ export function createHostingSiteCreateService({
         }
       }
       // Never accept createSite's response object as persistence evidence.
-      website = await websiteRegistry.getWebsite(reserved.websiteId);
+      const website = await websiteRegistry.getWebsite(reserved.websiteId);
       if (!website) {
         throw fail('hosting_site_persistence_unverified', 'The allocated Website could not be verified in persistent state.', 503);
       }
-      allocation = allocations.complete(rawToken, policy, prepared.allocationInput, website);
+      const allocation = allocations.complete(rawToken, policy, prepared.allocationInput, website);
+      verifiedWebsite = website;
+      completedAllocation = allocation;
     } catch (err) {
       if (dbReservation?.reserved && !dbReservation.reusedAttached && typeof finalizeDbQuota === 'function') {
         try { await finalizeDbQuota(dbReservation.operationId, 'released'); } catch {}
       }
       throw err;
     }
+    const website = verifiedWebsite;
+    const allocation = completedAllocation;
     let provisioning = null;
     let provisioningError = null;
     let stage = 'ownership_recorded';

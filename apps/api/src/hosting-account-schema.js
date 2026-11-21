@@ -251,7 +251,12 @@ export function rollbackEmptyHostingAccountSchema({ db, transaction }) {
         throw new AuthError('hosting_schema_in_use', 'Hosting account data must be migrated before rollback.', 409);
       }
     }
+    const hasDbAllocations = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'auth_hosting_database_allocations'").get());
+    if (hasDbAllocations && db.prepare('SELECT 1 FROM auth_hosting_database_allocations LIMIT 1').get()) {
+      throw new AuthError('hosting_schema_in_use', 'Hosting account data must be migrated before rollback.', 409);
+    }
     rollbackEmptyHostingSiteAllocationSchema(db);
+    if (hasDbAllocations) db.exec('DROP TABLE auth_hosting_database_allocations');
     const expected = expectedObjects(current);
     for (const [type, name] of [...expected].reverse().filter(([type]) => type === 'trigger')) db.exec(`DROP ${type} ${name}`);
     if (current >= 2) db.exec('DROP TABLE auth_hosting_lifecycle_intents');

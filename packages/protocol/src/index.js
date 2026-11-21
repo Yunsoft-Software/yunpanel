@@ -404,7 +404,10 @@ function validateMutationPayload(operation, payload, errors) {
   if (operation === OPERATIONS.MAIL_CONFIG_ROLLBACK) validateMailConfigRollback(payload, operation, errors);
 
   if (operation === OPERATIONS.DOMAIN_STAGE) {
-    rejectUnexpectedKeys(payload, ['primaryDomain', 'aliases', 'targetType', 'target', 'nginxSettings', 'tls', 'canonicalRedirect', 'httpsRedirect', 'domainRevision', 'passengerAttachment'], operation, errors);
+    rejectUnexpectedKeys(payload, ['primaryDomain', 'aliases', 'targetType', 'target', 'nginxSettings', 'tls', 'canonicalRedirect', 'httpsRedirect', 'domainRevision', 'passengerAttachment', 'websiteId'], operation, errors);
+    if (payload.websiteId !== undefined && payload.websiteId !== null) {
+      try { assertUuid(payload.websiteId, 'websiteId'); } catch { errors.push('domain.stage websiteId is invalid'); }
+    }
     if (payload.passengerAttachment !== undefined) {
       const pin = payload.passengerAttachment;
       const ids = ['serverId', 'domainId', 'applicationId', 'websiteId', 'releaseId'];
