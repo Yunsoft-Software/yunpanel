@@ -246,7 +246,7 @@ test('Real Playwright Chromium E2E: Free Owner sees early Premium notices & back
 
     // /users: existing Owner account remains visible; Premium notice appears before any create password form
     await page.goto(`${publicOrigin}/users`, { waitUntil: 'networkidle' });
-    await page.getByRole('cell', { name: 'Owner' }).first().waitFor({ timeout: 10_000 });
+    await page.getByRole('cell', { name: 'Sunucu Yöneticisi' }).first().waitFor({ timeout: 10_000 });
     await page.locator('[data-premium-notice="users"]').waitFor({ timeout: 5_000 });
     await page.getByRole('button', { name: /Kullanıcı ekle/ }).click();
     await page.locator('[data-premium-gate-dialog="users"]').waitFor({ timeout: 5_000 });

@@ -5,7 +5,7 @@ export default function SystemUpdatePanel({ server }) {
   const [packageState, setPackageState] = useState(null);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  const [message, setMessage] = useState('Check the APT repository for a YunPanel update.');
+  const [message, setMessage] = useState('YunPanel paketi için güncel sürümü APT deposundan denetleyin.');
   const [error, setError] = useState(null);
 
   async function runOperation(operation) {
@@ -13,7 +13,7 @@ export default function SystemUpdatePanel({ server }) {
     setBusy(true);
     setError(null);
     setConfirming(false);
-    setMessage(operation === 'upgrade' ? 'Installing the YunPanel update…' : 'Checking package versions…');
+    setMessage(operation === 'upgrade' ? 'YunPanel güncellemesi kuruluyor…' : 'Paket sürümleri denetleniyor…');
     try {
       const job = await panelRequest(
         `/servers/${server.id}/system/${operation === 'upgrade' ? 'upgrade' : 'packages/inspect'}`,
@@ -24,26 +24,26 @@ export default function SystemUpdatePanel({ server }) {
       const completed = await waitForJob(job.id, { attempts: 180 });
       setPackageState(completed.result);
       setMessage(completed.result?.upgraded
-        ? `Upgraded ${completed.result.previousVersion} → ${completed.result.installedVersion}. Services are restarting.`
+        ? `${completed.result.previousVersion} → ${completed.result.installedVersion} sürümüne güncellendi. Servisler yeniden başlatılıyor.`
         : completed.result?.updateAvailable
-          ? `Update ${completed.result.candidateVersion} is ready.`
-          : `YunPanel ${completed.result?.installedVersion ?? 'package'} is current.`);
+          ? `${completed.result.candidateVersion} güncellemesi hazır.`
+          : `YunPanel ${completed.result?.installedVersion ?? 'paketi'} güncel.`);
     } catch (operationError) {
       setError(operationError.message);
-      setMessage('Package operation did not complete.');
+      setMessage('Paket işlemi tamamlanamadı.');
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <section className="panel domain-panel" aria-label="YunPanel package updates">
+    <section className="panel domain-panel" aria-label="YunPanel paket güncellemeleri">
       <div className="panel-heading">
         <div>
-          <p className="eyebrow">APT package</p>
-          <h2>YunPanel updates</h2>
+          <p className="eyebrow">APT Paketi</p>
+          <h2>YunPanel Güncellemeleri</h2>
         </div>
-        <span className="panel-meta">{busy ? 'running' : packageState?.updateAvailable ? 'update available' : 'ready'}</span>
+        <span className="panel-meta">{busy ? 'Çalışıyor' : packageState?.updateAvailable ? 'Güncelleme var' : 'Hazır'}</span>
       </div>
       <div className="domain-row">
         <div className="domain-primary">
@@ -54,31 +54,31 @@ export default function SystemUpdatePanel({ server }) {
           </div>
         </div>
         <div className="domain-cell">
-          <span>Installed</span>
-          <strong>{packageState?.installedVersion ?? 'Not checked'}</strong>
+          <span>Kurulu sürüm</span>
+          <strong>{packageState?.installedVersion ?? 'Henüz denetlenmedi'}</strong>
         </div>
         <div className="domain-cell">
-          <span>Candidate</span>
-          <strong>{packageState?.candidateVersion ?? 'Not checked'}</strong>
+          <span>Aday sürüm</span>
+          <strong>{packageState?.candidateVersion ?? 'Henüz denetlenmedi'}</strong>
         </div>
         <div className="topbar-actions">
           <button className="secondary-button" type="button" disabled={!server || busy} onClick={() => runOperation('inspect')}>
-            {busy ? 'Working…' : 'Check updates'}
+            {busy ? 'Denetleniyor…' : 'Güncellemeleri denetle'}
           </button>
           {packageState?.updateAvailable && !confirming && (
             <button className="primary-button" type="button" disabled={busy} onClick={() => setConfirming(true)}>
-              Upgrade YunPanel
+              YunPanel&apos;i güncelle
             </button>
           )}
           {confirming && (
             <>
-              <button className="secondary-button" type="button" disabled={busy} onClick={() => setConfirming(false)}>Cancel</button>
-              <button className="primary-button" type="button" disabled={busy} onClick={() => runOperation('upgrade')}>Confirm upgrade</button>
+              <button className="secondary-button" type="button" disabled={busy} onClick={() => setConfirming(false)}>Vazgeç</button>
+              <button className="primary-button" type="button" disabled={busy} onClick={() => runOperation('upgrade')}>Güncellemeyi onayla</button>
             </>
           )}
         </div>
       </div>
-      {error && <div className="server-last-seen">Error · {error}</div>}
+      {error && <div className="server-last-seen">Hata · {error}</div>}
     </section>
   );
 }

@@ -33,19 +33,23 @@ function RedirectWithSearch({ to }) {
 }
 function OwnerRoute({ children }) {
   const { isOwner } = usePanelSession();
-  return isOwner ? children : <Navigate to="/websites" replace />;
+  const location = useLocation();
+  return isOwner ? children : <Navigate to="/websites" replace state={{ accessDeniedRedirect: { from: location.pathname } }} />;
 }
 function ResellerRoute({ children }) {
   const { isReseller } = usePanelSession();
-  return isReseller ? children : <Navigate to="/websites" replace />;
+  const location = useLocation();
+  return isReseller ? children : <Navigate to="/websites" replace state={{ accessDeniedRedirect: { from: location.pathname } }} />;
 }
 function ManagementRoute({ children }) {
   const { canManage } = usePanelSession();
-  return canManage ? children : <Navigate to="/websites" replace />;
+  const location = useLocation();
+  return canManage ? children : <Navigate to="/websites" replace state={{ accessDeniedRedirect: { from: location.pathname } }} />;
 }
 function CustomerRoute({ children }) {
   const { isCustomer } = usePanelSession();
-  return isCustomer ? children : <Navigate to="/websites" replace />;
+  const location = useLocation();
+  return isCustomer ? children : <Navigate to="/websites" replace state={{ accessDeniedRedirect: { from: location.pathname } }} />;
 }
 function ScopedRoute({ management, readOnly }) {
   const { canManage } = usePanelSession();
@@ -64,7 +68,8 @@ const manage = (element) => <ManagementRoute>{element}</ManagementRoute>;
 const scoped = (management, readOnly) => <ScopedRoute management={management} readOnly={readOnly} />;
 function CustomersRoute() {
   const { isOwner, isReseller } = usePanelSession();
-  return isOwner ? <OwnerHostingAccountsPage kind="customer" /> : isReseller ? <ResellerCustomersPage /> : <Navigate to="/websites" replace />;
+  const location = useLocation();
+  return isOwner ? <OwnerHostingAccountsPage kind="customer" /> : isReseller ? <ResellerCustomersPage /> : <Navigate to="/websites" replace state={{ accessDeniedRedirect: { from: location.pathname } }} />;
 }
 function createWorkspaceRouter() {
   return createBrowserRouter([{

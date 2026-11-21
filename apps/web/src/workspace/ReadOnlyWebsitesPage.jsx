@@ -13,7 +13,7 @@ export default function ReadOnlyWebsitesPage() {
   const rows = useMemo(() => domainTreeRows(domains.items, { query, collapsed: new Set() }), [domains.items, query]);
   const certs = ['ready', 'stale'].includes(certificates.status) ? certificates.items : null;
   return <>
-    <PageHeading title="Web siteleri" description="Read Only hesabı: alan adı hiyerarşisi, hedef, sunucu, durum ve SSL bilgileri görüntülenir." />
+    <PageHeading title="Web siteleri" description="Salt Okunur hesabı: alan adı hiyerarşisi, hedef, sunucu, durum ve SSL bilgileri görüntülenir." />
     <Section title="Siteler ve alt alan adları" description="Bir kayda tıklayarak salt okunur detay ekranını açın.">
       <div className="ws-filters"><label className="ws-filter-search">Alan adı veya alias ara<input type="search" value={query} onChange={(event) => setParams(event.target.value ? { q: event.target.value } : {}, { replace: true })} placeholder="ör. api.example.com" /></label></div>
       <CollectionNotice resource={domains} label="Web siteleri" />
@@ -28,6 +28,6 @@ export default function ReadOnlyWebsitesPage() {
         </tr>;
       })}</tbody></table></div> : domains.status === 'ready' && <EmptyState title={domains.items.length ? 'Eşleşen alan adı bulunamadı' : 'Web sitesi kaydı yok'} detail={domains.items.length ? 'Arama terimini değiştirin.' : 'Bu hesap yeni kayıt oluşturamaz.'} icon={domains.items.length ? 'search' : 'globe'} />}
     </Section>
-    <p className="ws-muted">Read Only hesabı alan adı, uygulama, DNS hedefi veya sertifika ayarını değiştiremez.</p>
+    <p className="ws-muted">Salt Okunur hesabı alan adı, uygulama, DNS hedefi veya sertifika ayarını değiştiremez.</p>
   </>;
 }

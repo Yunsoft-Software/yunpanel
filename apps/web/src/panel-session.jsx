@@ -3,6 +3,18 @@ import { panelPermission } from './owner-access.js';
 
 const PanelSessionContext = createContext(null);
 
+export function formatUserRoleLabel(user) {
+  if (!user || typeof user !== 'object') return 'Kullanıcı';
+  const role = user.role;
+  const hostingKind = user.hosting?.kind;
+  if (role === 'owner') return 'Sunucu Yöneticisi';
+  if (hostingKind === 'reseller' || role === 'reseller') return 'Bayi';
+  if (hostingKind === 'customer' || role === 'customer') return 'Müşteri';
+  if (role === 'site_manager') return 'Site Yöneticisi';
+  if (role === 'read_only') return 'Salt Okunur';
+  return 'Kullanıcı';
+}
+
 export function PanelSessionProvider({ session, children }) {
   const value = useMemo(() => {
     const role = session?.user?.role;

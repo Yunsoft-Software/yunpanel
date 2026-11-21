@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { panelRequest } from '../api.js';
+import { formatUserRoleLabel } from '../panel-session.jsx';
 import { sessionGeneration, setSession } from '../session-client.js';
 import { Badge, Button, EmptyState, ErrorNotice, LinkButton, Modal, PageHeading, Section } from './PanelKit.jsx';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
@@ -68,7 +69,7 @@ export default function UsersPage() {
     if (result.sessionRevoked || instance !== client.current || started !== sessionGeneration()) return;
     setDialog(null);
     setProfileRevision((value) => value + 1);
-    setNotice(method === 'POST' ? 'Hesap oluşturuldu. Owner, ilk HTTPS girişinde MFA kurulumunu tamamlamalıdır.'
+    setNotice(method === 'POST' ? 'Hesap oluşturuldu. Sunucu Yöneticisi, ilk HTTPS girişinde MFA kurulumunu tamamlamalıdır.'
       : method === 'DELETE' ? 'Kullanıcı hesabı silindi. Web siteleri ve uygulamalar değiştirilmedi.'
         : 'Hesap kaydedildi. Değişiklik yapıldıysa kullanıcının mevcut oturumları kapatıldı.');
     refresh();
@@ -100,7 +101,7 @@ export default function UsersPage() {
         <thead><tr><th scope="col">Kullanıcı adı</th><th scope="col">Rol</th><th scope="col">Durum</th><th scope="col">MFA</th><th scope="col">İşlemler</th></tr></thead>
         <tbody>{visible.users.map((user) => <tr key={user.id}>
           <th scope="row" style={{ overflowWrap: 'anywhere' }}>{user.username}</th>
-          <td>{user.role === 'owner' ? 'Owner' : user.role === 'site_manager' ? 'Site Yöneticisi' : 'Read Only'}</td>
+          <td>{formatUserRoleLabel(user)}</td>
           <td><Badge state={user.active ? 'active' : 'off'}>{user.active ? 'Aktif' : 'Devre dışı'}</Badge></td>
           <td><Badge state={user.mfaEnabled ? 'active' : 'warning'}>{user.mfaEnabled ? 'Kurulu' : 'Kurulu değil'}</Badge></td>
           <td><div className="ws-actions"><Button disabled={locked} aria-label={`${user.username} hesabını düzenle`} onClick={() => { setNotice(''); setDialog({ type: 'edit', user }); }}>Düzenle</Button>
@@ -184,15 +185,15 @@ function UserDialog({ mode, user, licensePath, onClose, onSave }) {
       {reload && <p role="alert">İşlemi yeniden göndermeyin. Formu kapatıp listeyi kontrol edin; gerekiyorsa güncel kaydı yeniden açın.</p>}
       <fieldset disabled={busy || reload}>
         {deleting ? <>
-          <p><strong>{user.username}</strong> hesabı, oturumları ve MFA bilgileri kalıcı olarak silinecek. Web siteleri ve uygulamalar silinmez. Son aktif Owner silinemez.</p>
+          <p><strong>{user.username}</strong> hesabı, oturumları ve MFA bilgileri kalıcı olarak silinecek. Web siteleri ve uygulamalar silinmez. Son aktif Sunucu Yöneticisi silinemez.</p>
           <label>Onaylamak için {user.username} yazın<input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="off" spellCheck={false} required /></label>
         </> : <>
           <div className="ws-form-grid"><label>Kullanıcı adı<input name="username" value={form.username} onChange={(event) => update('username', event.target.value)} autoComplete="off" autoCapitalize="none" spellCheck={false} maxLength={128} required /><span className="ws-field-hint">3–128 karakter; harf, rakam ve . _ @ + - kullanılabilir.</span></label>
             {!user && <label>İlk parola<input type="password" name="new-password" value={form.password} onChange={(event) => update('password', event.target.value)} autoComplete="new-password" minLength={12} required /><span className="ws-field-hint">En az 12 karakter. Parola daha sonra listelenmez; güvenli bir kanaldan paylaşın.</span></label>}
             <label>Rol<select value={form.role} onChange={(event) => update('role', event.target.value)}>
-              <option value="owner">Owner — tam yönetim</option>
+              <option value="owner">Sunucu Yöneticisi — tam yönetim</option>
               <option value="site_manager">Site Yöneticisi — seçili siteler</option>
-              <option value="read_only">Read Only — yalnız kendi hesabı</option>
+              <option value="read_only">Salt Okunur — yalnız görüntüleme</option>
             </select></label>
             <label>Hesap durumu<select value={String(form.active)} onChange={(event) => update('active', event.target.value === 'true')}><option value="true">Aktif</option><option value="false">Devre dışı</option></select></label>
           </div>
@@ -220,7 +221,7 @@ function UserDialog({ mode, user, licensePath, onClose, onSave }) {
               </div>
             </div>
           )}
-          <p className="ws-muted">{user ? 'Kullanıcı adı, rol veya durum değişirse bu hesabın bütün oturumları ve bekleyen giriş doğrulamaları iptal edilir. Kendi hesabınızı değiştirirseniz yeniden giriş gerekir.' : 'Yeni Owner hesabı, ilk HTTPS girişinde iki adımlı doğrulamayı kurmadan yönetim ekranlarına erişemez.'}</p>
+          <p className="ws-muted">{user ? 'Kullanıcı adı, rol veya durum değişirse bu hesabın bütün oturumları ve bekleyen giriş doğrulamaları iptal edilir. Kendi hesabınızı değiştirirseniz yeniden giriş gerekir.' : 'Yeni Sunucu Yöneticisi hesabı, ilk HTTPS girişinde iki adımlı doğrulamayı kurmadan yönetim ekranlarına erişemez.'}</p>
         </>}
       </fieldset>
       <footer className="ws-modal-footer"><Button disabled={busy} onClick={close}>{reload ? 'Kapat ve listeyi yenile' : 'Vazgeç'}</Button>

@@ -7,7 +7,7 @@ import LoginForm from './LoginForm.jsx';
 import AccountDialog from './AccountDialog.jsx';
 import OwnerEnrollment from './OwnerEnrollment.jsx';
 import { ownerAccess } from './owner-access.js';
-import { PanelSessionProvider } from './panel-session.jsx';
+import { formatUserRoleLabel, PanelSessionProvider } from './panel-session.jsx';
 import './auth.css';
 import './mfa.css';
 
@@ -130,7 +130,7 @@ export default function AuthGate({ children }) {
   return <div className="authenticated-panel">
     <div className="auth-sessionbar" aria-label="Hesap işlemleri">
       <span>YunPanel <span className="auth-separator">/</span> Yönetim</span>
-      <div><span>{state.session.user.username}</span><span className="auth-role">{state.session.user.role === 'owner' ? 'Owner' : state.session.user.role === 'site_manager' ? 'Site Manager' : 'Read Only'}</span><button disabled={busy || showEnrollment} onClick={() => setAccountOpen(true)}>Hesabım</button><button disabled={busy} onClick={logout}>{busy ? 'İşleniyor…' : 'Çıkış yap'}</button></div>
+      <div><span>{state.session.user.username}</span><span className="auth-role">{formatUserRoleLabel(state.session.user)}</span><button disabled={busy || showEnrollment} onClick={() => setAccountOpen(true)}>Hesabım</button><button disabled={busy} onClick={logout}>{busy ? 'İşleniyor…' : 'Çıkış yap'}</button></div>
     </div>
     {deadline.warning && <div className="auth-expiry" role="status"><span>{deadline.absolute ? 'Azami oturum süresi dolmak üzere. Yeniden giriş gerekecek.' : 'Oturumunuz hareketsizlik nedeniyle kapanmak üzere.'}</span>{!deadline.absolute && <button className="auth-secondary" disabled={busy} onClick={extend}>Oturumu uzat</button>}</div>}
     {actionError && <p className="auth-banner" role="alert">{actionError}</p>}

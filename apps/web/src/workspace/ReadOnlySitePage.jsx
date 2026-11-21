@@ -4,6 +4,30 @@ import { useWorkspace } from './WorkspaceContext.jsx';
 import { Badge, CollectionNotice, EmptyState, Icon, KeyValues, PageHeading, Section } from './PanelKit.jsx';
 import { certificateState, externalSiteUrl, matchingApplications, parentTrail, selectedApplication, siteHref, formatDate, domainTargetLabel } from './site-model.js';
 
+const DOMAIN_STATE_LABELS = Object.freeze({
+  active: 'Aktif',
+  draft: 'Taslak',
+  staged: 'Hazırlandı',
+  suspended: 'Askıda',
+  error: 'Hata',
+  pending: 'Bekliyor',
+});
+
+const TARGET_TYPE_LABELS = Object.freeze({
+  static: 'Statik site',
+  proxy: 'Uygulama proxy',
+  redirect: 'Yönlendirme',
+  php: 'PHP sitesi',
+});
+
+function formatDomainState(state) {
+  return DOMAIN_STATE_LABELS[state] ?? 'Bilinmiyor';
+}
+
+function formatTargetType(targetType) {
+  return TARGET_TYPE_LABELS[targetType] ?? 'Diğer';
+}
+
 export default function ReadOnlySitePage() {
   const { websiteId, tab } = useParams();
   const { domains, applications, certificates, servers, refreshAll } = useWorkspace();
@@ -14,10 +38,10 @@ export default function ReadOnlySitePage() {
   const application = selectedApplication(domain, applications.items);
   const ssl = certificateState(domain, certificates.status === 'ready' ? certificates.items : null);
   const server = servers.items.find((item) => item.id === domain.serverId);
-  const url = externalSiteUrl(domain);
+  const url = domain.state === 'active' ? externalSiteUrl(domain) : null;
   return <>
     <nav className="ws-breadcrumb" aria-label="Site konumu"><Link to="/websites">Web siteleri</Link>{parentTrail(domain, domains.items).map((parent) => <Fragment key={parent.id}><span aria-hidden="true">/</span><Link to={siteHref(parent.id)}>{parent.primaryDomain}</Link></Fragment>)}<span aria-hidden="true">/</span><span>{domain.primaryDomain}</span></nav>
-    <PageHeading title={domain.primaryDomain} description={`Read Only · ${domain.parentDomainId ? 'Alt alan adı' : 'Web sitesi'} · ${server?.displayName ?? server?.name ?? server?.hostname ?? 'Sunucu bilgisi bekleniyor'}`} actions={<>{url && <a href={url} target="_blank" rel="noopener noreferrer" className="ws-button"><Icon name="external" />Siteyi aç</a>}<button type="button" className="ws-button" onClick={refreshAll}><Icon name="refresh" />Yenile</button></>} />
+    <PageHeading title={domain.primaryDomain} description={`Salt Okunur · ${domain.parentDomainId ? 'Alt alan adı' : 'Web sitesi'} · ${server?.displayName ?? server?.name ?? server?.hostname ?? 'Sunucu bilgisi bekleniyor'}`} actions={<>{url && <a href={url} target="_blank" rel="noopener noreferrer" className="ws-button"><Icon name="external" />Siteyi aç</a>}<button type="button" className="ws-button" onClick={refreshAll}><Icon name="refresh" />Yenile</button></>} />
     <div className="ws-site-meta"><Badge state={domain.state} /><Badge state={ssl.state}>{ssl.label}</Badge><span>{application ? `${application.name} · Node.js ${application.runtime?.nodeMajor ?? ''}` : domain.targetType === 'static' ? 'Statik dosya yayını' : `Proxy · 127.0.0.1:${domain.target?.upstreamPort ?? '—'}`}</span></div>
     <CollectionNotice resource={domains} label="Alan adı verisi" /><CollectionNotice resource={applications} label="Uygulama verisi" /><CollectionNotice resource={certificates} label="Sertifika verisi" />
     <div className="ws-equal-columns">
@@ -28,11 +52,11 @@ export default function ReadOnlySitePage() {
         ['Sunucu', server?.displayName ?? server?.name ?? server?.hostname ?? '—'], ['Son etkinleştirme', formatDate(domain.lastAppliedAt)],
       ]} /></Section>
       <Section title="Kayıt bilgileri"><KeyValues items={[
-        ['Durum', domain.state], ['SSL', ssl.label], ['Hedef türü', domain.targetType],
+        ['Durum', formatDomainState(domain.state)], ['SSL', ssl.label], ['Hedef türü', formatTargetType(domain.targetType)],
         ['Üst alan adı', domains.items.find((item) => item.id === domain.parentDomainId)?.primaryDomain ?? 'Bağımsız kayıt'],
         ['Oluşturulma', formatDate(domain.createdAt)], ['Güncelleme', formatDate(domain.updatedAt)],
       ]} /></Section>
     </div>
-    <Section title="Salt okunur erişim"><div className="ws-section-body"><p className="ws-muted">Bu hesap deploy, restart, env, domain, SSL, terminal veya başka bir sunucu işlemi başlatamaz. İşlem geçmişi ve hassas çalışma verileri bu rolde gösterilmez.</p></div></Section>
+    <Section title="Salt okunur erişim"><div className="ws-section-body"><p className="ws-muted">Bu hesap yayınlama, yeniden başlatma, ortam değişkeni, alan adı, SSL, terminal veya başka bir sunucu işlemi başlatamaz. İşlem geçmişi ve hassas çalışma verileri bu rolde gösterilmez.</p></div></Section>
   </>;
 }

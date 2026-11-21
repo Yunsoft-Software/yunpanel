@@ -23,7 +23,7 @@ export default function ReadOnlyDashboardPage() {
     ['SSL uyarıları', certsReadable ? warnings.length : null, 'Sertifika kayıtlarındaki uyarılar', 'shield', '/websites', 'Siteleri incele'],
   ];
   return <>
-    <PageHeading title="Genel bakış" description="Read Only hesabı: envanter ve çalışma durumu görüntülenir; yönetim işlemleri kapalıdır." actions={<button type="button" className="ws-button" onClick={refreshAll}><Icon name="refresh" />Yenile</button>} />
+    <PageHeading title="Genel bakış" description="Salt Okunur hesabı: envanter ve çalışma durumu görüntülenir; yönetim işlemleri kapalıdır." actions={<button type="button" className="ws-button" onClick={refreshAll}><Icon name="refresh" />Yenile</button>} />
     <section className="ws-metrics ws-console-metrics" aria-label="Salt okunur özet">{metrics.map(([label, value, detail, icon, to, linkLabel]) => <article className="ws-metric" key={label}><div className="ws-metric-label"><span>{label}</span><Icon name={icon} /></div><strong>{value ?? '—'}</strong><small>{detail}</small>{to && <><br /><Link to={to} aria-label={`${label}: ${linkLabel}`}>{linkLabel}<Icon name="arrow" size={14} /></Link></>}</article>)}</section>
     {diskUsage !== null && diskUsage >= 90 ? (
       <div className="ws-notice ws-notice-error" role="alert" aria-live="assertive"><Icon name="alert" /><div><strong>Kritik disk doluluğu · %{Math.round(diskUsage)}</strong><p>Disk alanı kritik seviyede (%90 üzeri). Sistem yöneticisiyle iletişime geçin.</p></div></div>

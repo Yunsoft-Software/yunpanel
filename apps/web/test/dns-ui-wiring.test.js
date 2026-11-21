@@ -15,7 +15,14 @@ test('site workspace exposes real authoritative DNS management instead of a plac
   assert.match(detail, /tab === 'dns'/);
   assert.match(detail, /<DnsPanel key=\{domain\.id\}/);
   assert.match(panel, /dnsZoneContextKey\(domain, domains\)/);
-  assert.match(panel, /Managed kayıtlar bu yoldan silinemez/);
+  assert.match(panel, /Yetkili DNS Bölgesi/);
+  assert.match(panel, /SOA seri numarası/);
+  assert.match(panel, /Bölge türü/);
+  assert.match(panel, /Özel kayıt ekle/);
+  assert.match(panel, /Bölge şablonu eşitlemesi/);
+  assert.match(panel, /Kayıtları kontrol et \/ Yenile/);
+  assert.match(panel, /Sistem tarafından yönetilen kayıtlar bu yoldan silinemez/);
+  assert.doesNotMatch(panel, /Authoritative DNS zone|Zone Template senkronizasyonu|Manual kayıt ekle|YunPanel ownership marker|read-only görünür|restart sonrası inspect-first recovery|Server-wide Zone Template|diff üretilir/);
   assert.match(panel, /previewDnsReapply/);
   assert.match(panel, /previewDnssec/);
   assert.match(panel, /waitForDnsOperation/);
@@ -29,6 +36,6 @@ test('DNS workspace keeps managed records read-only and routes subdomains to the
   assert.match(panel, /const editable = dnsRecordEditable\(rrset\)/);
   assert.match(panel, /editable && canManage/);
   assert.match(panel, /root\.id !== domain\.id/);
-  assert.match(panel, /ayrı bir zone sahibi değil/);
+  assert.match(panel, /ayrı bir bölge sahibi değildir/);
   assert.match(panel, /siteHref\(root\.id, 'dns'\)/);
 });

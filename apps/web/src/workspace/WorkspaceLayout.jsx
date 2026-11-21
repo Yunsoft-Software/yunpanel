@@ -25,6 +25,7 @@ function Shell() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [dismissedRedirectKey, setDismissedRedirectKey] = useState(null);
   const [themeMode, setThemeMode] = useState(() => (typeof document !== 'undefined' && document.documentElement.dataset.wsTheme === 'light' ? 'light' : 'dark'));
   const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 900px)').matches);
   function toggleSidebar() {
@@ -69,6 +70,12 @@ function Shell() {
   const activeJobCount = jobCount ?? 0;
   const alertCount = computeWorkspaceAlerts({ domains, websites, certificates, servers }).length;
   const groups = navigationGroups(canManage, isOwner, isReseller, isCustomer);
+  const accessDeniedRedirect = location.state?.accessDeniedRedirect;
+  const showAccessRedirectNotice = Boolean(
+    accessDeniedRedirect
+    && typeof accessDeniedRedirect === 'object'
+    && dismissedRedirectKey !== location.key,
+  );
   useEffect(() => {
     const media = window.matchMedia('(max-width: 900px)');
     const change = () => { setNarrow(media.matches); if (!media.matches) setMenuOpen(false); };
@@ -185,7 +192,7 @@ function Shell() {
           {canManage && <LinkButton to="/jobs" icon="jobs" aria-label={`İşlemler${jobCount > 0 ? `, ${jobCount} aktif` : ''}`} title="İşlemler"><span className="ws-toolbar-label">İşlemler</span>{jobCount > 0 && <span className="ws-nav-count">{jobCount}</span>}</LinkButton>}
         </div>
       </div>
-      <main id="workspace-main" ref={content} className="ws-content" tabIndex={-1}>{notice && <div className="ws-notice" role="status"><div>{notice}</div><Button icon="close" aria-label="Bildirimi kapat" onClick={() => setNotice(null)} /></div>}<Outlet /></main>
+      <main id="workspace-main" ref={content} className="ws-content" tabIndex={-1}>{showAccessRedirectNotice && <div className="ws-notice ws-notice-warn" role="status" data-access-redirect-notice="true"><div>Bu sayfaya erişim yetkiniz olmadığı için yetkili olduğunuz site listesine yönlendirildiniz.</div><Button icon="close" aria-label="Yetki yönlendirme bildirimini kapat" onClick={() => setDismissedRedirectKey(location.key)} /></div>}{notice && <div className="ws-notice" role="status"><div>{notice}</div><Button icon="close" aria-label="Bildirimi kapat" onClick={() => setNotice(null)} /></div>}<Outlet /></main>
     </div>
     {paletteOpen && <CommandPalette domains={domains} canManage={canManage} isOwner={isOwner} isReseller={isReseller} isCustomer={isCustomer} onClose={() => setPaletteOpen(false)} />}
     {notificationsOpen && <NotificationCenterDrawer open={notificationsOpen} onClose={() => setNotificationsOpen(false)} />}

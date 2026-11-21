@@ -33,6 +33,74 @@ import SecondaryDnsStatusPanel from './SecondaryDnsStatusPanel.jsx';
 import { formatDate, siteHref } from './site-model.js';
 import './dns-panel.css';
 
+const ZONE_KIND_LABELS = Object.freeze({
+  Master: 'Birincil',
+  Primary: 'Birincil',
+  Native: 'Yerel',
+  Slave: 'İkincil',
+  Secondary: 'İkincil',
+});
+
+const RECORD_SOURCE_LABELS = Object.freeze({
+  template: 'Bölge Şablonu',
+  runtime: 'Uygulama',
+  mail: 'E-Posta',
+  manual: 'Özel',
+});
+
+const DIFF_ACTION_LABELS = Object.freeze({
+  add: 'Ekle',
+  create: 'Ekle',
+  replace: 'Güncelle',
+  update: 'Güncelle',
+  delete: 'Sil',
+});
+
+const DNSSEC_STATUS_LABELS = Object.freeze({
+  secure_ready: 'Güvenli delege hazır',
+  pending_parent_ds: 'Kayıt firması DS kaydı bekleniyor',
+  parent_ds_mismatch: 'DS kaydı uyuşmuyor',
+  parent_ds_without_dnssec: 'İmzalama kapalı, DS kaydı aktif',
+  parent_ds_unverifiable: 'DS kaydı doğrulanamıyor',
+  signing_material_incomplete: 'İmzalama anahtarı eksik',
+  insecure_parent_unverifiable: 'DNSSEC kapalı · üst kayıt belirsiz',
+  insecure: 'DNSSEC kapalı',
+});
+
+const PARENT_DS_STATUS_LABELS = Object.freeze({
+  matched: 'Eşleşiyor',
+  missing: 'Eksik',
+  mismatch: 'Uyuşmuyor',
+  unverifiable: 'Doğrulanamıyor',
+  present: 'Mevcut',
+});
+
+const PENDING_DNSSEC_STATUSES = new Set([
+  'pending_parent_ds',
+  'parent_ds_mismatch',
+  'parent_ds_without_dnssec',
+  'parent_ds_unverifiable',
+  'insecure_parent_unverifiable',
+]);
+
+function formatZoneKind(kind) {
+  return ZONE_KIND_LABELS[kind] ?? kind ?? '—';
+}
+
+function formatRecordSource(source) {
+  return RECORD_SOURCE_LABELS[source] ?? dnsSourceLabel(source);
+}
+
+function formatDnssecBadge(status) {
+  const base = dnssecPresentation(status);
+  return { state: base.state, label: DNSSEC_STATUS_LABELS[status] ?? base.label };
+}
+
+function formatParentDsStatus(status) {
+  if (!status) return '—';
+  return PARENT_DS_STATUS_LABELS[status] ?? status;
+}
+
 function operationHistory(reapply, dnssec) {
   return [
     ...(Array.isArray(reapply) ? reapply.map((entry) => ({ ...entry, kind: 'reapply' })) : []),
@@ -43,10 +111,10 @@ function operationHistory(reapply, dnssec) {
 function valueHint(type) {
   return ({
     A: 'Her satıra bir IPv4 adresi.', AAAA: 'Her satıra bir IPv6 adresi.',
-    CNAME: 'Tek hedef hostname. Örnek: app.example.com', MX: 'Her satır: öncelik hedef. Örnek: 10 mail.example.com',
-    TXT: 'Her satır ayrı TXT değeri.', CAA: 'Her satır: flags tag value. Örnek: 0 issue letsencrypt.org',
-    SRV: 'Her satır: priority weight port target. Örnek: 0 1 443 service.example.com',
-    NS: 'Her satıra bir nameserver hostname.', SOA: 'Tek değer: primary-ns rname serial refresh retry expire minimum.',
+    CNAME: 'Tek hedef alan adı. Örnek: app.example.com', MX: 'Her satır: öncelik hedef. Örnek: 10 mail.example.com',
+    TXT: 'Her satır ayrı TXT değeri.', CAA: 'Her satır: bayrak etiket değer. Örnek: 0 issue letsencrypt.org',
+    SRV: 'Her satır: öncelik ağırlık port hedef. Örnek: 0 1 443 service.example.com',
+    NS: 'Her satıra bir ad sunucusu adı.', SOA: 'Tek değer: birincil-ns yetkili-adres seri yenileme deneme süre-sonu en-az.',
   })[type] ?? '';
 }
 
@@ -67,17 +135,17 @@ function DnsRecordDialog({ zone, rrset, defaultOwner = '', onClose, onSaved }) {
     try {
       const payload = dnsRecordPayload(draft, zone.serial);
       await saveManualDnsRecord(zone.domainId, payload);
-      await onSaved(editing ? 'Manual DNS kaydı güncellendi.' : 'Manual DNS kaydı eklendi.');
+      await onSaved(editing ? 'Özel DNS kaydı güncellendi.' : 'Özel DNS kaydı eklendi.');
     } catch (failure) {
       if (failure.name !== 'AbortError') setError(failure.message);
     } finally { setBusy(false); }
   }
-  return <Modal title={editing ? 'Manual DNS kaydını düzenle' : 'Manual DNS kaydı ekle'} onClose={onClose} busy={busy} wide>
+  return <Modal title={editing ? 'Özel DNS kaydını düzenle' : 'Özel DNS kaydı ekle'} onClose={onClose} busy={busy} wide>
     <form className="ws-form dns-record-form" onSubmit={submit}>
       <ErrorNotice error={error} />
       <fieldset disabled={busy}>
         <div className="ws-form-grid">
-          <label>Kayıt adı<input value={draft.owner} readOnly={editing} onChange={(event) => update('owner', event.target.value)} placeholder="@ veya api" required autoComplete="off" spellCheck={false} /><span className="dns-field-hint">Kök kayıt için @; relative adlar zone içine yazılır.</span></label>
+          <label>Kayıt adı<input value={draft.owner} readOnly={editing} onChange={(event) => update('owner', event.target.value)} placeholder="@ veya api" required autoComplete="off" spellCheck={false} /><span className="dns-field-hint">Kök kayıt için @ yazın; alt adlar bu bölgeye göre kaydedilir.</span></label>
           <label>TTL (saniye)<input type="number" min="60" max="86400" step="1" value={draft.ttl} onChange={(event) => update('ttl', event.target.value)} required /></label>
         </div>
         <div className="dns-type-field"><span>Kayıt türü</span><div className="dns-type-grid" role="group" aria-label="DNS kayıt türü">{DNS_RECORD_TYPES.map((type) => <button key={type} type="button" disabled={editing || busy} aria-pressed={draft.type === type} className={draft.type === type ? 'active' : ''} onClick={() => update('type', type)}>{type}</button>)}</div></div>
@@ -89,59 +157,69 @@ function DnsRecordDialog({ zone, rrset, defaultOwner = '', onClose, onSaved }) {
 }
 
 function ZoneRecords({ zone, canManage, busy, onAdd, onEdit, onDelete }) {
-  if (!zone?.rrsets?.length) return <EmptyState title="Zone boş" detail="Authoritative zone var ancak RRset bulunamadı." icon="globe" />;
+  if (!zone?.rrsets?.length) return <EmptyState title="Bölge kaydı yok" detail="Yetkili DNS bölgesi mevcut ancak henüz kayıt bulunamadı." icon="globe" />;
   return <div className="dns-table-wrap"><table className="dns-table"><thead><tr><th>Ad</th><th>Tür</th><th>TTL</th><th>Kaynak</th><th>Değer</th><th aria-label="İşlemler" /></tr></thead><tbody>{zone.rrsets.map((rrset) => {
     const editable = dnsRecordEditable(rrset);
     const values = dnsRrsetValues(rrset);
-    return <tr key={`${rrset.owner}:${rrset.type}`}><td><strong>{relativeDnsOwner(rrset.owner, zone.zoneName)}</strong><small>{rrset.owner}</small></td><td><code>{rrset.type}</code></td><td>{rrset.ttl ?? '—'}</td><td><Badge state={editable ? 'unknown' : 'staged'}>{dnsSourceLabel(rrset.source)}</Badge>{rrset.templateVersion && <small>v{rrset.templateVersion}</small>}</td><td className="dns-values">{values.length ? values.map((value, index) => <code key={`${value}:${index}`}>{value}</code>) : <span>—</span>}</td><td>{editable && canManage && <div className="ws-actions"><Button disabled={busy} onClick={() => onEdit(rrset)}>Düzenle</Button><Button variant="danger" disabled={busy} onClick={() => onDelete(rrset)}>Sil</Button></div>}</td></tr>;
-  })}</tbody></table>{canManage && <div className="dns-table-footer"><Button variant="primary" icon="plus" disabled={busy} onClick={onAdd}>Manual kayıt ekle</Button></div>}</div>;
+    return <tr key={`${rrset.owner}:${rrset.type}`}><td><strong>{relativeDnsOwner(rrset.owner, zone.zoneName)}</strong><small>{rrset.owner}</small></td><td><code>{rrset.type}</code></td><td>{rrset.ttl ?? '—'}</td><td><Badge state={editable ? 'unknown' : 'staged'}>{formatRecordSource(rrset.source)}</Badge>{rrset.templateVersion && <small>v{rrset.templateVersion}</small>}</td><td className="dns-values">{values.length ? values.map((value, index) => <code key={`${value}:${index}`}>{value}</code>) : <span>—</span>}</td><td>{editable && canManage && <div className="ws-actions"><Button disabled={busy} onClick={() => onEdit(rrset)}>Düzenle</Button><Button variant="danger" disabled={busy} onClick={() => onDelete(rrset)}>Sil</Button></div>}</td></tr>;
+  })}</tbody></table>{canManage && <div className="dns-table-footer"><Button variant="primary" icon="plus" disabled={busy} onClick={onAdd}>Özel kayıt ekle</Button></div>}</div>;
 }
 
 function ReapplyPanel({ preview, loading, canManage, busy, onRefresh, onApply }) {
-  return <Section title="Zone Template senkronizasyonu" description="Server-wide Zone Template değişiklikleri mevcut zone’a otomatik yazılmaz; önce diff üretilir.">
+  const hasPendingChanges = Boolean(preview && !preview.noChanges && (preview.changes?.length > 0 || preview.conflicts?.length > 0 || preview.blockers?.length > 0));
+  return <Section
+    title="Bölge şablonu eşitlemesi"
+    description="Sunucu genelindeki bölge şablonu değişiklikleri mevcut bölgelere otomatik yazılmaz; önce değişiklik özeti hazırlanır."
+    actions={hasPendingChanges ? <div className="ws-actions"><Badge state="pending">Eşitleme bekliyor</Badge><Button icon="refresh" disabled={busy || loading} onClick={onRefresh}>Kayıtları kontrol et / Yenile</Button></div> : null}
+  >
     <div className="ws-section-body">
-      {loading && !preview ? <div className="ws-loading" role="status"><span className="ws-spinner" />Zone diff okunuyor…</div> : preview ? <>
+      {loading && !preview ? <div className="ws-loading" role="status"><span className="ws-spinner" />Bölge değişiklik özeti okunuyor…</div> : preview ? <>
         <KeyValues items={[
-          ['Template sürümü', preview.templateVersion], ['DNS identity revision', preview.dnsIdentityRevision],
-          ['Mevcut SOA serial', preview.observedSerial], ['Hedef SOA serial', preview.nextSerial],
-          ['Korunan manual RRset', preview.preservedManualRrsetCount], ['Değişiklik', preview.changes?.length ?? 0],
+          ['Şablon sürümü', preview.templateVersion], ['DNS kimlik sürümü', preview.dnsIdentityRevision],
+          ['Mevcut SOA seri numarası', preview.observedSerial], ['Hedef SOA seri numarası', preview.nextSerial],
+          ['Korunan özel kayıtlar', preview.preservedManualRrsetCount], ['Değişiklik', preview.changes?.length ?? 0],
         ]} />
-        {preview.conflicts?.length > 0 && <div className="ws-notice ws-notice-error" role="alert"><div><strong>Manual kayıt çakışması</strong><p>{preview.conflicts.map((item) => `${relativeDnsOwner(item.owner, preview.zoneName)} ${item.type}`).join(', ')} managed desired state ile aynı RRset’i kullanıyor. Manual kayıt sessizce ezilmeyecek.</p></div></div>}
-        {preview.blockers?.length > 0 && <div className="ws-notice ws-notice-warn" role="alert"><div><strong>Re-apply bloklandı</strong><p>{preview.blockers.map((item) => `${relativeDnsOwner(item.owner, preview.zoneName)} ${item.type} · ${item.code}`).join(', ')}</p></div></div>}
-        {preview.changes?.length > 0 && <div className="dns-diff"><strong>Planlanan RRset değişiklikleri</strong>{preview.changes.map((item, index) => <div key={`${item.action}:${item.owner}:${item.type}:${index}`}><Badge state={item.action === 'delete' ? 'warning' : item.action === 'replace' ? 'running' : 'staged'}>{item.action}</Badge><code>{relativeDnsOwner(item.owner, preview.zoneName)} {item.type}</code><span>{dnsSourceLabel(item.source)}</span></div>)}</div>}
-        {preview.noChanges && <div className="ws-notice"><div><strong>Zone güncel</strong><p>Authoritative managed kayıtlar mevcut Zone Template ve DNS identity ile eşleşiyor.</p></div></div>}
-      </> : <div className="ws-muted">Zone diff henüz okunmadı.</div>}
-      <div className="ws-actions"><Button icon="refresh" disabled={busy || loading} onClick={onRefresh}>Diff’i yenile</Button>{canManage && preview?.applyAllowed && <Button variant="primary" disabled={busy} onClick={onApply}>Template’i zone’a uygula</Button>}</div>
+        {preview.conflicts?.length > 0 && <div className="ws-notice ws-notice-error" role="alert"><div><strong>Özel kayıt çakışması</strong><p>{preview.conflicts.map((item) => `${relativeDnsOwner(item.owner, preview.zoneName)} ${item.type}`).join(', ')} sistemin yöneteceği kayıtla çakışıyor. Özel kaydınız otomatik olarak ezilmeyecek.</p></div></div>}
+        {preview.blockers?.length > 0 && <div className="ws-notice ws-notice-warn" role="alert"><div><strong>Şablon eşitlemesi engellendi</strong><p>{preview.blockers.map((item) => `${relativeDnsOwner(item.owner, preview.zoneName)} ${item.type}`).join(', ')}</p><details className="ws-support-code"><summary>Destek kodu</summary><code>{preview.blockers.map((item) => item.code).join(', ')}</code></details></div></div>}
+        {preview.changes?.length > 0 && <div className="dns-diff"><strong>Gereken kayıt değişiklikleri</strong>{preview.changes.map((item, index) => <div key={`${item.action}:${item.owner}:${item.type}:${index}`}><Badge state={item.action === 'delete' ? 'warning' : item.action === 'replace' ? 'running' : 'staged'}>{DIFF_ACTION_LABELS[item.action] ?? item.action}</Badge><code>{relativeDnsOwner(item.owner, preview.zoneName)} {item.type}</code><span>{formatRecordSource(item.source)}</span></div>)}</div>}
+        {preview.noChanges && <div className="ws-notice"><div><strong>Bölge güncel</strong><p>Yönetilen DNS kayıtları mevcut bölge şablonu ve DNS kimliği ile uyumlu.</p></div></div>}
+      </> : <div className="ws-muted">Bölge değişiklik özeti henüz alınmadı.</div>}
+      <div className="ws-actions"><Button icon="refresh" disabled={busy || loading} onClick={onRefresh}>Kayıtları kontrol et / Yenile</Button>{canManage && preview?.applyAllowed && <Button variant="primary" disabled={busy} onClick={onApply}>Şablonu bölgeye uygula</Button>}</div>
     </div>
   </Section>;
 }
 
 function DnssecPanel({ state, preview, canManage, busy, onPreview, onRefresh }) {
-  const presentation = dnssecPresentation(state?.status);
-  return <Section title="DNSSEC" description="Signing state ile parent/registrar DS yayını ayrı ayrı doğrulanır." actions={state && <Badge state={presentation.state}>{presentation.label}</Badge>}>
+  const presentation = formatDnssecBadge(state?.status);
+  const needsVerification = PENDING_DNSSEC_STATUSES.has(state?.status);
+  return <Section
+    title="DNSSEC"
+    description="Yerel imzalama durumu ile alan adı kayıt firmasındaki DS kaydı ayrı ayrı doğrulanır."
+    actions={state && <div className="ws-actions"><Badge state={presentation.state}>{presentation.label}</Badge>{needsVerification && <Button icon="refresh" disabled={busy} onClick={onRefresh}>Kayıtları kontrol et / Yenile</Button>}</div>}
+  >
     <div className="ws-section-body">
       {state ? <>
         <KeyValues items={[
-          ['Local signing', state.dnssec ? 'Açık' : 'Kapalı'], ['Parent DS', state.parent?.status ?? '—'],
-          ['SOA serial', state.serial], ['Signing key', state.keys?.length ?? 0],
+          ['Yerel imzalama', state.dnssec ? 'Açık' : 'Kapalı'], ['Kayıt firması DS durumu', formatParentDsStatus(state.parent?.status)],
+          ['SOA seri numarası', state.serial], ['İmzalama anahtarı', state.keys?.length ?? 0],
         ]} />
-        {state.ds?.length > 0 && <div className="dns-ds-box"><strong>Registrar’a girilecek DS</strong>{state.ds.map((record) => <code key={record}>{record}</code>)}</div>}
-        {state.parent?.records?.length > 0 && <div className="dns-ds-box"><strong>Parent’ta görülen DS</strong>{state.parent.records.map((record) => <code key={record}>{record}</code>)}</div>}
-        {state.status === 'pending_parent_ds' && <div className="ws-notice ws-notice-warn"><div><strong>DNSSEC henüz secure değil</strong><p>Yukarıdaki DS değerini registrar/parent zone’a ekleyin. Parent authoritative nameserver’larda aynı DS görülmeden secure-ready gösterilmez.</p></div></div>}
-        {['parent_ds_mismatch', 'parent_ds_without_dnssec', 'signing_material_incomplete'].includes(state.status) && <div className="ws-notice ws-notice-error" role="alert"><div><strong>DNSSEC müdahale istiyor</strong><p>{presentation.label}. Delegasyon bu durumda güvenli kabul edilmez.</p></div></div>}
+        {state.ds?.length > 0 && <div className="dns-ds-box"><strong>Alan adı kayıt firmasına eklenecek DS kayıtları</strong>{state.ds.map((record) => <code key={record}>{record}</code>)}</div>}
+        {state.parent?.records?.length > 0 && <div className="dns-ds-box"><strong>Kayıt firmasında görülen DS kayıtları</strong>{state.parent.records.map((record) => <code key={record}>{record}</code>)}</div>}
+        {state.status === 'pending_parent_ds' && <div className="ws-notice ws-notice-warn"><div><strong>DS kaydı doğrulanmayı bekliyor</strong><p>Yukarıdaki DS kaydını alan adı kayıt firmanızın DNS paneline ekleyin, ardından üstteki düğmeyle kayıtları yeniden kontrol edin.</p></div></div>}
+        {['parent_ds_mismatch', 'parent_ds_without_dnssec', 'signing_material_incomplete'].includes(state.status) && <div className="ws-notice ws-notice-error" role="alert"><div><strong>DNSSEC müdahale istiyor</strong><p>{presentation.label}. Kayıt firması DS kaydı eşleşmeden DNSSEC güvenli sayılmaz.</p></div></div>}
       </> : <div className="ws-loading" role="status"><span className="ws-spinner" />DNSSEC durumu okunuyor…</div>}
-      {preview?.blockers?.length > 0 && <div className="ws-notice ws-notice-warn" role="alert"><div><strong>DNSSEC değişikliği bloklandı</strong><p>{preview.blockers.map((item) => item.message).join(' ')}</p></div></div>}
-      <div className="ws-actions"><Button icon="refresh" disabled={busy} onClick={onRefresh}>Durumu yenile</Button>{canManage && state && <Button variant={state.dnssec ? 'danger' : 'primary'} disabled={busy || state.status === 'signing_material_incomplete'} onClick={() => onPreview(!state.dnssec)}>{state.dnssec ? 'DNSSEC’i kapat' : 'DNSSEC’i aç'}</Button>}</div>
+      {preview?.blockers?.length > 0 && <div className="ws-notice ws-notice-warn" role="alert"><div><strong>DNSSEC değişikliği engellendi</strong><p>{preview.blockers.map((item) => item.message).join(' ')}</p></div></div>}
+      <div className="ws-actions"><Button icon="refresh" disabled={busy} onClick={onRefresh}>Kayıtları kontrol et / Yenile</Button>{canManage && state && <Button variant={state.dnssec ? 'danger' : 'primary'} disabled={busy || state.status === 'signing_material_incomplete'} onClick={() => onPreview(!state.dnssec)}>{state.dnssec ? 'DNSSEC’i kapat' : 'DNSSEC’i aç'}</Button>}</div>
     </div>
   </Section>;
 }
 
 function OperationsPanel({ reapply, dnssec }) {
   const operations = useMemo(() => operationHistory(reapply, dnssec).slice(0, 10), [reapply, dnssec]);
-  return <Section title="DNS işlemleri" description="Template re-apply ve DNSSEC mutation journal’ları restart sonrası inspect-first recovery için tutulur.">
-    {operations.length === 0 ? <EmptyState title="Henüz DNS operation yok" detail="Zone re-apply veya DNSSEC değişikliği yapıldığında burada görünür." icon="jobs" /> : <div className="dns-operation-list">{operations.map((operation) => {
+  return <Section title="DNS işlemleri" description="Bölge şablonu eşitleme ve DNSSEC değişiklik kayıtları burada listelenir.">
+    {operations.length === 0 ? <EmptyState title="Henüz DNS işlemi yok" detail="Bölge şablonu eşitlemesi veya DNSSEC değişikliği yapıldığında burada görünür." icon="jobs" /> : <div className="dns-operation-list">{operations.map((operation) => {
       const presentation = operationPresentation(operation);
-      return <article key={`${operation.kind}:${operation.id}`}><div><strong>{operation.kind === 'dnssec' ? `DNSSEC ${operation.targetEnabled ? 'enable' : 'disable'}` : 'Zone Template re-apply'}</strong><span>{formatDate(operation.updatedAt ?? operation.createdAt)}</span></div><Badge state={presentation.state}>{presentation.label}</Badge>{operation.error && <small>{operation.error.code} · {operation.error.message}</small>}</article>;
+      return <article key={`${operation.kind}:${operation.id}`}><div><strong>{operation.kind === 'dnssec' ? (operation.targetEnabled ? 'DNSSEC etkinleştirme' : 'DNSSEC kapatma') : 'Bölge şablonu eşitlemesi'}</strong><span>{formatDate(operation.updatedAt ?? operation.createdAt)}</span></div><Badge state={presentation.state}>{presentation.label}</Badge>{operation.error && <small>{operation.error.message}{operation.error.code ? <details className="ws-support-code"><summary>Destek kodu</summary><code>{operation.error.code}</code></details> : null}</small>}</article>;
     })}</div>}
   </Section>;
 }
@@ -236,7 +314,7 @@ export default function DnsPanel({ domain, domains, canManage }) {
     return () => { refreshGeneration.current += 1; };
   }, [refresh]);
 
-  if (!root) return <Section title="DNS"><ErrorNotice error={error} />{loading ? <div className="ws-loading" role="status">DNS bölgesi doğrulanıyor…</div> : <EmptyState title="Authoritative zone bulunamadı" detail="Alan adının DNS bölgesi doğrulanamadı. Yenileyerek tekrar deneyin." icon="alert" action={<Button icon="refresh" onClick={refresh}>Yenile</Button>} />}</Section>;
+  if (!root) return <Section title="DNS" actions={<div className="ws-actions"><Badge state="pending">Doğrulanmadı</Badge><Button icon="refresh" disabled={loading} onClick={refresh}>Kayıtları kontrol et / Yenile</Button></div>}><ErrorNotice error={error} />{loading ? <div className="ws-loading" role="status">DNS bölgesi doğrulanıyor…</div> : <EmptyState title="Yetkili DNS bölgesi bulunamadı" detail="Alan adının DNS bölgesi doğrulanamadı. Kayıtları kontrol ederek tekrar deneyin." icon="alert" action={<Button icon="refresh" onClick={refresh}>Kayıtları kontrol et / Yenile</Button>} />}</Section>;
 
   async function refreshed(messageText = null) {
     setRecordDialog(null); setDeleteTarget(null); setConfirmation(null); setDnssecPreview(null);
@@ -249,7 +327,7 @@ export default function DnsPanel({ domain, domains, canManage }) {
     setBusy(true); setError(null); setMessage(null);
     try {
       await provisionDnsZone(root.id);
-      await refreshed('Yerel PowerDNS authoritative zone başarıyla oluşturuldu.');
+      await refreshed('Yerel yetkili DNS bölgesi başarıyla oluşturuldu.');
     } catch (failure) {
       if (failure.name !== 'AbortError') setError(failure.message);
     } finally {
@@ -262,7 +340,7 @@ export default function DnsPanel({ domain, domains, canManage }) {
     setBusy(true); setError(null); setMessage(null);
     try {
       await deleteManualDnsRecord(root.id, dnsRecordDeletePayload(deleteTarget, zone.zoneName, zone.serial));
-      await refreshed('Manual DNS kaydı silindi.');
+      await refreshed('Özel DNS kaydı silindi.');
     } catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { setBusy(false); }
   }
@@ -273,8 +351,8 @@ export default function DnsPanel({ domain, domains, canManage }) {
     try {
       const started = await applyDnsReapply(root.id, confirmation.preview);
       const operation = await waitForDnsOperation({ domainId: root.id, kind: 'reapply', operation: started });
-      if (operation.status === 'failed') throw new Error(operation.error?.message ?? 'Zone Template re-apply başarısız.');
-      await refreshed('Zone Template authoritative zone’a uygulandı.');
+      if (operation.status === 'failed') throw new Error(operation.error?.message ?? 'Bölge şablonu eşitlemesi başarısız oldu.');
+      await refreshed('Bölge şablonu yetkili DNS bölgesine uygulandı.');
     } catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { setBusy(false); }
   }
@@ -298,7 +376,7 @@ export default function DnsPanel({ domain, domains, canManage }) {
       const started = await applyDnssec(root.id, confirmation.preview);
       const operation = await waitForDnsOperation({ domainId: root.id, kind: 'dnssec', operation: started });
       if (operation.status === 'failed') throw new Error(operation.error?.message ?? 'DNSSEC işlemi başarısız.');
-      await refreshed(confirmation.preview.targetEnabled ? 'DNSSEC signing açıldı. Parent DS durumunu doğrulayın.' : 'DNSSEC signing güvenli sırayla kapatıldı.');
+      await refreshed(confirmation.preview.targetEnabled ? 'DNSSEC imzalama açıldı. Alan adı kayıt firmasındaki DS kaydını doğrulayın.' : 'DNSSEC imzalama güvenli sırayla kapatıldı.');
     } catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { setBusy(false); }
   }
@@ -313,17 +391,17 @@ export default function DnsPanel({ domain, domains, canManage }) {
       <ErrorNotice error={error} />
       <Section
         title={`Alt alan adı DNS kayıtları: ${domain.primaryDomain}`}
-        description={`${root.primaryDomain} authoritative zone’u yönetiyor. ${domain.primaryDomain} ayrı bir zone sahibi değil. Subdomain kayıtları parent/root zone içinde yönetilir.`}
-        actions={<><LinkButton to={siteHref(root.id, 'dns')} icon="arrow">{root.primaryDomain} DNS ayarlarına git</LinkButton><Button icon="refresh" disabled={busy || loading} onClick={refresh}>{loading ? 'Yenileniyor…' : 'Yenile'}</Button></>}
+        description={`${root.primaryDomain} yetkili DNS bölgesini yönetir. ${domain.primaryDomain} ayrı bir bölge sahibi değildir; alt alan adı kayıtları üst bölge içinde yönetilir.`}
+        actions={<div className="ws-actions">{!subdomainZone && !loading && <Badge state="pending">Üst bölge doğrulanmadı</Badge>}<LinkButton to={siteHref(root.id, 'dns')} icon="arrow">{root.primaryDomain} DNS ayarlarına git</LinkButton><Button icon="refresh" disabled={busy || loading} onClick={refresh}>{loading ? 'Yenileniyor…' : 'Kayıtları kontrol et / Yenile'}</Button></div>}
       >
         {subdomainZone ? (
           <>
             <div className="ws-section-body">
               <KeyValues items={[
-                ['Üst Zone', zone.zoneName],
+                ['Üst bölge', zone.zoneName],
                 ['Alt alan adı', domain.primaryDomain],
                 ['Tanımlı kayıt sayısı', subdomainRrsets.length],
-                ['Zone türü', zone.kind],
+                ['Bölge türü', formatZoneKind(zone.kind)],
               ]} />
             </div>
             <ZoneRecords
@@ -333,11 +411,11 @@ export default function DnsPanel({ domain, domains, canManage }) {
             />
           </>
         ) : loading ? (
-          <div className="ws-loading" role="status"><span className="ws-spinner" />Üst zone okunuyor…</div>
+          <div className="ws-loading" role="status"><span className="ws-spinner" />Üst bölge okunuyor…</div>
         ) : (
           <EmptyState
-            title="Üst Authoritative Zone Bulunamadı"
-            detail={`${root.primaryDomain} için bu sunucuda yerel PowerDNS zone bulunmuyor.`}
+            title="Üst Yetkili DNS Bölgesi Bulunamadı"
+            detail={`${root.primaryDomain} için bu sunucuda yerel PowerDNS bölgesi bulunmuyor.`}
             icon="globe"
             action={<LinkButton to={siteHref(root.id, 'dns')} icon="arrow">{root.primaryDomain} DNS ayarlarına git</LinkButton>}
           />
@@ -346,13 +424,26 @@ export default function DnsPanel({ domain, domains, canManage }) {
     </>;
   }
 
+  const zonePendingCheck = !zone || Boolean(reapply && !reapply.noChanges && (reapply.changes?.length > 0 || reapply.conflicts?.length > 0));
+  const zoneStatusBadge = !zone && !loading
+    ? <Badge state="pending">Yerel bölge doğrulanmadı</Badge>
+    : zone && reapply && !reapply.noChanges && (reapply.changes?.length > 0 || reapply.conflicts?.length > 0)
+      ? <Badge state="pending">Güncelleme bekliyor</Badge>
+      : zone
+        ? <Badge state="active">Bölge etkin</Badge>
+        : null;
+
   return <>
     {message && <div className="ws-notice"><div><strong>DNS</strong><p>{message}</p></div></div>}
     <ErrorNotice error={error} />
-    <Section title="Authoritative DNS zone" description={`${root.primaryDomain} · PowerDNS authoritative`} actions={<Button icon="refresh" disabled={busy || loading} onClick={refresh}>{loading ? 'Yenileniyor…' : 'Yenile'}</Button>}>
+    <Section
+      title="Yetkili DNS Bölgesi"
+      description={`${root.primaryDomain} · PowerDNS yetkili DNS`}
+      actions={<div className="ws-actions">{zoneStatusBadge}<Button icon="refresh" disabled={busy || loading} onClick={refresh}>{loading ? 'Yenileniyor…' : zonePendingCheck ? 'Kayıtları kontrol et / Yenile' : 'Yenile'}</Button></div>}
+    >
       {zone ? <><div className="ws-section-body"><KeyValues items={[
-        ['Zone', zone.zoneName], ['SOA serial', zone.serial], ['Zone türü', zone.kind], ['DNSSEC', zone.dnssec ? 'Signing açık' : 'Kapalı'],
-      ]} /><p className="ws-muted">Zone Template, mail ve runtime kayıtları YunPanel ownership marker’ı taşır ve burada read-only görünür. Manual kayıtlar ayrı sahiplikte düzenlenebilir.</p></div><ZoneRecords zone={zone} canManage={canManage} busy={busy} onAdd={() => setRecordDialog({ rrset: null })} onEdit={(rrset) => setRecordDialog({ rrset })} onDelete={setDeleteTarget} /></> : loading ? <div className="ws-loading" role="status"><span className="ws-spinner" />Authoritative zone okunuyor…</div> : <EmptyState title="Yerel Authoritative DNS Zone Bulunmuyor" detail={`${root.primaryDomain} için bu sunucuda yerel PowerDNS authoritative zone bulunmuyor. Alan adınızın DNS kayıtları alan adı firmanızda veya harici DNS sağlayıcınızda (Cloudflare vb.) barındırılıyor olabilir.`} icon="globe" action={canManage && !ownChild ? <Button variant="primary" icon="plus" disabled={busy} onClick={provisionZone}>{busy ? 'Zone oluşturuluyor…' : 'Yerel DNS Zone Oluştur'}</Button> : null} />}
+        ['Bölge', zone.zoneName], ['SOA seri numarası', zone.serial], ['Bölge türü', formatZoneKind(zone.kind)], ['DNSSEC', zone.dnssec ? 'Etkin' : 'Kapalı'],
+      ]} /><p className="ws-muted">Bölge şablonu, e-posta ve uygulama kayıtları sistem tarafından yönetilir ve burada salt okunur gösterilir. Özel kayıtları aşağıdan ekleyebilir veya düzenleyebilirsiniz.</p></div><ZoneRecords zone={zone} canManage={canManage} busy={busy} onAdd={() => setRecordDialog({ rrset: null })} onEdit={(rrset) => setRecordDialog({ rrset })} onDelete={setDeleteTarget} /></> : loading ? <div className="ws-loading" role="status"><span className="ws-spinner" />Yetkili DNS bölgesi okunuyor…</div> : <EmptyState title="Yerel Yetkili DNS Bölgesi Bulunmuyor" detail={`${root.primaryDomain} için bu sunucuda yerel PowerDNS bölgesi bulunmuyor. Alan adınızın DNS kayıtları alan adı firmanızda veya harici DNS sağlayıcınızda (Cloudflare vb.) barındırılıyor olabilir.`} icon="globe" action={canManage && !ownChild ? <Button variant="primary" icon="plus" disabled={busy} onClick={provisionZone}>{busy ? 'Bölge oluşturuluyor…' : 'Yerel DNS Bölgesi Oluştur'}</Button> : null} />}
     </Section>
     {zone && <>
       {!ownChild && <SecondaryDnsStatusPanel state={secondary} loading={loading} busy={busy} onRefresh={refresh} />}
@@ -360,8 +451,8 @@ export default function DnsPanel({ domain, domains, canManage }) {
       <OperationsPanel reapply={reapplyOperations} dnssec={dnssecOperations} />
     </>}
     {recordDialog && zone && <DnsRecordDialog zone={zone} rrset={recordDialog.rrset} onClose={() => setRecordDialog(null)} onSaved={refreshed} />}
-    {deleteTarget && zone && <ConfirmDialog title="Manual DNS kaydını sil" message={`${relativeDnsOwner(deleteTarget.owner, zone.zoneName)} ${deleteTarget.type} RRset’i silinecek. Managed kayıtlar bu yoldan silinemez.`} confirmation={`delete-dns:${relativeDnsOwner(deleteTarget.owner, zone.zoneName)}:${deleteTarget.type}`} confirmLabel="Kaydı sil" busy={busy} error={null} onCancel={() => setDeleteTarget(null)} onConfirm={deleteRecord} />}
-    {confirmation?.kind === 'reapply' && <ConfirmDialog title="Zone Template’i yeniden uygula" message={`${confirmation.preview.changes?.length ?? 0} managed RRset değişikliği uygulanacak; manual kayıtlar korunacak ve SOA serial ${confirmation.preview.observedSerial} → ${confirmation.preview.nextSerial} ilerleyecek.`} confirmation={confirmation.preview.confirmation} confirmLabel="Zone’u güncelle" busy={busy} error={null} onCancel={() => setConfirmation(null)} onConfirm={runReapply} />}
-    {confirmation?.kind === 'dnssec' && <ConfirmDialog title={confirmation.preview.targetEnabled ? 'DNSSEC signing aç' : 'DNSSEC signing kapat'} message={confirmation.preview.targetEnabled ? 'PowerDNS zone signing açılacak. İşlemden sonra üretilen DS registrar/parent zone’a eklenmeden secure delegation tamamlanmış sayılmaz.' : 'DNSSEC yalnız parent authoritative nameserver’larda DS kaydı verifiably absent ise kapatılır.'} confirmation={confirmation.preview.confirmation} confirmLabel={confirmation.preview.targetEnabled ? 'DNSSEC’i aç' : 'DNSSEC’i kapat'} busy={busy} error={null} onCancel={() => setConfirmation(null)} onConfirm={runDnssec} />}
+    {deleteTarget && zone && <ConfirmDialog title="Özel DNS kaydını sil" message={`${relativeDnsOwner(deleteTarget.owner, zone.zoneName)} ${deleteTarget.type} kaydı silinecek. Sistem tarafından yönetilen kayıtlar bu yoldan silinemez.`} confirmation={`delete-dns:${relativeDnsOwner(deleteTarget.owner, zone.zoneName)}:${deleteTarget.type}`} confirmLabel="Kaydı sil" busy={busy} error={null} onCancel={() => setDeleteTarget(null)} onConfirm={deleteRecord} />}
+    {confirmation?.kind === 'reapply' && <ConfirmDialog title="Bölge şablonunu yeniden uygula" message={`${confirmation.preview.changes?.length ?? 0} kayıt değişikliği uygulanacak; özel kayıtlarınız korunacak ve SOA seri numarası ${confirmation.preview.observedSerial} → ${confirmation.preview.nextSerial} olarak güncellenecek.`} confirmation={confirmation.preview.confirmation} confirmLabel="Bölgeyi güncelle" busy={busy} error={null} onCancel={() => setConfirmation(null)} onConfirm={runReapply} />}
+    {confirmation?.kind === 'dnssec' && <ConfirmDialog title={confirmation.preview.targetEnabled ? 'DNSSEC imzalamayı aç' : 'DNSSEC imzalamayı kapat'} message={confirmation.preview.targetEnabled ? 'PowerDNS bölge imzalama açılacak. İşlemden sonra üretilen DS kaydı alan adı kayıt firmanıza eklenmeden güvenli delege tamamlanmış sayılmaz.' : 'DNSSEC yalnızca alan adı kayıt firmasında DS kaydının kaldırıldığı doğrulandığında kapatılır.'} confirmation={confirmation.preview.confirmation} confirmLabel={confirmation.preview.targetEnabled ? 'DNSSEC’i aç' : 'DNSSEC’i kapat'} busy={busy} error={null} onCancel={() => setConfirmation(null)} onConfirm={runDnssec} />}
   </>;
 }
