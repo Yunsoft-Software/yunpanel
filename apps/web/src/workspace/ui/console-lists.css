@@ -15,6 +15,15 @@
 .ws-site-list .ws-section-heading { align-items: center; }
 .ws-site-list .ws-inline-summary { border-bottom: 0; padding-top: 12px; padding-bottom: 0; }
 .ws-jobs-table { min-width: 700px; }
+.ws-reseller-row-actions { align-items: center; }
+.ws-row-actions-inline { display: flex; flex-wrap: wrap; gap: 8px; }
+.ws-row-actions-menu { display: none; }
+.ws-row-actions-menu > summary { list-style: none; cursor: pointer; justify-content: space-between; width: 100%; }
+.ws-row-actions-menu > summary::-webkit-details-marker { display: none; }
+.ws-row-actions-menu > summary::after { content: '▾'; margin-left: 8px; color: var(--ws-muted); }
+.ws-row-actions-menu[open] > summary::after { content: '▴'; }
+.ws-row-actions-menu-list { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; }
+.ws-row-actions-menu-list .ws-button { width: 100%; justify-content: center; }
 @media (max-width: 1100px) {
   .ws-filter-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ws-site-list .ws-websites-table td, .ws-site-list .ws-websites-table th { padding-inline: 12px; }
@@ -48,6 +57,26 @@
   .ws-site-list .ws-row-end .ws-actions { justify-content: stretch; flex-wrap: wrap; }
   .ws-site-list .ws-row-end .ws-button { flex: 1; min-height: 44px; }
   .ws-site-list .ws-pagination { padding: 16px; }
+}
+@media (max-width: 640px) {
+  .ws-reseller-customers-table,
+  .ws-reseller-customers-table tbody { display: block; width: 100%; min-width: 0; max-width: 100%; }
+  .ws-reseller-customers-table caption { display: block; width: 100%; text-align: left; padding: 10px 14px 4px; box-sizing: border-box; }
+  .ws-reseller-customers-table thead { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); }
+  .ws-reseller-customers-table tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px 12px; padding: 14px; border-bottom: 1px solid var(--ws-border); box-sizing: border-box; }
+  .ws-reseller-customers-table tbody tr:last-child { border-bottom: 0; }
+  .workspace-shell .ws-reseller-customers-table th,
+  .workspace-shell .ws-reseller-customers-table td { display: block; min-width: 0; width: auto; max-width: 100%; padding: 0; border: 0; text-align: left; overflow-wrap: anywhere; }
+  .ws-reseller-customers-table th[scope="row"],
+  .ws-reseller-customers-table td:nth-child(2),
+  .ws-reseller-customers-table td.ws-reseller-actions-cell { grid-column: 1 / -1; }
+  .ws-reseller-customers-table td[data-label]::before { content: attr(data-label); display: block; color: var(--ws-muted); font-size: 11px; margin-bottom: 4px; }
+  .ws-reseller-row-actions { flex-direction: column; align-items: stretch; gap: 8px; width: 100%; }
+  .ws-reseller-row-actions .ws-row-primary-action { width: 100%; min-height: 44px; justify-content: center; }
+  .ws-row-actions-inline { display: none; }
+  .ws-row-actions-menu { display: block; width: 100%; }
+  .ws-row-actions-menu > summary { min-height: 44px; box-sizing: border-box; }
+  .ws-row-actions-menu-list .ws-button { min-height: 44px; box-sizing: border-box; }
 }
 @media (max-width: 380px) {
   .ws-filter-options { grid-template-columns: minmax(0, 1fr); }

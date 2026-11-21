@@ -324,6 +324,9 @@ test('Real Playwright Chromium E2E: Owner, Reseller and Customer first-screen gu
     await signIn(ownerPage, publicOrigin, '/websites', 'owneradmin', ownerPass);
     const ownerStrip = ownerPage.locator('[data-next-actions="owner"]');
     await ownerStrip.waitFor({ timeout: 10_000 });
+    // Item 10: PageHeading on /websites no longer duplicates Uygulama Marketi (single entry lives in left sidebar)
+    assert.equal(await ownerPage.locator('main .ws-page-heading').getByRole('link', { name: 'Uygulama Marketi' }).count(), 0);
+    assert.ok(await ownerPage.locator('main .ws-page-heading').getByRole('link', { name: 'Web sitesi ekle' }).isVisible());
     assert.ok(await ownerPage.getByRole('link', { name: 'Sunucu sağlığı ve genel bakış' }).isVisible());
     assert.ok(await ownerPage.getByRole('link', { name: 'Güvenlik duvarı' }).isVisible());
     assert.match(await ownerStrip.textContent(), /henüz yayında değil|DNS veya SSL bekleyen/);
@@ -411,6 +414,48 @@ test('Real Playwright Chromium E2E: Owner, Reseller and Customer first-screen gu
     }, { customerId: custOne.id, serverId: localServerId });
     assert.ok([403, 409].includes(quotaEnforcementResult.status), `Expected 403/409 quota block, got ${quotaEnforcementResult.status}: ${JSON.stringify(quotaEnforcementResult.body)}`);
     assert.equal(quotaEnforcementResult.body?.error?.code ?? quotaEnforcementResult.body?.code, 'customer_quota_exceeded');
+
+    // Item 12: Mobile responsive customer actions at 390x844 and 320x700 — zero horizontal page overflow,
+    // primary action immediately visible and secondary actions cleanly reachable via Diğer işlemler disclosure.
+    for (const viewport of [{ width: 390, height: 844 }, { width: 320, height: 700 }]) {
+      await resellerPage.setViewportSize(viewport);
+      const mobileOverflow = await resellerPage.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        innerWidth: window.innerWidth,
+      }));
+      assert.ok(
+        mobileOverflow.scrollWidth <= mobileOverflow.innerWidth,
+        `Unexpected horizontal overflow at ${viewport.width}px: scrollWidth=${mobileOverflow.scrollWidth} > innerWidth=${mobileOverflow.innerWidth}`,
+      );
+      const mobileRow = resellerPage.locator('tr', { has: resellerPage.getByRole('rowheader', { name: 'musteribir' }) });
+      const primaryBtn = mobileRow.getByRole('button', { name: 'Site tahsis et' });
+      assert.ok(await primaryBtn.isVisible(), `Primary Site tahsis et button must be visible at ${viewport.width}px`);
+      const primaryBox = await primaryBtn.boundingBox();
+      assert.ok(primaryBox && primaryBox.x >= 0 && primaryBox.x + primaryBox.width <= viewport.width + 1, `Primary button clipped at ${viewport.width}px: ${JSON.stringify(primaryBox)}`);
+
+      const detailsMenu = mobileRow.locator('details.ws-row-actions-menu');
+      const summary = detailsMenu.locator('summary');
+      assert.ok(await summary.isVisible(), `Diğer işlemler summary must be visible at ${viewport.width}px`);
+      if (!(await detailsMenu.evaluate((el) => el.open))) {
+        await summary.click();
+      }
+      for (const actionLabel of ['Kota tahsis et', 'Girişi düzenle', 'Askıya al']) {
+        const actionBtn = detailsMenu.getByRole('button', { name: actionLabel });
+        assert.ok(await actionBtn.isVisible(), `${actionLabel} must be visible inside Diğer işlemler at ${viewport.width}px`);
+        const box = await actionBtn.boundingBox();
+        assert.ok(box && box.x >= 0 && box.x + box.width <= viewport.width + 1, `${actionLabel} clipped at ${viewport.width}px: ${JSON.stringify(box)}`);
+      }
+      const openOverflow = await resellerPage.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        innerWidth: window.innerWidth,
+      }));
+      assert.ok(
+        openOverflow.scrollWidth <= openOverflow.innerWidth,
+        `Unexpected horizontal overflow when menu open at ${viewport.width}px: scrollWidth=${openOverflow.scrollWidth} > innerWidth=${openOverflow.innerWidth}`,
+      );
+      await summary.click();
+    }
+
     assert.deepEqual(resellerErrors, []);
     await resellerCtx.close();
 

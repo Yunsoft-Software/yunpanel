@@ -8,6 +8,7 @@ import { createHostingAccountClient, hostingAccountMessage } from './hosting-acc
 import { buildResellerAccountQuotaMetrics } from './quota-model.js';
 import { buildResellerNextActions } from './next-actions-model.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
+import './ui/console-lists.css';
 
 const LIMIT = 25;
 const blankForm = () => ({ username: '', password: '' });
@@ -139,13 +140,13 @@ export default function ResellerCustomersPage() {
             <strong>Kaynak Kilidi:</strong> Askıya alınan müşterilere site tahsis edilemez; barındırma kaynakları kilitlidir.
           </p>
         )}
-        {page?.accounts?.some((a) => a.quotas?.maxWebsites !== null && a.quotas?.maxWebsites !== undefined && (a.usage?.websites ?? 0) >= a.quotas.maxWebsites) && (
+        {page?.accounts?.some((a) => buildResellerAccountQuotaMetrics(a).websites.isFull) && (
           <p className="ws-muted" style={{ color: 'var(--ws-warning)' }}>
             <strong>Kota Sınırı:</strong> Web sitesi kotası dolan müşterilere yeni site tahsis etmek için önce &quot;Kota tahsis et&quot; ile müşteri limitini yükseltin.
           </p>
         )}
       </div>
-      {page && (page.accounts.length ? <div className="ws-table-scroll"><table className="ws-table">
+      {page && (page.accounts.length ? <div className="ws-table-scroll"><table className="ws-table ws-reseller-customers-table">
         <caption className="ws-muted">Yalnız mevcut bayi profilinize bağlı müşteri hesapları</caption>
         <thead><tr>
           <th scope="col">Kullanıcı adı</th>
@@ -160,9 +161,16 @@ export default function ResellerCustomersPage() {
           const metrics = buildResellerAccountQuotaMetrics(account);
           const isWebsiteQuotaFull = metrics.websites.isFull;
           const isSuspended = !account.active;
+          const secondaryActions = <>
+            <Button disabled={locked} onClick={() => { setNotice(''); setDialog({ type: 'quotas', account }); }}>Kota tahsis et</Button>
+            <Button disabled={locked} onClick={() => { setNotice(''); setDialog({ type: 'edit', account }); }}>Girişi düzenle</Button>
+            <Button variant={account.active ? 'danger' : 'primary'} disabled={locked} onClick={() => { setNotice(''); setDialog({ type: 'status', account, active: !account.active }); }}>
+              {account.active ? 'Askıya al' : 'Yeniden aç'}
+            </Button>
+          </>;
           return <tr key={account.id}>
             <th scope="row">{account.username}</th>
-            <td>
+            <td data-label="Giriş / Kaynak durumu">
               {isSuspended ? (
                 <Badge state="off">Askıda (Kilitli)</Badge>
               ) : isWebsiteQuotaFull ? (
@@ -171,36 +179,37 @@ export default function ResellerCustomersPage() {
                 <Badge state="active">Etkin</Badge>
               )}
             </td>
-            <td>
+            <td data-label="Web Siteleri">
               <span>{metrics.websites.summaryText}</span>
               {metrics.websites.reservedCount > 0 && <span className="ws-field-hint" style={{ display: 'block' }}>{metrics.websites.reservedCount} bekleyen tahsis dahil</span>}
               {isWebsiteQuotaFull && <span className="ws-field-hint" style={{ color: 'var(--ws-warning)', display: 'block' }}>Kota doldu</span>}
             </td>
-            <td>
+            <td data-label="Disk">
               <span>{metrics.disk.measured ? metrics.disk.summaryText : metrics.disk.usageText}</span>
               {!metrics.disk.measured && <span className="ws-field-hint" style={{ display: 'block' }}>{metrics.disk.hasLimit ? `Kayıtlı sınır: ${metrics.disk.limitText}` : 'Sınır: Sınırsız'}</span>}
             </td>
-            <td>
+            <td data-label="Trafik">
               <span>{metrics.traffic.measured ? metrics.traffic.summaryText : metrics.traffic.usageText}</span>
               {!metrics.traffic.measured && <span className="ws-field-hint" style={{ display: 'block' }}>{metrics.traffic.hasLimit ? `Kayıtlı sınır: ${metrics.traffic.limitText}` : 'Sınır: Sınırsız'}</span>}
             </td>
-            <td>
+            <td data-label="Veritabanı">
               <span>{metrics.databases.measured ? metrics.databases.summaryText : metrics.databases.usageText}</span>
               {!metrics.databases.measured && <span className="ws-field-hint" style={{ display: 'block' }}>{metrics.databases.hasLimit ? `Kayıtlı sınır: ${metrics.databases.limitText}` : 'Sınır: Sınırsız'}</span>}
             </td>
-            <td><div className="ws-actions">
+            <td data-label="İşlemler" className="ws-reseller-actions-cell"><div className="ws-actions ws-reseller-row-actions">
               <Button
+                className="ws-row-primary-action"
                 disabled={locked || isSuspended || isWebsiteQuotaFull}
                 title={isSuspended ? 'Askıya alınan müşterilere site tahsis edilemez' : isWebsiteQuotaFull ? 'Müşteri web sitesi kotası doldu' : 'Yeni web sitesi tahsis et'}
                 onClick={() => { setNotice(''); setDialog({ type: 'allocate', account }); }}
               >
                 Site tahsis et
               </Button>
-              <Button disabled={locked} onClick={() => { setNotice(''); setDialog({ type: 'quotas', account }); }}>Kota tahsis et</Button>
-              <Button disabled={locked} onClick={() => { setNotice(''); setDialog({ type: 'edit', account }); }}>Girişi düzenle</Button>
-              <Button variant={account.active ? 'danger' : 'primary'} disabled={locked} onClick={() => { setNotice(''); setDialog({ type: 'status', account, active: !account.active }); }}>
-                {account.active ? 'Askıya al' : 'Yeniden aç'}
-              </Button>
+              <div className="ws-row-actions-inline">{secondaryActions}</div>
+              <details className="ws-row-actions-menu">
+                <summary className="ws-button">Diğer işlemler</summary>
+                <div className="ws-row-actions-menu-list">{secondaryActions}</div>
+              </details>
             </div></td>
           </tr>;
         })}</tbody>

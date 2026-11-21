@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { panelRequest } from '../api.js';
 import { readHostingAccount, hostingAccountMessage } from './hosting-account-client.js';
 import { Link, useSearchParams } from 'react-router';
@@ -27,6 +27,7 @@ export default function WebsitesPage() {
   const selfAccountId = isCustomer ? (session?.user?.id ?? null) : null;
   const [customer, setCustomer] = useState(null), [customerError, setCustomerError] = useState(null);
   const [selfAccount, setSelfAccount] = useState(null);
+  const lastSelfAccountId = useRef(selfAccountId);
   useEffect(() => {
     let active = true; const controller = new AbortController(); setCustomer(null); setCustomerError(null);
     if (customerId) panelRequest(`/users/hosting/accounts/${encodeURIComponent(customerId)}`, { signal: controller.signal }).then(value => {
@@ -38,6 +39,10 @@ export default function WebsitesPage() {
   }, [customerId]);
   useEffect(() => {
     let active = true; const controller = new AbortController();
+    if (lastSelfAccountId.current !== selfAccountId) {
+      lastSelfAccountId.current = selfAccountId;
+      setSelfAccount(null);
+    }
     if (!selfAccountId) { setSelfAccount(null); return () => { active = false; controller.abort(); }; }
     panelRequest(`/users/hosting/accounts/${encodeURIComponent(selfAccountId)}`, { signal: controller.signal }).then(value => {
       const account = readHostingAccount(value);
@@ -96,7 +101,7 @@ export default function WebsitesPage() {
   return <>
     {customerId && <p className="ws-notice" role="status">{customer ? `${customer.username} hesabının web siteleri` : customerError ? 'Müşteri siteleri doğrulanamadı.' : 'Müşterinin web siteleri yükleniyor…'} <Link to="/websites">Tüm siteler</Link></p>}
     <ErrorNotice error={customerError} />
-    <PageHeading title={isReseller ? 'Sitelerim' : 'Web Siteleri'} description={isReseller ? 'Müşterilerinize ait web sitelerini ve yayın araçlarını yönetin.' : isCustomer ? 'Web sitenizin dosya, e-posta ve veritabanı araçlarını buradan yönetin.' : 'Barındırılan web siteleri, alt alan adları ve yayın araçları.'} actions={<><Button icon="refresh" onClick={refreshAll}>Yenile</Button>{isOwner && canManage && <LinkButton to="/docker" icon="box">Uygulama Marketi</LinkButton>}{isOwner && canManage && <LinkButton to="/websites/new" icon="plus" variant="primary">Web sitesi ekle</LinkButton>}{isOwner && canManage && <LinkButton to="/websites/new?mode=subdomain" icon="plus">Alt alan adı ekle</LinkButton>}{isReseller && <LinkButton to="/customers" icon="user" variant="primary">Müşterilerim</LinkButton>}</>} />
+    <PageHeading title={isReseller ? 'Sitelerim' : 'Web Siteleri'} description={isReseller ? 'Müşterilerinize ait web sitelerini ve yayın araçlarını yönetin.' : isCustomer ? 'Web sitenizin dosya, e-posta ve veritabanı araçlarını buradan yönetin.' : 'Barındırılan web siteleri, alt alan adları ve yayın araçları.'} actions={<><Button icon="refresh" onClick={refreshAll}>Yenile</Button>{isOwner && canManage && <LinkButton to="/websites/new" icon="plus" variant="primary">Web sitesi ekle</LinkButton>}{isOwner && canManage && <LinkButton to="/websites/new?mode=subdomain" icon="plus">Alt alan adı ekle</LinkButton>}{isReseller && <LinkButton to="/customers" icon="user" variant="primary">Müşterilerim</LinkButton>}</>} />
     {isOwner && canManage && <WebsiteRemovalRecoveryPanel onChanged={refreshAll} />}
     {isOwner && canManage && ownerNextActions && (
       <Section
