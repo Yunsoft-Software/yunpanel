@@ -333,7 +333,7 @@ test('Real Playwright Chromium E2E (Zero Mocks): Site Kaynakları discoverabilit
 
     await failPage.locator('section').filter({ hasText: 'Site Kaynakları' }).getByRole('button', { name: 'Yenile', exact: true }).click();
     await failPage.getByRole('button', { name: 'Yeniden dene', exact: true }).waitFor({ timeout: 10_000 });
-    assert.equal(await failPage.locator('table[aria-label="Site kaynak tüketimi"]').count(), 0, 'failed backend must clear stale table and render ZERO fake rows');
+    assert.equal(await failPage.locator('table[aria-label="Kaynak Tüketimi"]').count(), 0, 'failed backend must clear stale table and render ZERO fake rows');
     assert.equal(await failPage.locator('[data-site-consumption-measured-at]').getAttribute('data-site-consumption-measured-at'), '');
     assert.match(await failPage.locator('section').filter({ hasText: 'Site Kaynakları' }).innerText(), /Henüz ölçülmedi/);
     await failContext.close();

@@ -228,7 +228,7 @@ function SiteConsumptionWorkspace({ domain, website }) {
         )}
         {consumption && (
           <div className="ws-table-scroll ws-table-container" style={{ overflowX: 'auto', overscrollBehaviorX: 'contain', width: '100%', maxWidth: '100%' }}>
-            <table className="ws-table" role="table" aria-label="Site kaynak tüketimi" style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <table className="ws-table" role="table" aria-label="Kaynak Tüketimi" style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead role="rowgroup">
                 <tr role="row">
                   <th scope="col" role="columnheader" style={{ textAlign: 'left', padding: '0.55rem' }}>Kaynak</th>
