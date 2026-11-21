@@ -8,7 +8,7 @@ import { usePanelSession } from '../panel-session.jsx';
 import { sessionVersion, sessionTransitionPending } from '../session-client.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
-import { buildLicenseSettingsPath, isPremiumRequired } from './license-client.js';
+import { buildLicenseSettingsPath, resolveLicenseGateState } from './license-client.js';
 import { Button, CollectionNotice, ConfirmDialog, EmptyState, ErrorNotice, FileRootBadge, KeyValues, LinkButton, PageHeading, Section } from './PanelKit.jsx';
 import {
   applyFrameworkPresetToForm,
@@ -137,11 +137,17 @@ function WebsiteForm({ parentId }) {
   const baseLocked = busy || finishedAttempt || domains.status !== 'ready' || servers.status !== 'ready';
   const bindingDataPending = (existingType || sharedMode) && (applications.status !== 'ready' || websites.status !== 'ready');
   const locked = baseLocked || Boolean(bindingDataPending);
-  const isolatedUsersPremiumRequired = isPremiumRequired(license, 'perSiteIsolatedUsers');
-  const resellerPremiumRequired = isPremiumRequired(license, 'resellerAccounts');
+  const isolatedUsersGate = resolveLicenseGateState(license, 'perSiteIsolatedUsers');
+  const resellerGate = resolveLicenseGateState(license, 'resellerAccounts');
+  const isolatedUsersPremiumRequired = isolatedUsersGate === 'premium_required';
   const selectedCustomer = customers.find((account) => account.id === form.customerId) ?? null;
-  const siteOwnerPremiumRequired = (form.ownerMode === 'new_admin' && isolatedUsersPremiumRequired)
-    || (form.ownerMode === 'customer' && (isolatedUsersPremiumRequired || Boolean(selectedCustomer?.resellerId && resellerPremiumRequired)));
+  const siteOwnerGate = form.ownerMode === 'owner'
+    ? 'allowed'
+    : form.ownerMode === 'new_admin'
+      ? isolatedUsersGate
+      : (selectedCustomer?.resellerId && resellerGate !== 'allowed' ? resellerGate : isolatedUsersGate);
+  const siteOwnerBlocked = siteOwnerGate !== 'allowed';
+  const siteOwnerPremiumRequired = siteOwnerGate === 'premium_required';
   const newWebsiteReturnTo = form.ownerMode === 'customer' && form.customerId
     ? `/websites/new?customer=${encodeURIComponent(form.customerId)}`
     : '/websites/new';
@@ -161,7 +167,7 @@ function WebsiteForm({ parentId }) {
     event.preventDefault();
     const current = scope.current;
     if (locked || pending.current || !current?.isCurrent()) return;
-    if (siteOwnerPremiumRequired) return;
+    if (siteOwnerBlocked) return;
     if (step < 3) { setStep(value => value + 1); return; }
     pending.current = true; setError(null);
     try {
@@ -248,8 +254,31 @@ function WebsiteForm({ parentId }) {
             <option value="customer">{isolatedUsersPremiumRequired ? 'Mevcut müşteri — Premium' : 'Mevcut müşteri'}</option>
             {form.mode === 'domain' && <option value="new_admin">{isolatedUsersPremiumRequired ? 'Yeni site giriş hesabı — Premium' : 'Yeni site giriş hesabı'}</option>}
           </select></label>
-          {form.ownerMode === 'customer' && !siteOwnerPremiumRequired && <label>Müşteri<select required value={form.customerId} onChange={event => update('customerId', event.target.value)}><option value="">Müşteri seçin</option>{customers.map(account => <option key={account.id} value={account.id}>{account.username}</option>)}</select><ErrorNotice error={customerError} /></label>}
+          {form.ownerMode === 'customer' && !siteOwnerBlocked && <label>Müşteri<select required value={form.customerId} onChange={event => update('customerId', event.target.value)}><option value="">Müşteri seçin</option>{customers.map(account => <option key={account.id} value={account.id}>{account.username}</option>)}</select><ErrorNotice error={customerError} /></label>}
         </div>
+        {siteOwnerGate === 'loading' && (
+          <div className="ws-notice" role="status" data-license-gate-state="new-website-owner-loading">
+            <div>
+              <strong>Lisans durumu doğrulanıyor…</strong>
+              <p>Ayrı müşteri veya site yöneticisi ataması lisans doğrulaması tamamlanana kadar beklemede. “Yönetim hesabım” ile hemen devam edebilirsiniz.</p>
+            </div>
+            <div className="ws-actions">
+              <Button onClick={() => { update('ownerMode', 'owner'); update('adminPassword', ''); }}>Yönetim hesabımla devam et</Button>
+            </div>
+          </div>
+        )}
+        {siteOwnerGate === 'error' && (
+          <div className="ws-notice ws-notice-warn" role="alert" data-license-gate-state="new-website-owner-error">
+            <div>
+              <strong>Lisans durumu okunamadı</strong>
+              <p>Ayrı müşteri veya site giriş hesabı ataması lisans doğrulanana kadar beklemede. “Yönetim hesabım” ile site oluşturmaya devam edebilirsiniz.</p>
+            </div>
+            <div className="ws-actions">
+              <Button icon="refresh" onClick={() => license?.refresh?.()}>Lisans durumunu yeniden dene</Button>
+              <Button onClick={() => { update('ownerMode', 'owner'); update('adminPassword', ''); }}>Yönetim hesabımla devam et</Button>
+            </div>
+          </div>
+        )}
         {siteOwnerPremiumRequired && (
           <div className="ws-notice ws-notice-warn" role="status" data-premium-notice="new-website-owner">
             <div>
@@ -262,7 +291,7 @@ function WebsiteForm({ parentId }) {
             </div>
           </div>
         )}
-        {form.mode === 'domain' && form.ownerMode === 'new_admin' && !siteOwnerPremiumRequired && <div className="ws-form-divider" style={{ marginTop: 24 }}>
+        {form.mode === 'domain' && form.ownerMode === 'new_admin' && !siteOwnerBlocked && <div className="ws-form-divider" style={{ marginTop: 24 }}>
           <h3>Yeni site giriş hesabı</h3>
           <p className="ws-muted">Bu kullanıcı yalnız bu sitenin panel araçlarına erişebilir. WordPress yönetici hesabı kurulum sırasında ayrıca belirlenir.</p>
           <LoginCredentialsFields email={form.adminEmail} password={form.adminPassword}
@@ -353,7 +382,7 @@ function WebsiteForm({ parentId }) {
         {form.mode === 'domain' && <div className="ws-form-divider" style={{ marginTop: 24 }}><h3>Posta</h3><label className="ws-check" style={{ marginTop: 16 }}><input type="checkbox" checked={form.mailMode === 'local'} onChange={(event) => update('mailMode', event.target.checked ? 'local' : 'none')} /><span><strong>E-posta ve Webmail etkinleştir</strong><small><code>webmail.{form.primaryDomain.trim() || 'domain.com'}</code> için DNS A kaydı, SSL sertifikası ve webmail arayüzü otomatik olarak hazırlanır.</small></span></label></div>}
         </>}
         <SiteCreateProgress state={submission} />
-        <footer className="ws-form-footer" style={{ marginTop: 24 }}><LinkButton to="/websites">Vazgeç</LinkButton>{step > 1 && <Button disabled={busy} onClick={() => setStep(value => value - 1)}>Geri</Button>}<Button type="submit" variant="primary" icon="plus" disabled={locked || !serverId || siteOwnerPremiumRequired || (step >= 2 && existingType && !form.applicationId) || (step >= 2 && sharedMode && !form.websiteId)}>{busy ? 'Site kuruluyor…' : step < 3 ? 'Devam et' : sharedMode ? 'Alan adını bağla' : 'Siteyi oluştur'}</Button></footer>
+        <footer className="ws-form-footer" style={{ marginTop: 24 }}><LinkButton to="/websites">Vazgeç</LinkButton>{step > 1 && <Button disabled={busy} onClick={() => setStep(value => value - 1)}>Geri</Button>}<Button type="submit" variant="primary" icon="plus" disabled={locked || !serverId || siteOwnerBlocked || (step >= 2 && existingType && !form.applicationId) || (step >= 2 && sharedMode && !form.websiteId)}>{busy ? 'Site kuruluyor…' : step < 3 ? 'Devam et' : sharedMode ? 'Alan adını bağla' : 'Siteyi oluştur'}</Button></footer>
 
       </fieldset></form>
     </Section>}

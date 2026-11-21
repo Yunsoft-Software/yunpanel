@@ -508,12 +508,27 @@ test('Real Playwright Chromium E2E: Slow or failed GET /api/panel/license fails 
     const slowSidebar = slowPage.getByRole('navigation', { name: 'Panel bölümleri' });
     await slowSidebar.waitFor({ timeout: 15_000 });
 
-    // Owner normal /websites screen remains completely usable while license check is still in flight
+    // Owner normal /websites screen and /websites/new (ownerMode="owner") remain usable while license check is in flight,
+    // whereas Premium-gated new_admin / customer site-owner modes stay fail-closed!
     await slowPage.getByRole('heading', { name: 'Web Siteleri' }).waitFor({ timeout: 10_000 });
-    assert.ok(await slowPage.locator('main .ws-page-heading').getByRole('link', { name: 'Web sitesi ekle' }).isVisible());
+    const addSiteLink = slowPage.locator('main .ws-page-heading').getByRole('link', { name: 'Web sitesi ekle' });
+    assert.ok(await addSiteLink.isVisible());
+    await addSiteLink.click();
+    await slowPage.getByLabel('Site sahibi').waitFor({ timeout: 10_000 });
+    assert.equal(await slowPage.getByRole('button', { name: 'Devam et', exact: true }).isDisabled(), false, 'Owner normal site creation must remain enabled while license loads');
+    await slowPage.getByLabel('Site sahibi').selectOption('new_admin');
+    await slowPage.locator('[data-license-gate-state="new-website-owner-loading"]').waitFor({ timeout: 5_000 });
+    assert.equal(await slowPage.locator('input[type="password"]').count(), 0);
+    assert.equal(await slowPage.getByRole('button', { name: 'Devam et', exact: true }).isDisabled(), true);
+    await slowPage.getByLabel('Site sahibi').selectOption('customer');
+    await slowPage.locator('[data-license-gate-state="new-website-owner-loading"]').waitFor({ timeout: 5_000 });
+    assert.equal(await slowPage.getByRole('button', { name: 'Devam et', exact: true }).isDisabled(), true);
+    await slowPage.getByRole('button', { name: 'Yönetim hesabımla devam et' }).click();
+    assert.equal(await slowPage.getByRole('button', { name: 'Devam et', exact: true }).isDisabled(), false);
 
     // /resellers finishes loading its real list while /api/panel/license is still held -> Bayi ekle stays disabled
     await slowSidebar.locator('a[href="/resellers"]').click();
+    await slowPage.getByRole('button', { name: 'Değişiklikleri bırak' }).click();
     await slowPage.getByText('Henüz bayi yok').waitFor({ timeout: 10_000 });
     const resellerLoadingNotice = slowPage.locator('[data-license-gate-state="loading"]');
     await resellerLoadingNotice.waitFor({ timeout: 5_000 });
@@ -577,9 +592,21 @@ test('Real Playwright Chromium E2E: Slow or failed GET /api/panel/license fails 
     await errPage.locator('[data-license-gate-state="error"]').waitFor({ timeout: 5_000 });
     assert.equal(await errPage.getByRole('button', { name: /Müşteri ekle/ }).isDisabled(), true);
 
+    // /websites/new in license error state: Owner normal mode stays enabled, new_admin/customer stay fail-closed with retry button!
+    await errSidebar.locator('a[href="/websites"]').click();
+    await errPage.locator('main .ws-page-heading').getByRole('link', { name: 'Web sitesi ekle' }).click();
+    await errPage.getByLabel('Site sahibi').waitFor({ timeout: 10_000 });
+    assert.equal(await errPage.getByRole('button', { name: 'Devam et', exact: true }).isDisabled(), false);
+    await errPage.getByLabel('Site sahibi').selectOption('new_admin');
+    await errPage.locator('[data-license-gate-state="new-website-owner-error"]').waitFor({ timeout: 5_000 });
+    assert.equal(await errPage.locator('input[type="password"]').count(), 0);
+    assert.equal(await errPage.getByRole('button', { name: 'Devam et', exact: true }).isDisabled(), true);
+
     // /users in license error state: existing users remain visible, Kullanıcı ekle disabled,
     // and HostingProfileDialog keeps Premium-gated Profili bağla disabled with retry notice!
-    await errPage.goto(`${publicOrigin}/users`, { waitUntil: 'networkidle' });
+    await errSidebar.locator('a[href="/tools-settings"]').click();
+    await errPage.getByRole('button', { name: 'Değişiklikleri bırak' }).click();
+    await errPage.locator('a[href="/settings/users"]').first().click();
     await errPage.getByRole('rowheader', { name: 'owneradmin' }).waitFor({ timeout: 10_000 });
     await errPage.getByRole('rowheader', { name: 'existingmgr' }).waitFor({ timeout: 10_000 });
     const usersErrNotice = errPage.locator('[data-license-gate-state="error"]');
