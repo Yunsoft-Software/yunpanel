@@ -4,6 +4,7 @@ import { chmod, link, lstat, mkdir, mkdtemp, open, readdir, realpath, rm, unlink
 import { isIP } from 'node:net';
 import path from 'node:path';
 import { assertDomainName, assertUuid, isInfrastructureDatabase } from '@yunpanel/shared';
+import { normalizeMailboxAddress } from '@yunpanel/config-templates';
 import { createPleskImporter } from './plesk-importer.js';
 
 const EXPORT_NAME = 'plesk.json';
@@ -168,6 +169,222 @@ async function inspectSite(sitePath, siteStat, documentRoot, uid, destination) {
   return { sha256: digest.digest('hex'), files, directories, bytes: bytes.toString() };
 }
 
+const FORWARDING_MODES = new Set(['copy', 'redirect']);
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function canonicalMailAddress(value, sourceDomain, { requireSourceDomain = false, allowLocalPart = false } = {}) {
+  if (typeof value !== 'string') {
+    fail('mail_invalid', 'Mail addresses must be non-empty strings');
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    fail('mail_invalid', 'Mail addresses must be non-empty strings');
+  }
+  const candidate = allowLocalPart && !trimmed.includes('@') ? `${trimmed}@${sourceDomain}` : trimmed;
+  let parsed;
+  try {
+    parsed = normalizeMailboxAddress(candidate);
+  } catch {
+    fail('mail_invalid', 'Mail inventory contains an invalid email address');
+  }
+  if (requireSourceDomain && parsed.domain !== sourceDomain) {
+    fail('mail_invalid', 'Mail inventory addresses must belong to the selected source domain');
+  }
+  return parsed.address;
+}
+
+function extractMailDestinations(entry, sourceDomain) {
+  let rawDestinations;
+  if (entry.destinations !== undefined) {
+    if (!Array.isArray(entry.destinations) || entry.destinations.length === 0) {
+      fail('mail_invalid', 'Mail destinations must be a non-empty array of email addresses');
+    }
+    rawDestinations = entry.destinations;
+  } else if (entry.destination !== undefined || entry.to !== undefined) {
+    rawDestinations = [entry.destination ?? entry.to];
+  } else {
+    fail('mail_invalid', 'Each mail alias or forwarding must declare at least one destination');
+  }
+  return rawDestinations.map((dest) => canonicalMailAddress(dest, sourceDomain));
+}
+
+function extractMailInventory(rawRow, parsedMailDomain, sourceDomain) {
+  const hasMail = Object.hasOwn(rawRow, 'mail') && rawRow.mail !== undefined;
+  const hasMailDomain = Object.hasOwn(rawRow, 'mailDomain') && rawRow.mailDomain !== undefined;
+  if (hasMail && hasMailDomain) {
+    fail('mail_invalid', 'Declare mail inventory under either mail or mailDomain, not both');
+  }
+  const rawMail = hasMail ? rawRow.mail : hasMailDomain ? rawRow.mailDomain : null;
+  if (rawMail === null) {
+    return {
+      enabled: false,
+      domainName: null,
+      mailboxes: [],
+      aliases: [],
+      forwardings: [],
+    };
+  }
+  if (!isPlainObject(rawMail)) {
+    fail('mail_invalid', 'Mail inventory must be a JSON object');
+  }
+  if (rawMail.domainName !== undefined && rawMail.domainName !== null) {
+    if (domainName(rawMail.domainName) !== sourceDomain) {
+      fail('mail_invalid', 'Mail domain must match the selected source domain');
+    }
+  }
+  if (parsedMailDomain?.domainName && parsedMailDomain.domainName !== sourceDomain) {
+    fail('mail_invalid', 'Mail domain must match the selected source domain');
+  }
+  if (rawMail.enabled !== undefined && typeof rawMail.enabled !== 'boolean') {
+    fail('mail_invalid', 'Mail enabled flag must be a boolean');
+  }
+
+  // Only non-secret inventory fields are projected; password/hash/secret fields are strictly stripped.
+  if (rawMail.mailboxes !== undefined && !Array.isArray(rawMail.mailboxes)) {
+    fail('mail_invalid', 'Mail mailboxes must be an array');
+  }
+  const seenMailboxes = new Set();
+  const mailboxes = [];
+  for (const box of rawMail.mailboxes ?? []) {
+    if (!isPlainObject(box)) {
+      fail('mail_invalid', 'Each mailbox entry must be an object');
+    }
+    const explicitAddress = box.address ?? box.email;
+    const localCandidate = box.name ?? box.mailbox;
+    const rawAddress = explicitAddress !== undefined && explicitAddress !== null ? explicitAddress : localCandidate;
+    const address = canonicalMailAddress(rawAddress, sourceDomain, {
+      requireSourceDomain: true,
+      allowLocalPart: explicitAddress === undefined || explicitAddress === null,
+    });
+    if (seenMailboxes.has(address)) {
+      fail('mail_invalid', 'Duplicate mailbox addresses are not allowed in the export');
+    }
+    seenMailboxes.add(address);
+
+    let quotaBytes = null;
+    const hasQuotaBytes = box.quotaBytes !== undefined && box.quotaBytes !== null;
+    const hasQuotaMb = box.quotaMb !== undefined && box.quotaMb !== null;
+    let mbBytes = null;
+    if (hasQuotaMb) {
+      const converted = box.quotaMb * 1024 * 1024;
+      if (!Number.isSafeInteger(box.quotaMb) || box.quotaMb <= 0 || !Number.isSafeInteger(converted)) {
+        fail('mail_invalid', 'Mailbox quotaMb must be a positive safe integer');
+      }
+      mbBytes = converted;
+    }
+    if (hasQuotaBytes) {
+      if (!Number.isSafeInteger(box.quotaBytes) || box.quotaBytes <= 0) {
+        fail('mail_invalid', 'Mailbox quotaBytes must be a positive safe integer');
+      }
+      if (hasQuotaMb && box.quotaBytes !== mbBytes) {
+        fail('mail_invalid', 'Mailbox quotaBytes and quotaMb values conflict');
+      }
+      quotaBytes = box.quotaBytes;
+    } else if (hasQuotaMb) {
+      quotaBytes = mbBytes;
+    }
+    mailboxes.push({ address, quotaBytes });
+  }
+  mailboxes.sort((left, right) => left.address.localeCompare(right.address));
+
+  if (rawMail.aliases !== undefined && !Array.isArray(rawMail.aliases)) {
+    fail('mail_invalid', 'Mail aliases must be an array');
+  }
+  const aliasMap = new Map();
+  for (const entry of rawMail.aliases ?? []) {
+    if (!isPlainObject(entry)) {
+      fail('mail_invalid', 'Each mail alias entry must be an object');
+    }
+    const source = canonicalMailAddress(entry.source ?? entry.from, sourceDomain, {
+      requireSourceDomain: true,
+      allowLocalPart: true,
+    });
+    const destinations = extractMailDestinations(entry, sourceDomain);
+    if (destinations.includes(source)) {
+      fail('mail_invalid', 'Mail alias cannot target its own source address');
+    }
+    if (!aliasMap.has(source)) aliasMap.set(source, new Set());
+    const targetSet = aliasMap.get(source);
+    for (const dest of destinations) targetSet.add(dest);
+  }
+  const aliases = [...aliasMap.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([source, destinations]) => ({ source, destinations: [...destinations].sort() }));
+
+  if (rawMail.forwardings !== undefined && !Array.isArray(rawMail.forwardings)) {
+    fail('mail_invalid', 'Mail forwardings must be an array');
+  }
+  const forwardingMap = new Map();
+  for (const entry of rawMail.forwardings ?? []) {
+    if (!isPlainObject(entry)) {
+      fail('mail_invalid', 'Each mail forwarding entry must be an object');
+    }
+    const source = canonicalMailAddress(entry.source ?? entry.from, sourceDomain, {
+      requireSourceDomain: true,
+      allowLocalPart: true,
+    });
+    const destinations = extractMailDestinations(entry, sourceDomain);
+    if (destinations.includes(source)) {
+      fail('mail_invalid', 'Mail forwarding cannot forward to its own source address');
+    }
+    let mode;
+    if (entry.mode !== undefined && entry.mode !== null) {
+      if (typeof entry.mode !== 'string' || !FORWARDING_MODES.has(entry.mode)) {
+        fail('mail_invalid', 'Mail forwarding mode must be copy or redirect');
+      }
+      mode = entry.mode;
+    } else if (entry.keepCopy !== undefined && entry.keepCopy !== null) {
+      if (typeof entry.keepCopy !== 'boolean') {
+        fail('mail_invalid', 'Mail forwarding keepCopy must be a boolean');
+      }
+      mode = entry.keepCopy ? 'copy' : 'redirect';
+    } else {
+      mode = seenMailboxes.has(source) ? 'copy' : 'redirect';
+    }
+    const existing = forwardingMap.get(source);
+    if (existing) {
+      if (existing.mode !== mode) {
+        fail('mail_invalid', 'Conflicting forwarding modes declared for the same source address');
+      }
+      for (const dest of destinations) existing.destinations.add(dest);
+    } else {
+      forwardingMap.set(source, { mode, destinations: new Set(destinations) });
+    }
+  }
+  const forwardings = [...forwardingMap.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([source, item]) => ({
+      source,
+      destinations: [...item.destinations].sort(),
+      mode: item.mode,
+    }));
+
+  const hasInventory = mailboxes.length > 0 || aliases.length > 0 || forwardings.length > 0;
+  if (rawMail.enabled === false) {
+    if (hasInventory) {
+      fail('mail_invalid', 'Disabled mail inventory cannot declare mailboxes, aliases or forwardings');
+    }
+    return {
+      enabled: false,
+      domainName: null,
+      mailboxes: [],
+      aliases: [],
+      forwardings: [],
+    };
+  }
+  const enabled = rawMail.enabled === true || hasInventory;
+  return {
+    enabled,
+    domainName: enabled ? sourceDomain : null,
+    mailboxes,
+    aliases,
+    forwardings,
+  };
+}
+
 function parseExport(content, serverId, sourceDomain, sourceDatabase) {
   let data;
   let preview;
@@ -201,7 +418,8 @@ function parseExport(content, serverId, sourceDomain, sourceDatabase) {
       && !['mysql', 'mariadb'].includes(String(engine).trim().toLowerCase()))) {
     fail('source_mismatch', 'The bundle must contain only the selected MySQL or MariaDB database');
   }
-  return { phpVersion: site.runtime.phpVersion, documentRoot };
+  const mail = extractMailInventory(rows[0], site.mailDomain, sourceDomain);
+  return { phpVersion: site.runtime.phpVersion, documentRoot, mail };
 }
 
 async function inspectBundle(bundle, uid, { serverId, sourceDomain, sourceDatabase }, destination) {
@@ -215,12 +433,13 @@ async function inspectBundle(bundle, uid, { serverId, sourceDomain, sourceDataba
   const metadata = await readInput(exportPath, await inspectEntry(exportPath, uid), {
     maxBytes: MAX_EXPORT_BYTES, destination: copyPath(EXPORT_NAME),
   });
-  const runtime = parseExport(metadata.content, serverId, sourceDomain, sourceDatabase);
+  const parsed = parseExport(metadata.content, serverId, sourceDomain, sourceDatabase);
+  const runtime = { phpVersion: parsed.phpVersion, documentRoot: parsed.documentRoot };
   const site = await inspectSite(sitePath, await inspectEntry(sitePath, uid), runtime.documentRoot, uid, copyPath(SITE_NAME));
   const sql = await readInput(sqlPath, await inspectEntry(sqlPath, uid), { destination: copyPath(SQL_NAME) });
   if (sql.bytes === '0') fail('sql_empty', 'The database dump must be present and non-empty');
   await assertUnchanged(bundle.absolute, bundle.stat);
-  return { runtime, files: { exportSha256: metadata.sha256, site, sql } };
+  return { runtime, mail: parsed.mail, files: { exportSha256: metadata.sha256, site, sql } };
 }
 
 async function inspectTransfer({
@@ -251,13 +470,22 @@ async function inspectTransfer({
     }
     if ((await readdir(staging.absolute)).length !== 0) fail('target_not_empty', 'Use an empty staging directory');
     const identity = { serverId: targetServer, sourceDomain, sourceDatabase };
-    const { runtime, files } = await inspectBundle(bundle, uid, identity);
+    const { runtime, mail, files } = await inspectBundle(bundle, uid, identity);
     await assertUnchanged(staging.absolute, staging.stat);
 
+    const cutover = {
+      imapSyncRequired: mail.mailboxes.length > 0,
+      rollbackPreservesPostCutoverWrites: true,
+      preDnsChecks: mail.mailboxes.length > 0
+        ? ['http', 'login', 'sql', 'imap']
+        : ['http', 'login', 'sql'],
+    };
     const preview = {
       version: 1,
       source: { domain: sourceDomain, database: sourceDatabase, ...runtime },
       target: { serverId: targetServer, domain: targetDomain, database: targetDatabase },
+      mail,
+      cutover,
       files,
       readOnly: true,
     };
@@ -317,15 +545,20 @@ export async function stagePleskOfflineTransfer(options = {}) {
     const prepared = await inspectBundle(bundle, uid, identity, preparedPath);
     const readback = await inspectBundle({ absolute: preparedPath, stat: await inspectEntry(preparedPath, uid) }, uid, identity);
     if (JSON.stringify(prepared.files) !== JSON.stringify(preview.files)
-      || JSON.stringify(readback.files) !== JSON.stringify(preview.files)) {
+      || JSON.stringify(readback.files) !== JSON.stringify(preview.files)
+      || JSON.stringify(prepared.mail) !== JSON.stringify(preview.mail)
+      || JSON.stringify(readback.mail) !== JSON.stringify(preview.mail)) {
       fail('digest_mismatch', 'The staged files differ from the approved preview');
     }
     const receipt = {
       version: 1,
       status: 'ready',
       digest: preview.digest,
+      stagedAt: new Date().toISOString(),
       source: preview.source,
       target: preview.target,
+      mail: preview.mail,
+      cutover: preview.cutover,
       files: preview.files,
       bundleDirectory: preparedPath,
     };

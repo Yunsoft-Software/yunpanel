@@ -284,3 +284,13 @@ export {
 } from './nftables.js';
 export { normalizeSmarthost, renderSmarthost, smarthostPolicy, SMARTHOST_DIRECTORY, SMARTHOST_SASL_PASSWD_PATH } from './mail-smarthost.js';
 export { PROTECTED_PATH_AUTH_DIRECTORY } from './nginx.js';
+
+export {
+  WafPolicyTemplateError,
+  nginxWafConfigPath,
+  normalizeWafExcludedRoutes,
+  previewCloudflareManagedWafPolicy,
+  previewCrowdSecAppSecPolicy,
+  previewWafPolicy,
+  wafPolicyTemplatePolicy,
+} from './waf-policy.js';

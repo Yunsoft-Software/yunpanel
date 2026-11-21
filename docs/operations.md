@@ -33,6 +33,22 @@ Snapshot directory 0700, state.tar/manifest 0600; SHA-256/source allowlist/membe
 3. Aynı argümanlarla `stage` eylemini ve `--expect <sha256>` değerini kullan. `transfer.json` içindeki `bundleDirectory` kopyayı gösterir. Kopya PHP çalıştırmaz ve SQL uygulamaz. Pilot, kopyalanan dosyaları normal panel kurulumuyla açılan geçici siteye ve SQL’i yalnız o sitenin boş veritabanına taşıyarak sürer.
 4. DNS değişikliğinden önce HTTP, giriş ve SQL’i eski ve yeni ortamda karşılaştır. Posta varsa iki IMAP eşitlemesinden sonra klasör, ileti ve teslimatı doğrula. Geçiş sonrasında yeni yazıları da koruyan geri dönüşü pilotta dene. [Canlı kabul](../todo.md#linux-hosting-pilotu-ve-plesk-geçişi).
 
+## WAF hazırlığı (gözlem, uygulama ve geri dönüş)
+
+WAF şablonları iki açık sağlayıcıyı destekler (`packages/config-templates/src/waf-policy.js`): Cloudflare Managed WAF (`cloudflare_managed`) ve doğrudan barındırılan sitelerde yerel Nginx + CrowdSec AppSec (`crowdsec_appsec`).
+
+1. **Gözlemle başla (`observe`).** İlk etkinleştirmede her iki sağlayıcı da engelleme yapmayan modda açılır: Cloudflare `log`, CrowdSec AppSec ise `appsec_failure_action passthrough;` ve `simulation: true`. Varsayılan güvenli yol istisnaları (`/wp-login.php`, `/wp-admin/async-upload.php`, `/wp-json/wp/v2/media`, `/api/auth/`) korunur; ek yollar katı karakter doğrulamasından geçer.
+2. **Uygulamaya geçiş (`enforce`).** Normal giriş, dosya yükleme ve API istekleri gözlem loglarında yanlış pozitif vermeden doğrulanmadan `enforce` açılmaz. Geçişten önce geri dönüş özetini kaydetmek zorunludur: CrowdSec AppSec için önceki gözlem politikasının `previousPolicySha256` değeri, Cloudflare için `previousRulesetVersion` ve `previousRulesetSha256`.
+3. **Geri dönüş (`disabled`).** Yanlış pozitifte CrowdSec AppSec için üretilen `disabled` Nginx parçası (`/etc/nginx/yunpanel-waf/<domain>.conf`) ve pasif acquisition dosyası yazılıp `nginx -t` + reload uygulanır; Cloudflare’da kural geçersiz kılma `log`/`off` durumuna çekilir ve önceki kural kümesi sürümü geri yüklenir.
+
+## WordPress staging’den canlıya seçici aktarım hazırlığı
+
+Staging’den canlıya aktarım planlayıcısı (`apps/api/src/wordpress-selective-transfer.js`) canlı sipariş, üyelik ve çalışma zamanı yapılandırmasını varsayılan olarak korur.
+
+1. **Dosya kapsamı:** Yalnızca seçilen göreli kapsamlar (`themes`, `plugins`, `mu-plugins` ve doğrulanmış `wp-content/` özel yolları) aktarılır. `wp-config.php`, `.htaccess`, `.user.ini` her zaman; `wp-content/uploads/**` ise açıkça istenmedikçe korunur. Sembolik link ve yol kaçışı reddedilir.
+2. **Tablo koruması:** WooCommerce sipariş/ödeme/oturum tabloları, `users`/`usermeta`, `comments`/`commentmeta` ve Action Scheduler kuyruk tabloları varsayılan olarak aktarılmaz. Canlıda `shop_order` / `shop_subscription` / `shop_order_refund` kayıtları varsa paylaşılan `posts` ve `postmeta` tabloları kör tam yazmaya kapatılır.
+3. **Önkoşul ve doğrulama:** Uygulama öncesi doğrulanmış canlı yedek ve değişmemiş `planSha256` zorunludur. Aktarım sonrasında staging bayrakları geri çevrilir (`blog_public = 1`, `WP_ENVIRONMENT_TYPE = 'production'`, `DISABLE_WP_CRON` kaldırılır) ve WP/DB/HTTP sağlık denetimi doğrulanır.
+
 ## İş kurtarma
 
 Packaged job-recovery.mjs status ile exact job/operation ve host evidence incelenir. reconcile/recover-* komutu yalnız desteklediği operation ve aynı server/job kimliğiyle, gerekli açık onaydan sonra çalışır. Generic force-success yok. Job kayıtları/attempt budget/evidence silinmez. Unknown/lost-ack önce inspect; kör replay yok. Background backup recovery'nin startup'a bağlı olduğu varsayılmaz; 9 Ekim audit'inde açık bulundu.

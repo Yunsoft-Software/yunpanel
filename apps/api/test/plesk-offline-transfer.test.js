@@ -233,3 +233,104 @@ test('a change after private staging starts prevents publication and cleans up o
   assert.equal(await readFile(indexPath, 'utf8'), '<?php echo "fixture-file-marker";');
   assert.equal(await readFile(sqlPath, 'utf8'), 'SELECT "replacement";');
 });
+
+test('non-mail PHP export keeps mail disabled and omits imap from preDnsChecks', async (t) => {
+  const { options } = await createFixture(t);
+  const preview = await previewPleskOfflineTransfer(options);
+  assert.deepEqual(preview.mail, {
+    enabled: false,
+    domainName: null,
+    mailboxes: [],
+    aliases: [],
+    forwardings: [],
+  });
+  assert.deepEqual(preview.cutover, {
+    imapSyncRequired: false,
+    rollbackPreservesPostCutoverWrites: true,
+    preDnsChecks: ['http', 'login', 'sql'],
+  });
+});
+
+test('extracts non-secret mail inventory and cutover checks for mail-enabled WordPress Plesk exports', async (t) => {
+  const { options, exportSite, setExport, documentRoot } = await createFixture(t);
+  await writeFile(path.join(documentRoot, 'wp-login.php'), '<?php /* wp */', { mode: 0o600 });
+  const mailSite = {
+    ...exportSite,
+    mail: {
+      mailboxes: [
+        {
+          name: 'info',
+          email: 'INFO@source.example.net',
+          quotaMb: 500,
+          password: 'mailbox-plain-secret-marker',
+          passwordHash: '$argon2id$v=19$m=65536,t=3,p=1$hash-secret-marker',
+        },
+        {
+          address: 'admin@source.example.net',
+          quotaBytes: 268435456,
+          secret: 'mailbox-extra-secret-marker',
+          imapPassword: 'imap-password-marker',
+        },
+      ],
+      aliases: [
+        { source: 'sales@source.example.net', destination: 'info@source.example.net' },
+        { source: 'sales@source.example.net', destinations: ['admin@source.example.net', 'info@source.example.net'] },
+      ],
+      forwardings: [
+        { source: 'info@source.example.net', destination: 'ops@external.test', mode: 'copy' },
+        { source: 'alerts@source.example.net', destinations: ['oncall@external.test'], keepCopy: false },
+      ],
+      dkimPrivateKey: '-----BEGIN PRIVATE KEY-----mail-dkim-secret-marker-----END PRIVATE KEY-----',
+    },
+  };
+  await setExport([mailSite]);
+
+  const first = await previewPleskOfflineTransfer(options);
+  const second = await previewPleskOfflineTransfer({ ...options, expectedDigest: first.digest });
+  assert.deepEqual(second, first);
+  assert.equal(first.digest, second.digest);
+  assert.deepEqual(first.mail, {
+    enabled: true,
+    domainName: 'source.example.net',
+    mailboxes: [
+      { address: 'admin@source.example.net', quotaBytes: 268435456 },
+      { address: 'info@source.example.net', quotaBytes: 500 * 1024 * 1024 },
+    ],
+    aliases: [
+      { source: 'sales@source.example.net', destinations: ['admin@source.example.net', 'info@source.example.net'] },
+    ],
+    forwardings: [
+      { source: 'alerts@source.example.net', destinations: ['oncall@external.test'], mode: 'redirect' },
+      { source: 'info@source.example.net', destinations: ['ops@external.test'], mode: 'copy' },
+    ],
+  });
+  assert.deepEqual(first.cutover, {
+    imapSyncRequired: true,
+    rollbackPreservesPostCutoverWrites: true,
+    preDnsChecks: ['http', 'login', 'sql', 'imap'],
+  });
+  assert.doesNotMatch(
+    JSON.stringify(first),
+    /mailbox-plain-secret-marker|hash-secret-marker|mailbox-extra-secret-marker|imap-password-marker|mail-dkim-secret-marker|database-secret-marker/,
+  );
+});
+
+test('rejects foreign-domain, self-forwarding, duplicate or malformed mail inventory fail-closed', async (t) => {
+  const { options, exportSite, setExport } = await createFixture(t);
+  const invalidCases = [
+    { mailboxes: [{ address: 'info@foreign.example.net', quotaMb: 100 }] },
+    { mailboxes: [{ address: 'info@source.example.net' }, { address: 'INFO@source.example.net' }] },
+    { mailboxes: [{ address: 'info@source.example.net', quotaBytes: -10 }] },
+    { mailboxes: [{ address: 'info@source.example.net', quotaBytes: 1024 * 1024, quotaMb: 2 }] },
+    { mailboxes: [{ address: 'info@source.example.net', quotaBytes: 1024 * 1024, quotaMb: -1 }] },
+    { aliases: [{ source: 'sales@source.example.net', destination: 'sales@source.example.net' }] },
+    { forwardings: [{ source: 'info@source.example.net', destination: 'info@source.example.net' }] },
+    { forwardings: [{ source: 'info@source.example.net', destination: 'ops@external.test', mode: 'bounce' }] },
+    { enabled: false, mailboxes: [{ address: 'info@source.example.net' }] },
+    { mailboxes: 'not-an-array' },
+  ];
+  for (const invalidMail of invalidCases) {
+    await setExport([{ ...exportSite, mail: invalidMail }]);
+    await assert.rejects(previewPleskOfflineTransfer(options), { code: 'plesk_transfer_mail_invalid' });
+  }
+});

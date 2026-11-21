@@ -29,6 +29,8 @@ The staging directory must already exist and be empty. The default action only
 previews. Use --expect to verify an earlier preview. With stage, --expect is
 required, and transfer.json appears only after the private copy is verified.
 Read bundleDirectory in transfer.json relative to the staging directory.
+Optional non-secret mail inventory and cutover checks are included when present
+in plesk.json; mail credentials are never copied into previews or receipts.
 SQL content is hashed, not parsed or executed.`;
 
 function parseArguments(argv) {
