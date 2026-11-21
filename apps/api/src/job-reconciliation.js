@@ -677,6 +677,7 @@ async function applyReconciliation({
   passengerReleasePhaseStore = null,
   mailDomainRegistry,
   mailServiceIdentityRegistry = null,
+  onDomainActivated = null,
   job,
 }) {
   if (job.resourceType === 'application' && PASSENGER_RELEASE_OPERATIONS.has(job.operation)) {
@@ -770,6 +771,9 @@ async function applyReconciliation({
     }
     if (job.operation === OPERATIONS.DOMAIN_ACTIVATE) {
       await domainRegistry.markApplied(job.resourceId, { checksum: job.result.checksum });
+      if (typeof onDomainActivated === 'function') {
+        await Promise.resolve(onDomainActivated({ domainId: job.resourceId })).catch(() => {});
+      }
     }
     return { reconciled: true, outcome: 'succeeded' };
   }
@@ -867,6 +871,7 @@ export async function reconcileCompletedJob({
   passengerReleasePhaseStore = null,
   mailDomainRegistry = null,
   mailServiceIdentityRegistry = null,
+  onDomainActivated = null,
   job,
 }) {
   let reconciliationResult = null;
@@ -881,6 +886,7 @@ export async function reconcileCompletedJob({
       passengerReleasePhaseStore,
       mailDomainRegistry,
       mailServiceIdentityRegistry,
+      onDomainActivated,
       job,
     });
   } catch (error) {

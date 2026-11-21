@@ -212,6 +212,7 @@ export async function startLocalRuntime({
   executorFactory = createLocalJobExecutor,
   acquireLock = acquireLocalExecutionLock,
   reconcile = reconcileCompletedJob,
+  onDomainActivated = null,
   onError = () => {},
   snapshotIntervalMs = DEFAULT_SNAPSHOT_INTERVAL_MS,
 } = {}) {
@@ -329,6 +330,7 @@ export async function startLocalRuntime({
       runtimeBindingRegistry,
       mailDomainRegistry,
       mailServiceIdentityRegistry,
+      ...(typeof onDomainActivated === 'function' ? { onDomainActivated } : {}),
       job,
     });
     if (!result || result.reconciled !== true) {

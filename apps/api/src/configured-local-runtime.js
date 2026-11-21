@@ -59,6 +59,7 @@ export async function startConfiguredLocalRuntime({
   dnsProviderCredentialRegistry = null,
   jobLogStore = null,
   recoverRunningJobs = null,
+  onDomainActivated = null,
   onWebsitePhpToolReceiptRecorded = null,
   createOperations = createLocalHostOperations,
   createCertificateOperationReceipts = createCertificateOperationReceiptStore,
@@ -651,6 +652,7 @@ export async function startConfiguredLocalRuntime({
     snapshotProvider,
     recordExecutionEvidence,
     recoverRunningJobs,
+    ...(typeof onDomainActivated === 'function' ? { onDomainActivated } : {}),
     onError,
   });
 }

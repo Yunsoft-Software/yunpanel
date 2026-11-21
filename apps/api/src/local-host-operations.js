@@ -207,7 +207,15 @@ export function createLocalHostOperations({
   authorizePanelJob = null,
   authorizeWebsiteBackupScheduleJob = null,
   requiresWebsiteProvisioningAuthorization = null,
+  beforeDomainActivate = null,
+  afterDomainActivate = null,
 } = {}) {
+  if (beforeDomainActivate !== null && typeof beforeDomainActivate !== 'function') {
+    throw new Error('beforeDomainActivate must be a function when configured');
+  }
+  if (afterDomainActivate !== null && typeof afterDomainActivate !== 'function') {
+    throw new Error('afterDomainActivate must be a function when configured');
+  }
   if (loadApplicationEnvironment !== null && typeof loadApplicationEnvironment !== 'function') {
     throw new Error('loadApplicationEnvironment must be a function when configured');
   }
@@ -866,8 +874,20 @@ export function createLocalHostOperations({
     [OPERATIONS.DATABASE_BACKUP, executeDatabaseBackup],
     [OPERATIONS.DATABASE_RESTORE, executeDatabaseRestore],
     [OPERATIONS.DNS_RECORD_APPLY, executeDnsRecord],
-    [OPERATIONS.DOMAIN_STAGE, (payload) => nginxManager.stageDomain(payload)],
-    [OPERATIONS.DOMAIN_ACTIVATE, (payload, execution) => nginxManager.activateDomain({ ...payload, activationId: execution?.jobId ?? null })],
+    [OPERATIONS.DOMAIN_STAGE, (payload) => {
+      const websiteId = payload?.websiteId ?? payload?.spec?.websiteId ?? null;
+      return nginxManager.stageDomain(websiteId ? { ...payload, websiteId } : payload);
+    }],
+    [OPERATIONS.DOMAIN_ACTIVATE, async (payload, execution) => {
+      if (beforeDomainActivate) {
+        await beforeDomainActivate(payload);
+      }
+      const activated = await nginxManager.activateDomain({ ...payload, activationId: execution?.jobId ?? null });
+      if (afterDomainActivate) {
+        await Promise.resolve(afterDomainActivate(payload)).catch(() => {});
+      }
+      return activated;
+    }],
     [OPERATIONS.SSL_ISSUE, (payload) => executeCertificate(payload, (input, execution) => acmeManager.issueCertificate(input, execution))],
     [OPERATIONS.SSL_RENEW, async (payload, execution) => {
       const result = await executeCertificate(payload, (input, execution) => acmeManager.renewCertificate(input, execution));

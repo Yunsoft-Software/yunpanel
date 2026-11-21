@@ -1,6 +1,7 @@
 import { AuthError } from './auth-error.js';
 
 const quotaFields = Object.freeze(['maxWebsites', 'maxDiskMb', 'maxTrafficMb', 'maxDatabases']);
+const enforcementFields = Object.freeze(['disk', 'traffic']);
 const count = (value) => Number.isSafeInteger(value) && value >= 0;
 const invalid = () => new AuthError('invalid_customer_quotas', 'Customer quotas must specify maxWebsites, maxDiskMb, maxTrafficMb, and maxDatabases as non-negative integers or null.', 400);
 
@@ -12,9 +13,32 @@ export function initializeCustomerQuotaSchema(db) {
       max_disk_mb INTEGER CHECK(max_disk_mb IS NULL OR (typeof(max_disk_mb) = 'integer' AND max_disk_mb >= 0)),
       max_traffic_mb INTEGER CHECK(max_traffic_mb IS NULL OR (typeof(max_traffic_mb) = 'integer' AND max_traffic_mb >= 0)),
       max_databases INTEGER CHECK(max_databases IS NULL OR (typeof(max_databases) = 'integer' AND max_databases >= 0)),
+      enforce_disk_quota INTEGER NOT NULL DEFAULT 0 CHECK(enforce_disk_quota IN (0, 1)),
+      enforce_traffic_quota INTEGER NOT NULL DEFAULT 0 CHECK(enforce_traffic_quota IN (0, 1)),
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
+  `);
+  const columns = new Set(db.prepare('PRAGMA table_info(auth_customer_quotas)').all().map((column) => column.name));
+  if (!columns.has('enforce_disk_quota')) {
+    db.exec('ALTER TABLE auth_customer_quotas ADD COLUMN enforce_disk_quota INTEGER NOT NULL DEFAULT 0 CHECK(enforce_disk_quota IN (0, 1));');
+  }
+  if (!columns.has('enforce_traffic_quota')) {
+    db.exec('ALTER TABLE auth_customer_quotas ADD COLUMN enforce_traffic_quota INTEGER NOT NULL DEFAULT 0 CHECK(enforce_traffic_quota IN (0, 1));');
+  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS auth_hosting_database_allocations (
+      operation_id TEXT PRIMARY KEY NOT NULL,
+      customer_id TEXT NOT NULL REFERENCES auth_hosting_accounts(user_id) ON DELETE CASCADE,
+      website_id TEXT NOT NULL,
+      server_id TEXT NOT NULL,
+      database_name TEXT NOT NULL,
+      state TEXT NOT NULL CHECK(state IN ('reserved', 'attached', 'released')),
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_auth_hosting_database_allocations_customer_state
+      ON auth_hosting_database_allocations(customer_id, state);
   `);
 }
 
@@ -33,6 +57,269 @@ export function validateCustomerQuotas(input) {
     maxTrafficMb: input.maxTrafficMb,
     maxDatabases: input.maxDatabases,
   };
+}
+
+export function validateCustomerQuotaEnforcement(input, { quotas = null } = {}) {
+  if (input === undefined) return {};
+  if (!input || typeof input !== 'object' || Array.isArray(input)
+    || ![Object.prototype, null].includes(Object.getPrototypeOf(input))) {
+    throw new AuthError('invalid_customer_quotas', 'Customer quota enforcement must be an object containing boolean disk and/or traffic flags.', 400);
+  }
+  for (const key of Object.keys(input)) {
+    if (!enforcementFields.includes(key) || typeof input[key] !== 'boolean') {
+      throw new AuthError('invalid_customer_quotas', 'Customer quota enforcement accepts only boolean disk and traffic fields.', 400);
+    }
+  }
+  const normalized = {};
+  if (Object.hasOwn(input, 'disk')) {
+    if (input.disk === true && (!quotas || quotas.maxDiskMb === null || quotas.maxDiskMb === undefined || !count(quotas.maxDiskMb))) {
+      throw new AuthError('invalid_customer_quotas', 'Enabling disk quota enforcement requires a finite maxDiskMb limit.', 400);
+    }
+    normalized.disk = input.disk;
+  }
+  if (Object.hasOwn(input, 'traffic')) {
+    if (input.traffic === true && (!quotas || quotas.maxTrafficMb === null || quotas.maxTrafficMb === undefined || !count(quotas.maxTrafficMb))) {
+      throw new AuthError('invalid_customer_quotas', 'Enabling traffic quota enforcement requires a finite maxTrafficMb limit.', 400);
+    }
+    normalized.traffic = input.traffic;
+  }
+  return normalized;
+}
+
+export function createCustomerManagedDiskWriteGuard({
+  hostingAccounts = null,
+  getWebsiteOwnerQuotas = null,
+  siteConsumptionInspector = null,
+  measureWebsiteDiskBytes = null,
+} = {}) {
+  const resolveOwnerQuotas = typeof getWebsiteOwnerQuotas === 'function'
+    ? getWebsiteOwnerQuotas
+    : (typeof hostingAccounts?.getWebsiteOwnerQuotas === 'function'
+      ? (websiteId) => hostingAccounts.getWebsiteOwnerQuotas(websiteId)
+      : null);
+
+  const customerLocks = new Map();
+
+  async function withCustomerLock(customerId, action) {
+    const previous = customerLocks.get(customerId) ?? Promise.resolve();
+    let releaseCurrent;
+    const currentGate = new Promise((resolve) => { releaseCurrent = resolve; });
+    const tail = previous.catch(() => {}).then(() => currentGate);
+    customerLocks.set(customerId, tail);
+    await previous.catch(() => {});
+    try {
+      return await action();
+    } finally {
+      releaseCurrent();
+      if (customerLocks.get(customerId) === tail) {
+        customerLocks.delete(customerId);
+      }
+    }
+  }
+
+  async function measureSiteBytes(websiteId) {
+    if (typeof measureWebsiteDiskBytes === 'function') {
+      const bytes = await measureWebsiteDiskBytes(websiteId);
+      return Number.isFinite(bytes) && bytes >= 0 ? bytes : null;
+    }
+    if (typeof siteConsumptionInspector?.measureWebsiteDiskQuotaBytes === 'function') {
+      const result = await siteConsumptionInspector.measureWebsiteDiskQuotaBytes(websiteId);
+      if (result?.ok === true && Number.isFinite(result.bytes) && result.bytes >= 0) {
+        return result.bytes;
+      }
+      return null;
+    }
+    return null;
+  }
+
+  return async function withManagedDiskWriteQuota(context = {}, executeWrite) {
+    if (typeof executeWrite !== 'function') {
+      throw new TypeError('Managed disk write quota guard requires an executeWrite callback');
+    }
+    const {
+      websiteId,
+      incomingBytes = 0,
+      lookupExistingBytes = null,
+    } = context;
+
+    if (typeof resolveOwnerQuotas !== 'function') {
+      return executeWrite();
+    }
+    const initialOwner = await resolveOwnerQuotas(websiteId);
+    if (!initialOwner || initialOwner.quotaEnforcement?.disk !== true
+      || initialOwner.quotas?.maxDiskMb === null || initialOwner.quotas?.maxDiskMb === undefined) {
+      return executeWrite();
+    }
+
+    return withCustomerLock(initialOwner.customerId, async () => {
+      const owner = await resolveOwnerQuotas(websiteId);
+      if (!owner || owner.quotaEnforcement?.disk !== true
+        || owner.quotas?.maxDiskMb === null || owner.quotas?.maxDiskMb === undefined) {
+        return executeWrite();
+      }
+
+      const safeIncoming = Number.isFinite(incomingBytes) && incomingBytes > 0 ? incomingBytes : 0;
+      let existingBytes = 0;
+      if (typeof lookupExistingBytes === 'function') {
+        const found = await lookupExistingBytes();
+        if (Number.isFinite(found) && found > 0) existingBytes = found;
+      }
+
+      const limitBytes = owner.quotas.maxDiskMb * 1024 * 1024;
+      const websiteIds = Array.isArray(owner.websiteIds) && owner.websiteIds.length > 0
+        ? [...new Set(owner.websiteIds)]
+        : [websiteId];
+
+      let currentCustomerTotalBytes = 0;
+      for (const id of websiteIds) {
+        let measured = null;
+        try {
+          measured = await measureSiteBytes(id);
+        } catch {
+          measured = null;
+        }
+        if (measured === null) {
+          throw new AuthError(
+            'customer_disk_quota_unmeasurable',
+            'Müşteri disk kullanımı ölçülemediği için yazma işlemi durduruldu.',
+            503,
+          );
+        }
+        currentCustomerTotalBytes += measured;
+      }
+
+      const projectedBytes = Math.max(0, currentCustomerTotalBytes - existingBytes) + safeIncoming;
+      if (projectedBytes > limitBytes) {
+        throw new AuthError(
+          'customer_disk_quota_exceeded',
+          'Müşteri disk kotası aşıldığı için yeni dosya veya içerik yazılamaz.',
+          409,
+        );
+      }
+
+      return executeWrite();
+    });
+  };
+}
+
+export function createCustomerDatabaseQuotaCoordinator({
+  hostingAccounts = null,
+  databaseBindingRegistry = null,
+} = {}) {
+  const customerLocks = new Map();
+
+  async function withCustomerLock(customerId, action) {
+    const previous = customerLocks.get(customerId) ?? Promise.resolve();
+    let releaseCurrent;
+    const currentGate = new Promise((resolve) => { releaseCurrent = resolve; });
+    const tail = previous.catch(() => {}).then(() => currentGate);
+    customerLocks.set(customerId, tail);
+    await previous.catch(() => {});
+    try {
+      return await action();
+    } finally {
+      releaseCurrent();
+      if (customerLocks.get(customerId) === tail) {
+        customerLocks.delete(customerId);
+      }
+    }
+  }
+
+  function resolveCustomerId({ customerId = null, websiteId = null } = {}) {
+    if (typeof websiteId === 'string' && websiteId && typeof hostingAccounts?.getWebsiteOwnerQuotas === 'function') {
+      const owner = hostingAccounts.getWebsiteOwnerQuotas(websiteId);
+      if (owner?.customerId) return owner.customerId;
+    }
+    if (typeof customerId === 'string' && customerId && typeof hostingAccounts?.getCustomer === 'function') {
+      const customer = hostingAccounts.getCustomer(customerId);
+      if (customer?.kind === 'customer') return customer.id;
+    }
+    return null;
+  }
+
+  async function withCustomerDbLock(target, task) {
+    if (typeof task !== 'function') throw new TypeError('Database quota lock requires a task callback');
+    const customerId = typeof target === 'string'
+      ? resolveCustomerId({ websiteId: target })
+      : resolveCustomerId(target ?? {});
+    if (!customerId) return task(null);
+    return withCustomerLock(customerId, () => task(customerId));
+  }
+
+  async function listAllBindings() {
+    if (typeof databaseBindingRegistry?.listBindings !== 'function') return [];
+    const list = await databaseBindingRegistry.listBindings();
+    return Array.isArray(list) ? list : [];
+  }
+
+  async function reserve(input = {}) {
+    if (typeof hostingAccounts?.reserveCustomerDatabaseAllocation !== 'function') {
+      return { customerId: null, reserved: false };
+    }
+    return withCustomerDbLock({ customerId: input.customerId, websiteId: input.websiteId }, async () => {
+      const activeBindings = await listAllBindings();
+      return hostingAccounts.reserveCustomerDatabaseAllocation({
+        ...input,
+        activeBindings,
+      });
+    });
+  }
+
+  async function finalize(operationId, state, target = null) {
+    if (typeof hostingAccounts?.finalizeCustomerDatabaseAllocation !== 'function') {
+      return { operationId: operationId ?? null, state, updated: false };
+    }
+    const run = () => hostingAccounts.finalizeCustomerDatabaseAllocation(operationId, state);
+    return target ? withCustomerDbLock(target, run) : run();
+  }
+
+  async function reserveAndRun(input = {}, bindStep) {
+    if (typeof bindStep !== 'function') throw new TypeError('reserveAndRun requires a bindStep callback');
+    if (typeof hostingAccounts?.reserveCustomerDatabaseAllocation !== 'function') {
+      return bindStep({ customerId: null, reserved: false });
+    }
+    return withCustomerDbLock({ customerId: input.customerId, websiteId: input.websiteId }, async () => {
+      const activeBindings = await listAllBindings();
+      const reservation = hostingAccounts.reserveCustomerDatabaseAllocation({
+        ...input,
+        activeBindings,
+      });
+      let attached = false;
+      try {
+        const result = await bindStep(reservation);
+        if (reservation?.reserved && typeof hostingAccounts?.finalizeCustomerDatabaseAllocation === 'function') {
+          hostingAccounts.finalizeCustomerDatabaseAllocation(reservation.operationId, 'attached');
+          attached = true;
+        }
+        return result;
+      } catch (error) {
+        if (reservation?.reserved && !reservation.reusedAttached && !attached
+          && typeof hostingAccounts?.finalizeCustomerDatabaseAllocation === 'function') {
+          try { hostingAccounts.finalizeCustomerDatabaseAllocation(reservation.operationId, 'released'); } catch {}
+        }
+        throw error;
+      }
+    });
+  }
+
+  async function bindAndAttach({ websiteId, customerId = null, operationId = null } = {}, bindStep) {
+    if (typeof bindStep !== 'function') throw new TypeError('bindAndAttach requires a bindStep callback');
+    return withCustomerDbLock({ customerId, websiteId }, async () => {
+      const result = await bindStep();
+      if (operationId && typeof hostingAccounts?.finalizeCustomerDatabaseAllocation === 'function') {
+        hostingAccounts.finalizeCustomerDatabaseAllocation(operationId, 'attached');
+      }
+      return result;
+    });
+  }
+
+  return Object.freeze({
+    withCustomerDbLock,
+    reserve,
+    finalize,
+    reserveAndRun,
+    bindAndAttach,
+  });
 }
 
 export function assertCustomerQuotaCapacity({ quotas, usage, resource = 'websites', amount = 1 } = {}) {
@@ -90,6 +377,11 @@ export function evaluateResourceMetric({
   reasonCode = null,
   reason = null,
   definedLimitScope = null,
+  completeness = null,
+  rotationGapCount = null,
+  meterStartedAt = null,
+  accountingMode = null,
+  includesStaticAssets = null,
 } = {}) {
   const isMeasured = measured !== null && measured !== undefined && typeof measured === 'number' && Number.isFinite(measured);
   const measuredValue = isMeasured ? measured : null;
@@ -145,6 +437,11 @@ export function evaluateResourceMetric({
     reasonCode: normalizeOptionalText(reasonCode),
     reason: normalizeOptionalText(reason),
     definedLimitScope: normalizeOptionalText(definedLimitScope),
+    ...(normalizeOptionalText(completeness) !== null ? { completeness: normalizeOptionalText(completeness) } : {}),
+    ...(Number.isSafeInteger(rotationGapCount) && rotationGapCount >= 0 ? { rotationGapCount } : {}),
+    ...(normalizeMeasuredTimestamp(meterStartedAt) !== null ? { meterStartedAt: normalizeMeasuredTimestamp(meterStartedAt) } : {}),
+    ...(normalizeOptionalText(accountingMode) !== null ? { accountingMode: normalizeOptionalText(accountingMode) } : {}),
+    ...(typeof includesStaticAssets === 'boolean' ? { includesStaticAssets } : {}),
   });
 }
 
@@ -185,6 +482,11 @@ export function buildSiteConsumptionReport({
       reasonCode: detail?.reasonCode ?? null,
       reason: detail?.reason ?? null,
       definedLimitScope: definedLimitScopes?.[key] ?? detail?.definedLimitScope ?? null,
+      completeness: detail?.completeness ?? null,
+      rotationGapCount: detail?.rotationGapCount ?? null,
+      meterStartedAt: detail?.meterStartedAt ?? null,
+      accountingMode: detail?.accountingMode ?? null,
+      includesStaticAssets: detail?.includesStaticAssets ?? null,
     });
 
     metrics[key] = evaluated;
@@ -398,8 +700,14 @@ export function createSiteConsumptionInspector({
               if (traffic.trafficMb !== undefined) measurements.trafficMb = traffic.trafficMb;
               metricDetails.trafficMb = {
                 measuredAt: traffic.measuredAt ?? null,
+                bytes: traffic.bytes ?? null,
                 period: traffic.period ?? null,
                 scope: traffic.scope ?? null,
+                completeness: traffic.completeness ?? null,
+                rotationGapCount: traffic.rotationGapCount ?? null,
+                meterStartedAt: traffic.meterStartedAt ?? null,
+                accountingMode: traffic.accountingMode ?? null,
+                includesStaticAssets: typeof traffic.includesStaticAssets === 'boolean' ? traffic.includesStaticAssets : null,
                 reasonCode: traffic.reasonCode ?? null,
                 reason: traffic.reason ?? null,
               };
@@ -523,6 +831,47 @@ export function createSiteConsumptionInspector({
         metricDetails,
         definedLimitScopes,
       });
+    },
+    async measureWebsiteDiskQuotaBytes(websiteId, { signal = null } = {}) {
+      if (!websiteId || typeof websiteId !== 'string') {
+        return Object.freeze({ ok: false, bytes: null, reasonCode: 'invalid_website_id' });
+      }
+      let website = null;
+      if (websiteRegistry?.getWebsite) {
+        try { website = await websiteRegistry.getWebsite(websiteId); } catch { website = null; }
+      }
+      if (typeof systemInspector?.getDiskQuotaBytes !== 'function') {
+        return Object.freeze({
+          ok: false,
+          bytes: null,
+          reasonCode: 'disk_quota_measurement_unavailable',
+          reason: 'Disk kota ölçüm adaptörü kullanılamıyor.',
+        });
+      }
+      try {
+        const result = await systemInspector.getDiskQuotaBytes(websiteId, website, { signal });
+        if (result?.ok === true && Number.isFinite(result.bytes) && result.bytes >= 0) {
+          return Object.freeze({
+            ok: true,
+            bytes: result.bytes,
+            measuredAt: result.measuredAt ?? new Date().toISOString(),
+            scope: result.scope ?? 'active_release_root_apparent',
+          });
+        }
+        return Object.freeze({
+          ok: false,
+          bytes: null,
+          reasonCode: result?.reasonCode ?? 'disk_measurement_failed',
+          reason: result?.reason ?? 'Disk kota ölçümü doğrulanamadı.',
+        });
+      } catch {
+        return Object.freeze({
+          ok: false,
+          bytes: null,
+          reasonCode: 'disk_measurement_failed',
+          reason: 'Disk kota ölçümü doğrulanamadı.',
+        });
+      }
     },
   });
 }

@@ -101,11 +101,16 @@ function publicEvidence(spec) {
   });
 }
 
-export function createWebsiteDomainActivationProvisioningHandler({ domainRegistry, retirementProvider = null } = {}) {
+export function createWebsiteDomainActivationProvisioningHandler({
+  domainRegistry,
+  retirementProvider = null,
+  onDomainActivated = null,
+} = {}) {
   if (!domainRegistry || typeof domainRegistry.getDomain !== 'function'
     || typeof domainRegistry.activateProvisionedDomains !== 'function'
     || typeof domainRegistry.resetProvisionedDomains !== 'function'
-    || (retirementProvider !== null && typeof retirementProvider?.withRetiredRouting !== 'function')) {
+    || (retirementProvider !== null && typeof retirementProvider?.withRetiredRouting !== 'function')
+    || (onDomainActivated !== null && typeof onDomainActivated !== 'function')) {
     throw new WebsiteDomainActivationProvisioningError(
       'website_domain_activation_dependencies_invalid',
       'Provisioned Domain activation dependencies are invalid',
@@ -161,6 +166,9 @@ export function createWebsiteDomainActivationProvisioningHandler({ domainRegistr
         'website_domain_activation_unverified',
         'Provisioned Domain state did not match the active Nginx evidence',
       );
+    }
+    if (onDomainActivated) {
+      await Promise.resolve(onDomainActivated({ websiteId: spec.websiteId, domains: spec.domains })).catch(() => {});
     }
     return publicEvidence(spec);
   }

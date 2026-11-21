@@ -253,13 +253,25 @@ export function createAuthStore({
     if (row.kind === 'customer') {
       const quotaTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'auth_customer_quotas'").get();
       if (quotaTable) {
-        const quotaRow = db.prepare('SELECT max_websites AS maxWebsites, max_disk_mb AS maxDiskMb, max_traffic_mb AS maxTrafficMb, max_databases AS maxDatabases FROM auth_customer_quotas WHERE customer_id = ?').get(userId);
+        const quotaColumns = new Set(db.prepare('PRAGMA table_info(auth_customer_quotas)').all().map((column) => column.name));
+        const hasEnforcementColumns = quotaColumns.has('enforce_disk_quota') && quotaColumns.has('enforce_traffic_quota');
+        const quotaRow = db.prepare(
+          hasEnforcementColumns
+            ? 'SELECT max_websites AS maxWebsites, max_disk_mb AS maxDiskMb, max_traffic_mb AS maxTrafficMb, max_databases AS maxDatabases, COALESCE(enforce_disk_quota, 0) AS enforceDiskQuota, COALESCE(enforce_traffic_quota, 0) AS enforceTrafficQuota FROM auth_customer_quotas WHERE customer_id = ?'
+            : 'SELECT max_websites AS maxWebsites, max_disk_mb AS maxDiskMb, max_traffic_mb AS maxTrafficMb, max_databases AS maxDatabases FROM auth_customer_quotas WHERE customer_id = ?',
+        ).get(userId);
         if (quotaRow) {
           profile.quotas = {
             maxWebsites: quotaRow.maxWebsites,
             maxDiskMb: quotaRow.maxDiskMb,
             maxTrafficMb: quotaRow.maxTrafficMb,
             maxDatabases: quotaRow.maxDatabases,
+          };
+          profile.quotaEnforcement = {
+            websites: true,
+            databases: true,
+            disk: Boolean(quotaRow.enforceDiskQuota),
+            traffic: Boolean(quotaRow.enforceTrafficQuota),
           };
         }
       }

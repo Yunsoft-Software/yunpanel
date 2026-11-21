@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { createDatabaseCredentialEvidenceInspector } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { databaseCredentialRegistryInternals } from './database-credential-registry.js';
@@ -242,6 +243,9 @@ export function createWebsiteDatabaseProvisioningHandler({
   databaseHealthProvider,
   evidenceInspector = createDatabaseCredentialEvidenceInspector(),
   waitForTerminalJob = (job) => defaultWaitForTerminalJob(jobRegistry, job),
+  databaseQuotaCoordinator = null,
+  reserveDatabaseQuota = null,
+  finalizeDatabaseQuota = null,
 } = {}) {
   if (!jobRegistry || typeof jobRegistry.enqueue !== 'function' || typeof jobRegistry.getJob !== 'function'
     || !databaseBindingRegistry || typeof databaseBindingRegistry.getByDatabase !== 'function'
@@ -259,6 +263,11 @@ export function createWebsiteDatabaseProvisioningHandler({
     || typeof databaseInventoryProvider !== 'function' || typeof databaseHealthProvider !== 'function'
     || !evidenceInspector || typeof evidenceInspector.inspectApplied !== 'function'
     || typeof evidenceInspector.inspectDeleted !== 'function'
+    || (databaseQuotaCoordinator !== null && (typeof databaseQuotaCoordinator.reserve !== 'function'
+      || typeof databaseQuotaCoordinator.bindAndAttach !== 'function'
+      || typeof databaseQuotaCoordinator.finalize !== 'function'))
+    || (reserveDatabaseQuota !== null && typeof reserveDatabaseQuota !== 'function')
+    || (finalizeDatabaseQuota !== null && typeof finalizeDatabaseQuota !== 'function')
     || typeof waitForTerminalJob !== 'function') {
     throw new WebsiteDatabaseProvisioningError(
       'website_database_dependencies_invalid',
@@ -372,63 +381,120 @@ export function createWebsiteDatabaseProvisioningHandler({
 
   async function apply(context = {}) {
     const intent = databaseIntent(context.intent, context.websiteId);
-    assertSecurity(await databaseHealthProvider(intent.serverId));
-    const createJob = await enqueueDatabase(intent, context, OPERATIONS.DATABASE_CREATE);
-    let current = await state(intent);
-    if (!current.exists) {
-      throw new WebsiteDatabaseProvisioningError(
-        'website_database_create_unconfirmed',
-        'Database create job succeeded but the schema is absent from live inventory',
-        503,
+    const quotaOperationId = typeof context.operationId === 'string' && context.operationId
+      ? `site-create-db:${context.operationId}`
+      : `website-db-prov:${randomUUID()}`;
+    let reservation = null;
+    let attached = false;
+    try {
+      if (databaseQuotaCoordinator) {
+        reservation = await databaseQuotaCoordinator.reserve({
+          websiteId: intent.websiteId,
+          serverId: intent.serverId,
+          databaseName: intent.databaseName,
+          operationId: quotaOperationId,
+        });
+      } else if (typeof reserveDatabaseQuota === 'function') {
+        const activeBindings = typeof databaseBindingRegistry.listBindings === 'function'
+          ? await databaseBindingRegistry.listBindings()
+          : [];
+        reservation = await reserveDatabaseQuota({
+          websiteId: intent.websiteId,
+          serverId: intent.serverId,
+          databaseName: intent.databaseName,
+          operationId: quotaOperationId,
+          activeBindings,
+        });
+      }
+      assertSecurity(await databaseHealthProvider(intent.serverId));
+      const createJob = await enqueueDatabase(intent, context, OPERATIONS.DATABASE_CREATE);
+      let current = await state(intent);
+      if (!current.exists) {
+        throw new WebsiteDatabaseProvisioningError(
+          'website_database_create_unconfirmed',
+          'Database create job succeeded but the schema is absent from live inventory',
+          503,
+        );
+      }
+      let binding = current.binding;
+      const attachOperationId = reservation?.operationId ?? quotaOperationId;
+      if (databaseQuotaCoordinator) {
+        binding = await databaseQuotaCoordinator.bindAndAttach({
+          websiteId: intent.websiteId,
+          operationId: attachOperationId,
+        }, async () => {
+          if (binding) return binding;
+          return databaseBindingRegistry.bindDatabase({
+            serverId: intent.serverId,
+            databaseName: intent.databaseName,
+            websiteId: intent.websiteId,
+            applicationId: intent.applicationId,
+            confirmation: `bind-database:${intent.serverId}:${intent.databaseName}:${intent.websiteId}`,
+          });
+        });
+        attached = true;
+      } else {
+        if (!binding) {
+          binding = await databaseBindingRegistry.bindDatabase({
+            serverId: intent.serverId,
+            databaseName: intent.databaseName,
+            websiteId: intent.websiteId,
+            applicationId: intent.applicationId,
+            confirmation: `bind-database:${intent.serverId}:${intent.databaseName}:${intent.websiteId}`,
+          });
+        }
+        if (typeof finalizeDatabaseQuota === 'function') {
+          await finalizeDatabaseQuota(attachOperationId, 'attached');
+          attached = true;
+        }
+      }
+      binding = assertBinding(binding, intent);
+      let credential = await databaseCredentialRegistry.getForBinding(binding.id);
+      if (!credential) {
+        const username = databaseCredentialRegistryInternals.usernameFor(binding.id);
+        credential = await databaseCredentialRegistry.createCredential({
+          databaseBindingId: binding.id,
+          privileges: intent.privileges,
+          confirmation: `create-database-credential:${binding.id}:${username}`,
+        });
+      }
+      credential = assertCredential(credential, binding, intent);
+      const applied = await queueCredential(
+        intent,
+        credential,
+        binding,
+        OPERATIONS.DATABASE_CREDENTIAL_APPLY,
+        context,
       );
-    }
-    let binding = current.binding;
-    if (!binding) {
-      binding = await databaseBindingRegistry.bindDatabase({
-        serverId: intent.serverId,
-        databaseName: intent.databaseName,
-        websiteId: intent.websiteId,
-        applicationId: intent.applicationId,
-        confirmation: `bind-database:${intent.serverId}:${intent.databaseName}:${intent.websiteId}`,
+      const host = await evidenceInspector.inspectApplied(applied.bundle);
+      if (host?.applied !== true || host.desiredStateSha256 !== applied.bundle.desiredStateSha256) {
+        throw new WebsiteDatabaseProvisioningError(
+          'website_database_grants_unconfirmed',
+          'Database grant application could not be confirmed from live host state',
+          503,
+        );
+      }
+      current = await state(intent);
+      if (!current.exists || current.binding?.id !== binding.id || current.credential?.id !== credential.id) {
+        throw new WebsiteDatabaseProvisioningError(
+          'website_database_state_drift',
+          'Website database state changed during provisioning',
+        );
+      }
+      return evidenceFrom(applied.bundle, {
+        databaseCreateJobId: createJob.id,
+        credentialApplyJobId: applied.job.id,
       });
+    } catch (error) {
+      if (reservation?.reserved && !reservation.reusedAttached && !attached) {
+        if (databaseQuotaCoordinator) {
+          try { await databaseQuotaCoordinator.finalize(reservation.operationId, 'released', { websiteId: intent.websiteId }); } catch {}
+        } else if (typeof finalizeDatabaseQuota === 'function') {
+          try { await finalizeDatabaseQuota(reservation.operationId, 'released'); } catch {}
+        }
+      }
+      throw error;
     }
-    binding = assertBinding(binding, intent);
-    let credential = await databaseCredentialRegistry.getForBinding(binding.id);
-    if (!credential) {
-      const username = databaseCredentialRegistryInternals.usernameFor(binding.id);
-      credential = await databaseCredentialRegistry.createCredential({
-        databaseBindingId: binding.id,
-        privileges: intent.privileges,
-        confirmation: `create-database-credential:${binding.id}:${username}`,
-      });
-    }
-    credential = assertCredential(credential, binding, intent);
-    const applied = await queueCredential(
-      intent,
-      credential,
-      binding,
-      OPERATIONS.DATABASE_CREDENTIAL_APPLY,
-      context,
-    );
-    const host = await evidenceInspector.inspectApplied(applied.bundle);
-    if (host?.applied !== true || host.desiredStateSha256 !== applied.bundle.desiredStateSha256) {
-      throw new WebsiteDatabaseProvisioningError(
-        'website_database_grants_unconfirmed',
-        'Database grant application could not be confirmed from live host state',
-        503,
-      );
-    }
-    current = await state(intent);
-    if (!current.exists || current.binding?.id !== binding.id || current.credential?.id !== credential.id) {
-      throw new WebsiteDatabaseProvisioningError(
-        'website_database_state_drift',
-        'Website database state changed during provisioning',
-      );
-    }
-    return evidenceFrom(applied.bundle, {
-      databaseCreateJobId: createJob.id,
-      credentialApplyJobId: applied.job.id,
-    });
   }
 
   async function inspectCompensation(context = {}) {
@@ -508,6 +574,13 @@ export function createWebsiteDatabaseProvisioningHandler({
         });
       }
       await enqueueDatabase(intent, context, OPERATIONS.DATABASE_DELETE);
+    }
+    if (typeof context.operationId === 'string' && context.operationId) {
+      if (databaseQuotaCoordinator) {
+        try { await databaseQuotaCoordinator.finalize(`site-create-db:${context.operationId}`, 'released', { websiteId: intent.websiteId }); } catch {}
+      } else if (typeof finalizeDatabaseQuota === 'function') {
+        try { await finalizeDatabaseQuota(`site-create-db:${context.operationId}`, 'released'); } catch {}
+      }
     }
     return inspectCompensation(context);
   }

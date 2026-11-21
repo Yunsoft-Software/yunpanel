@@ -192,6 +192,7 @@ export function createAuthenticatedApi({
   toolGatewayAuthorizer = null,
   automationHandler = null,
   licenseEntitlementService = null,
+  onCustomerQuotaUpdated = null,
 }) {
   const boundary = createBrowserAuthBoundary({ store, publicOrigin, development, ownerMfaRequired, proxyToken, trustedProxyIps });
   const { localDevelopment, ownerPolicy, cookieName, mfaCookieName, readCookie, checkOrigin } = boundary;
@@ -441,6 +442,7 @@ export function createAuthenticatedApi({
           readJson,
           json,
           licenseEntitlementService,
+          onCustomerQuotaUpdated,
         });
       }
       if (pathname === '/api/audit') return handleAuditRead({ request, response, query: url.searchParams, store, json });

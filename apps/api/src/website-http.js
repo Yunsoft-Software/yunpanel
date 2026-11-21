@@ -153,6 +153,8 @@ export function mountWebsiteRoutes(app, {
   customerLookup = null,
   siteConsumptionInspector = null,
   websiteOwnerQuotasLookup = null,
+  diskQuotaCapabilityLookup = null,
+  siteTrafficMetaLookup = null,
 } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function' || typeof app.patch !== 'function') throw new Error('Express application is required');
   if (!websiteRegistry || typeof websiteRegistry.listWebsites !== 'function'
@@ -286,9 +288,49 @@ export function mountWebsiteRoutes(app, {
       }
     }
 
-    const enforcedLimits = website.enforcedLimits ?? {};
-    return siteConsumptionInspector
-      ? siteConsumptionInspector.inspectWebsite(website.id, {
+    const [diskCapability, trafficMeta] = await Promise.all([
+      typeof diskQuotaCapabilityLookup === 'function'
+        ? Promise.resolve().then(() => diskQuotaCapabilityLookup(website)).catch(() => null)
+        : Promise.resolve(null),
+      typeof siteTrafficMetaLookup === 'function'
+        ? Promise.resolve().then(() => siteTrafficMetaLookup(website.id)).catch(() => null)
+        : Promise.resolve(null),
+    ]);
+
+    const enforcedLimits = {};
+    const ownerEnforcement = ownerQuotaInfo?.quotaEnforcement && typeof ownerQuotaInfo.quotaEnforcement === 'object'
+      ? ownerQuotaInfo.quotaEnforcement
+      : null;
+    const trafficEnforcementRequested = Boolean(
+      ownerQuotas
+      && typeof ownerQuotas === 'object'
+      && ownerQuotas.maxTrafficMb !== null
+      && ownerQuotas.maxTrafficMb !== undefined
+      && ownerEnforcement?.traffic === true,
+    );
+    const trafficGuardReady = trafficMeta?.trafficGuardReady === true;
+
+    if (ownerQuotas && typeof ownerQuotas === 'object') {
+      if (ownerQuotas.maxDatabases !== null && ownerQuotas.maxDatabases !== undefined && ownerEnforcement?.databases !== false) {
+        enforcedLimits.databases = ownerQuotas.maxDatabases;
+      }
+      if (ownerQuotas.maxDiskMb !== null && ownerQuotas.maxDiskMb !== undefined && ownerEnforcement?.disk === true) {
+        enforcedLimits.diskSpaceMb = ownerQuotas.maxDiskMb;
+      }
+      if (trafficEnforcementRequested && trafficGuardReady) {
+        enforcedLimits.trafficMb = ownerQuotas.maxTrafficMb;
+      }
+    }
+    if (website.enforcedLimits && typeof website.enforcedLimits === 'object') {
+      for (const [key, value] of Object.entries(website.enforcedLimits)) {
+        if (value !== undefined) {
+          enforcedLimits[key] = value;
+        }
+      }
+    }
+
+    const baseReport = siteConsumptionInspector
+      ? await siteConsumptionInspector.inspectWebsite(website.id, {
         customerId: resolvedCustomerId,
         definedLimits,
         enforcedLimits,
@@ -302,6 +344,74 @@ export function mountWebsiteRoutes(app, {
         enforcedLimits,
         definedLimitScopes,
       });
+
+    const nativeHardQuotaSupported = diskCapability?.nativeHardQuotaSupported === true;
+    const nativeQuotaCapability = diskCapability?.enforcementMode === 'native_quota_available'
+      ? 'native_quota_available'
+      : 'managed_write_guard';
+
+    const diskSpaceMb = Object.freeze({
+      ...baseReport.metrics.diskSpaceMb,
+      enforcementMode: 'managed_write_guard',
+      nativeHardQuotaSupported,
+      nativeQuotaCapability,
+      ...(baseReport.metrics.diskSpaceMb.enforcedLimit !== null
+        ? { enforcementScope: 'managed_write_guard' }
+        : {}),
+    });
+
+    const databases = Object.freeze({
+      ...baseReport.metrics.databases,
+      ...(baseReport.metrics.databases.enforcedLimit !== null
+        ? { enforcementScope: 'customer_account_databases' }
+        : {}),
+    });
+
+    const trafficBase = baseReport.metrics.trafficMb;
+    const trafficMb = Object.freeze({
+      ...trafficBase,
+      blocked: trafficMeta?.blocked === true,
+      trafficGuardReady,
+      ...(trafficEnforcementRequested ? { trafficEnforcementRequested: true } : {}),
+      ...(!trafficBase.accountingMode && typeof trafficMeta?.accountingMode === 'string'
+        ? { accountingMode: trafficMeta.accountingMode }
+        : {}),
+      ...(typeof trafficBase.includesStaticAssets !== 'boolean' && typeof trafficMeta?.includesStaticAssets === 'boolean'
+        ? { includesStaticAssets: trafficMeta.includesStaticAssets }
+        : {}),
+      ...(trafficBase.enforcedLimit !== null
+        ? { enforcementScope: 'nginx_monthly_http_limit' }
+        : {}),
+    });
+
+    const metrics = Object.freeze({
+      ...baseReport.metrics,
+      diskSpaceMb,
+      databases,
+      trafficMb,
+    });
+
+    const categories = Object.freeze({
+      ...baseReport.categories,
+      disk: Object.freeze({
+        ...baseReport.categories.disk,
+        spaceMb: diskSpaceMb,
+      }),
+      database: Object.freeze({
+        ...baseReport.categories.database,
+        databases,
+      }),
+      traffic: Object.freeze({
+        ...baseReport.categories.traffic,
+        usageMb: trafficMb,
+      }),
+    });
+
+    return Object.freeze({
+      ...baseReport,
+      metrics,
+      categories,
+    });
   }
 
   async function handleConsumptionRoute(request, response) {

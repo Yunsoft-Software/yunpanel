@@ -70,6 +70,7 @@ export async function handleHostingAccountAdmin({
   readJson,
   json,
   licenseEntitlementService = null,
+  onCustomerQuotaUpdated = null,
 }) {
   const accounts = store.users?.hostingAccounts;
   const actor = requireHostingActor(accounts, rawToken, requireManagement);
@@ -164,6 +165,9 @@ export async function handleHostingAccountAdmin({
     }
     const body = await readJson(request);
     const account = call('updateCustomerQuotas', match[1], body);
+    if (typeof onCustomerQuotaUpdated === 'function') {
+      await onCustomerQuotaUpdated({ customerId: match[1], account });
+    }
     return json(response, 200, { data: { account, accessGranted: false } });
   }
   if (match?.[2] === 'status' && request.method === 'PATCH') {

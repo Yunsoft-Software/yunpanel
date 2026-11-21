@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'node:path';
+import { AuthError } from './auth-error.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { SiteFileManagerError } from './site-file-manager.js';
 import { SiteFileWorkerError, siteFileWorkerInternals } from './site-file-worker.js';
@@ -78,7 +79,10 @@ function asyncRoute(handler) {
   return async (request, response, next) => {
     try { return await handler(request, response); }
     catch (error) {
-      if (error instanceof SiteFileHttpError || error instanceof SiteFileManagerError || error instanceof SiteFileWorkerError) return next(error);
+      if (error instanceof SiteFileHttpError || error instanceof SiteFileManagerError
+        || error instanceof SiteFileWorkerError || error instanceof AuthError) {
+        return next(error);
+      }
       return next(new SiteFileHttpError('site_file_backend_failed', 'Site file request could not be completed', 503));
     }
   };
@@ -89,10 +93,51 @@ function downloadName(filePath) {
   return encodeURIComponent(name).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
 }
 
-export function mountSiteFileRoutes(app, { siteFileManager } = {}) {
+async function lookupExistingFileBytes(siteFileManager, websiteId, rawPath, { allowReadTextFallback = false } = {}) {
+  let normalizedPath;
+  try {
+    normalizedPath = siteFileWorkerInternals.relativePath(rawPath);
+  } catch {
+    return 0;
+  }
+  const parentDir = path.posix.dirname(normalizedPath);
+  const listPath = parentDir === '.' ? '' : parentDir;
+  try {
+    const listing = await siteFileManager.execute(websiteId, { operation: 'list', path: listPath });
+    const entry = Array.isArray(listing?.entries)
+      ? listing.entries.find((item) => item && item.path === normalizedPath)
+      : null;
+    if (entry?.type === 'file' && Number.isSafeInteger(entry.size) && entry.size >= 0) {
+      return entry.size;
+    }
+    return 0;
+  } catch (error) {
+    if (allowReadTextFallback && error?.code === 'site_file_list_too_large') {
+      try {
+        const existing = await siteFileManager.execute(websiteId, { operation: 'read_text', path: normalizedPath });
+        if (typeof existing?.content === 'string') {
+          return Buffer.byteLength(existing.content, 'utf8');
+        }
+      } catch {
+        return 0;
+      }
+    }
+    return 0;
+  }
+}
+
+export function mountSiteFileRoutes(app, { siteFileManager, withManagedDiskWriteQuota = null } = {}) {
   if (!app || !siteFileManager || typeof siteFileManager.execute !== 'function') {
     throw new TypeError('Site file HTTP dependencies are required');
   }
+  if (withManagedDiskWriteQuota !== null && typeof withManagedDiskWriteQuota !== 'function') {
+    throw new TypeError('Site file managed disk quota guard must be a function');
+  }
+  const runWrite = (context, executeWrite) => (
+    withManagedDiskWriteQuota
+      ? withManagedDiskWriteQuota(context, executeWrite)
+      : executeWrite()
+  );
 
   app.get('/api/websites/:websiteId/files', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const data = await siteFileManager.execute(request.params.websiteId, { operation: 'list', path: queryPath(request.query, { optional: true }) });
@@ -120,9 +165,15 @@ export function mountSiteFileRoutes(app, { siteFileManager } = {}) {
   app.put('/api/websites/:websiteId/files/upload', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const filePath = queryPath(request.query);
     const content = await rawBody(request);
-    const data = await siteFileManager.execute(request.params.websiteId, {
+    const data = await runWrite({
+      websiteId: request.params.websiteId,
+      incomingBytes: content.length,
+      operation: 'upload',
+      path: filePath,
+      lookupExistingBytes: () => lookupExistingFileBytes(siteFileManager, request.params.websiteId, filePath),
+    }, () => siteFileManager.execute(request.params.websiteId, {
       operation: 'upload', path: filePath, content: content.toString('base64'),
-    });
+    }));
     return response.status(data.created ? 201 : 200).json({ data });
   }));
 
@@ -132,7 +183,13 @@ export function mountSiteFileRoutes(app, { siteFileManager } = {}) {
       || typeof request.body.expectedSha256 !== 'string') {
       throw new SiteFileHttpError('site_file_request_invalid', 'Text edit request fields are invalid');
     }
-    const data = await siteFileManager.execute(request.params.websiteId, { operation: 'write_text', ...request.body });
+    const data = await runWrite({
+      websiteId: request.params.websiteId,
+      incomingBytes: Buffer.byteLength(request.body.content, 'utf8'),
+      operation: 'write_text',
+      path: request.body.path,
+      lookupExistingBytes: () => lookupExistingFileBytes(siteFileManager, request.params.websiteId, request.body.path, { allowReadTextFallback: true }),
+    }, () => siteFileManager.execute(request.params.websiteId, { operation: 'write_text', ...request.body }));
     return response.json({ data });
   }));
 
@@ -150,7 +207,12 @@ export function mountSiteFileRoutes(app, { siteFileManager } = {}) {
     if (!exactObject(request.body, ['path']) || typeof request.body.path !== 'string') {
       throw new SiteFileHttpError('site_file_request_invalid', 'File creation request fields are invalid');
     }
-    const data = await siteFileManager.execute(request.params.websiteId, { operation: 'create_file', path: request.body.path });
+    const data = await runWrite({
+      websiteId: request.params.websiteId,
+      incomingBytes: 0,
+      operation: 'create_file',
+      path: request.body.path,
+    }, () => siteFileManager.execute(request.params.websiteId, { operation: 'create_file', path: request.body.path }));
     return response.status(201).json({ data });
   }));
 
@@ -158,7 +220,12 @@ export function mountSiteFileRoutes(app, { siteFileManager } = {}) {
     if (!exactObject(request.body, ['path']) || typeof request.body.path !== 'string') {
       throw new SiteFileHttpError('site_file_request_invalid', 'Directory request fields are invalid');
     }
-    const data = await siteFileManager.execute(request.params.websiteId, { operation: 'mkdir', path: request.body.path });
+    const data = await runWrite({
+      websiteId: request.params.websiteId,
+      incomingBytes: 0,
+      operation: 'mkdir',
+      path: request.body.path,
+    }, () => siteFileManager.execute(request.params.websiteId, { operation: 'mkdir', path: request.body.path }));
     return response.status(201).json({ data });
   }));
 

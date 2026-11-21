@@ -25,6 +25,7 @@ export async function handleUserAdmin({
   readJson,
   json,
   licenseEntitlementService = null,
+  onCustomerQuotaUpdated = null,
 }) {
   if (isHostingAccountPath(pathname)) {
     return handleHostingAccountAdmin({
@@ -38,6 +39,7 @@ export async function handleUserAdmin({
       readJson,
       json,
       licenseEntitlementService,
+      onCustomerQuotaUpdated,
     });
   }
   const collection = pathname === '/api/users';

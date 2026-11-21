@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { isInfrastructureDatabase } from '@yunpanel/shared';
 import { AuthError } from './auth-error.js';
 import { createHostingSiteAllocationStore } from './hosting-site-allocation-store.js';
 import { hostingWebsitesForCapacity } from './hosting-site-allocation-schema.js';
@@ -8,6 +9,7 @@ import { assertResellerCapacity, countResellerUsage, validateResellerLimits } fr
 import {
   initializeCustomerQuotaSchema,
   validateCustomerQuotas,
+  validateCustomerQuotaEnforcement,
   assertCustomerQuotaWithinResellerCapacity,
 } from './customer-quotas.js';
 
@@ -127,10 +129,45 @@ export function createHostingAccountStore({
       websites: hostingWebsitesForCapacity(db),
     });
   }
+  function customerQuotaRecord(id) {
+    const row = db.prepare(`SELECT
+      max_websites AS maxWebsites,
+      max_disk_mb AS maxDiskMb,
+      max_traffic_mb AS maxTrafficMb,
+      max_databases AS maxDatabases,
+      COALESCE(enforce_disk_quota, 0) AS enforceDiskQuota,
+      COALESCE(enforce_traffic_quota, 0) AS enforceTrafficQuota
+      FROM auth_customer_quotas WHERE customer_id = ?`).get(id);
+    if (!row) {
+      return {
+        quotas: { maxWebsites: null, maxDiskMb: null, maxTrafficMb: null, maxDatabases: null },
+        quotaEnforcement: { websites: true, databases: true, disk: false, traffic: false },
+      };
+    }
+    return {
+      quotas: validateCustomerQuotas({
+        maxWebsites: row.maxWebsites,
+        maxDiskMb: row.maxDiskMb,
+        maxTrafficMb: row.maxTrafficMb,
+        maxDatabases: row.maxDatabases,
+      }),
+      quotaEnforcement: {
+        websites: true,
+        databases: true,
+        disk: Boolean(row.enforceDiskQuota),
+        traffic: Boolean(row.enforceTrafficQuota),
+      },
+    };
+  }
   function customerQuotas(id) {
-    const row = db.prepare('SELECT max_websites AS maxWebsites, max_disk_mb AS maxDiskMb, max_traffic_mb AS maxTrafficMb, max_databases AS maxDatabases FROM auth_customer_quotas WHERE customer_id = ?').get(id);
-    if (!row) return { maxWebsites: null, maxDiskMb: null, maxTrafficMb: null, maxDatabases: null };
-    return validateCustomerQuotas(row);
+    return customerQuotaRecord(id).quotas;
+  }
+  function customerWebsiteIds(id, { includeReserved = false } = {}) {
+    const stateFilter = includeReserved ? "state IN ('reserved', 'attached')" : "state = 'attached'";
+    return db.prepare(`SELECT DISTINCT website_id FROM (
+      SELECT website_id FROM auth_customer_websites WHERE customer_id = ?
+      UNION SELECT website_id FROM auth_hosting_site_allocations WHERE customer_id = ? AND ${stateFilter}
+    ) ORDER BY website_id`).all(id, id).map((value) => value.website_id);
   }
   function customerUsage(id) {
     const websiteRow = db.prepare(`SELECT count(DISTINCT website_id) AS total FROM (
@@ -149,15 +186,17 @@ export function createHostingAccountStore({
     const hasReservedSites = row.kind === 'reseller' && db.prepare(`SELECT 1 FROM auth_hosting_site_allocations a
       JOIN auth_hosting_accounts h ON h.user_id = a.customer_id
       WHERE h.reseller_id = ? AND a.state = 'reserved' LIMIT 1`).get(row.user_id);
+    const customerRecord = row.kind === 'customer' ? customerQuotaRecord(row.user_id) : null;
     return {
       ...projection(row), username: row.username, revision: row.revision, userRevision: row.user_revision,
       createdAt: row.created_at, updatedAt: row.updated_at, stage: 'profile_only',
       ...(row.kind === 'reseller' ? { limits: limits(row.user_id), usage: usage(row), usageScope: hasReservedSites ? 'registered_and_reserved_ownership' : 'registered_ownership' } : {}),
-      ...(row.kind === 'customer' ? { quotas: customerQuotas(row.user_id), usage: customerUsage(row.user_id),
-        websiteIds: db.prepare(`SELECT DISTINCT website_id FROM (
-          SELECT website_id FROM auth_customer_websites WHERE customer_id = ?
-          UNION SELECT website_id FROM auth_hosting_site_allocations WHERE customer_id = ? AND state = 'attached'
-        ) ORDER BY website_id`).all(row.user_id, row.user_id).map(value => value.website_id) } : {}),
+      ...(row.kind === 'customer' ? {
+        quotas: customerRecord.quotas,
+        quotaEnforcement: customerRecord.quotaEnforcement,
+        usage: customerUsage(row.user_id),
+        websiteIds: customerWebsiteIds(row.user_id),
+      } : {}),
     };
   }
   function candidate(id, expectedUserRevision) {
@@ -314,7 +353,9 @@ export function createHostingAccountStore({
         db.prepare('INSERT INTO users(id, username, password_hash, role, active, created_at, password_changed_at) VALUES (?, ?, ?, ?, 1, ?, ?)')
           .run(id, name, passwordHash, 'site_manager', timestamp, timestamp);
         insert(actor, { id }, kind, parentId, assignedLimits);
-        if (assignedQuotas) db.prepare('INSERT INTO auth_customer_quotas VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+        if (assignedQuotas) db.prepare(`INSERT INTO auth_customer_quotas
+          (customer_id, max_websites, max_disk_mb, max_traffic_mb, max_databases, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
           id, assignedQuotas.maxWebsites, assignedQuotas.maxDiskMb, assignedQuotas.maxTrafficMb, assignedQuotas.maxDatabases, timestamp, timestamp);
         audit(actor.id, `hosting.${kind}_login_created`, { type: 'user', id });
         return view(existing(id));
@@ -344,7 +385,9 @@ export function createHostingAccountStore({
           const validated = validateCustomerQuotas(input.quotas);
           if (parent) assertCustomerQuotaWithinResellerCapacity({ customerQuotas: validated, resellerLimits: limits(parent.user_id) });
           const timestamp = now();
-          db.prepare('INSERT INTO auth_customer_quotas VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+          db.prepare(`INSERT INTO auth_customer_quotas
+            (customer_id, max_websites, max_disk_mb, max_traffic_mb, max_databases, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
             user.id, validated.maxWebsites, validated.maxDiskMb, validated.maxTrafficMb, validated.maxDatabases, timestamp, timestamp,
           );
         }
@@ -378,7 +421,9 @@ export function createHostingAccountStore({
         if (input.quotas) {
           const validated = validateCustomerQuotas(input.quotas);
           assertCustomerQuotaWithinResellerCapacity({ customerQuotas: validated, resellerLimits: limits(parent.user_id) });
-          db.prepare('INSERT INTO auth_customer_quotas VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+          db.prepare(`INSERT INTO auth_customer_quotas
+            (customer_id, max_websites, max_disk_mb, max_traffic_mb, max_databases, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
             id, validated.maxWebsites, validated.maxDiskMb, validated.maxTrafficMb, validated.maxDatabases, timestamp, timestamp,
           );
         }
@@ -485,7 +530,7 @@ export function createHostingAccountStore({
     updateCustomerQuotas(rawToken, requireManagement, id, input) {
       return transaction(() => {
         const actor = managementActor(rawToken, requireManagement);
-        fields(input, ['revision', 'quotas']);
+        fields(input, ['revision', 'quotas', 'quotaEnforcement'], ['revision', 'quotas']);
         const row = existing(id, revision(input.revision));
         if (row.kind !== 'customer') throw scopeDenied();
         const parent = row.reseller_id === null ? null : existing(row.reseller_id);
@@ -496,22 +541,46 @@ export function createHostingAccountStore({
           assertCustomerQuotaWithinResellerCapacity({ customerQuotas: nextQuotas, resellerLimits: limits(parent.user_id) });
         }
 
-        const previous = customerQuotas(id);
+        const previousRecord = customerQuotaRecord(id);
+        const previous = previousRecord.quotas;
+        const previousEnforcement = previousRecord.quotaEnforcement;
+
+        const requestedEnforcement = Object.hasOwn(input, 'quotaEnforcement')
+          ? validateCustomerQuotaEnforcement(input.quotaEnforcement, { quotas: nextQuotas })
+          : {};
+
+        let nextEnforceDisk = Object.hasOwn(requestedEnforcement, 'disk')
+          ? requestedEnforcement.disk
+          : previousEnforcement.disk;
+        let nextEnforceTraffic = Object.hasOwn(requestedEnforcement, 'traffic')
+          ? requestedEnforcement.traffic
+          : previousEnforcement.traffic;
+
+        if (!Object.hasOwn(requestedEnforcement, 'disk') && nextQuotas.maxDiskMb === null) {
+          nextEnforceDisk = false;
+        }
+        if (!Object.hasOwn(requestedEnforcement, 'traffic') && nextQuotas.maxTrafficMb === null) {
+          nextEnforceTraffic = false;
+        }
+
         const unchanged = ['maxWebsites', 'maxDiskMb', 'maxTrafficMb', 'maxDatabases'].every(
           (key) => nextQuotas[key] === previous[key],
-        );
+        ) && nextEnforceDisk === previousEnforcement.disk
+          && nextEnforceTraffic === previousEnforcement.traffic;
         if (unchanged) return view(row);
 
         if (row.revision === Number.MAX_SAFE_INTEGER) throw conflict();
         const timestamp = now();
         db.prepare(`INSERT INTO auth_customer_quotas
-          (customer_id, max_websites, max_disk_mb, max_traffic_mb, max_databases, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
+          (customer_id, max_websites, max_disk_mb, max_traffic_mb, max_databases, enforce_disk_quota, enforce_traffic_quota, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(customer_id) DO UPDATE SET
             max_websites = excluded.max_websites,
             max_disk_mb = excluded.max_disk_mb,
             max_traffic_mb = excluded.max_traffic_mb,
             max_databases = excluded.max_databases,
+            enforce_disk_quota = excluded.enforce_disk_quota,
+            enforce_traffic_quota = excluded.enforce_traffic_quota,
             updated_at = excluded.updated_at
         `).run(
           id,
@@ -519,6 +588,8 @@ export function createHostingAccountStore({
           nextQuotas.maxDiskMb,
           nextQuotas.maxTrafficMb,
           nextQuotas.maxDatabases,
+          nextEnforceDisk ? 1 : 0,
+          nextEnforceTraffic ? 1 : 0,
           timestamp,
           timestamp,
         );
@@ -696,7 +767,9 @@ export function createHostingAccountStore({
         // 3. Insert customer quotas if provided
         if (input.quotas) {
           const validated = validateCustomerQuotas(input.quotas);
-          db.prepare('INSERT INTO auth_customer_quotas VALUES (?, ?, ?, ?, ?, ?, ?)')
+          db.prepare(`INSERT INTO auth_customer_quotas
+            (customer_id, max_websites, max_disk_mb, max_traffic_mb, max_databases, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)`)
             .run(input.userId, validated.maxWebsites, validated.maxDiskMb, validated.maxTrafficMb, validated.maxDatabases, timestamp, timestamp);
         }
 
@@ -1134,11 +1207,195 @@ export function createHostingAccountStore({
         SELECT customer_id, 0 AS priority FROM auth_customer_websites WHERE website_id = ?
         UNION ALL
         SELECT customer_id, 1 AS priority FROM auth_hosting_site_allocations WHERE website_id = ? AND state = 'attached'
-      ) ORDER BY priority ASC LIMIT 1`).get(websiteId, websiteId);
+        UNION ALL
+        SELECT customer_id, 2 AS priority FROM auth_hosting_site_allocations WHERE website_id = ? AND state = 'reserved'
+      ) ORDER BY priority ASC LIMIT 1`).get(websiteId, websiteId, websiteId);
       if (!ownerRow?.customerId) return null;
+      const record = customerQuotaRecord(ownerRow.customerId);
       return Object.freeze({
         customerId: ownerRow.customerId,
-        quotas: Object.freeze(customerQuotas(ownerRow.customerId)),
+        quotas: Object.freeze(record.quotas),
+        quotaEnforcement: Object.freeze(record.quotaEnforcement),
+        websiteIds: Object.freeze(customerWebsiteIds(ownerRow.customerId, { includeReserved: true })),
+      });
+    },
+    reserveCustomerDatabaseAllocation({
+      customerId: explicitCustomerId = null,
+      websiteId,
+      serverId,
+      databaseName,
+      operationId = null,
+      activeBindings = [],
+      ttlMs = 15 * 60_000,
+    } = {}) {
+      if (!identifier(websiteId) || !identifier(serverId)
+        || typeof databaseName !== 'string' || !databaseName.trim()) {
+        throw error('invalid_database_allocation_input', 'Valid websiteId, serverId, and databaseName are required.');
+      }
+      if (!Number.isSafeInteger(ttlMs) || ttlMs < 1) {
+        throw error('invalid_database_allocation_input', 'Reservation TTL must be a positive integer.');
+      }
+      const normalizedDbName = databaseName.trim().toLowerCase();
+      if (isInfrastructureDatabase(normalizedDbName)) {
+        throw error('invalid_database_name', 'Infrastructure database cannot be allocated.', 400);
+      }
+      const opId = typeof operationId === 'string' && operationId.trim() ? operationId.trim() : randomUUID();
+      return transaction(() => {
+        const ownerRow = db.prepare(`SELECT customer_id AS customerId FROM (
+          SELECT customer_id, 0 AS priority FROM auth_customer_websites WHERE website_id = ?
+          UNION ALL
+          SELECT customer_id, 1 AS priority FROM auth_hosting_site_allocations WHERE website_id = ? AND state IN ('attached', 'reserved')
+        ) ORDER BY priority ASC LIMIT 1`).get(websiteId, websiteId);
+
+        let customerId = ownerRow?.customerId ?? null;
+        if (!customerId && explicitCustomerId && identifier(explicitCustomerId)) {
+          const explicitRow = raw(explicitCustomerId);
+          if (explicitRow && explicitRow.kind === 'customer') {
+            customerId = explicitRow.user_id;
+          }
+        }
+        if (!customerId) {
+          return { customerId: null, reserved: false };
+        }
+
+        const quotas = customerQuotas(customerId);
+        if (quotas.maxDatabases === null) {
+          return { customerId, reserved: false };
+        }
+
+        const timestamp = now();
+        const existingAlloc = db.prepare('SELECT * FROM auth_hosting_database_allocations WHERE operation_id = ?').get(opId);
+        if (existingAlloc
+          && existingAlloc.customer_id === customerId
+          && existingAlloc.website_id === websiteId
+          && existingAlloc.server_id === serverId
+          && existingAlloc.database_name.toLowerCase() === normalizedDbName) {
+          if (existingAlloc.state === 'attached') {
+            return {
+              customerId,
+              operationId: opId,
+              reserved: false,
+              reusedAttached: true,
+              maxDatabases: quotas.maxDatabases,
+            };
+          }
+          if (existingAlloc.state === 'reserved') {
+            db.prepare('UPDATE auth_hosting_database_allocations SET updated_at = ? WHERE operation_id = ?')
+              .run(timestamp, opId);
+            return {
+              customerId,
+              operationId: opId,
+              reserved: true,
+              reused: true,
+              maxDatabases: quotas.maxDatabases,
+            };
+          }
+        }
+
+        const ownedWebsiteIds = new Set(customerWebsiteIds(customerId, { includeReserved: true }));
+        ownedWebsiteIds.add(websiteId);
+
+        const safeBindings = Array.isArray(activeBindings) ? activeBindings : [];
+        const alreadyBoundToSameSite = safeBindings.some((binding) => (
+          binding
+          && binding.serverId === serverId
+          && binding.websiteId === websiteId
+          && typeof binding.databaseName === 'string'
+          && !isInfrastructureDatabase(binding.databaseName)
+          && binding.databaseName.toLowerCase() === normalizedDbName
+        ));
+        if (alreadyBoundToSameSite) {
+          return {
+            customerId,
+            operationId: opId,
+            reserved: false,
+            alreadyBound: true,
+            maxDatabases: quotas.maxDatabases,
+          };
+        }
+
+        const cutoff = timestamp - ttlMs;
+        db.prepare(`UPDATE auth_hosting_database_allocations
+          SET state = 'released', updated_at = ?
+          WHERE customer_id = ? AND state = 'reserved' AND updated_at < ?`)
+          .run(timestamp, customerId, cutoff);
+
+        const used = new Set();
+        for (const binding of safeBindings) {
+          if (!binding || typeof binding.serverId !== 'string' || typeof binding.databaseName !== 'string') continue;
+          if (!ownedWebsiteIds.has(binding.websiteId)) continue;
+          if (isInfrastructureDatabase(binding.databaseName)) continue;
+          used.add(`${binding.serverId}:${binding.databaseName.toLowerCase()}`);
+        }
+
+        const activeReservations = db.prepare(`SELECT server_id, database_name
+          FROM auth_hosting_database_allocations
+          WHERE customer_id = ? AND state = 'reserved' AND updated_at >= ?`)
+          .all(customerId, cutoff);
+        for (const item of activeReservations) {
+          if (isInfrastructureDatabase(item.database_name)) continue;
+          used.add(`${item.server_id}:${item.database_name.toLowerCase()}`);
+        }
+
+        if (used.size + 1 > quotas.maxDatabases) {
+          throw error(
+            'customer_quota_exceeded',
+            'Müşteri veritabanı kotası dolduğu için yeni veritabanı oluşturulamaz veya bağlanamaz.',
+            409,
+          );
+        }
+
+        db.prepare(`INSERT INTO auth_hosting_database_allocations
+          (operation_id, customer_id, website_id, server_id, database_name, state, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, 'reserved', ?, ?)
+          ON CONFLICT(operation_id) DO UPDATE SET
+            customer_id = excluded.customer_id,
+            website_id = excluded.website_id,
+            server_id = excluded.server_id,
+            database_name = excluded.database_name,
+            state = 'reserved',
+            updated_at = excluded.updated_at`)
+          .run(opId, customerId, websiteId, serverId, databaseName.trim(), timestamp, timestamp);
+
+        return {
+          customerId,
+          operationId: opId,
+          reserved: true,
+          usedCount: used.size,
+          maxDatabases: quotas.maxDatabases,
+        };
+      });
+    },
+    finalizeCustomerDatabaseAllocation(operationId, state) {
+      if (state !== 'attached' && state !== 'released') {
+        throw error('invalid_database_allocation_state', 'Database allocation state must be attached or released.');
+      }
+      if (typeof operationId !== 'string' || !operationId.trim()) {
+        return { operationId: null, state, updated: false };
+      }
+      const opId = operationId.trim();
+      return transaction(() => {
+        const result = db.prepare(`UPDATE auth_hosting_database_allocations
+          SET state = ?, updated_at = ?
+          WHERE operation_id = ?`).run(state, now(), opId);
+        return { operationId: opId, state, updated: result.changes === 1 };
+      });
+    },
+    listEnforcedTrafficCustomers() {
+      return transaction(() => {
+        const rows = db.prepare(`SELECT h.user_id AS customerId, q.max_traffic_mb AS maxTrafficMb
+          FROM auth_hosting_accounts h
+          JOIN users u ON u.id = h.user_id
+          JOIN auth_customer_quotas q ON q.customer_id = h.user_id
+          WHERE h.kind = 'customer'
+            AND q.enforce_traffic_quota = 1
+            AND q.max_traffic_mb IS NOT NULL
+          ORDER BY h.user_id`).all();
+        return rows.map((row) => ({
+          customerId: row.customerId,
+          maxTrafficMb: row.maxTrafficMb,
+          websiteIds: customerWebsiteIds(row.customerId),
+        }));
       });
     },
   };

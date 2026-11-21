@@ -239,8 +239,9 @@ test('Real createApp site consumption: real disk + active DB count + customer de
     assert.equal(siteAConsumption.metrics.databases.measured, 2);
     assert.equal(siteAConsumption.metrics.databases.definedLimit, 1);
     assert.equal(siteAConsumption.metrics.databases.definedLimitScope, 'customer_account');
-    assert.equal(siteAConsumption.metrics.databases.enforcedLimit, null);
-    assert.equal(siteAConsumption.metrics.databases.enforced, false);
+    assert.equal(siteAConsumption.metrics.databases.enforcedLimit, 1);
+    assert.equal(siteAConsumption.metrics.databases.enforced, true);
+    assert.equal(siteAConsumption.metrics.databases.enforcementScope, 'customer_account_databases');
     assert.equal(siteAConsumption.metrics.databases.exceeded, true);
 
     assert.equal(siteAConsumption.metrics.trafficMb.measured, null);

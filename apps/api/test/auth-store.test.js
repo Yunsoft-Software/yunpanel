@@ -532,7 +532,7 @@ test('hosting customer session profile includes quotas when defined in customer 
       .run('customer-with-quotas', 'customer-with-quotas', encoded);
     db.prepare('INSERT INTO auth_hosting_accounts VALUES (?, ?, ?, 1, 1000, 1000)')
       .run('customer-with-quotas', 'customer', null);
-    db.prepare('INSERT INTO auth_customer_quotas VALUES (?, ?, ?, ?, ?, 1000, 1000)')
+    db.prepare('INSERT INTO auth_customer_quotas (customer_id, max_websites, max_disk_mb, max_traffic_mb, max_databases, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1000, 1000)')
       .run('customer-with-quotas', 5, 2048, 10240, 3);
   } finally { db.close(); }
 
@@ -546,6 +546,12 @@ test('hosting customer session profile includes quotas when defined in customer 
       maxDiskMb: 2048,
       maxTrafficMb: 10240,
       maxDatabases: 3,
+    },
+    quotaEnforcement: {
+      websites: true,
+      databases: true,
+      disk: false,
+      traffic: false,
     },
   });
 });

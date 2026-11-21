@@ -59,6 +59,8 @@ export function createWebsiteProvisioningRuntime({
   elFinderGatewayManager,
   sftpSiteManager,
   nginxManager,
+  beforeDomainActivate = null,
+  onDomainActivated = null,
   applicationRegistry = null,
   applicationEnvironmentRegistry = null,
   websiteRegistry = null,
@@ -148,6 +150,7 @@ export function createWebsiteProvisioningRuntime({
       ...(sftpSiteManager ? { sftpSiteManager } : {}),
       nginxManager: resolvedNginxManager,
       nginxCompensationGuard,
+      ...(beforeDomainActivate ? { beforeDomainActivate } : {}),
     }),
     dns_zone: createWebsiteDnsZoneProvisioningHandler(),
     node_release: nodeReleaseHandler(),
@@ -311,18 +314,34 @@ export function createWebsiteProvisioningRuntime({
 
   function configureDomainControlPlane(dependencies = {}) {
     const nextDomainRegistry = dependencies.domainRegistry;
+    const nextOnDomainActivated = dependencies.onDomainActivated ?? onDomainActivated ?? null;
     if (!nextDomainRegistry) throw new Error('Website Domain provisioning registry is required');
     if (domainControlPlane) {
       if (domainControlPlane.domainRegistry !== nextDomainRegistry) {
         throw new Error('Website Domain provisioning registry cannot be replaced');
+      }
+      if (!domainControlPlane.onDomainActivated && nextOnDomainActivated) {
+        handlers.domain_activation = createWebsiteDomainActivationProvisioningHandler({
+          domainRegistry: nextDomainRegistry,
+          retirementProvider,
+          onDomainActivated: nextOnDomainActivated,
+        });
+        domainControlPlane = Object.freeze({
+          domainRegistry: nextDomainRegistry,
+          onDomainActivated: nextOnDomainActivated,
+        });
       }
       return Object.freeze({ configured: true });
     }
     handlers.domain_activation = createWebsiteDomainActivationProvisioningHandler({
       domainRegistry: nextDomainRegistry,
       retirementProvider,
+      ...(nextOnDomainActivated ? { onDomainActivated: nextOnDomainActivated } : {}),
     });
-    domainControlPlane = Object.freeze({ domainRegistry: nextDomainRegistry });
+    domainControlPlane = Object.freeze({
+      domainRegistry: nextDomainRegistry,
+      onDomainActivated: nextOnDomainActivated,
+    });
     return Object.freeze({ configured: true });
   }
 
@@ -555,6 +574,9 @@ export function createWebsiteProvisioningRuntime({
       databaseHealthProvider: nextHealthProvider,
       evidenceInspector: nextEvidenceInspector,
       waitForTerminalJob: nextWaitForTerminalJob,
+      databaseQuotaCoordinator: nextDatabaseQuotaCoordinator = null,
+      reserveDatabaseQuota: nextReserveDatabaseQuota = null,
+      finalizeDatabaseQuota: nextFinalizeDatabaseQuota = null,
     } = dependencies;
     if (!nextJobRegistry || !nextBindingRegistry || !nextCredentialRegistry || !nextApplyService
       || !nextMaterializer || typeof nextInventoryProvider !== 'function'
@@ -570,7 +592,10 @@ export function createWebsiteProvisioningRuntime({
         || databaseControlPlane.databaseInventoryProvider !== nextInventoryProvider
         || databaseControlPlane.databaseHealthProvider !== nextHealthProvider
         || databaseControlPlane.evidenceInspector !== nextEvidenceInspector
-        || databaseControlPlane.waitForTerminalJob !== nextWaitForTerminalJob) {
+        || databaseControlPlane.waitForTerminalJob !== nextWaitForTerminalJob
+        || databaseControlPlane.databaseQuotaCoordinator !== nextDatabaseQuotaCoordinator
+        || databaseControlPlane.reserveDatabaseQuota !== nextReserveDatabaseQuota
+        || databaseControlPlane.finalizeDatabaseQuota !== nextFinalizeDatabaseQuota) {
         throw new Error('Website database provisioning dependencies cannot be replaced');
       }
       return Object.freeze({ configured: true });
@@ -585,6 +610,9 @@ export function createWebsiteProvisioningRuntime({
       databaseHealthProvider: nextHealthProvider,
       ...(nextEvidenceInspector ? { evidenceInspector: nextEvidenceInspector } : {}),
       ...(nextWaitForTerminalJob ? { waitForTerminalJob: nextWaitForTerminalJob } : {}),
+      ...(nextDatabaseQuotaCoordinator ? { databaseQuotaCoordinator: nextDatabaseQuotaCoordinator } : {}),
+      ...(nextReserveDatabaseQuota ? { reserveDatabaseQuota: nextReserveDatabaseQuota } : {}),
+      ...(nextFinalizeDatabaseQuota ? { finalizeDatabaseQuota: nextFinalizeDatabaseQuota } : {}),
     });
     databaseControlPlane = Object.freeze({
       jobRegistry: nextJobRegistry,
@@ -596,6 +624,9 @@ export function createWebsiteProvisioningRuntime({
       databaseHealthProvider: nextHealthProvider,
       evidenceInspector: nextEvidenceInspector,
       waitForTerminalJob: nextWaitForTerminalJob,
+      databaseQuotaCoordinator: nextDatabaseQuotaCoordinator,
+      reserveDatabaseQuota: nextReserveDatabaseQuota,
+      finalizeDatabaseQuota: nextFinalizeDatabaseQuota,
     });
     return Object.freeze({ configured: true });
   }

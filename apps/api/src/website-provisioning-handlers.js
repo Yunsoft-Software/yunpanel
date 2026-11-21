@@ -329,6 +329,7 @@ function nginxSpec({ operation, intent, tls = null, httpsRedirect = false, canon
 
   return Object.freeze({
     primaryDomain: intent.primaryDomain,
+    ...(typeof intent.websiteId === 'string' && intent.websiteId ? { websiteId: intent.websiteId } : {}),
     aliases: Object.freeze([...intent.aliases]),
     acmeOnlyHostnames: Object.freeze([...(intent.acmeOnlyHostnames ?? [])]),
     mailDiscoverySocketPath: intent.mailDiscoverySocketPath ?? null,
@@ -369,6 +370,7 @@ export function createWebsiteProvisioningHandlers({
   staticDeploymentManager = createWebsiteStaticDeploymentManager(),
   nginxManager = createNginxManager(),
   nginxCompensationGuard = null,
+  beforeDomainActivate = null,
 } = {}) {
   if (!identityManager
     || typeof identityManager.apply !== 'function'
@@ -401,6 +403,7 @@ export function createWebsiteProvisioningHandlers({
     || typeof nginxManager.activateDomain !== 'function'
     || typeof nginxManager.compensateDomain !== 'function'
     || (nginxCompensationGuard !== null && typeof nginxCompensationGuard !== 'function')
+    || (beforeDomainActivate !== null && typeof beforeDomainActivate !== 'function')
     || typeof nginxManager.inspectDomainCompensation !== 'function') {
     throw new WebsiteProvisioningHandlerError(
       'website_provisioning_handler_dependencies_invalid',
@@ -575,6 +578,9 @@ export function createWebsiteProvisioningHandlers({
   async function applyNginx(context = {}) {
     const spec = nginxSpec(context);
     const stage = await nginxManager.stageDomain(spec);
+    if (beforeDomainActivate) {
+      await beforeDomainActivate({ primaryDomain: spec.primaryDomain, websiteId: spec.websiteId ?? null });
+    }
     const active = await nginxManager.activateDomain({
       primaryDomain: spec.primaryDomain,
       checksum: stage.checksum,

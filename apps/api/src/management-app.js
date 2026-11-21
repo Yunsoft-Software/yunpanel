@@ -26,7 +26,12 @@ import {
   createLinuxSiteConsumptionAdapter,
   RcloneError,
 } from '@yunpanel/host-runtime';
-import { createSiteConsumptionInspector } from './customer-quotas.js';
+import {
+  createCustomerDatabaseQuotaCoordinator,
+  createCustomerManagedDiskWriteGuard,
+  createSiteConsumptionInspector,
+} from './customer-quotas.js';
+import { createWebsiteTrafficCoordinator } from './website-traffic-coordinator.js';
 import { createWebsiteHttpHealthInspector } from '@yunpanel/host-runtime/website-http-health-inspector';
 import { createApplicationDeployQueue } from './application-deploy-queue.js';
 import { createWebsiteDatabaseBackupAdapter } from './website-database-backup-adapter.js';
@@ -779,11 +784,29 @@ export function createApp(allOptions = {}) {
       localServerId,
     });
   }
+  const websiteTrafficCoordinator = options.websiteTrafficCoordinator
+    ?? (options.websiteTrafficLedger
+      ? createWebsiteTrafficCoordinator({
+        domainRegistry,
+        websiteRegistry,
+        hostingAccounts,
+        websiteTrafficLedger: options.websiteTrafficLedger,
+        websiteTrafficEnforcer: options.websiteTrafficEnforcer ?? null,
+        ...(options.websiteTrafficSitesDir ? { sitesDir: options.websiteTrafficSitesDir } : {}),
+        ...(options.websiteTrafficAllowedLogDir ? { allowedLogDir: options.websiteTrafficAllowedLogDir } : {}),
+        ...(options.now ? { now: options.now } : {}),
+      })
+      : null);
+  const onDomainActivated = options.onDomainActivated
+    ?? (websiteTrafficCoordinator ? () => websiteTrafficCoordinator.reconcileTrafficEnforcement({ syncLedger: false }) : null);
   if (websiteProvisioningRuntime) {
     if (typeof websiteProvisioningRuntime.configureDomainControlPlane !== 'function') {
       throw new Error('Website provisioning runtime cannot configure Domain control-plane dependencies');
     }
-    websiteProvisioningRuntime.configureDomainControlPlane({ domainRegistry });
+    websiteProvisioningRuntime.configureDomainControlPlane({
+      domainRegistry,
+      ...(onDomainActivated ? { onDomainActivated } : {}),
+    });
     if (applicationEnvironmentRegistry) {
       if (typeof websiteProvisioningRuntime.configurePassengerEnvironment !== 'function') {
         throw new Error('Website provisioning runtime cannot configure Passenger environment dependencies');
@@ -803,6 +826,10 @@ export function createApp(allOptions = {}) {
       });
     }
   }
+  const customerDatabaseQuotaCoordinator = options.databaseQuotaCoordinator
+    ?? (hostingAccounts
+      ? createCustomerDatabaseQuotaCoordinator({ hostingAccounts, databaseBindingRegistry })
+      : null);
   const siteCreateDependencies = {
     registry: localRegistry,
     applicationRegistry,
@@ -813,6 +840,8 @@ export function createApp(allOptions = {}) {
     mailDomainRegistry,
     serverDnsIdentityRegistry,
     dnsZoneTemplateRegistry,
+    databaseBindingRegistry,
+    databaseQuotaCoordinator: customerDatabaseQuotaCoordinator,
     localServerId,
     userAdminStore,
     licenseEntitlementService,
@@ -1073,6 +1102,7 @@ export function createApp(allOptions = {}) {
     : hostingAccounts && typeof hostingAccounts.getWebsiteOwnerQuotas === 'function'
       ? (websiteId) => hostingAccounts.getWebsiteOwnerQuotas(websiteId)
       : null;
+  const siteConsumptionTrafficInspector = options.siteConsumptionTrafficInspector ?? options.websiteTrafficLedger ?? null;
   const siteConsumptionInspector = options.siteConsumptionInspector ?? createSiteConsumptionInspector({
     websiteRegistry,
     domainRegistry,
@@ -1083,10 +1113,12 @@ export function createApp(allOptions = {}) {
       databaseBindingRegistry,
       localServerId,
       ...(options.siteConsumptionPathContractOptions ? { pathContractOptions: options.siteConsumptionPathContractOptions } : {}),
-      ...(options.siteConsumptionTrafficInspector ? { trafficInspector: options.siteConsumptionTrafficInspector } : {}),
+      ...(siteConsumptionTrafficInspector ? { trafficInspector: siteConsumptionTrafficInspector } : {}),
       ...(options.siteConsumptionAllowCurrentUserWithoutSetpriv ? { allowCurrentUserWithoutSetpriv: true } : {}),
     }),
   });
+  const siteTrafficMetaLookup = options.siteTrafficMetaLookup
+    ?? (websiteTrafficCoordinator ? (websiteId) => websiteTrafficCoordinator.resolveSiteTrafficMeta(websiteId) : null);
   mountWebsiteRoutes(app, {
     websiteRegistry,
     domainRegistry,
@@ -1094,6 +1126,8 @@ export function createApp(allOptions = {}) {
     customerLookup,
     siteConsumptionInspector,
     websiteOwnerQuotasLookup,
+    diskQuotaCapabilityLookup: options.diskQuotaCapabilityLookup ?? null,
+    siteTrafficMetaLookup,
   });
   mountWebsiteAnalyticsRoutes(app, {
     websiteRegistry,
@@ -1350,6 +1384,7 @@ export function createApp(allOptions = {}) {
       jobRegistry,
       databaseBindingRegistry,
       databaseCredentialRegistry,
+      databaseQuotaCoordinator: customerDatabaseQuotaCoordinator,
       requireDatabaseName: databaseHttpInternals.requireDatabaseName,
       ensureDatabaseIdle: databaseHttpInternals.ensureDatabaseIdle,
       latestDatabaseSnapshot: databaseHttpInternals.latestDatabaseSnapshot,
@@ -1381,6 +1416,7 @@ export function createApp(allOptions = {}) {
     if (databaseInventoryProvider) mountDatabaseSetupRoutes(app, {
       registry: localRegistry, websiteRegistry, databaseBindingRegistry, databaseCredentialRegistry,
       databaseCredentialApplyService: databaseCredentialApply, databaseInventoryProvider, siteMutationLock,
+      databaseQuotaCoordinator: customerDatabaseQuotaCoordinator,
       auditStore: options.auditStore ?? options.authStore?.audit ?? aiAudit ?? null,
       authorizeActor: options.authorizeWebsiteActor ?? null,
     });
@@ -1408,8 +1444,16 @@ export function createApp(allOptions = {}) {
     });
   }
   if (siteFileManager) {
+    const withManagedDiskWriteQuota = options.withManagedDiskWriteQuota
+      ?? (hostingAccounts
+        ? createCustomerManagedDiskWriteGuard({
+          hostingAccounts,
+          siteConsumptionInspector,
+        })
+        : null);
     mountSiteFileRoutes(app, {
       siteFileManager,
+      withManagedDiskWriteQuota,
     });
   }
   if (websiteStaticCopyService) mountWebsiteStaticCopyRoutes(app, { service: websiteStaticCopyService });

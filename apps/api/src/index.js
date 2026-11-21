@@ -9,6 +9,10 @@ import {createLocalPassengerRestartOperation} from './local-passenger-restart-op
 import os from 'node:os';
 import path from 'node:path';
 import {
+  YUNPANEL_TRAFFIC_CONF_PATH,
+  YUNPANEL_TRAFFIC_LOG_PATH,
+} from '@yunpanel/config-templates';
+import {
   createJournalLogReader,
   createDatabaseManager,
   createMailAntivirusHealthInspector,
@@ -16,16 +20,23 @@ import {
   createMailProtocolHealthInspector,
   createMailReadinessInspector,
   createNginxLogReader,
+  createNginxManager,
   createMailSmarthostManager,
   createProtectedPathAuthManager,
   createWebsiteCronManager,
+  createWebsiteTrafficEnforcer,
+  createWebsiteTrafficLedger,
   createPhpCliToolManager,
   createPhpFpmSiteManager,
   createCacheIsolationManager,
+  discoverAppliedTrafficVhosts,
   inspectAllowlistedServices,
   inspectDocker,
+  inspectNativeDiskQuotaSupport,
   inspectNginx,
 } from '@yunpanel/host-runtime';
+import { createCustomerDatabaseQuotaCoordinator } from './customer-quotas.js';
+import { createWebsiteTrafficCoordinator } from './website-traffic-coordinator.js';
 import { createApp, API_VERSION } from './app.js';
 import { createAiConversationService } from './ai-conversation-service.js';
 import { createAiPolicyStore } from './ai-policy-store.js';
@@ -205,6 +216,12 @@ const websiteCronStorePath = process.env.YUNPANEL_WEBSITE_CRON_STORE
   ?? path.join(controlPlaneStateRoot, 'website-cron-registry.json');
 const websiteCachePolicyStorePath = process.env.YUNPANEL_WEBSITE_CACHE_POLICY_STORE
   ?? path.join(controlPlaneStateRoot, 'website-cache-policies.json');
+const websiteTrafficLogPath = process.env.YUNPANEL_WEBSITE_TRAFFIC_LOG ?? YUNPANEL_TRAFFIC_LOG_PATH;
+const websiteTrafficStorePath = process.env.YUNPANEL_WEBSITE_TRAFFIC_STORE
+  ?? path.join(controlPlaneStateRoot, 'website-traffic-ledger.json');
+const websiteTrafficConfPath = process.env.YUNPANEL_WEBSITE_TRAFFIC_CONF ?? YUNPANEL_TRAFFIC_CONF_PATH;
+const nginxSitesDir = process.env.YUNPANEL_NGINX_SITES_DIR ?? '/etc/nginx/sites-enabled';
+const websiteTrafficAllowedLogDir = path.dirname(websiteTrafficLogPath);
 const panelSettingsStorePath = process.env.YUNPANEL_PANEL_SETTINGS_STORE
   ?? path.join(controlPlaneStateRoot, 'panel-settings.json');
 const aiPolicyStorePath = process.env.YUNPANEL_AI_POLICY_STORE
@@ -487,9 +504,51 @@ const websiteCacheService = createWebsiteCacheService({
   cachePolicyRegistry: websiteCachePolicyRegistry,
   cacheIsolationManager,
 });
+const nginxManager = createNginxManager({
+  sitesDir: nginxSitesDir,
+  trafficLogPath: websiteTrafficLogPath,
+  enableTrafficLimitGuard: true,
+});
+let websiteTrafficLedger = null;
+let websiteTrafficEnforcer = null;
+let websiteTrafficCoordinator = null;
+let localRuntimeInstance = null;
+function ensureLinuxTrafficEnforcer() {
+  if (process.platform !== 'linux' || !localRuntimeInstance) return null;
+  if (!websiteTrafficEnforcer) {
+    websiteTrafficEnforcer = createWebsiteTrafficEnforcer({
+      configPath: websiteTrafficConfPath,
+      trafficLogPath: websiteTrafficLogPath,
+      sitesDir: nginxSitesDir,
+      nginxManager,
+    });
+    websiteTrafficCoordinator?.setEnforcer(websiteTrafficEnforcer);
+  }
+  return websiteTrafficEnforcer;
+}
+const beforeDomainActivate = async () => {
+  if (process.platform !== 'linux' || !localRuntimeInstance) return;
+  ensureLinuxTrafficEnforcer();
+  if (websiteTrafficLedger) {
+    await websiteTrafficLedger.sync().catch(() => {});
+  }
+  if (websiteTrafficCoordinator) {
+    await websiteTrafficCoordinator.reconcileTrafficEnforcement({ syncLedger: false });
+  }
+};
+const onDomainActivated = async () => {
+  if (process.platform !== 'linux' || !localRuntimeInstance) return;
+  ensureLinuxTrafficEnforcer();
+  if (websiteTrafficCoordinator) {
+    await websiteTrafficCoordinator.reconcileTrafficEnforcement({ syncLedger: false });
+  }
+};
 const websiteProvisioningRuntime = createWebsiteProvisioningRuntime({
   filePath: websiteProvisioningStorePath,
   isolationMigrationFilePath: websiteIsolationMigrationStorePath,
+  nginxManager,
+  beforeDomainActivate: process.platform === 'linux' && Boolean(localServerId) ? beforeDomainActivate : null,
+  onDomainActivated: process.platform === 'linux' && Boolean(localServerId) ? onDomainActivated : null,
   siteMutationLock,
   authorizeActor: authorizeWebsitePhpActor,
 });
@@ -756,6 +815,43 @@ registry.databaseSecurityHardener = () => databaseManager.hardenSecurityBaseline
 await prepareRootAuthStateOwnership({ filePath: authStorePath });
 const liveSessions = createLiveSessionRegistry({ requireGenerationBoundary: true, generationBoundary: terminalGenerationBoundary });
 const authStore = createAuthStore({ filePath: authStorePath, liveSessions });
+const customerDatabaseQuotaCoordinator = createCustomerDatabaseQuotaCoordinator({
+  hostingAccounts: authStore.hostingAccounts ?? authStore.users?.hostingAccounts ?? null,
+  databaseBindingRegistry,
+});
+websiteTrafficLedger = createWebsiteTrafficLedger({
+  filePath: websiteTrafficStorePath,
+  logPath: websiteTrafficLogPath,
+  isMeteredWebsite: async (websiteId) => {
+    const normalizedId = typeof websiteId === 'string' ? websiteId.trim().toLowerCase() : '';
+    if (!normalizedId) return false;
+    const discovered = await discoverAppliedTrafficVhosts({
+      domains: await domainRegistry.listDomains(),
+      sitesDir: nginxSitesDir,
+      allowedLogDir: websiteTrafficAllowedLogDir,
+    });
+    return discovered.dedicatedWebsiteIds.includes(normalizedId);
+  },
+  resolveLegacySources: async () => {
+    const discovered = await discoverAppliedTrafficVhosts({
+      domains: await domainRegistry.listDomains(),
+      sitesDir: nginxSitesDir,
+      allowedLogDir: websiteTrafficAllowedLogDir,
+    });
+    return discovered.legacySources;
+  },
+});
+await websiteTrafficLedger.init();
+websiteTrafficCoordinator = createWebsiteTrafficCoordinator({
+  domainRegistry,
+  websiteRegistry,
+  hostingAccounts: authStore.hostingAccounts ?? authStore.users?.hostingAccounts ?? null,
+  websiteTrafficLedger,
+  websiteTrafficEnforcer: null,
+  sitesDir: nginxSitesDir,
+  allowedLogDir: websiteTrafficAllowedLogDir,
+});
+const diskQuotaCapabilityLookup = () => inspectNativeDiskQuotaSupport({ targetPath: '/var/www/yunpanel' });
 const terminalCapabilityRegistry = createTerminalCapabilityRegistry({ liveSessions });
 const terminalProcessManager = createTerminalProcessManager({ liveSessions });
 const ttydSessionManager = createTtydSessionManager({ liveSessions });
@@ -1228,6 +1324,7 @@ websiteProvisioningRuntime.configureDatabaseControlPlane({
   databaseCredentialMaterializer,
   databaseInventoryProvider: websiteDatabaseInventoryProvider,
   databaseHealthProvider: websiteDatabaseHealthProvider,
+  databaseQuotaCoordinator: customerDatabaseQuotaCoordinator,
 });
 await websiteProvisioningRuntime.init();
 const applicationDeployQueue = createApplicationDeployQueue({
@@ -1253,7 +1350,6 @@ const applicationPassengerMigrationService = createApplicationPassengerMigration
 const pleskImporter = localServerId
   ? createPleskImporter({ localServerId })
   : null;
-let localRuntimeInstance = null;
 let websiteBackupOperationService = null;
 const backupScheduleRegistry = createWebsiteBackupScheduleRegistry({ filePath: path.join(controlPlaneStateRoot, 'website-backup-schedules.json') });
 let backupScheduler = null;
@@ -1319,6 +1415,15 @@ const listener = createAuthenticatedApi({
   proxyToken: internalProxyToken,
   trustedProxyIps: process.env.YUNPANEL_TRUSTED_PROXY_IPS,
   licenseEntitlementService,
+  onCustomerQuotaUpdated: async () => {
+    if (process.platform !== 'linux' || !localRuntimeInstance) return;
+    try {
+      await websiteTrafficCoordinator.reconcileTrafficEnforcement({ syncLedger: true });
+    } catch (error) {
+      const code = typeof error?.code === 'string' ? error.code : 'website_traffic_reconcile_failed';
+      console.error(`[yunpanel-api] traffic enforcement reconcile failed code=${code}`);
+    }
+  },
   toolGatewayAuthorizer: async ({ gateway, request, session }) => {
     if (gateway.id === 'phpmyadmin') {
       const gatewaySession = request.headers['x-yunpanel-phpmyadmin-session'];
@@ -1421,6 +1526,11 @@ const listener = createAuthenticatedApi({
       databaseBindingRegistry,
       databaseCredentialRegistry,
       databaseCredentialApplyService,
+      databaseQuotaCoordinator: customerDatabaseQuotaCoordinator,
+      websiteTrafficLedger,
+      websiteTrafficCoordinator,
+      diskQuotaCapabilityLookup,
+      ...(process.platform === 'linux' && Boolean(localServerId) ? { onDomainActivated } : {}),
       phpMyAdminHandoffService: phpMyAdminHandoffRuntime ? phpMyAdminHandoffService : null,
       elFinderHandoffService: elFinderHandoffRuntime ? elFinderHandoffService : null,
       siteFileManager,
@@ -1518,9 +1628,12 @@ const localRuntime = await startConfiguredLocalRuntime({
     await websiteStaticCopyService?.recoverStartup();
     await websitePhpCopyService?.recoverStartup();
   },
+  onDomainActivated: process.platform === 'linux' ? onDomainActivated : null,
   onWebsitePhpToolReceiptRecorded: async (payload) => { if (payload.actionId === 'wp.toolkit') await wordpressToolkitService?.releaseSecret(payload); },
   createOperations: (options) => dockerComposeRuntime.extendLocalOperations(createLocalHostOperations({
     ...options,
+    nginxManager,
+    ...(process.platform === 'linux' ? { beforeDomainActivate } : {}),
     databaseManager,
     databaseCredentialOperation: localDatabaseCredentialOperation,
     websiteCronOperation: localWebsiteCronOperation,
@@ -1546,6 +1659,7 @@ const localRuntime = await startConfiguredLocalRuntime({
   inspectNginx,
   onError: reportLocalExecutorFault,
 });
+localRuntimeInstance = localRuntime;
 const renewalScheduler = startCertificateRenewalScheduler({
   certificateRegistry,
   jobRegistry,
@@ -1553,7 +1667,23 @@ const renewalScheduler = startCertificateRenewalScheduler({
   intervalMs: certificateRenewalIntervalMs,
   renewBeforeMs: certificateRenewBeforeMs,
 });
-localRuntimeInstance = localRuntime;
+let websiteTrafficTimer = null;
+if (process.platform === 'linux' && Boolean(localRuntime)) {
+  ensureLinuxTrafficEnforcer();
+  try {
+    await websiteTrafficCoordinator.reconcileTrafficEnforcement({ syncLedger: true });
+  } catch (error) {
+    const code = typeof error?.code === 'string' ? error.code : 'website_traffic_startup_reconcile_failed';
+    console.error(`[yunpanel-api] initial traffic reconcile skipped code=${code}`);
+  }
+  websiteTrafficTimer = setInterval(() => {
+    void websiteTrafficCoordinator.reconcileTrafficEnforcement({ syncLedger: true }).catch((error) => {
+      const code = typeof error?.code === 'string' ? error.code : 'website_traffic_periodic_reconcile_failed';
+      console.error(`[yunpanel-api] periodic traffic reconcile failed code=${code}`);
+    });
+  }, 60_000);
+  websiteTrafficTimer.unref?.();
+}
 websiteRemovalWorker?.start();
 websiteProvisioningWorker.start();
 if (websiteBackupOperationService && localRuntime) {
@@ -1643,6 +1773,7 @@ async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`[yunpanel-api] received ${signal}, shutting down`);
+  if (websiteTrafficTimer) clearInterval(websiteTrafficTimer);
   systemWatchdogService.stop();
   renewalScheduler.stop();
   if (websiteRemovalWorker) await websiteRemovalWorker.stop();

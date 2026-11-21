@@ -17,10 +17,14 @@ export function createHostingSiteCreateRuntime(dependencies = {}) {
     applicationRegistry: dependencies.applicationRegistry,
     domainRegistry: dependencies.domainRegistry,
     mailDomainRegistry: dependencies.mailDomainRegistry,
+    databaseBindingRegistry: dependencies.databaseBindingRegistry ?? null,
     websiteProvisioningRegistry: dependencies.websiteProvisioningRuntime?.registry
       ?? dependencies.websiteProvisioningRegistry,
     siteMutationLock: dependencies.siteMutationLock,
     localServerId: dependencies.localServerId,
+    databaseQuotaCoordinator: dependencies.databaseQuotaCoordinator ?? null,
+    reserveDatabaseQuota: dependencies.reserveDatabaseQuota ?? null,
+    finalizeDatabaseQuota: dependencies.finalizeDatabaseQuota ?? null,
     previewSiteCreate: (input) => {
       const arg = input && typeof input === 'object'
         ? Object.assign(Object.create(input), { input, ...dependencies })

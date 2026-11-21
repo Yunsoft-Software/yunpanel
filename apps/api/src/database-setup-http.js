@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { isInfrastructureDatabase } from '@yunpanel/shared';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { databaseCredentialRegistryInternals } from './database-credential-registry.js';
@@ -9,6 +10,7 @@ const route = (action) => async (request, response, next) => { try { await actio
 export function mountDatabaseSetupRoutes(app, {
   registry, websiteRegistry, databaseBindingRegistry, databaseCredentialRegistry,
   databaseCredentialApplyService, databaseInventoryProvider, siteMutationLock, auditStore, authorizeActor = null,
+  databaseQuotaCoordinator = null, reserveDatabaseQuota = null, finalizeDatabaseQuota = null,
 } = {}) {
   const base = '/api/servers/:serverId/websites/:websiteId/databases';
   async function target(request) {
@@ -42,18 +44,55 @@ export function mountDatabaseSetupRoutes(app, {
       if (binding && (binding.websiteId !== website.id || binding.applicationId !== website.applicationId)) throw fail('database_already_bound', 'Veritabanı başka bir siteye bağlı');
       if (exists && !binding && request.auth.user.role !== 'owner') throw fail('database_binding_owner_required', 'Mevcut veritabanının ilk site atamasını yönetici yapmalıdır', 403);
       if (body.mode === 'continue' && !binding) throw fail('database_setup_not_found', 'Devam edilecek kurulum bulunamadı', 404);
-      binding ??= await databaseBindingRegistry.bindDatabase({ serverId: server.id, websiteId: website.id, applicationId: website.applicationId,
-        databaseName: body.databaseName, confirmation: `bind-database:${server.id}:${body.databaseName}:${website.id}` });
-      let credential = await databaseCredentialRegistry.getForBinding(binding.id);
-      if (credential && body.password != null) throw fail('database_password_already_configured', 'Mevcut kullanıcı parolası ayrı parola değiştirme işlemiyle düzenlenir');
-      credential ??= await databaseCredentialRegistry.createCredential({ databaseBindingId: binding.id,
-        initialPassword: body.password ?? null, confirmation: `create-database-credential:${binding.id}:${databaseCredentialRegistryInternals.usernameFor(binding.id)}` });
-      const queued = await databaseCredentialApplyService.resumeApply(credential.id, {
-        createDatabase: !exists,
-        authorization: { actorId: request.auth.user.id, userId: request.auth.user.id, sessionId: request.auth.id,
-          role: request.auth.user.role, websiteId: website.id },
-      });
-      return { binding, credential, job: jobPublicView(queued.job) };
+      const executeSetup = async () => {
+        binding ??= await databaseBindingRegistry.bindDatabase({ serverId: server.id, websiteId: website.id, applicationId: website.applicationId,
+          databaseName: body.databaseName, confirmation: `bind-database:${server.id}:${body.databaseName}:${website.id}` });
+        let credential = await databaseCredentialRegistry.getForBinding(binding.id);
+        if (credential && body.password != null) throw fail('database_password_already_configured', 'Mevcut kullanıcı parolası ayrı parola değiştirme işlemiyle düzenlenir');
+        credential ??= await databaseCredentialRegistry.createCredential({ databaseBindingId: binding.id,
+          initialPassword: body.password ?? null, confirmation: `create-database-credential:${binding.id}:${databaseCredentialRegistryInternals.usernameFor(binding.id)}` });
+        const queued = await databaseCredentialApplyService.resumeApply(credential.id, {
+          createDatabase: !exists,
+          authorization: { actorId: request.auth.user.id, userId: request.auth.user.id, sessionId: request.auth.id,
+            role: request.auth.user.role, websiteId: website.id },
+        });
+        return { binding, credential, job: jobPublicView(queued.job) };
+      };
+      if (databaseQuotaCoordinator && typeof databaseQuotaCoordinator.reserveAndRun === 'function') {
+        return databaseQuotaCoordinator.reserveAndRun({
+          websiteId: website.id,
+          serverId: server.id,
+          databaseName: body.databaseName,
+          operationId: `db-setup:${randomUUID()}`,
+        }, executeSetup);
+      }
+      let reservation = null;
+      let attached = false;
+      try {
+        if (typeof reserveDatabaseQuota === 'function') {
+          const activeBindings = typeof databaseBindingRegistry.listBindings === 'function'
+            ? await databaseBindingRegistry.listBindings()
+            : [];
+          reservation = await reserveDatabaseQuota({
+            websiteId: website.id,
+            serverId: server.id,
+            databaseName: body.databaseName,
+            operationId: `db-setup:${randomUUID()}`,
+            activeBindings,
+          });
+        }
+        const setupResult = await executeSetup();
+        if (reservation?.reserved && typeof finalizeDatabaseQuota === 'function') {
+          await finalizeDatabaseQuota(reservation.operationId, 'attached');
+          attached = true;
+        }
+        return setupResult;
+      } catch (error) {
+        if (reservation?.reserved && !attached && typeof finalizeDatabaseQuota === 'function') {
+          try { await finalizeDatabaseQuota(reservation.operationId, 'released'); } catch {}
+        }
+        throw error;
+      }
     });
     response.set('Cache-Control', 'no-store'); response.status(202).json({ data: result });
   }));

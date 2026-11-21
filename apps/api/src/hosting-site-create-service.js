@@ -30,17 +30,35 @@ export function createHostingSiteCreateService({
   applicationRegistry = null,
   domainRegistry = null,
   mailDomainRegistry = null,
+  databaseBindingRegistry = null,
   websiteProvisioningRegistry = null,
   siteMutationLock = null,
   localServerId,
   previewSiteCreate,
   createSite,
+  databaseQuotaCoordinator = null,
+  reserveDatabaseQuota = null,
+  finalizeDatabaseQuota = null,
 }) {
   const allocations = hostingAccounts?.siteAllocations;
   if (!id(localServerId) || ![hostingAccounts?.get, allocations?.preview, allocations?.reserve, allocations?.complete,
     websiteRegistry?.getWebsite, previewSiteCreate, createSite].every((fn) => typeof fn === 'function')) {
     throw new TypeError('Hosted site creation requires live accounts, allocation storage, Website registry and local site-create adapters');
   }
+  const reserveDbQuota = typeof databaseQuotaCoordinator?.reserve === 'function'
+    ? (params) => databaseQuotaCoordinator.reserve(params)
+    : typeof reserveDatabaseQuota === 'function'
+      ? reserveDatabaseQuota
+      : (typeof hostingAccounts?.reserveCustomerDatabaseAllocation === 'function'
+        ? (params) => hostingAccounts.reserveCustomerDatabaseAllocation(params)
+        : null);
+  const finalizeDbQuota = typeof databaseQuotaCoordinator?.finalize === 'function'
+    ? (operationId, state, target) => databaseQuotaCoordinator.finalize(operationId, state, target)
+    : typeof finalizeDatabaseQuota === 'function'
+      ? finalizeDatabaseQuota
+      : (typeof hostingAccounts?.finalizeCustomerDatabaseAllocation === 'function'
+        ? (operationId, state) => hostingAccounts.finalizeCustomerDatabaseAllocation(operationId, state)
+        : null);
   async function prepare(rawToken, policy, value) {
     hostingAccounts.get(rawToken, policy, value.customerId); // Live Owner check before reading runtime state.
     if (value.input.serverId !== localServerId) throw fail('local_server_required', 'Sites can be created only on this panel host.', 404);
@@ -89,42 +107,69 @@ export function createHostingSiteCreateService({
     if (prepared.allocation.state === 'available' && await websiteRegistry.getWebsite(prepared.allocationInput.websiteId)) {
       throw fail('hosting_site_migration_required', 'An existing Website requires explicit ownership migration.');
     }
-    // Rechecks live Owner, account chain and capacity atomically AFTER all reads.
-    const reserved = allocations.reserve(rawToken, policy, prepared.allocationInput);
+    const plannedDatabase = prepared.base?.plan?.database ?? null;
+    const requestsInitialDatabase = submitted.input?.database?.mode === 'create' || Boolean(plannedDatabase);
+    let dbReservation = null;
+    if (requestsInitialDatabase && plannedDatabase && typeof reserveDbQuota === 'function') {
+      const reservePayload = {
+        customerId: prepared.allocationInput.customerId,
+        websiteId: plannedDatabase.websiteId ?? prepared.allocationInput.websiteId,
+        serverId: plannedDatabase.serverId ?? prepared.allocationInput.serverId,
+        databaseName: plannedDatabase.databaseName,
+        operationId: `site-create-db:${prepared.allocationInput.operationId}`,
+      };
+      if (!databaseQuotaCoordinator) {
+        reservePayload.activeBindings = typeof databaseBindingRegistry?.listBindings === 'function'
+          ? await databaseBindingRegistry.listBindings()
+          : [];
+      }
+      dbReservation = await reserveDbQuota(reservePayload);
+    }
+    let allocation;
+    let website;
     let created = false;
     let siteAdmin = null;
     let siteAdminError = null;
-    if (reserved.state !== 'attached') {
-      const result = await createSite({
-        input: submitted.input,
-        previewDigest: prepared.base.previewDigest,
-        confirmation: prepared.base.confirmation,
-        ...(outerLock ? { siteMutationLock: null } : {}),
-      });
-      if (!result || typeof result.created !== 'boolean' || result.website?.id !== reserved.websiteId) {
-        throw fail('hosting_site_result_invalid', 'Site creation did not return the allocated Website.', 503);
-      }
-      created = result.created;
-      if (result.siteAdmin) {
-        siteAdmin = result.siteAdmin;
-        if (!siteAdminError && siteAdmin.status === 'attention') {
-          siteAdminError = Object.freeze({
-            code: siteAdmin.code ?? 'site_admin_result_unverified',
-            message: 'Site administrator account creation requires attention.',
-            status: siteAdmin.code === 'site_admin_conflict' ? 409 : 400,
-          });
+    try {
+      // Rechecks live Owner, account chain and capacity atomically AFTER all reads.
+      const reserved = allocations.reserve(rawToken, policy, prepared.allocationInput);
+      if (reserved.state !== 'attached') {
+        const result = await createSite({
+          input: submitted.input,
+          previewDigest: prepared.base.previewDigest,
+          confirmation: prepared.base.confirmation,
+          ...(outerLock ? { siteMutationLock: null } : {}),
+        });
+        if (!result || typeof result.created !== 'boolean' || result.website?.id !== reserved.websiteId) {
+          throw fail('hosting_site_result_invalid', 'Site creation did not return the allocated Website.', 503);
+        }
+        created = result.created;
+        if (result.siteAdmin) {
+          siteAdmin = result.siteAdmin;
+          if (!siteAdminError && siteAdmin.status === 'attention') {
+            siteAdminError = Object.freeze({
+              code: siteAdmin.code ?? 'site_admin_result_unverified',
+              message: 'Site administrator account creation requires attention.',
+              status: siteAdmin.code === 'site_admin_conflict' ? 409 : 400,
+            });
+          }
+        }
+        if (result.siteAdminError) {
+          siteAdminError = result.siteAdminError;
         }
       }
-      if (result.siteAdminError) {
-        siteAdminError = result.siteAdminError;
+      // Never accept createSite's response object as persistence evidence.
+      website = await websiteRegistry.getWebsite(reserved.websiteId);
+      if (!website) {
+        throw fail('hosting_site_persistence_unverified', 'The allocated Website could not be verified in persistent state.', 503);
       }
+      allocation = allocations.complete(rawToken, policy, prepared.allocationInput, website);
+    } catch (err) {
+      if (dbReservation?.reserved && !dbReservation.reusedAttached && typeof finalizeDbQuota === 'function') {
+        try { await finalizeDbQuota(dbReservation.operationId, 'released'); } catch {}
+      }
+      throw err;
     }
-    // Never accept createSite's response object as persistence evidence.
-    const website = await websiteRegistry.getWebsite(reserved.websiteId);
-    if (!website) {
-      throw fail('hosting_site_persistence_unverified', 'The allocated Website could not be verified in persistent state.', 503);
-    }
-    const allocation = allocations.complete(rawToken, policy, prepared.allocationInput, website);
     let provisioning = null;
     let provisioningError = null;
     let stage = 'ownership_recorded';
@@ -328,6 +373,9 @@ export function createHostingSiteCreateService({
         || receipt.allocationOperationId !== prepared.allocationInput.operationId
         || receipt.released !== true || receipt.quotaReleased !== true) {
         throw fail('hosting_site_recovery_unverified', 'Site reservation recovery could not be verified.', 503);
+      }
+      if (typeof finalizeDbQuota === 'function') {
+        try { await finalizeDbQuota(`site-create-db:${prepared.allocationInput.operationId}`, 'released'); } catch {}
       }
       return Object.freeze({
         websiteId: receipt.websiteId,

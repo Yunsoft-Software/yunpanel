@@ -1396,6 +1396,7 @@ export function createApp({
     const payload = {
       domainRevision: domain.desiredRevision,
       primaryDomain: domain.primaryDomain,
+      ...(domain.websiteId ? { websiteId: domain.websiteId } : {}),
       aliases: domain.aliases,
       targetType: domain.targetType,
       target: domain.target,

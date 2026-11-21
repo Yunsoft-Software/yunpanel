@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { isInfrastructureDatabase } from '@yunpanel/shared';
 import { databaseCredentialRegistryInternals } from './database-credential-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
@@ -79,6 +80,9 @@ export function mountDatabaseBindingRoutes(app, {
   latestDatabaseSnapshot,
   withApplicationLock = null,
   authorizeActor = null,
+  databaseQuotaCoordinator = null,
+  reserveDatabaseQuota = null,
+  finalizeDatabaseQuota = null,
 } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function' || typeof app.delete !== 'function') {
     throw new Error('Express application is required');
@@ -92,6 +96,9 @@ export function mountDatabaseBindingRoutes(app, {
     || typeof databaseBindingRegistry.listBindings !== 'function'
     || (databaseCredentialRegistry !== null && (typeof databaseCredentialRegistry.getForBinding !== 'function'
       || typeof databaseCredentialRegistry.listCredentials !== 'function'))
+    || (databaseQuotaCoordinator !== null && typeof databaseQuotaCoordinator.reserveAndRun !== 'function')
+    || (reserveDatabaseQuota !== null && typeof reserveDatabaseQuota !== 'function')
+    || (finalizeDatabaseQuota !== null && typeof finalizeDatabaseQuota !== 'function')
     || typeof requireDatabaseName !== 'function' || typeof ensureDatabaseIdle !== 'function'
     || typeof latestDatabaseSnapshot !== 'function') {
     throw new Error('Database binding route dependencies are invalid');
@@ -215,13 +222,46 @@ export function mountDatabaseBindingRoutes(app, {
       if (!snapshot.databases.some((database) => database.name === name)) {
         throw new DatabaseBindingHttpError('database_not_found', 'Database was not found in the latest verified inventory', 404);
       }
-      return databaseBindingRegistry.bindDatabase({
+      const bindStep = () => databaseBindingRegistry.bindDatabase({
         serverId: scope.serverId,
         databaseName: name,
         websiteId: scope.websiteId,
         applicationId: body.applicationId ?? scope.applicationId,
         confirmation: body.confirmation,
       });
+      if (databaseQuotaCoordinator) {
+        return databaseQuotaCoordinator.reserveAndRun({
+          websiteId: scope.websiteId,
+          serverId: scope.serverId,
+          databaseName: name,
+          operationId: `db-bind:${randomUUID()}`,
+        }, bindStep);
+      }
+      let reservation = null;
+      let attached = false;
+      try {
+        if (typeof reserveDatabaseQuota === 'function') {
+          const activeBindings = await databaseBindingRegistry.listBindings();
+          reservation = await reserveDatabaseQuota({
+            websiteId: scope.websiteId,
+            serverId: scope.serverId,
+            databaseName: name,
+            operationId: `db-bind:${randomUUID()}`,
+            activeBindings,
+          });
+        }
+        const bound = await bindStep();
+        if (reservation?.reserved && typeof finalizeDatabaseQuota === 'function') {
+          await finalizeDatabaseQuota(reservation.operationId, 'attached');
+          attached = true;
+        }
+        return bound;
+      } catch (error) {
+        if (reservation?.reserved && !attached && typeof finalizeDatabaseQuota === 'function') {
+          try { await finalizeDatabaseQuota(reservation.operationId, 'released'); } catch {}
+        }
+        throw error;
+      }
     });
     return response.status(201).json({ data: binding, sideEffects: { databaseChanged: false } });
   }));
