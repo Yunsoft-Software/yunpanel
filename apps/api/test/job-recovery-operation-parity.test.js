@@ -96,6 +96,7 @@ test('packaged recovery CLI exposes only explicit operation families and no forc
     'recover-mail-dkim',
     'recover-mail-data',
     'recover-roundcube-config',
+    'recover-cron',
   ]) {
     assert.match(source, new RegExp(`['\"]${action}['\"]`));
   }

@@ -147,6 +147,12 @@ export function createTtydSessionManager({
   }
 
   const sessions = new Map();
+  let pendingCount = 0;
+  const pendingByUser = new Map();
+
+  function totalSessionCount() {
+    return sessions.size + pendingCount;
+  }
 
   async function runIdentity(file, args) {
     if (typeof run !== 'function') {
@@ -233,7 +239,7 @@ export function createTtydSessionManager({
   }
 
   function userSessionCount(userId) {
-    let count = 0;
+    let count = pendingByUser.get(userId) ?? 0;
     for (const record of sessions.values()) if (record.userId === userId && !record.closed) count += 1;
     return count;
   }
@@ -262,7 +268,15 @@ export function createTtydSessionManager({
     record.closeReason = reason;
     if (record.lease) {
       const websiteId = record.target?.scope === 'site' ? record.target.websiteId : null;
-      void record.drain().catch((error) => reportDrainError(websiteId, error));
+      record.drainPromise = record.drain().catch((error) => {
+        reportDrainError(websiteId, error);
+        throw error;
+      });
+      record.drainPromise.catch(() => {});
+      return true;
+    }
+    if (record.exited) {
+      cleanupRecord(record);
       return true;
     }
     signal(record, 'SIGHUP');
@@ -275,6 +289,7 @@ export function createTtydSessionManager({
 
   async function waitForSocket(record, gatewayIdentity) {
     const deadline = now() + 5_000;
+    let sawTransientSocket = false;
     while (now() < deadline) {
       if (record.exited) {
         throw new TtydSessionError(
@@ -285,16 +300,29 @@ export function createTtydSessionManager({
       }
       try {
         const info = await lstatFn(record.socketPath);
-        if (!info?.isSocket?.() || info.isSymbolicLink?.()
-          || info.uid !== gatewayIdentity.uid || info.gid !== gatewayIdentity.gid
-          || (Number(info.mode ?? 0) & 0o7777) !== 0o660) {
+        if (!info?.isSocket?.() || info.isSymbolicLink?.()) {
           throw new TtydSessionError(
             'ttyd_session_socket_unsafe',
             'ttyd session socket ownership or mode is unsafe',
             503,
           );
         }
-        return;
+        if (info.uid === gatewayIdentity.uid && info.gid === gatewayIdentity.gid
+          && (Number(info.mode ?? 0) & 0o7777) === 0o660) {
+          return;
+        }
+        // libwebsockets executes bind(), chown(), and chmod() separately; allow only
+        // the transient root/gateway startup window to converge before the deadline.
+        const transientOwner = (info.uid === 0 || info.uid === gatewayIdentity.uid)
+          && (info.gid === 0 || info.gid === gatewayIdentity.gid);
+        if (!transientOwner) {
+          throw new TtydSessionError(
+            'ttyd_session_socket_unsafe',
+            'ttyd session socket ownership or mode is unsafe',
+            503,
+          );
+        }
+        sawTransientSocket = true;
       } catch (error) {
         if (error instanceof TtydSessionError) throw error;
         if (error?.code !== 'ENOENT') {
@@ -309,6 +337,13 @@ export function createTtydSessionManager({
         const timer = setTimer(resolve, 25);
         timer?.unref?.();
       });
+    }
+    if (sawTransientSocket) {
+      throw new TtydSessionError(
+        'ttyd_session_socket_unsafe',
+        'ttyd session socket ownership or mode is unsafe',
+        503,
+      );
     }
     throw new TtydSessionError(
       'ttyd_session_socket_timeout',
@@ -327,7 +362,7 @@ export function createTtydSessionManager({
         503,
       );
     }
-    if (sessions.size >= maxSessions || userSessionCount(normalizedUserId) >= maxUserSessions) {
+    if (totalSessionCount() >= maxSessions || userSessionCount(normalizedUserId) >= maxUserSessions) {
       throw new TtydSessionError(
         'ttyd_session_limit',
         'Terminal session limit reached',
@@ -335,20 +370,41 @@ export function createTtydSessionManager({
       );
     }
 
+    let slotReserved = true;
+    pendingCount += 1;
+    pendingByUser.set(normalizedUserId, (pendingByUser.get(normalizedUserId) ?? 0) + 1);
+    const releasePendingSlot = () => {
+      if (!slotReserved) return;
+      slotReserved = false;
+      pendingCount -= 1;
+      const next = (pendingByUser.get(normalizedUserId) ?? 0) - 1;
+      if (next > 0) pendingByUser.set(normalizedUserId, next);
+      else pendingByUser.delete(normalizedUserId);
+    };
+
     const websiteId = target?.scope === 'site' ? target.websiteId : null;
     let lease, record, lifecycle, cancelled = false, completeOpen, spawnAttempted = false, pendingUnregister;
+    let drainPromise = null;
     const opened = new Promise(resolve => { completeOpen = resolve; });
-    const drain = async (options) => {
+    const drain = (options) => {
       cancelled = true;
-      await lease.awaitRemovalDecision();
-      await opened;
-      if (!spawnAttempted) return lease.settleWithoutProcess();
-      if (!lifecycle) throw new TtydSessionError('terminal_drain_evidence_unavailable', 'Terminal kapatılamadı', 503);
-      const result = await lifecycle.drain(options);
-      cleanupRecord(record);
-      sessions.delete(record.id);
-      return lease.finish(result);
+      if (drainPromise) return drainPromise;
+      drainPromise = (async () => {
+        await lease.awaitRemovalDecision();
+        await opened;
+        if (!spawnAttempted) return lease.settleWithoutProcess();
+        if (!lifecycle) throw new TtydSessionError('terminal_drain_evidence_unavailable', 'Terminal kapatılamadı', 503);
+        const result = await lifecycle.drain(options);
+        if (record) {
+          cleanupRecord(record);
+          sessions.delete(record.id);
+        }
+        return lease.finish(result);
+      })();
+      drainPromise.catch(() => { drainPromise = null; });
+      return drainPromise;
     };
+    try {
     if (websiteId !== null) {
       if (!liveSessions?.beginWebsiteOpen) throw new TtydSessionError('terminal_drain_evidence_unavailable', 'Terminal kullanılamıyor', 503);
       try { lease = liveSessions.beginWebsiteOpen({ websiteId, backend: 'ttyd',
@@ -360,7 +416,6 @@ export function createTtydSessionManager({
         }, stop: () => { cancelled = true; if (record) terminateRecord(record, 'website_removal'); }, drain });
       } catch (error) { throw new TtydSessionError(error.code ?? 'terminal_drain_evidence_unavailable', 'Site siliniyor', error.status ?? 503); }
     }
-    try {
     if (liveSessions) pendingUnregister = liveSessions.register({
       sessionId: normalizedOwnerSessionId, userId: normalizedUserId, websiteId,
       terminate: () => { cancelled = true; if (record) terminateRecord(record, 'session_revoked'); },
@@ -416,26 +471,12 @@ export function createTtydSessionManager({
     if (lease?.isFenced() || cancelled) throw new TtydSessionError('terminal_website_removing', 'Site siliniyor', 409);
     let child, seed, observation;
     try {
-      spawnAttempted = true;
       child = spawnProcess(TTYD, args, {
         cwd: resolved.cwd,
         detached: true,
         env: resolved.env,
         stdio: 'ignore',
       });
-      observation = observeTerminalChild(child, {
-        onExit: () => {
-          if (!record) return;
-          record.exited = true; record.closed = true; cleanupRecord(record);
-          if (lease) void drain().catch((error) => reportDrainError(websiteId, error));
-        },
-        onError: ({ spawnFailed }) => {
-          cancelled = true;
-          if (spawnFailed) lease?.settleWithoutProcess();
-          if (record) terminateRecord(record, 'process_error');
-        },
-      });
-      if (lease) seed = captureOwnedTerminalIdentity(child.pid);
     } catch {
       throw new TtydSessionError(
         'ttyd_session_spawn_failed',
@@ -444,13 +485,50 @@ export function createTtydSessionManager({
       );
     }
     if (!child || !Number.isSafeInteger(child.pid) || child.pid < 1
-      || typeof child.once !== 'function' || typeof child.kill !== 'function') {
-      if (!lease) { try { child?.kill?.('SIGKILL'); } catch {} }
+      || typeof child.once !== 'function' || typeof child.on !== 'function' || typeof child.kill !== 'function') {
+      if (child && typeof child.on === 'function') child.on('error', () => {});
+      if (!lease && Number.isSafeInteger(child?.pid) && child.pid >= 1) {
+        try { child.kill('SIGKILL'); } catch {}
+      }
       throw new TtydSessionError(
         'ttyd_session_spawn_failed',
         'ttyd session could not be started',
         503,
       );
+    }
+
+    spawnAttempted = true;
+    try {
+      observation = observeTerminalChild(child, {
+        onExit: () => {
+          if (!record) return;
+          record.exited = true; record.closed = true; cleanupRecord(record);
+          if (lease) {
+            record.drainPromise = drain().catch((error) => {
+              reportDrainError(websiteId, error);
+              throw error;
+            });
+            record.drainPromise.catch(() => {});
+          }
+        },
+        onError: ({ spawnFailed }) => {
+          cancelled = true;
+          if (spawnFailed) lease?.settleWithoutProcess();
+          if (record) terminateRecord(record, 'process_error');
+        },
+      });
+      if (lease) seed = captureOwnedTerminalIdentity(child.pid);
+    } catch (error) {
+      if (error?.name === 'TerminalProcessError') throw error;
+      throw new TtydSessionError(
+        'ttyd_session_spawn_failed',
+        'ttyd session could not be started',
+        503,
+      );
+    }
+
+    if (lease) {
+      lifecycle = await createOwnedTerminalLifecycle({ seed, childExit: observation.exit, socketPath });
     }
 
     record = {
@@ -474,10 +552,10 @@ export function createTtydSessionManager({
       unregister: pendingUnregister,
       lease,
       drain,
+      drainPromise: null,
     };
     sessions.set(id, record);
-
-    if (lease) lifecycle = await createOwnedTerminalLifecycle({ seed, childExit: observation.exit, socketPath });
+    releasePendingSlot();
 
     record.startupTimer = setTimer(() => {
       if (record.connectedAt === null) terminateRecord(record, 'connect_timeout');
@@ -498,7 +576,7 @@ export function createTtydSessionManager({
     await lease?.awaitRemovalDecision();
     if (lease?.isFenced() || cancelled) {
       terminateRecord(record, 'website_removal');
-      await drain();
+      if (lease) await drain();
       throw new TtydSessionError('terminal_website_removing', 'Site siliniyor', 409);
     }
     return publicSession(record);
@@ -506,10 +584,19 @@ export function createTtydSessionManager({
       completeOpen();
       pendingUnregister?.();
       if (!spawnAttempted) lease?.settleWithoutProcess();
-      else if (lease) void drain().catch((drainError) => reportDrainError(websiteId, drainError));
+      else if (lease) {
+        const drainTask = record?.drainPromise ?? drain().catch((drainError) => {
+          reportDrainError(websiteId, drainError);
+          throw drainError;
+        });
+        drainTask.catch(() => {});
+      }
       if (error?.name === 'TerminalProcessError') throw new TtydSessionError(error.code, 'Terminal kapatılamadı', error.status);
       throw error;
-    } finally { completeOpen(); }
+    } finally {
+      releasePendingSlot();
+      completeOpen();
+    }
   }
 
   function authorize(sessionId, {
@@ -552,7 +639,12 @@ export function createTtydSessionManager({
   }
 
   function closeAll(reason = 'server_shutdown') {
-    for (const record of [...sessions.values()]) terminateRecord(record, reason);
+    const drainPromises = [];
+    for (const record of [...sessions.values()]) {
+      terminateRecord(record, reason);
+      if (record.drainPromise) drainPromises.push(record.drainPromise);
+    }
+    return Promise.allSettled(drainPromises);
   }
 
   return Object.freeze({

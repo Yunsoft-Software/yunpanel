@@ -49,17 +49,18 @@ export function formatTerminalDrainFailureLine({ backend, websiteId = null, erro
 // sessions, enter this inventory. A UID, executable name or a numeric PGID is
 // never sufficient authority to signal a process.
 const OWNED_PROCESS_PYTHON = String.raw`
-import base64,json,os,signal,stat,sys,time
+import base64,json,os,re,signal,stat,sys,time
+SOCKET_PATH_RE=r'/run/yunpanel/ttyd/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.sock'
 def reject(code):
  print(json.dumps({'error':code}));sys.exit(2)
 def proc(pid):
  try:
-  text=open('/proc/'+str(pid)+'/stat').read(8193)
+  with open('/proc/'+str(pid)+'/stat') as f:text=f.read(8193)
   if len(text)>8192:reject('terminal_drain_identity_invalid')
   end=text.rfind(')'); fields=text[end+2:].split()
   if end<0 or len(fields)<20:reject('terminal_drain_identity_invalid')
   return {'pid':int(text[:text.index(' ')]),'ppid':int(fields[1]),'pgid':int(fields[2]),'sid':int(fields[3]),'starttime':fields[19],'state':fields[0]}
- except FileNotFoundError:return None
+ except (FileNotFoundError,ProcessLookupError):return None
 def same(a,b):return a is not None and b is not None and a['pid']==b['pid'] and a['starttime']==b['starttime']
 def clean(p):return {k:p[k] for k in ('pid','ppid','pgid','sid','starttime')}
 def inventory():
@@ -101,6 +102,8 @@ try:
   if proc(os.getpid()) is None:reject('terminal_drain_unsupported')
   print(json.dumps({'supported':True}));sys.exit(0)
  if x['mode']=='initial':
+  if x.get('socketPath') is not None:
+   if not isinstance(x['socketPath'],str) or not re.fullmatch(SOCKET_PATH_RE,x['socketPath']):reject('terminal_drain_socket_changed')
   while True:
    creator=proc(x['seed']['creator']['pid']); root=proc(x['seed']['root']['pid'])
    if creator is None or root is None or clean(creator)!=x['seed']['creator'] or not same(root,x['seed']['root']) or root['ppid']!=x['seed']['root']['ppid'] or root['ppid']!=creator['pid']:reject('terminal_drain_identity_unavailable')
@@ -116,8 +119,7 @@ try:
  sockets=evidence.get('socket')
  if sockets is not None:
   path=sockets['path']
-  import re
-  if not re.fullmatch(r'/run/yunpanel/ttyd/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.sock',path):reject('terminal_drain_socket_changed')
+  if not isinstance(path,str) or not re.fullmatch(SOCKET_PATH_RE,path):reject('terminal_drain_socket_changed')
  held={}; stopped=set(); previous=None
  try:
   while True:
@@ -145,7 +147,9 @@ try:
     if pid not in held:
      try:fd=os.pidfd_open(pid,0)
      except ProcessLookupError:continue
-     if not same(proc(pid),known[pid]):os.close(fd);reject('terminal_drain_pid_reused')
+     post=proc(pid)
+     if post is None:os.close(fd);continue
+     if not same(post,known[pid]):os.close(fd);reject('terminal_drain_pid_reused')
      held[pid]=fd
     try:signal.pidfd_send_signal(held[pid],signal.SIGSTOP,None,0)
     except ProcessLookupError:continue
@@ -154,8 +158,11 @@ try:
    if shape==previous and all(p['state'] in ('T','t','Z') for p in live.values()):break
    previous=shape;time.sleep(.01)
   evidence['known']=[known[p] for p in sorted(known)]
-  if x.get('socketPath') is not None:
-   candidate={'path':x['socketPath'],'identity':socket_info(x['socketPath'])}
+  if x['mode']!='initial' and x.get('socketPath') is not None:
+   sp=x['socketPath']
+   if not isinstance(sp,str) or not re.fullmatch(SOCKET_PATH_RE,sp):reject('terminal_drain_socket_changed')
+   if sockets is not None and sockets.get('path')!=sp:reject('terminal_drain_socket_changed')
+   candidate={'path':sp,'identity':socket_info(sp)}
    if candidate['identity'] is None:reject('terminal_drain_socket_unavailable')
    inode=socket_listener_inode(candidate['path']); owner=False
    if inode is None:reject('terminal_drain_socket_unavailable')
@@ -167,17 +174,18 @@ try:
      for name in names:
       try:
        if os.readlink('/proc/'+str(pid)+'/fd/'+name)=='socket:['+inode+']':owner=True
-      except FileNotFoundError:continue
-    except FileNotFoundError:continue
+      except (FileNotFoundError,ProcessLookupError):continue
+    except (FileNotFoundError,ProcessLookupError):continue
     if not same(proc(pid),p):reject('terminal_drain_identity_unavailable')
    if not owner or socket_info(candidate['path'])!=candidate['identity'] or socket_listener_inode(candidate['path'])!=inode:reject('terminal_drain_socket_changed')
    candidate['identity']['kernelInode']=inode
+   if sockets is not None and sockets.get('identity') is not None and sockets['identity']!=candidate['identity']:reject('terminal_drain_socket_changed')
    evidence['socket']=candidate;sockets=candidate
   if x['mode']!='drain':print(json.dumps(evidence));sys.exit(0)
   for pid,fd in held.items():
-   if not same(proc(pid),known[pid]):
-    if proc(pid) is None:continue
-    reject('terminal_drain_pid_reused')
+   post=proc(pid)
+   if post is None:continue
+   if not same(post,known[pid]):reject('terminal_drain_pid_reused')
    for sig in (signal.SIGHUP,signal.SIGKILL):
     try:signal.pidfd_send_signal(fd,sig,None,0)
     except ProcessLookupError:pass

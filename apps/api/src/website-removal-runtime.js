@@ -579,6 +579,18 @@ export function createWebsiteRemovalRuntime({
         return registry.succeedStep(op.id, step.id, { domainRemoved: true, domainId });
       }
 
+      // Never silently ignore a prior failed child domain removal operation or start a conflicting second one.
+      const failedChild = domainOps.find((dOp) => dOp.status === 'failed');
+      if (failedChild) {
+        const childIdSuffix = typeof failedChild.id === 'string' && failedChild.id.length > 0
+          ? ` (${failedChild.id})`
+          : '';
+        return registry.blockStep(op.id, step.id, {
+          code: 'child_domain_removal_blocked',
+          message: `Child domain removal for ${domainId} is failed${childIdSuffix}`,
+        });
+      }
+
       // Start new domain removal operation
       const domainPreview = await domainRemovalRuntime.preview({ domainId });
       if (!domainPreview || !domainPreview.confirmation) {

@@ -503,3 +503,69 @@ test('a database bound after the removal plan stops the removal before the Websi
     assert.match(stopped.error.message, /latedb/);
   }
 });
+
+test('website-removal-runtime fails closed on a prior failed child domain removal instead of starting a conflicting second removal', async () => {
+  const registry = createWebsiteRemovalOperationRegistry();
+  await registry.init();
+
+  let previewCalls = 0;
+  let startCalls = 0;
+  const failedChildOp = {
+    id: 'dom-rem-failed-1',
+    domainId: 'dom-1',
+    status: 'failed',
+    error: { code: 'domain_removal_routing_failed', message: 'Nginx reload failed' },
+  };
+  const domainRemovalRuntime = {
+    listForDomain: async (domainId) => (domainId === 'dom-1' ? [failedChildOp] : []),
+    preview: async () => {
+      previewCalls += 1;
+      return { readyToStart: true, previewDigest: 'b'.repeat(64), confirmation: 'start-domain-remove:dom-1:1:xyz' };
+    },
+    start: async () => {
+      startCalls += 1;
+      throw new Error('Must not start a conflicting second domain removal');
+    },
+  };
+
+  const cleanupActions = [];
+  const runtime = createWebsiteRemovalRuntime({
+    domainRegistry: {
+      listDomains: async () => [{ id: 'dom-1', websiteId: 'ws-1', primaryDomain: 'example.com' }],
+      getDomain: async (id) => (id === 'dom-1' ? { id: 'dom-1', websiteId: 'ws-1', primaryDomain: 'example.com' } : null),
+    },
+    registry,
+    previewProvider: async () => mockPreview({ withDomains: true, withDatabases: false, withRuntimeBinding: false }),
+    domainRemovalRuntime,
+    websiteRegistry: {
+      getWebsite: async () => ({ id: 'ws-1', serverId: 'srv-local', applicationId: 'app-1', revision: 1 }),
+      finalizeWebsiteRemoval: async () => { cleanupActions.push('finalizeWebsite'); },
+    },
+    ...applicationCleanupDependencies(cleanupActions),
+    websiteSftpKeyRegistry: {
+      listKeys: async () => [],
+      revokeKey: async () => { cleanupActions.push('revokeKey'); },
+    },
+    fileCleanupInspector: async ({ websiteId, applicationId }) => ({ ready: true, websiteId, applicationId, targets: [] }),
+    fileCleanupHandler: async () => { cleanupActions.push('fileCleanup'); return { filesCleaned: true }; },
+    unixIdentityCleanupInspector: async ({ websiteId, systemUser }) => ({ ready: true, websiteId, applicationId: 'app-1', systemUser }),
+    unixIdentityCleanupHandler: async () => { cleanupActions.push('unixCleanup'); return { unixIdentityCleaned: true }; },
+  });
+
+  const preview = mockPreview({ withDomains: true, withDatabases: false, withRuntimeBinding: false });
+  const op = await runtime.start({
+    websiteId: preview.website.id,
+    previewDigest: preview.previewDigest,
+    confirmation: preview.confirmation,
+  });
+
+  assert.equal(previewCalls, 0);
+  assert.equal(startCalls, 0);
+  assert.deepEqual(cleanupActions, []);
+  assert.equal(op.status, 'blocked');
+  assert.equal(op.steps[0].kind, 'domain_removal');
+  assert.equal(op.steps[0].status, 'blocked');
+  assert.equal(op.steps[0].error?.code, 'child_domain_removal_blocked');
+  assert.match(op.steps[0].error?.message ?? '', /dom-1/);
+  assert.match(op.steps[0].error?.message ?? '', /dom-rem-failed-1/);
+});

@@ -28,6 +28,7 @@ import { runRunningNodeRollbackRecoveryFromStores } from '../apps/api/src/job-ru
 import { runRunningReadOnlyRecoveryFromStores } from '../apps/api/src/job-running-readonly-recovery-runtime.js';
 import { runRunningRoundcubeConfigRecoveryFromStores } from '../apps/api/src/job-running-roundcube-config-recovery-runtime.js';
 import { runRunningPhpToolRecoveryFromStores } from '../apps/api/src/job-running-php-tool-recovery-runtime.js';
+import { runRunningCronRecoveryFromStores } from '../apps/api/src/job-running-cron-recovery-runtime.js';
 import { runRunningServiceControlRecoveryFromStores } from '../apps/api/src/job-running-service-recovery-runtime.js';
 import { runRunningServiceReceiptRecoveryFromStores } from '../apps/api/src/job-running-service-receipt-recovery-runtime.js';
 import { runRunningStaticRollbackRecoveryFromStores } from '../apps/api/src/job-running-static-rollback-recovery-runtime.js';
@@ -67,8 +68,9 @@ const RECOVERY_ACTIONS = Object.freeze([
   'recover-mail-data',
   'recover-roundcube-config',
   'recover-php-tool',
+  'recover-cron',
 ]);
-const USAGE = 'Usage: job-recovery.mjs status | recover-passenger-release <server-id> <job-id> --confirm | compensate-passenger-release <server-id> <job-id> --confirm | reconcile <server-id> <job-id> --confirm | recover-readonly <server-id> <job-id> --confirm | recover-domain-stage <server-id> <job-id> --confirm | recover-domain-activate <server-id> <job-id> --confirm | recover-static-deploy <server-id> <job-id> --confirm | recover-static-rollback <server-id> <job-id> --confirm | recover-node-deploy <server-id> <job-id> --confirm | recover-node-restart <server-id> <job-id> --confirm | recover-node-process <server-id> <job-id> --confirm | recover-node-runtime-install <server-id> <job-id> --confirm | recover-node-rollback <server-id> <job-id> --confirm | recover-system-upgrade <server-id> <job-id> --confirm | recover-certificate <server-id> <job-id> --confirm | recover-database-create <server-id> <job-id> --confirm | recover-database-delete <server-id> <job-id> --confirm | recover-database-backup <server-id> <job-id> --confirm | recover-database-restore <server-id> <job-id> --confirm | recover-database-credential <server-id> <job-id> --confirm | recover-dns-record <server-id> <job-id> --confirm | recover-service-control <server-id> <job-id> --confirm | recover-service-mutation <server-id> <job-id> --confirm | recover-mail-config <server-id> <job-id> --confirm | recover-mail-dkim <server-id> <job-id> --confirm | recover-mail-data <server-id> <job-id> --confirm | recover-roundcube-config <server-id> <job-id> --confirm | recover-php-tool <server-id> <job-id> --confirm';
+const USAGE = 'Usage: job-recovery.mjs status | recover-passenger-release <server-id> <job-id> --confirm | compensate-passenger-release <server-id> <job-id> --confirm | reconcile <server-id> <job-id> --confirm | recover-readonly <server-id> <job-id> --confirm | recover-domain-stage <server-id> <job-id> --confirm | recover-domain-activate <server-id> <job-id> --confirm | recover-static-deploy <server-id> <job-id> --confirm | recover-static-rollback <server-id> <job-id> --confirm | recover-node-deploy <server-id> <job-id> --confirm | recover-node-restart <server-id> <job-id> --confirm | recover-node-process <server-id> <job-id> --confirm | recover-node-runtime-install <server-id> <job-id> --confirm | recover-node-rollback <server-id> <job-id> --confirm | recover-system-upgrade <server-id> <job-id> --confirm | recover-certificate <server-id> <job-id> --confirm | recover-database-create <server-id> <job-id> --confirm | recover-database-delete <server-id> <job-id> --confirm | recover-database-backup <server-id> <job-id> --confirm | recover-database-restore <server-id> <job-id> --confirm | recover-database-credential <server-id> <job-id> --confirm | recover-dns-record <server-id> <job-id> --confirm | recover-service-control <server-id> <job-id> --confirm | recover-service-mutation <server-id> <job-id> --confirm | recover-mail-config <server-id> <job-id> --confirm | recover-mail-dkim <server-id> <job-id> --confirm | recover-mail-data <server-id> <job-id> --confirm | recover-roundcube-config <server-id> <job-id> --confirm | recover-php-tool <server-id> <job-id> --confirm | recover-cron <server-id> <job-id> --confirm';
 
 export function parseJobRecoveryArguments(argv) {
   if (!Array.isArray(argv)) throw new Error(USAGE);
@@ -175,6 +177,7 @@ export async function runJobRecoveryCli({
   recoverMailData = runRunningMailDataRecoveryFromStores,
   recoverRoundcubeConfig = runRunningRoundcubeConfigRecoveryFromStores,
   recoverPhpTool = runRunningPhpToolRecoveryFromStores,
+  recoverCron = runRunningCronRecoveryFromStores,
   recoveryAudit = recordRecoveryAuditOutcome,
   stdout = process.stdout,
 } = {}) {
@@ -211,7 +214,9 @@ export async function runJobRecoveryCli({
     else if (parsed.action === 'recover-mail-dkim') handler = recoverMailDkim;
     else if (parsed.action === 'recover-mail-data') handler = recoverMailData;
     else if (parsed.action === 'recover-roundcube-config') handler = recoverRoundcubeConfig;
-    else handler = recoverPhpTool;
+    else if (parsed.action === 'recover-php-tool') handler = recoverPhpTool;
+    else if (parsed.action === 'recover-cron') handler = recoverCron;
+    else throw new Error(USAGE);
     if (typeof handler !== 'function') throw new Error('Job recovery mutation dependency is invalid');
     const result = await handler({
       serverId: parsed.serverId,
