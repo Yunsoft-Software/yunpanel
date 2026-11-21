@@ -79,6 +79,8 @@ test('command search connects daily Turkish site tasks to direct site-scoped too
     ['dns', 'dns'],
     ['günlük', 'logs'],
     ['cron', 'cron'],
+    ['kaynak', 'resources'],
+    ['disk', 'resources'],
   ]) {
     const entries = commandEntries({ canManage: true, isCustomer: true, domains, query: term });
     const siteTaskIndex = entries.findIndex((entry) => entry.to === `/websites/dom-1/${expectedTab}`);
@@ -123,10 +125,10 @@ test('command search never lets hostname or substring collisions hijack domain m
   const alphaSslTasks = alphaSsl.filter((entry) => entry.id.startsWith('domain-task:'));
   assert.deepEqual(alphaSslTasks.map((entry) => entry.to), ['/websites/dom-alpha/ssl']);
 });
-test('site tools follow three task families and expose DNS, Git and logs', () => {
+test('site tools follow three task families and expose DNS, Git, logs and site resources', () => {
   const groups = groupSiteTabs(SITE_TABS);
   assert.deepEqual(groups.map((group) => group.id), ['dashboard', 'hosting', 'mail']);
-  assert.deepEqual(groups[0].tabs.map(([key]) => key), ['overview', 'files', 'databases', 'ssl', 'node', 'php', 'wordpress', 'deploy', 'logs', 'analytics', 'backup']);
+  assert.deepEqual(groups[0].tabs.map(([key]) => key), ['overview', 'files', 'databases', 'resources', 'ssl', 'node', 'php', 'wordpress', 'deploy', 'logs', 'analytics', 'backup']);
   assert.deepEqual(groups[1].tabs.map(([key]) => key), ['hosting', 'dns', 'settings', 'domains', 'access', 'terminal', 'cron']);
   assert.deepEqual(groups[2].tabs.map(([key]) => key), ['mail']);
 });
@@ -184,7 +186,8 @@ test('source: command palette uses actual Owner context and preferences are not 
 test('source: mobile site navigation shows primary task bar plus single selector and tools wrap on narrow screens', async () => {
   const nav = await source('ui/SiteNavigation.jsx');
   assert.match(nav, /groupSiteTabs\(tabs\)/);
-  assert.match(nav, /activeTab === 'resources' \? 'databases'/);
+  assert.match(nav, /const activeKey = activeTab;/);
+  assert.doesNotMatch(nav, /activeTab === 'resources' \? 'databases'/);
   assert.doesNotMatch(nav, /<details|<summary/);
   assert.match(nav, /ws-site-tool-mobile-primary/);
   assert.match(nav, /Diğer site araçları/);

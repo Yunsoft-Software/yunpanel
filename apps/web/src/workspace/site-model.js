@@ -3,7 +3,7 @@ const ACTIVE_JOBS = new Set(['queued', 'running']);
 const CRON = 'cron';
 const BACKUP = 'backup';
 export const SITE_TABS = [
-  ['overview', 'Genel Bakış'], ['resources', 'Bağlı kaynaklar'], ['node', 'Uygulama'], ['deploy', 'Git / Yayınlama'],
+  ['overview', 'Genel Bakış'], ['resources', 'Site Kaynakları'], ['node', 'Uygulama'], ['deploy', 'Git / Yayınlama'],
   ['hosting', 'Barındırma ayarları'], ['domains', 'Alan adları'], ['dns', 'DNS'], ['ssl', 'SSL/TLS Sertifikaları'], ['files', 'Dosyalar'],
   ['databases', 'Veritabanları'], ['mail', 'E-posta'], ['logs', 'Günlükler'], ['analytics', 'İstatistikler'],
   [CRON, 'Zamanlanmış Görevler'], [BACKUP, 'Yedekleme ve Geri Yükleme'], ['terminal', 'Terminal'],

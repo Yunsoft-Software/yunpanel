@@ -396,13 +396,14 @@ export async function downloadSiteFile(websiteId, targetPath) {
   return new Uint8Array(arrayBuffer);
 }
 
-export async function getWebsiteConsumption(websiteId) {
+export async function getWebsiteConsumption(websiteId, { signal } = {}) {
   if (typeof websiteId !== 'string' || !websiteId) throw new Error('websiteId is required');
   const response = await fetch(`${MANAGEMENT_ROOT}/websites/${encodeURIComponent(websiteId)}/consumption`, {
     method: 'GET',
     credentials: 'same-origin',
     cache: 'no-store',
     headers: sessionHeaders('GET'),
+    signal,
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => null);

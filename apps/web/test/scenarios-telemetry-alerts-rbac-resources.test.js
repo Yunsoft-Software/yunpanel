@@ -1497,8 +1497,9 @@ test('SCN-RES-01 [28]: site-model normalizes all tab aliases, encodes special ch
     assert.equal(externalSiteUrl({ primaryDomain: badHost }), null);
   }
 
-  // groupSiteTabs places unknown extensions under Ek Araçlar and hides legacy 'resources' duplicate
+  // groupSiteTabs exposes 'resources' in dashboard and places unknown extensions under Ek Araçlar
   const grouped = groupSiteTabs([...SITE_TABS, ['custom-plugin', 'Özel Araç']]);
+  assert.ok(grouped.some((g) => g.id === 'dashboard' && g.tabs.some((t) => t[0] === 'resources')));
   assert.ok(grouped.some((g) => g.id === 'extensions' && g.tabs.some((t) => t[0] === 'custom-plugin')));
 });
 

@@ -78,7 +78,9 @@ test('Website migration stores and API composition expose explicit dependencies'
   assert.match(appSource, /websiteMigrationPolicy = createWebsiteMigrationPolicyStore\(\),/);
   assert.match(appSource, /migrationLedger = createWebsiteMigrationLedger\(\),/);
   assert.match(appSource, /websiteBindingRequired: \(\) => websiteMigrationPolicy\.snapshot\(\)\.websiteBindingRequired,/);
-  assert.match(appSource, /mountWebsiteRoutes\(app, \{ websiteRegistry, domainRegistry, localServerId(?:, customerLookup)? \}\);/);
+  assert.match(appSource, /createSiteConsumptionInspector\(/);
+  assert.match(appSource, /createLinuxSiteConsumptionAdapter\(/);
+  assert.match(appSource, /mountWebsiteRoutes\(app, \{[\s\S]*websiteRegistry,[\s\S]*domainRegistry,[\s\S]*localServerId,[\s\S]*customerLookup,[\s\S]*siteConsumptionInspector,[\s\S]*websiteOwnerQuotasLookup,[\s\S]*\}\);/);
   assert.match(appSource, /mountWebsiteMigrationRoutes\(app, \{[\s\S]*websiteMigrationPolicy,[\s\S]*migrationLedger,[\s\S]*\}\);/);
   assert.match(appSource, /error instanceof WebsiteMigrationBindError/);
   assert.match(appSource, /error instanceof WebsiteMigrationCreateError/);

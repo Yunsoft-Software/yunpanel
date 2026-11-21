@@ -4,7 +4,7 @@ import { databaseBackupChoices, databaseRestorePreviewView, websiteDatabaseDelet
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, Icon, KeyValues, LinkButton, Modal, Section } from './PanelKit.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { openWebsitePhpMyAdmin } from './phpmyadmin-client.js';
-import { siteHref } from './site-model.js';
+import { formatDate, siteHref } from './site-model.js';
 import SiteMailPanel from './SiteMailPanel.jsx';
 import DatabaseSetupDialog, { DatabaseConnectionDialog } from './DatabaseSetupDialog.jsx';
 import { useSearchParams } from 'react-router';
@@ -22,71 +22,168 @@ export default function SiteResourcesPanel(props) {
   return <DatabaseWorkspace key={props.website?.id ?? props.domain.id} {...props} />;
 }
 
+const CONSUMPTION_ROWS = Object.freeze([
+  ['diskSpaceMb', 'Disk Alanı', true],
+  ['databases', 'Veritabanı Sayısı', true],
+  ['trafficMb', 'Aylık Trafik', true],
+  ['diskInodes', 'Disk Inode', false],
+  ['databaseStorageMb', 'Veritabanı Depolama', false],
+  ['mailStorageMb', 'Posta Depolama', false],
+  ['mailboxes', 'Posta Kutusu Sayısı', false],
+  ['cpuPercent', 'CPU Kullanımı', false],
+  ['memoryMb', 'Bellek', false],
+  ['processCount', 'Süreç Sayısı', false],
+]);
+
+function formatHumanBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) return null;
+  if (bytes === 0) return '0 B';
+  if (bytes < 1024) return `${Math.round(bytes).toLocaleString('tr-TR')} B`;
+  const kib = bytes / 1024;
+  if (kib < 1024 * 1024) {
+    return `${Math.round(kib).toLocaleString('tr-TR')} KB`;
+  }
+  const gib = bytes / (1024 * 1024 * 1024);
+  return `${gib.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} GB`;
+}
+
+function formatMetricLimit(value, unit) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return null;
+  if (unit === 'percent') return `%${value.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}`;
+  if (unit && unit !== 'count') return `${value.toLocaleString('tr-TR', { maximumFractionDigits: 2 })} ${unit}`;
+  return value.toLocaleString('tr-TR');
+}
+
+function formatMeasuredDisplay(key, item) {
+  if (!item || item.unknown || item.measured === null || item.measured === undefined) {
+    return null;
+  }
+  if (key === 'diskSpaceMb') {
+    if (typeof item.bytes === 'number' && Number.isFinite(item.bytes)) {
+      if (item.bytes === 0) return '0 B';
+      const mbText = `${item.measured.toLocaleString('tr-TR', { maximumFractionDigits: 2 })} MB`;
+      const humanText = formatHumanBytes(item.bytes);
+      return humanText ? `${mbText} (${humanText})` : mbText;
+    }
+    return `${item.measured.toLocaleString('tr-TR', { maximumFractionDigits: 2 })} MB`;
+  }
+  if (item.unit === 'percent') return `%${item.measured.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}`;
+  if (item.unit && item.unit !== 'count') return `${item.measured.toLocaleString('tr-TR', { maximumFractionDigits: 2 })} ${item.unit}`;
+  return item.measured.toLocaleString('tr-TR');
+}
+
+function formatConsumptionTimestamp(value) {
+  if (!value) return 'Henüz ölçülmedi';
+  const formatted = formatDate(value);
+  return formatted && formatted !== '—' ? formatted : 'Henüz ölçülmedi';
+}
+
 function SiteConsumptionWorkspace({ domain, website }) {
   const [consumption, setConsumption] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const generation = useRef(0);
+  const controllerRef = useRef(null);
 
   const load = useCallback(async () => {
+    controllerRef.current?.abort();
     if (!website?.id) {
       setConsumption(null);
+      setError(null);
+      setBusy(false);
       return;
     }
+    const current = ++generation.current;
+    const controller = new AbortController();
+    controllerRef.current = controller;
     setBusy(true);
     setError(null);
     try {
-      const data = await getWebsiteConsumption(website.id);
-      setConsumption(data);
+      const data = await getWebsiteConsumption(website.id, { signal: controller.signal });
+      if (current === generation.current) setConsumption(data);
     } catch (err) {
-      setError(err.message ?? 'Site tüketim bilgisi yüklenemedi.');
+      if (err?.name === 'AbortError' || current !== generation.current) return;
+      setConsumption(null);
+      setError(err.message ?? 'Site kaynak ölçümü alınamadı.');
     } finally {
-      setBusy(false);
+      if (current === generation.current) setBusy(false);
     }
   }, [website?.id]);
 
   useEffect(() => {
     void load();
+    return () => {
+      generation.current += 1;
+      controllerRef.current?.abort();
+    };
   }, [load]);
 
   const metrics = consumption?.metrics ?? {};
-  const exceeded = consumption?.exceeded;
+  const metricValues = Object.values(metrics);
+  const enforcedExceeded = metricValues.filter((item) => item?.exceeded && item.enforcedLimit !== null);
+  const definedOnlyExceeded = metricValues.filter((item) => item?.exceeded && item.enforcedLimit === null && item.definedLimit !== null);
   const warnings = consumption?.warningMetrics ?? [];
+  const topMeasuredText = consumption?.measuredAt
+    ? `Son ölçüm: ${formatConsumptionTimestamp(consumption.measuredAt)}`
+    : (busy ? 'Ölçüm alınıyor…' : 'Henüz ölçülmedi');
 
-  const renderMetricRow = (item, fallbackLabel) => {
+  const renderMetricRow = ([key, label, isPrimary]) => {
+    const item = metrics[key];
     if (!item) return null;
-    const label = item.label || fallbackLabel;
-    const unit = item.unit && item.unit !== 'count' ? (item.unit === 'percent' ? '%' : ` ${item.unit}`) : '';
-    const measuredDisplay = item.unknown || item.measured === null
-      ? '— (Ölçülemedi)'
-      : (item.unit === 'percent' ? `%${item.measured}` : `${item.measured}${unit}`);
-    const definedDisplay = item.definedLimit !== null
-      ? (item.unit === 'percent' ? `%${item.definedLimit}` : `${item.definedLimit}${unit}`)
-      : 'Sınırsız';
-    const enforcedDisplay = item.enforcedLimit !== null
-      ? (item.unit === 'percent' ? `%${item.enforcedLimit}` : `${item.enforcedLimit}${unit}`)
-      : 'Uygulanmıyor';
+    const isUnmeasured = item.unknown || item.measured === null;
+    const isUnavailableSource = key === 'trafficMb' || !isPrimary || item.reasonCode === 'traffic_source_unavailable';
+    const measuredText = formatMeasuredDisplay(key, item);
+    const unmeasuredLabel = isUnavailableSource ? 'Ölçülemiyor' : 'Ölçülemedi';
+    const definedText = formatMetricLimit(item.definedLimit, item.unit) ?? 'Sınırsız';
+    const enforcedText = formatMetricLimit(item.enforcedLimit, item.unit) ?? 'Uygulanmıyor';
+    const rowTimestamp = !isUnmeasured && item.measuredAt ? formatConsumptionTimestamp(item.measuredAt) : 'Henüz ölçülmedi';
+
     const badgeState = item.status === 'exceeded'
-      ? 'danger'
+      ? (item.enforcedLimit !== null ? 'error' : 'warning')
       : item.status === 'warning'
         ? 'warning'
         : item.status === 'ok'
-          ? 'success'
+          ? 'healthy'
           : 'neutral';
     const badgeText = item.status === 'exceeded'
-      ? 'Aşıldı'
+      ? (item.enforcedLimit !== null ? 'Aşıldı' : 'Limit üstü')
       : item.status === 'warning'
         ? 'Uyarı'
         : item.status === 'ok'
           ? 'Normal'
-          : 'Bilinmiyor';
+          : unmeasuredLabel;
+
+    const trafficMeta = key === 'trafficMb' && !isUnmeasured && (item.period || item.scope)
+      ? [item.period, item.scope].filter(Boolean).join(' · ')
+      : null;
+    const diskScopeMeta = key === 'diskSpaceMb' && !isUnmeasured && item.scope === 'active_release_root'
+      ? 'Aktif sürüm içerik kökü'
+      : null;
 
     return (
-      <tr key={item.metric} role="row">
-        <td role="cell" data-label="Kaynak" style={{ fontWeight: 500, padding: '0.5rem' }}>{label}</td>
-        <td role="cell" data-label="Ölçülen Kullanım" style={{ padding: '0.5rem' }}>{measuredDisplay}</td>
-        <td role="cell" data-label="Tanımlı Limit" style={{ padding: '0.5rem' }}>{definedDisplay}</td>
-        <td role="cell" data-label="Sistem Tarafından Uygulanan Limit" style={{ padding: '0.5rem' }}>{enforcedDisplay}</td>
-        <td role="cell" data-label="Durum" style={{ padding: '0.5rem' }}>
+      <tr key={key} role="row" data-consumption-metric={key}>
+        <td role="cell" data-label="Kaynak" style={{ fontWeight: 500, padding: '0.55rem' }}>{label}</td>
+        <td role="cell" data-label="Ölçülen Kullanım" style={{ padding: '0.55rem' }}>
+          <div>{isUnmeasured ? unmeasuredLabel : measuredText}</div>
+          {isUnmeasured && item.reason && (
+            <small className="ws-muted" style={{ display: 'block', marginTop: '0.2rem' }}>{item.reason}</small>
+          )}
+          {diskScopeMeta && (
+            <small className="ws-muted" style={{ display: 'block', marginTop: '0.2rem' }}>{diskScopeMeta}</small>
+          )}
+          {trafficMeta && (
+            <small className="ws-muted" style={{ display: 'block', marginTop: '0.2rem' }}>{trafficMeta}</small>
+          )}
+        </td>
+        <td role="cell" data-label="Tanımlı Limit" style={{ padding: '0.55rem' }}>
+          <div>{definedText}</div>
+          {item.definedLimit !== null && item.definedLimitScope === 'customer_account' && (
+            <small className="ws-muted" style={{ display: 'block', marginTop: '0.15rem' }}>Hesap kotası</small>
+          )}
+        </td>
+        <td role="cell" data-label="Uygulanan Limit" style={{ padding: '0.55rem' }}>{enforcedText}</td>
+        <td role="cell" data-label="Ölçüm Zamanı" style={{ padding: '0.55rem' }}>{rowTimestamp}</td>
+        <td role="cell" data-label="Durum" style={{ padding: '0.55rem' }}>
           <Badge state={badgeState}>{badgeText}</Badge>
         </td>
       </tr>
@@ -95,48 +192,63 @@ function SiteConsumptionWorkspace({ domain, website }) {
 
   return (
     <Section
-      title="Site Kaynak ve Tüketim Görünürlüğü"
-      description={`${domain?.primaryDomain ?? 'Site'} için gerçek ölçülen tüketim ve uygulanan limitler`}
+      title="Site Kaynakları"
+      description={`${domain?.primaryDomain ?? 'Site'} · ${topMeasuredText}`}
       actions={<Button icon="refresh" onClick={load} disabled={busy}>Yenile</Button>}
     >
-      {error && <ErrorNotice error={error} />}
-      {exceeded && (
-        <div className="ws-notice ws-notice-danger" role="alert" style={{ marginBottom: '1rem' }}>
-          <strong>Kota Limiti Aşıldı:</strong> Bu siteye ait bir veya daha fazla kaynak sınırı aşılmıştır.
-        </div>
-      )}
-      {!exceeded && warnings.length > 0 && (
-        <div className="ws-notice ws-notice-warning" role="alert" style={{ marginBottom: '1rem' }}>
-          <strong>Kaynak Uyarısı:</strong> Bazı kaynaklar tanımlı limitlerin %85'ine ulaşmıştır.
-        </div>
-      )}
-      <div className="ws-table-scroll ws-table-container" style={{ overflowX: 'auto', overscrollBehaviorX: 'contain', width: '100%', maxWidth: '100%' }}>
-        <table className="ws-table" role="table" aria-label="Kaynak Tüketimi" style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead role="rowgroup">
-            <tr role="row">
-              <th scope="col" role="columnheader" style={{ textAlign: 'left', padding: '0.5rem' }}>Kaynak</th>
-              <th scope="col" role="columnheader" style={{ textAlign: 'left', padding: '0.5rem' }}>Ölçülen Kullanım</th>
-              <th scope="col" role="columnheader" style={{ textAlign: 'left', padding: '0.5rem' }}>Tanımlı Limit</th>
-              <th scope="col" role="columnheader" style={{ textAlign: 'left', padding: '0.5rem' }}>Sistem Tarafından Uygulanan Limit</th>
-              <th scope="col" role="columnheader" style={{ textAlign: 'left', padding: '0.5rem' }}>Durum</th>
-            </tr>
-          </thead>
-          <tbody role="rowgroup">
-            {renderMetricRow(metrics.diskSpaceMb, 'Disk Alanı')}
-            {renderMetricRow(metrics.diskInodes, 'Disk Inode')}
-            {renderMetricRow(metrics.mailStorageMb, 'Posta Depolama')}
-            {renderMetricRow(metrics.mailboxes, 'Posta Kutusu Sayısı')}
-            {renderMetricRow(metrics.databaseStorageMb, 'Veritabanı Depolama')}
-            {renderMetricRow(metrics.databases, 'Veritabanı Sayısı')}
-            {renderMetricRow(metrics.cpuPercent, 'CPU Kullanımı')}
-            {renderMetricRow(metrics.memoryMb, 'Bellek (RAM)')}
-            {renderMetricRow(metrics.processCount, 'Süreç Sayısı')}
-          </tbody>
-        </table>
+      <div className="ws-section-body" data-site-consumption-measured-at={consumption?.measuredAt ?? ''}>
+        {error && (
+          <div style={{ marginBottom: '1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <ErrorNotice error={error} />
+            <div>
+              <Button icon="refresh" onClick={load} disabled={busy}>Yeniden dene</Button>
+            </div>
+          </div>
+        )}
+        {enforcedExceeded.length > 0 && (
+          <div className="ws-notice ws-notice-danger" role="alert" style={{ marginBottom: '1rem' }}>
+            <strong>Kota Limiti Aşıldı:</strong> Bu siteye ait uygulanan bir kaynak sınırı aşılmıştır.
+          </div>
+        )}
+        {enforcedExceeded.length === 0 && definedOnlyExceeded.length > 0 && (
+          <div className="ws-notice" role="status" style={{ marginBottom: '1rem' }}>
+            <strong>Tanımlı Limit Aşıldı:</strong> Kayıtlı hesap veya site sınırı aşılmıştır; bu kaynak için otomatik site durdurma veya erişim engellemesi uygulanmaz.
+          </div>
+        )}
+        {enforcedExceeded.length === 0 && definedOnlyExceeded.length === 0 && warnings.length > 0 && (
+          <div className="ws-notice ws-notice-warning" role="status" style={{ marginBottom: '1rem' }}>
+            <strong>Kaynak Uyarısı:</strong> Bazı kaynaklar tanımlı sınırın %85’ine ulaşmıştır.
+          </div>
+        )}
+        {busy && !consumption && (
+          <div className="ws-loading" role="status">
+            <span className="ws-spinner" />
+            <span>Site kaynak ölçümleri alınıyor…</span>
+          </div>
+        )}
+        {consumption && (
+          <div className="ws-table-scroll ws-table-container" style={{ overflowX: 'auto', overscrollBehaviorX: 'contain', width: '100%', maxWidth: '100%' }}>
+            <table className="ws-table" role="table" aria-label="Site kaynak tüketimi" style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead role="rowgroup">
+                <tr role="row">
+                  <th scope="col" role="columnheader" style={{ textAlign: 'left', padding: '0.55rem' }}>Kaynak</th>
+                  <th scope="col" role="columnheader" style={{ textAlign: 'left', padding: '0.55rem' }}>Ölçülen Kullanım</th>
+                  <th scope="col" role="columnheader" style={{ textAlign: 'left', padding: '0.55rem' }}>Tanımlı Limit</th>
+                  <th scope="col" role="columnheader" style={{ textAlign: 'left', padding: '0.55rem' }}>Uygulanan Limit</th>
+                  <th scope="col" role="columnheader" style={{ textAlign: 'left', padding: '0.55rem' }}>Ölçüm Zamanı</th>
+                  <th scope="col" role="columnheader" style={{ textAlign: 'left', padding: '0.55rem' }}>Durum</th>
+                </tr>
+              </thead>
+              <tbody role="rowgroup">
+                {CONSUMPTION_ROWS.map(renderMetricRow)}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="ws-muted" style={{ marginTop: '0.75rem', fontSize: '0.85rem' }}>
+          Ölçülemeyen kaynaklar sıfır gösterilmez. Otomatik kota engellemesi şu an yalnızca bayi müşteri ve site sayıları ile müşteri yeni site tahsislerinde uygulanır; disk, veritabanı ve aylık trafik limitleri bilgilendirme amaçlıdır.
+        </p>
       </div>
-      <p className="ws-muted" style={{ marginTop: '0.75rem', fontSize: '0.85rem' }}>
-        Ölçülen kullanım gerçek sistem ölçümlerine dayanır; ölçülemeyen veya bilinmeyen değerler sıfır sayılmaz (—).
-      </p>
     </Section>
   );
 }

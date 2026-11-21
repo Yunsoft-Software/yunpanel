@@ -60,10 +60,22 @@ export const RESOURCE_METRICS = Object.freeze({
   mailboxes: Object.freeze({ category: 'mail', key: 'mailboxes', label: 'Posta Kutusu Sayısı', unit: 'count' }),
   databaseStorageMb: Object.freeze({ category: 'database', key: 'databaseStorageMb', label: 'Veritabanı Depolama', unit: 'MB' }),
   databases: Object.freeze({ category: 'database', key: 'databases', label: 'Veritabanı Sayısı', unit: 'count' }),
+  trafficMb: Object.freeze({ category: 'traffic', key: 'trafficMb', label: 'Aylık Trafik', unit: 'MB' }),
   cpuPercent: Object.freeze({ category: 'cpu', key: 'cpuPercent', label: 'CPU Kullanımı', unit: 'percent' }),
   memoryMb: Object.freeze({ category: 'memory', key: 'memoryMb', label: 'Bellek (RAM)', unit: 'MB' }),
   processCount: Object.freeze({ category: 'process', key: 'processCount', label: 'Süreç Sayısı', unit: 'count' }),
 });
+
+function normalizeMeasuredTimestamp(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = typeof value === 'number' ? value : Date.parse(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return new Date(parsed).toISOString();
+}
+
+function normalizeOptionalText(value) {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
+}
 
 export function evaluateResourceMetric({
   metric,
@@ -71,8 +83,15 @@ export function evaluateResourceMetric({
   definedLimit = null,
   enforcedLimit = null,
   warnThreshold = 0.85,
+  measuredAt = null,
+  bytes = null,
+  period = null,
+  scope = null,
+  reasonCode = null,
+  reason = null,
+  definedLimitScope = null,
 } = {}) {
-  const isMeasured = measured !== null && measured !== undefined && !Number.isNaN(measured) && typeof measured === 'number';
+  const isMeasured = measured !== null && measured !== undefined && typeof measured === 'number' && Number.isFinite(measured);
   const measuredValue = isMeasured ? measured : null;
   const unknown = !isMeasured;
 
@@ -102,6 +121,8 @@ export function evaluateResourceMetric({
   }
 
   const def = typeof metric === 'string' && RESOURCE_METRICS[metric] ? RESOURCE_METRICS[metric] : null;
+  const normalizedMeasuredAt = isMeasured ? normalizeMeasuredTimestamp(measuredAt) : null;
+  const normalizedBytes = isMeasured && typeof bytes === 'number' && Number.isFinite(bytes) && bytes >= 0 ? bytes : null;
 
   return Object.freeze({
     metric: typeof metric === 'string' ? metric : (def?.key ?? 'unknown'),
@@ -111,11 +132,19 @@ export function evaluateResourceMetric({
     measured: measuredValue,
     definedLimit: defined,
     enforcedLimit: enforced,
+    enforced: enforced !== null,
     effectiveLimit,
     unknown,
     status,
     exceeded,
     warning,
+    measuredAt: normalizedMeasuredAt,
+    bytes: normalizedBytes,
+    period: normalizeOptionalText(period),
+    scope: normalizeOptionalText(scope),
+    reasonCode: normalizeOptionalText(reasonCode),
+    reason: normalizeOptionalText(reason),
+    definedLimitScope: normalizeOptionalText(definedLimitScope),
   });
 }
 
@@ -125,6 +154,8 @@ export function buildSiteConsumptionReport({
   measurements = {},
   definedLimits = {},
   enforcedLimits = {},
+  metricDetails = {},
+  definedLimitScopes = {},
   inspectedAt = Date.now(),
 } = {}) {
   if (!websiteId || typeof websiteId !== 'string') {
@@ -140,12 +171,20 @@ export function buildSiteConsumptionReport({
     const measured = measurements?.[key] ?? null;
     const defined = definedLimits?.[key] ?? null;
     const enforced = enforcedLimits?.[key] ?? null;
+    const detail = metricDetails?.[key] && typeof metricDetails[key] === 'object' ? metricDetails[key] : null;
 
     const evaluated = evaluateResourceMetric({
       metric: key,
       measured,
       definedLimit: defined,
       enforcedLimit: enforced,
+      measuredAt: detail?.measuredAt ?? null,
+      bytes: detail?.bytes ?? null,
+      period: detail?.period ?? null,
+      scope: detail?.scope ?? null,
+      reasonCode: detail?.reasonCode ?? null,
+      reason: detail?.reason ?? null,
+      definedLimitScope: definedLimitScopes?.[key] ?? detail?.definedLimitScope ?? null,
     });
 
     metrics[key] = evaluated;
@@ -154,6 +193,19 @@ export function buildSiteConsumptionReport({
       exceededList.push(key);
     } else if (evaluated.warning) {
       warnings.push(key);
+    }
+  }
+
+  const measuredMetrics = Object.values(metrics).filter((item) => !item.unknown);
+  let measuredAt = null;
+  if (measuredMetrics.length > 0) {
+    const explicitTimestamps = measuredMetrics
+      .map((item) => (item.measuredAt ? Date.parse(item.measuredAt) : Number.NaN))
+      .filter((ts) => Number.isFinite(ts) && ts > 0);
+    if (explicitTimestamps.length > 0) {
+      measuredAt = new Date(Math.max(...explicitTimestamps)).toISOString();
+    } else {
+      measuredAt = normalizeMeasuredTimestamp(inspectedAt);
     }
   }
 
@@ -170,6 +222,9 @@ export function buildSiteConsumptionReport({
       storageMb: metrics.databaseStorageMb,
       databases: metrics.databases,
     }),
+    traffic: Object.freeze({
+      usageMb: metrics.trafficMb,
+    }),
     cpu: Object.freeze({
       usage: metrics.cpuPercent,
     }),
@@ -185,6 +240,7 @@ export function buildSiteConsumptionReport({
     websiteId,
     customerId,
     inspectedAt,
+    measuredAt,
     exceeded: anyExceeded,
     exceededMetrics: Object.freeze(exceededList),
     warningMetrics: Object.freeze(warnings),
@@ -232,7 +288,7 @@ export function createSiteConsumptionInspector({
   systemInspector = null,
 } = {}) {
   return Object.freeze({
-    async inspectWebsite(websiteId, { customerId = null, definedLimits = {}, enforcedLimits = {} } = {}) {
+    async inspectWebsite(websiteId, { customerId = null, definedLimits = {}, enforcedLimits = {}, definedLimitScopes = {}, signal = null } = {}) {
       if (!websiteId || typeof websiteId !== 'string') {
         throw new AuthError('invalid_site_consumption_input', 'websiteId is required', 400);
       }
@@ -248,18 +304,38 @@ export function createSiteConsumptionInspector({
 
       const resolvedCustomerId = customerId ?? website?.customerId ?? null;
       const measurements = {};
+      const metricDetails = {};
 
       if (systemInspector) {
         try {
           if (typeof systemInspector.getDiskUsage === 'function') {
-            const disk = await systemInspector.getDiskUsage(websiteId, website);
+            const disk = await systemInspector.getDiskUsage(websiteId, website, { signal });
             if (disk) {
               if (disk.spaceMb !== undefined) measurements.diskSpaceMb = disk.spaceMb;
               if (disk.inodes !== undefined) measurements.diskInodes = disk.inodes;
+              metricDetails.diskSpaceMb = {
+                measuredAt: disk.measuredAt ?? null,
+                bytes: disk.bytes ?? null,
+                scope: disk.scope ?? null,
+                reasonCode: disk.reasonCode ?? null,
+                reason: disk.reason ?? null,
+              };
+              if (disk.inodes !== undefined) {
+                metricDetails.diskInodes = {
+                  measuredAt: disk.measuredAt ?? null,
+                  scope: disk.scope ?? null,
+                  reasonCode: disk.reasonCode ?? null,
+                  reason: disk.reason ?? null,
+                };
+              }
             }
           }
         } catch {
-          // Failure leaves metric as unmeasured (null)
+          metricDetails.diskSpaceMb = {
+            measuredAt: null,
+            reasonCode: 'disk_measurement_failed',
+            reason: 'Disk kullanımı ölçülürken beklenmeyen bir hata oluştu.',
+          };
         }
 
         try {
@@ -268,6 +344,18 @@ export function createSiteConsumptionInspector({
             if (mail) {
               if (mail.storageMb !== undefined) measurements.mailStorageMb = mail.storageMb;
               if (mail.mailboxes !== undefined) measurements.mailboxes = mail.mailboxes;
+              metricDetails.mailStorageMb = {
+                measuredAt: mail.measuredAt ?? null,
+                scope: mail.scope ?? null,
+                reasonCode: mail.reasonCode ?? null,
+                reason: mail.reason ?? null,
+              };
+              metricDetails.mailboxes = {
+                measuredAt: mail.measuredAt ?? null,
+                scope: mail.scope ?? null,
+                reasonCode: mail.reasonCode ?? null,
+                reason: mail.reason ?? null,
+              };
             }
           }
         } catch {
@@ -280,16 +368,64 @@ export function createSiteConsumptionInspector({
             if (dbUsage) {
               if (dbUsage.storageMb !== undefined) measurements.databaseStorageMb = dbUsage.storageMb;
               if (dbUsage.databases !== undefined) measurements.databases = dbUsage.databases;
+              metricDetails.databases = {
+                measuredAt: dbUsage.measuredAt ?? null,
+                scope: dbUsage.scope ?? null,
+                reasonCode: dbUsage.reasonCode ?? null,
+                reason: dbUsage.reason ?? null,
+              };
+              if (dbUsage.storageMb !== undefined && dbUsage.storageMb !== null) {
+                metricDetails.databaseStorageMb = {
+                  measuredAt: dbUsage.measuredAt ?? null,
+                  scope: dbUsage.scope ?? null,
+                };
+              }
             }
           }
         } catch {
-          // Failure leaves metric as unmeasured (null)
+          measurements.databases = null;
+          metricDetails.databases = {
+            measuredAt: null,
+            reasonCode: 'database_inventory_unavailable',
+            reason: 'Veritabanı bağlantı envanteri okunamadığı için sayı doğrulanamadı.',
+          };
+        }
+
+        try {
+          if (typeof systemInspector.getTrafficUsage === 'function') {
+            const traffic = await systemInspector.getTrafficUsage(websiteId, website);
+            if (traffic) {
+              if (traffic.trafficMb !== undefined) measurements.trafficMb = traffic.trafficMb;
+              metricDetails.trafficMb = {
+                measuredAt: traffic.measuredAt ?? null,
+                period: traffic.period ?? null,
+                scope: traffic.scope ?? null,
+                reasonCode: traffic.reasonCode ?? null,
+                reason: traffic.reason ?? null,
+              };
+            }
+          }
+        } catch {
+          measurements.trafficMb = null;
+          metricDetails.trafficMb = {
+            measuredAt: null,
+            reasonCode: 'traffic_source_unavailable',
+            reason: 'Aylık trafik verisi okunamadı.',
+          };
         }
 
         try {
           if (typeof systemInspector.getCpuUsage === 'function') {
             const cpu = await systemInspector.getCpuUsage(websiteId, website);
-            if (cpu && cpu.percent !== undefined) measurements.cpuPercent = cpu.percent;
+            if (cpu && cpu.percent !== undefined) {
+              measurements.cpuPercent = cpu.percent;
+              metricDetails.cpuPercent = {
+                measuredAt: cpu.measuredAt ?? null,
+                scope: cpu.scope ?? null,
+                reasonCode: cpu.reasonCode ?? null,
+                reason: cpu.reason ?? null,
+              };
+            }
           }
         } catch {
           // Failure leaves metric as unmeasured (null)
@@ -298,7 +434,15 @@ export function createSiteConsumptionInspector({
         try {
           if (typeof systemInspector.getMemoryUsage === 'function') {
             const mem = await systemInspector.getMemoryUsage(websiteId, website);
-            if (mem && mem.usageMb !== undefined) measurements.memoryMb = mem.usageMb;
+            if (mem && mem.usageMb !== undefined) {
+              measurements.memoryMb = mem.usageMb;
+              metricDetails.memoryMb = {
+                measuredAt: mem.measuredAt ?? null,
+                scope: mem.scope ?? null,
+                reasonCode: mem.reasonCode ?? null,
+                reason: mem.reason ?? null,
+              };
+            }
           }
         } catch {
           // Failure leaves metric as unmeasured (null)
@@ -307,19 +451,66 @@ export function createSiteConsumptionInspector({
         try {
           if (typeof systemInspector.getProcessUsage === 'function') {
             const proc = await systemInspector.getProcessUsage(websiteId, website);
-            if (proc && proc.count !== undefined) measurements.processCount = proc.count;
+            if (proc && proc.count !== undefined) {
+              measurements.processCount = proc.count;
+              metricDetails.processCount = {
+                measuredAt: proc.measuredAt ?? null,
+                scope: proc.scope ?? null,
+                reasonCode: proc.reasonCode ?? null,
+                reason: proc.reason ?? null,
+              };
+            }
           }
         } catch {
           // Failure leaves metric as unmeasured (null)
         }
       }
 
-      if (measurements.databases === undefined && databaseBindingRegistry?.listDatabaseBindings) {
-        try {
-          const bindings = await databaseBindingRegistry.listDatabaseBindings();
-          measurements.databases = bindings.filter((b) => b.websiteId === websiteId).length;
-        } catch {
-          // ignore
+      if (measurements.databases === undefined && databaseBindingRegistry) {
+        if (typeof databaseBindingRegistry.listBindings === 'function') {
+          try {
+            const bindings = await databaseBindingRegistry.listBindings({
+              serverId: website?.serverId ?? null,
+              websiteId,
+            });
+            if (Array.isArray(bindings)) {
+              measurements.databases = bindings.filter((b) => (
+                b
+                && b.websiteId === websiteId
+                && (!website?.serverId || b.serverId === website.serverId)
+                && (!website?.applicationId || b.applicationId === website.applicationId)
+              )).length;
+              metricDetails.databases = {
+                measuredAt: new Date().toISOString(),
+                scope: 'canonical_active_bindings',
+              };
+            }
+          } catch {
+            measurements.databases = null;
+            metricDetails.databases = {
+              measuredAt: null,
+              reasonCode: 'database_inventory_unavailable',
+              reason: 'Veritabanı bağlantı envanteri okunamadığı için sayı doğrulanamadı.',
+            };
+          }
+        } else if (typeof databaseBindingRegistry.listDatabaseBindings === 'function') {
+          try {
+            const bindings = await databaseBindingRegistry.listDatabaseBindings();
+            if (Array.isArray(bindings)) {
+              measurements.databases = bindings.filter((b) => b && b.websiteId === websiteId).length;
+              metricDetails.databases = {
+                measuredAt: new Date().toISOString(),
+                scope: 'canonical_active_bindings',
+              };
+            }
+          } catch {
+            measurements.databases = null;
+            metricDetails.databases = {
+              measuredAt: null,
+              reasonCode: 'database_inventory_unavailable',
+              reason: 'Veritabanı bağlantı envanteri okunamadığı için sayı doğrulanamadı.',
+            };
+          }
         }
       }
 
@@ -329,6 +520,8 @@ export function createSiteConsumptionInspector({
         measurements,
         definedLimits: definedLimits ?? website?.quotas ?? {},
         enforcedLimits: enforcedLimits ?? website?.enforcedLimits ?? {},
+        metricDetails,
+        definedLimitScopes,
       });
     },
   });

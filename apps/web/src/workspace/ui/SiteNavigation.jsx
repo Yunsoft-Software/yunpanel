@@ -14,6 +14,7 @@ const MOBILE_SHORT_LABELS = {
   backup: 'Yedekleme',
   settings: 'Ayarlar',
   databases: 'Veritabanı',
+  resources: 'Kaynaklar',
   mail: 'E-posta',
   dns: 'DNS',
   domains: 'Alan Adları',
@@ -23,8 +24,7 @@ const tabLabel = (tab) => (Array.isArray(tab) ? tab[1] : (tab?.label ?? tab?.tit
 export default function SiteNavigation({ tabs, activeTab, domainId, query = '' }) {
   const navigate = useNavigate();
   const groups = groupSiteTabs(tabs);
-  // /resources is an old database entry. Its URL and engine remain supported.
-  const activeKey = activeTab === 'resources' ? 'databases' : activeTab;
+  const activeKey = activeTab;
   const allTabs = groups.flatMap((group) => group.tabs);
   const keys = allTabs.map(tabKey);
   const mobilePrimaryTabs = [];

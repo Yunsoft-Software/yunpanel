@@ -102,6 +102,7 @@ function SiteWorkspace({ websiteId, tab }) {
     if (key === 'terminal') return canManage && (managedTerminalWebsite || legacyManagedTarget);
     if (['php', 'wordpress'].includes(key)) return canManage && (website?.runtimeType === 'php' || application?.type === 'php');
     if (key === 'access') return canManage && (Boolean(website) || tab === 'access');
+    if (key === 'resources') return Boolean(website);
     if (['databases', 'mail'].includes(key)) return canManage && Boolean(website);
     return true;
   }).map(([key, label]) => [key, key === 'node' && application?.type === 'node' ? 'Node.js' : key === 'node' && (application?.type === 'php' || website?.runtimeType === 'php') ? 'PHP / WordPress' : key === 'node' && application?.type === 'python' ? 'Python' : key === 'node' && (application?.type === 'docker' || website?.runtimeType === 'docker') ? 'Docker' : label]);
@@ -126,6 +127,7 @@ function SiteWorkspace({ websiteId, tab }) {
   const runtimeLabel = runtimeType === 'node' ? `Node.js ${application?.runtime?.nodeMajor ?? ''}` : ({ php: 'PHP-FPM', python: 'Python', static: 'Statik site', docker: 'Docker / Proxy' }[runtimeType] ?? 'Yerel proxy');
   const shortcuts = [
     ['files', 'Dosya Yöneticisi', 'folder'], ['databases', 'Veritabanları', 'database'],
+    ['resources', 'Site Kaynakları', 'box'],
     ['hosting', 'Web Sunucusu & Nginx', 'settings'], ['domains', 'Alan Adları & Yönlendirme', 'globe'],
     ['ssl', 'SSL/TLS Sertifikaları', 'shield'],
     ['php', 'PHP Ayarları', 'code'], ['wordpress', 'WordPress', 'code'],
@@ -138,6 +140,7 @@ function SiteWorkspace({ websiteId, tab }) {
   const toolSubtitles = {
     files: 'Dizinler ve kod editörü',
     databases: 'MariaDB & phpMyAdmin',
+    resources: 'Disk kullanımı, veritabanı sayısı ve limitler',
     hosting: 'Nginx, CORS, önbellek ve proxy kuralları',
     domains: 'Alt alan adları, alias ve yayına alma',
     ssl: 'Let’s Encrypt & HTTPS',
@@ -154,7 +157,7 @@ function SiteWorkspace({ websiteId, tab }) {
     access: 'SFTP, SSH ve sistem erişimi',
   };
   const toolCategories = [
-    ['Sık kullanılan araçlar', ['files', 'databases', 'ssl', 'mail', 'backup', 'wordpress']],
+    ['Sık kullanılan araçlar', ['files', 'databases', 'resources', 'ssl', 'mail', 'backup', 'wordpress']],
     ['Geliştirici ve sunucu araçları', ['hosting', 'domains', 'dns', 'php', 'node', 'deploy', 'logs', 'analytics', 'cron', 'access']],
   ];
   const toolLinks = (items) => (

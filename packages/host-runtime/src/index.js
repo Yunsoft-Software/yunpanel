@@ -483,3 +483,7 @@ export { createApplicationEnvironmentBackupManager } from './application-environ
 export { createPhpMyAdminConfigurationService } from './phpmyadmin-configuration-service.js';
 export { createMailSmarthostManager, MailSmarthostError, mailSmarthostManagerInternals } from './mail-smarthost-manager.js';
 export { createProtectedPathAuthManager, ProtectedPathAuthError } from './protected-path-auth-manager.js';
+export {
+  createLinuxSiteConsumptionAdapter,
+  siteConsumptionInspectorInternals,
+} from './site-consumption-inspector.js';

@@ -79,11 +79,11 @@ test('search has bounded domain suggestions and encodes query strings', () => {
   assert.equal(commandEntries({ query: 'a&b?#' }).at(-1).to, '/websites?q=a%26b%3F%23');
   assert.equal(new URL(commandEntries({ query: 'x'.repeat(500) }).at(-1).to, 'https://panel.test').searchParams.get('q').length, 253);
 });
-test('site grouping keeps every visible tab exactly once without duplicating the legacy resources alias', () => {
+test('site grouping keeps every visible tab exactly once including resources', () => {
   const tabs = ['overview', 'resources', 'databases', 'node', 'deploy', 'domains', 'dns', 'ssl', 'files', 'logs', 'terminal', 'settings'].map((key) => [key, key]);
   const grouped = groupSiteTabs(tabs);
   assert.ok(grouped.length <= 3);
-  assert.deepEqual(grouped.flatMap((group) => group.tabs.map(([key]) => key)).sort(), tabs.filter(([key]) => key !== 'resources').map(([key]) => key).sort());
+  assert.deepEqual(grouped.flatMap((group) => group.tabs.map(([key]) => key)).sort(), tabs.map(([key]) => key).sort());
 });
 test('runtime-filtered and future backend tabs remain reachable without placeholders', () => {
   assert.deepEqual(groupSiteTabs([['overview', 'Overview']]).map((group) => group.id), ['dashboard']);

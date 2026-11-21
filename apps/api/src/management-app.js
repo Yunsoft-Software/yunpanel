@@ -23,8 +23,10 @@ import {
   createResticManager,
   createApplicationEnvironmentBackupManager,
   createWebsiteRestoreReceiptStore,
+  createLinuxSiteConsumptionAdapter,
   RcloneError,
 } from '@yunpanel/host-runtime';
+import { createSiteConsumptionInspector } from './customer-quotas.js';
 import { createWebsiteHttpHealthInspector } from '@yunpanel/host-runtime/website-http-health-inspector';
 import { createApplicationDeployQueue } from './application-deploy-queue.js';
 import { createWebsiteDatabaseBackupAdapter } from './website-database-backup-adapter.js';
@@ -509,7 +511,12 @@ export function createApp(allOptions = {}) {
   licenseEntitlementService = null,
   ...options
 } = allOptions;
-  const hostingAccounts = allOptions.hostingAccountStore ?? userAdminStore?.hostingAccounts ?? options.hostingAccountStore ?? null;
+  const hostingAccounts = allOptions.hostingAccountStore
+    ?? userAdminStore?.hostingAccounts
+    ?? options.hostingAccountStore
+    ?? options.authStore?.hostingAccounts
+    ?? options.authStore?.users?.hostingAccounts
+    ?? null;
   const customerLookup = typeof allOptions.customerLookup === 'function'
     ? allOptions.customerLookup
     : hostingAccounts && typeof hostingAccounts.getCustomer === 'function'
@@ -1061,7 +1068,33 @@ export function createApp(allOptions = {}) {
       migrationService: passengerMigrationService,
     });
   }
-  mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, localServerId, customerLookup });
+  const websiteOwnerQuotasLookup = typeof allOptions.websiteOwnerQuotasLookup === 'function'
+    ? allOptions.websiteOwnerQuotasLookup
+    : hostingAccounts && typeof hostingAccounts.getWebsiteOwnerQuotas === 'function'
+      ? (websiteId) => hostingAccounts.getWebsiteOwnerQuotas(websiteId)
+      : null;
+  const siteConsumptionInspector = options.siteConsumptionInspector ?? createSiteConsumptionInspector({
+    websiteRegistry,
+    domainRegistry,
+    databaseBindingRegistry,
+    systemInspector: options.siteConsumptionSystemInspector ?? createLinuxSiteConsumptionAdapter({
+      websiteRegistry,
+      domainRegistry,
+      databaseBindingRegistry,
+      localServerId,
+      ...(options.siteConsumptionPathContractOptions ? { pathContractOptions: options.siteConsumptionPathContractOptions } : {}),
+      ...(options.siteConsumptionTrafficInspector ? { trafficInspector: options.siteConsumptionTrafficInspector } : {}),
+      ...(options.siteConsumptionAllowCurrentUserWithoutSetpriv ? { allowCurrentUserWithoutSetpriv: true } : {}),
+    }),
+  });
+  mountWebsiteRoutes(app, {
+    websiteRegistry,
+    domainRegistry,
+    localServerId,
+    customerLookup,
+    siteConsumptionInspector,
+    websiteOwnerQuotasLookup,
+  });
   mountWebsiteAnalyticsRoutes(app, {
     websiteRegistry,
     domainRegistry,

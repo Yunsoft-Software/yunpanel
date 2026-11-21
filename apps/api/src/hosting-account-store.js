@@ -1128,5 +1128,18 @@ export function createHostingAccountStore({
         };
       });
     },
+    getWebsiteOwnerQuotas(websiteId) {
+      if (!identifier(websiteId)) return null;
+      const ownerRow = db.prepare(`SELECT customer_id AS customerId FROM (
+        SELECT customer_id, 0 AS priority FROM auth_customer_websites WHERE website_id = ?
+        UNION ALL
+        SELECT customer_id, 1 AS priority FROM auth_hosting_site_allocations WHERE website_id = ? AND state = 'attached'
+      ) ORDER BY priority ASC LIMIT 1`).get(websiteId, websiteId);
+      if (!ownerRow?.customerId) return null;
+      return Object.freeze({
+        customerId: ownerRow.customerId,
+        quotas: Object.freeze(customerQuotas(ownerRow.customerId)),
+      });
+    },
   };
 }

@@ -146,7 +146,14 @@ function asyncRoute(handler) {
   };
 }
 
-export function mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, localServerId = null, customerLookup = null, siteConsumptionInspector = null } = {}) {
+export function mountWebsiteRoutes(app, {
+  websiteRegistry,
+  domainRegistry,
+  localServerId = null,
+  customerLookup = null,
+  siteConsumptionInspector = null,
+  websiteOwnerQuotasLookup = null,
+} = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function' || typeof app.patch !== 'function') throw new Error('Express application is required');
   if (!websiteRegistry || typeof websiteRegistry.listWebsites !== 'function'
     || typeof websiteRegistry.getWebsite !== 'function' || typeof websiteRegistry.createWebsite !== 'function'
@@ -238,41 +245,85 @@ export function mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, local
     return response.json({ data: domains });
   }));
 
-  app.get('/api/websites/:websiteId/consumption', requirePanelRouteAccess, asyncRoute(async (request, response) => {
-    await checkWebsiteAccess(request, request.params.websiteId);
-    const website = await requireLocalWebsite(websiteRegistry, request.params.websiteId, localServerId);
-    const consumption = siteConsumptionInspector
-      ? await siteConsumptionInspector.inspectWebsite(website.id, {
-          customerId: website.customerId ?? null,
-          definedLimits: website.quotas ?? {},
-          enforcedLimits: website.enforcedLimits ?? {},
-        })
-      : buildSiteConsumptionReport({
-          websiteId: website.id,
-          customerId: website.customerId ?? null,
-          definedLimits: website.quotas ?? {},
-          enforcedLimits: website.enforcedLimits ?? {},
-        });
-    return response.json({ data: consumption });
-  }));
+  async function resolveWebsiteConsumption(website, { signal = null } = {}) {
+    let ownerQuotaInfo = null;
+    if (typeof websiteOwnerQuotasLookup === 'function') {
+      try {
+        ownerQuotaInfo = await Promise.resolve(websiteOwnerQuotasLookup(website.id));
+      } catch {
+        ownerQuotaInfo = null;
+      }
+    }
 
-  app.get('/api/websites/:websiteId/quotas', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const resolvedCustomerId = website.customerId ?? ownerQuotaInfo?.customerId ?? null;
+    const definedLimits = {};
+    const definedLimitScopes = {};
+    const ownerQuotas = ownerQuotaInfo?.quotas;
+    if (ownerQuotas && typeof ownerQuotas === 'object') {
+      if (ownerQuotas.maxDiskMb !== null && ownerQuotas.maxDiskMb !== undefined) {
+        definedLimits.diskSpaceMb = ownerQuotas.maxDiskMb;
+        definedLimitScopes.diskSpaceMb = 'customer_account';
+      }
+      if (ownerQuotas.maxDatabases !== null && ownerQuotas.maxDatabases !== undefined) {
+        definedLimits.databases = ownerQuotas.maxDatabases;
+        definedLimitScopes.databases = 'customer_account';
+      }
+      if (ownerQuotas.maxTrafficMb !== null && ownerQuotas.maxTrafficMb !== undefined) {
+        definedLimits.trafficMb = ownerQuotas.maxTrafficMb;
+        definedLimitScopes.trafficMb = 'customer_account';
+      }
+    }
+
+    const websiteQuotas = website.quotas && typeof website.quotas === 'object' ? website.quotas : {};
+    for (const [key, value] of Object.entries(websiteQuotas)) {
+      if (value !== undefined) {
+        definedLimits[key] = value;
+        if (value !== null) {
+          definedLimitScopes[key] = 'website';
+        } else {
+          delete definedLimitScopes[key];
+        }
+      }
+    }
+
+    const enforcedLimits = website.enforcedLimits ?? {};
+    return siteConsumptionInspector
+      ? siteConsumptionInspector.inspectWebsite(website.id, {
+        customerId: resolvedCustomerId,
+        definedLimits,
+        enforcedLimits,
+        definedLimitScopes,
+        signal,
+      })
+      : buildSiteConsumptionReport({
+        websiteId: website.id,
+        customerId: resolvedCustomerId,
+        definedLimits,
+        enforcedLimits,
+        definedLimitScopes,
+      });
+  }
+
+  async function handleConsumptionRoute(request, response) {
     await checkWebsiteAccess(request, request.params.websiteId);
     const website = await requireLocalWebsite(websiteRegistry, request.params.websiteId, localServerId);
-    const consumption = siteConsumptionInspector
-      ? await siteConsumptionInspector.inspectWebsite(website.id, {
-          customerId: website.customerId ?? null,
-          definedLimits: website.quotas ?? {},
-          enforcedLimits: website.enforcedLimits ?? {},
-        })
-      : buildSiteConsumptionReport({
-          websiteId: website.id,
-          customerId: website.customerId ?? null,
-          definedLimits: website.quotas ?? {},
-          enforcedLimits: website.enforcedLimits ?? {},
-        });
-    return response.json({ data: consumption });
-  }));
+    const controller = new AbortController();
+    const onClose = () => {
+      if (!response.writableEnded) controller.abort();
+    };
+    response.on('close', onClose);
+    try {
+      const consumption = await resolveWebsiteConsumption(website, { signal: controller.signal });
+      if (response.writableEnded || controller.signal.aborted) return;
+      return response.json({ data: consumption });
+    } finally {
+      response.off?.('close', onClose);
+    }
+  }
+
+  app.get('/api/websites/:websiteId/consumption', requirePanelRouteAccess, asyncRoute(handleConsumptionRoute));
+
+  app.get('/api/websites/:websiteId/quotas', requirePanelRouteAccess, asyncRoute(handleConsumptionRoute));
 
   app.post('/api/websites', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const role = request.auth?.user?.role;

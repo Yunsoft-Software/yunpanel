@@ -7,6 +7,7 @@ import { usePanelSession } from '../panel-session.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Button, Badge, CollectionNotice, EmptyState, ErrorNotice, Icon, LinkButton, PageHeading, Section } from './PanelKit.jsx';
 import { filterWebsiteListDomains, siteListPage } from './site-list-model.js';
+import { siteHref } from './site-model.js';
 import { createWebsiteTaskResolver, siteListFilterParams, clearSiteListFilters } from './website-task-model.js';
 import { buildCustomerQuotaSnapshot, buildCustomerSiteQuotaBreakdown } from './quota-model.js';
 import { buildCustomerNextActions, buildOwnerNextActions, buildResellerNextActions } from './next-actions-model.js';
@@ -226,7 +227,10 @@ export default function WebsitesPage() {
                       <strong><Link to={site.href}>{site.name}</Link></strong>
                       <p>{site.runtimeLabel}</p>
                     </div>
-                    <Badge state={site.statusState}>{site.statusLabel}</Badge>
+                    <div className="ws-actions">
+                      {site.domainId && <LinkButton to={siteHref(site.domainId, 'resources')} icon="box">Site Kaynakları</LinkButton>}
+                      <Badge state={site.statusState}>{site.statusLabel}</Badge>
+                    </div>
                   </li>
                 ))}
               </ul>

@@ -183,6 +183,14 @@ const DAILY_SITE_TASKS = Object.freeze([
     globalLabel: 'Zamanlanmış Görevler',
     keywords: ['cron', 'zamanlanmış', 'zamanlanmis', 'görev', 'gorev'],
   }),
+  Object.freeze({
+    tab: 'resources',
+    label: 'Site Kaynakları',
+    icon: 'box',
+    globalRoute: null,
+    globalLabel: null,
+    keywords: ['kaynak', 'kaynaklar', 'disk', 'kota', 'tüketim', 'tuketim'],
+  }),
 ]);
 
 function normalizeSearchText(value) {
@@ -297,16 +305,13 @@ export function commandEntries({ query = '', canManage = false, isOwner = false,
 export const tabKey = (tab) => (Array.isArray(tab) ? tab[0] : (tab?.id ?? tab?.key ?? tab));
 
 const siteGroups = [
-  { id: 'dashboard', label: 'Site', icon: 'dashboard', keys: ['overview', 'files', 'databases', 'ssl', 'node', 'php', 'wordpress', 'deploy', 'logs', 'analytics', 'backup'] },
+  { id: 'dashboard', label: 'Site', icon: 'dashboard', keys: ['overview', 'files', 'databases', 'resources', 'ssl', 'node', 'php', 'wordpress', 'deploy', 'logs', 'analytics', 'backup'] },
   { id: 'hosting', label: 'Barındırma ve DNS', icon: 'globe', keys: ['hosting', 'dns', 'settings', 'domains', 'access', 'terminal', 'cron'] },
   { id: 'mail', label: 'Posta', icon: 'mail', keys: ['mail'] },
 ];
 export function groupSiteTabs(tabs = []) {
   if (!Array.isArray(tabs)) return [];
   const known = new Set(siteGroups.flatMap((group) => group.keys));
-  // Legacy resources remains addressable, but it is the existing database surface,
-  // not a fourth user-facing workspace or a duplicate tool button.
-  known.add('resources');
   const groups = siteGroups.map((group) => ({
     ...group,
     tabs: group.keys.map((key) => tabs.find((tab) => tabKey(tab) === key)).filter(Boolean),
