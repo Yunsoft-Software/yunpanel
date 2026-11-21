@@ -7,8 +7,19 @@ const WAF_MODES = Object.freeze(['disabled', 'observe', 'enforce']);
 const CLOUDFLARE_ENFORCE_ACTIONS = Object.freeze(['managed_challenge', 'block']);
 const NGINX_WAF_DIRECTORY = '/etc/nginx/yunpanel-waf';
 const CROWDSEC_APPSEC_ACQUISITION_PATH = '/etc/crowdsec/acquis.d/yunpanel-appsec.yaml';
+const CROWDSEC_APPSEC_OBSERVE_CONFIG_PATH = '/etc/crowdsec/appsec-configs/yunpanel-appsec-observe.yaml';
 const CROWDSEC_APPSEC_DEFAULT_LISTEN = '127.0.0.1:7422';
 const CROWDSEC_APPSEC_DEFAULT_CONFIG = 'crowdsecurity/appsec-default';
+const CROWDSEC_APPSEC_OBSERVE_CONFIG_NAME = 'yunpanel/appsec-observe';
+const CROWDSEC_APPSEC_OBSERVE_INBAND_RULES = Object.freeze([
+  'crowdsecurity/base-config',
+  'crowdsecurity/vpatch-*',
+  'crowdsecurity/generic-*',
+]);
+const CROWDSEC_APPSEC_OBSERVE_OUTOFBAND_RULES = Object.freeze([
+  'crowdsecurity/experimental-*',
+  'crowdsecurity/appsec-generic-test',
+]);
 const MAX_EXCLUDED_ROUTES = 64;
 const DEFAULT_SAFE_ROUTE_EXCLUSIONS = Object.freeze([
   '/api/auth/',
@@ -196,9 +207,9 @@ export function nginxWafConfigPath(domain) {
 function renderNginxRouteExclusion(route) {
   if (route.endsWith('/')) {
     const escaped = route.replace(/[.]/g, '\\.');
-    return `if ($uri ~ "^${escaped}") {\n  set $yunpanel_waf_skip "1";\n}`;
+    return `if ($uri ~ "^${escaped}") {\n  set $crowdsec_disable_appsec "1";\n  set $yunpanel_waf_skip "1";\n}`;
   }
-  return `if ($uri = "${route}") {\n  set $yunpanel_waf_skip "1";\n}`;
+  return `if ($uri = "${route}") {\n  set $crowdsec_disable_appsec "1";\n  set $yunpanel_waf_skip "1";\n}`;
 }
 
 function renderCrowdSecNginxSnippet({ domain, mode, listenAddr, excludedRoutes }) {
@@ -210,6 +221,7 @@ function renderCrowdSecNginxSnippet({ domain, mode, listenAddr, excludedRoutes }
   ];
   if (mode === 'disabled') {
     lines.push(
+      'set $crowdsec_disable_appsec "1";',
       'set $yunpanel_waf_provider "crowdsec_appsec";',
       'set $yunpanel_waf_mode "disabled";',
       'set $yunpanel_appsec_enabled "0";',
@@ -223,6 +235,7 @@ function renderCrowdSecNginxSnippet({ domain, mode, listenAddr, excludedRoutes }
   const inbandAction = mode === 'observe' ? 'log' : 'block';
   lines.push(
     '# appsec_failure_action passthrough;',
+    'set $crowdsec_disable_appsec "0";',
     'set $yunpanel_waf_provider "crowdsec_appsec";',
     `set $yunpanel_waf_mode "${mode}";`,
     'set $yunpanel_appsec_enabled "1";',
@@ -238,6 +251,19 @@ function renderCrowdSecNginxSnippet({ domain, mode, listenAddr, excludedRoutes }
     }
   }
   return `${lines.join('\n')}\n`;
+}
+
+function renderCrowdSecObserveAppsecConfigYaml() {
+  return [
+    '# Managed by YunPanel: CrowdSec AppSec observe (non-blocking) config',
+    `name: "${CROWDSEC_APPSEC_OBSERVE_CONFIG_NAME}"`,
+    'default_remediation: "allow"',
+    'inband_rules:',
+    ...CROWDSEC_APPSEC_OBSERVE_INBAND_RULES.map((rule) => `  - "${rule}"`),
+    'outofband_rules:',
+    ...CROWDSEC_APPSEC_OBSERVE_OUTOFBAND_RULES.map((rule) => `  - "${rule}"`),
+    '',
+  ].join('\n');
 }
 
 function renderCrowdSecAcquisitionYaml({ domain, mode, listenAddr, appsecConfig }) {
@@ -294,6 +320,9 @@ export function previewCrowdSecAppSecPolicy({
   });
   const normalizedListen = normalizeListenAddr(listenAddr);
   const normalizedAppsecConfig = normalizeAppsecConfig(appsecConfig);
+  const effectiveAppsecConfig = normalizedMode === 'observe'
+    ? CROWDSEC_APPSEC_OBSERVE_CONFIG_NAME
+    : normalizedAppsecConfig;
   const normalizedSnapshot = normalizeCrowdSecRollbackSnapshot(rollbackSnapshot, normalizedMode);
 
   const nginxPath = nginxWafConfigPath(primaryDomain);
@@ -307,8 +336,9 @@ export function previewCrowdSecAppSecPolicy({
     domain: primaryDomain,
     mode: normalizedMode,
     listenAddr: normalizedListen,
-    appsecConfig: normalizedAppsecConfig,
+    appsecConfig: effectiveAppsecConfig,
   });
+  const observeConfigContent = renderCrowdSecObserveAppsecConfigYaml();
   const disabledNginxContent = renderCrowdSecNginxSnippet({
     domain: primaryDomain,
     mode: 'disabled',
@@ -324,6 +354,7 @@ export function previewCrowdSecAppSecPolicy({
 
   const nginxArtifact = makeArtifact(nginxPath, nginxContent);
   const acquisitionArtifact = makeArtifact(CROWDSEC_APPSEC_ACQUISITION_PATH, acquisContent);
+  const observeConfigArtifact = makeArtifact(CROWDSEC_APPSEC_OBSERVE_CONFIG_PATH, observeConfigContent);
   const rollbackNginxArtifact = makeArtifact(nginxPath, disabledNginxContent);
   const rollbackAcquisitionArtifact = makeArtifact(CROWDSEC_APPSEC_ACQUISITION_PATH, disabledAcquisContent);
 
@@ -333,6 +364,7 @@ export function previewCrowdSecAppSecPolicy({
     snapshot: normalizedSnapshot,
     nginxConfigTestRequired: true,
     reloadRequired: true,
+    removeFiles: Object.freeze([CROWDSEC_APPSEC_OBSERVE_CONFIG_PATH]),
     artifacts: Object.freeze({
       nginxInclude: rollbackNginxArtifact,
       crowdsecAcquisition: rollbackAcquisitionArtifact,
@@ -346,10 +378,12 @@ export function previewCrowdSecAppSecPolicy({
     mode: normalizedMode,
     listenAddr: normalizedListen,
     appsecConfig: normalizedAppsecConfig,
+    effectiveAppsecConfig: normalizedMode === 'disabled' ? null : effectiveAppsecConfig,
     excludedRoutes: normalizedRoutes,
     snapshot: normalizedSnapshot,
     nginxSha256: nginxArtifact.sha256,
     acquisitionSha256: acquisitionArtifact.sha256,
+    observeAppsecConfigSha256: normalizedMode === 'observe' ? observeConfigArtifact.sha256 : null,
   };
 
   return Object.freeze({
@@ -362,10 +396,13 @@ export function previewCrowdSecAppSecPolicy({
     appsecFailureAction: 'passthrough',
     listenAddr: normalizedListen,
     appsecConfig: normalizedAppsecConfig,
+    observeAppsecConfig: CROWDSEC_APPSEC_OBSERVE_CONFIG_NAME,
+    effectiveAppsecConfig: normalizedMode === 'disabled' ? null : effectiveAppsecConfig,
     excludedRoutes: normalizedRoutes,
     artifacts: Object.freeze({
       nginxInclude: nginxArtifact,
       crowdsecAcquisition: acquisitionArtifact,
+      ...(normalizedMode === 'observe' ? { crowdsecAppsecConfig: observeConfigArtifact } : {}),
     }),
     rollback,
     sha256: sha256(JSON.stringify(digestPayload)),
@@ -502,8 +539,10 @@ export const wafPolicyTemplatePolicy = Object.freeze({
   cloudflareEnforceActions: CLOUDFLARE_ENFORCE_ACTIONS,
   nginxWafDirectory: NGINX_WAF_DIRECTORY,
   crowdsecAppsecAcquisitionPath: CROWDSEC_APPSEC_ACQUISITION_PATH,
+  crowdsecAppsecObserveConfigPath: CROWDSEC_APPSEC_OBSERVE_CONFIG_PATH,
   defaultListenAddr: CROWDSEC_APPSEC_DEFAULT_LISTEN,
   defaultAppsecConfig: CROWDSEC_APPSEC_DEFAULT_CONFIG,
+  defaultObserveAppsecConfig: CROWDSEC_APPSEC_OBSERVE_CONFIG_NAME,
   defaultExcludedRoutes: DEFAULT_SAFE_ROUTE_EXCLUSIONS,
   maxExcludedRoutes: MAX_EXCLUDED_ROUTES,
 });
