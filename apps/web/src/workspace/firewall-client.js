@@ -1,20 +1,20 @@
-import { requestJson } from '../session-client.js';
+import { panelRequest } from '../api.js';
 
 function firewallBasePath(serverId) {
   if (serverId && typeof serverId === 'string' && serverId !== 'local') {
-    return `/api/servers/${encodeURIComponent(serverId)}/firewall`;
+    return `/servers/${encodeURIComponent(serverId)}/firewall`;
   }
-  return '/api/firewall';
+  return '/firewall';
 }
 
 export async function fetchFirewallStatus(options = {}) {
   const base = firewallBasePath(options.serverId);
-  return requestJson(`${base}/status`, { signal: options.signal });
+  return panelRequest(`${base}/status`, { signal: options.signal });
 }
 
 export async function fetchFirewallPorts(options = {}) {
   const base = firewallBasePath(options.serverId);
-  return requestJson(`${base}/ports`, { signal: options.signal });
+  return panelRequest(`${base}/ports`, { signal: options.signal });
 }
 
 export async function addFirewallPortRule({
@@ -26,7 +26,7 @@ export async function addFirewallPortRule({
   serverId = null,
 } = {}) {
   const base = firewallBasePath(serverId);
-  return requestJson(`${base}/ports`, {
+  return panelRequest(`${base}/ports`, {
     method: 'POST',
     body: {
       port: Number(port),
@@ -45,14 +45,14 @@ export async function removeFirewallPortRule({
 } = {}) {
   const base = firewallBasePath(serverId);
   const q = new URLSearchParams({ protocol }).toString();
-  return requestJson(`${base}/ports/${encodeURIComponent(port)}?${q}`, {
+  return panelRequest(`${base}/ports/${encodeURIComponent(port)}?${q}`, {
     method: 'DELETE',
   });
 }
 
 export async function fetchServiceProfiles(options = {}) {
   const base = firewallBasePath(options.serverId);
-  return requestJson(`${base}/service-profiles`, { signal: options.signal });
+  return panelRequest(`${base}/service-profiles`, { signal: options.signal });
 }
 
 export async function updateServiceProfiles({
@@ -60,7 +60,7 @@ export async function updateServiceProfiles({
   serverId = null,
 } = {}) {
   const base = firewallBasePath(serverId);
-  return requestJson(`${base}/service-profiles`, {
+  return panelRequest(`${base}/service-profiles`, {
     method: 'PUT',
     body: { profiles },
   });
@@ -74,7 +74,7 @@ export async function scanFirewallPort({
   serverId = null,
 } = {}) {
   const base = firewallBasePath(serverId);
-  return requestJson(`${base}/scan`, {
+  return panelRequest(`${base}/scan`, {
     method: 'POST',
     body: {
       host,
@@ -88,7 +88,7 @@ export async function scanFirewallPort({
 
 export async function fetchCrowdsecBans(options = {}) {
   const base = firewallBasePath(options.serverId);
-  return requestJson(`${base}/bans`, { signal: options.signal });
+  return panelRequest(`${base}/bans`, { signal: options.signal });
 }
 
 export async function addCrowdsecBan({
@@ -98,7 +98,7 @@ export async function addCrowdsecBan({
   serverId = null,
 } = {}) {
   const base = firewallBasePath(serverId);
-  return requestJson(`${base}/bans`, {
+  return panelRequest(`${base}/bans`, {
     method: 'POST',
     body: {
       ip,
@@ -116,11 +116,11 @@ export async function removeCrowdsecBan({
 } = {}) {
   const base = firewallBasePath(serverId);
   if (id) {
-    return requestJson(`${base}/bans/${encodeURIComponent(id)}`, {
+    return panelRequest(`${base}/bans/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     });
   }
-  return requestJson(`${base}/unban`, {
+  return panelRequest(`${base}/unban`, {
     method: 'POST',
     body: { ip },
   });

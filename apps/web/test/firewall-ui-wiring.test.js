@@ -22,15 +22,20 @@ test('firewall ui wiring: ux-model exposes /firewall in TOOLS_SETTINGS_GROUPS un
   assert.equal(firewallItem[2], 'shield');
 });
 
-test('firewall ui wiring: FirewallPage component source verification', async () => {
+test('firewall ui wiring: FirewallPage uses clean Turkish copy, independent fail-closed states, and panel gateway', async () => {
   const pageSrc = await source('FirewallPage.jsx');
+  const clientSrc = await source('firewall-client.js');
   const modelSrc = await source('firewall-model.js');
+
+  // Verify panelRequest gateway usage (never direct /api/firewall)
+  assert.match(clientSrc, /panelRequest/);
+  assert.equal(clientSrc.includes("'/api/firewall'"), false);
 
   // Verify real firewall status
   assert.match(pageSrc, /Güvenlik Duvarı ve Port Yönetimi/);
   assert.match(pageSrc, /nftables/);
 
-  // Verify unknown cloud / provider firewall advisory note
+  // Verify unknown cloud / provider firewall advisory note without English buzzwords
   assert.match(pageSrc, /Cloud \/ Sağlayıcı Güvenlik Duvarı Durumu: Bilinmiyor/);
   assert.match(pageSrc, /providerNotice/);
   assert.match(modelSrc, /AWS Güvenlik Grubu, Hetzner Cloud Firewall, GCP Firewall/);
@@ -39,7 +44,7 @@ test('firewall ui wiring: FirewallPage component source verification', async () 
   assert.match(pageSrc, /Sunucu Servis Profilleri/);
   assert.match(pageSrc, /localMail/);
   assert.match(pageSrc, /authoritativeDns/);
-  assert.match(pageSrc, /Local-mail ve authoritative-DNS servis profilleri etkin olmadığında gereksiz portların açılması engellenir/);
+  assert.match(pageSrc, /Yerel e-posta ve yetkili DNS servis profilleri etkin olmadığında ilgili portların açılması engellenir/);
 
   // Verify port inventory and reachability distinction
   assert.match(pageSrc, /Dinleyen Port/);
@@ -50,6 +55,25 @@ test('firewall ui wiring: FirewallPage component source verification', async () 
   assert.match(pageSrc, /CrowdSec/);
   assert.match(pageSrc, /Bouncer/);
 
-  // Verify test target restrictions (.44 rejection note)
-  assert.match(pageSrc, /\.44 ve yetkisiz hedefler reddedilir/);
+  // Verify clean end-user target restriction copy and zero hardcoded test IPs / English buzzwords / swallowed catches
+  assert.match(pageSrc, /isFirewallStatusVerified/);
+  assert.match(pageSrc, /Güvenlik duvarı durumu doğrulanamadı/);
+  assert.match(pageSrc, /Port erişilebilirlik testi yalnızca izinli sunucu hedeflerinde çalıştırılabilir\./);
+  for (const forbidden of [
+    '157.180.11.28',
+    'server.cryptoraichu.website',
+    '.44',
+    '(Unknown)',
+    '(Boot)',
+    '(Local Mail)',
+    '(Authoritative DNS)',
+    'E-Posta (Mail)',
+    'Local-mail',
+    'Authoritative-DNS',
+    '.catch(() => null)',
+    '.catch(() => [])',
+  ]) {
+    assert.equal(pageSrc.includes(forbidden), false, `FirewallPage.jsx must not contain "${forbidden}"`);
+    assert.equal(modelSrc.includes(forbidden), false, `firewall-model.js must not contain "${forbidden}"`);
+  }
 });

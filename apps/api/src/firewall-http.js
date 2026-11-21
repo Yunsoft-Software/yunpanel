@@ -11,6 +11,60 @@ export class FirewallHttpError extends Error {
   }
 }
 
+const SAFE_OPERATIONAL_ERROR_MESSAGES = Object.freeze({
+  decisions_list_failed: 'CrowdSec engelleme listesi alınamadı.',
+  decisions_parse_error: 'CrowdSec engelleme yanıtı doğrulanamadı.',
+  add_decision_failed: 'CrowdSec IP engelleme kuralı eklenemedi.',
+  delete_decision_failed: 'CrowdSec IP engelleme kuralı kaldırılamadı.',
+  metrics_failed: 'CrowdSec metrikleri alınamadı.',
+  alerts_list_failed: 'CrowdSec uyarı listesi alınamadı.',
+  ruleset_snapshot_failed: 'Güvenlik duvarı anlık görüntüsü alınamadı.',
+  candidate_syntax_error: 'Güvenlik duvarı kural doğrulaması başarısız oldu.',
+  apply_failed: 'Güvenlik duvarı kuralları uygulanamadı.',
+  rollback_failed: 'Güvenlik duvarı geri alma işlemi tamamlanamadı.',
+  service_operation_failed: 'Güvenlik duvarı servis işlemi tamamlanamadı.',
+  service_verification_failed: 'Güvenlik duvarı servis doğrulaması başarısız oldu.',
+  nft_binary_missing: 'Güvenlik duvarı servisi (nftables) sunucuda bulunamadı.',
+  nft_inspect_failed: 'Güvenlik duvarı kuralları okunamadı.',
+  nft_apply_failed: 'Güvenlik duvarı kuralları uygulanamadı.',
+  nft_validation_failed: 'Güvenlik duvarı kural doğrulaması başarısız oldu.',
+  nft_persist_failed: 'Güvenlik duvarı yapılandırması kaydedilemedi.',
+  conflicting_firewall_unknown: 'Çakışan güvenlik duvarı servisleri doğrulanamadı.',
+  systemd_check_failed: 'Güvenlik duvarı servis durumu doğrulanamadı.',
+});
+
+const SAFE_CROWDSEC_VALIDATION_CODES = new Set([
+  'invalid_ip',
+  'invalid_duration',
+  'invalid_id',
+  'missing_target',
+  'decision_not_found',
+]);
+
+const UNSAFE_HOST_ERROR_PATTERN = /(?:\/(?:etc|usr|var|tmp|bin|sbin|run|home|root|private|Users|opt)\/|\bENOENT\b|\bEACCES\b|\bEPERM\b|Command failed:|spawn\s)/i;
+
+function isHostOperationalError(error) {
+  if (!error) return false;
+  if (typeof error.code === 'string' && Object.hasOwn(SAFE_OPERATIONAL_ERROR_MESSAGES, error.code)) return true;
+  if (error instanceof CrowdsecManagerError && !SAFE_CROWDSEC_VALIDATION_CODES.has(error.code)) return true;
+  if (error instanceof NftablesManagerError) return true;
+  return false;
+}
+
+function safeFirewallErrorMessage(error) {
+  if (typeof error?.code === 'string' && Object.hasOwn(SAFE_OPERATIONAL_ERROR_MESSAGES, error.code)) {
+    return SAFE_OPERATIONAL_ERROR_MESSAGES[error.code];
+  }
+  const raw = typeof error?.message === 'string' ? error.message.trim() : '';
+  if (error instanceof CrowdsecManagerError && !SAFE_CROWDSEC_VALIDATION_CODES.has(error.code)) {
+    return 'CrowdSec işlemi tamamlanamadı.';
+  }
+  if (!raw || UNSAFE_HOST_ERROR_PATTERN.test(raw) || error instanceof NftablesManagerError) {
+    return 'Güvenlik duvarı işlemi tamamlanamadı.';
+  }
+  return raw;
+}
+
 function asyncRoute(handler) {
   return async (request, response, next) => {
     try {
@@ -27,11 +81,13 @@ function asyncRoute(handler) {
             ? 400
             : (error.code === 'unauthorized_test_target' ? 403 : (error.code === 'snapshot_not_found' || error.code === 'decision_not_found' ? 404 : 400))
         );
+        const includeDetails = !isHostOperationalError(error)
+          && !(typeof error?.message === 'string' && UNSAFE_HOST_ERROR_PATTERN.test(error.message));
         return response.status(status).json({
           error: {
             code: error.code ?? 'firewall_error',
-            message: error.message,
-            ...(error.details ? { details: error.details } : {}),
+            message: safeFirewallErrorMessage(error),
+            ...(includeDetails && error.details ? { details: error.details } : {}),
           },
         });
       }

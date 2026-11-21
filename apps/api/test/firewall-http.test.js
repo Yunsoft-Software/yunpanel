@@ -1,6 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
+import { once } from 'node:events';
+import { mkdtemp, rm } from 'node:fs/promises';
+import http from 'node:http';
+import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
 import express from 'express';
+import { createAuthenticatedApi } from '../src/auth-http.js';
+import { createAuthStore } from '../src/auth-store.js';
+import { createPanelServer } from '../../web/server.js';
 import {
   createFirewallService,
   FirewallServiceError,
@@ -11,6 +21,7 @@ import {
 } from '../src/firewall-http.js';
 import {
   createNftablesManager,
+  createCrowdsecManager,
   NftablesManagerError,
   CrowdsecManagerError,
 } from '@yunpanel/host-runtime';
@@ -673,5 +684,217 @@ test('PROD-05 Firewall HTTP API Suite', async (suite) => {
     } finally {
       server.close();
     }
+  });
+
+  await suite.test('Real CrowdsecManagerError from missing cscli preserves decisions_list_failed without leaking host paths', async (t) => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-fw-cscli-'));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    const missingBinary = path.join(dir, 'private-missing-cscli-binary');
+    const firewallService = createFirewallService({
+      crowdsecManager: createCrowdsecManager({ cscliPath: missingBinary }),
+      localServerId: 'srv-local-01',
+    });
+    const app = createHttpApp({ firewallService, role: 'owner' });
+    const server = app.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const port = server.address().port;
+
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/firewall/bans`);
+      assert.equal(res.status, 400);
+      const body = await res.json();
+      assert.equal(body.error.code, 'decisions_list_failed');
+      assert.equal(body.error.message, 'CrowdSec engelleme listesi alınamadı.');
+      assert.equal(JSON.stringify(body).includes(missingBinary), false);
+      assert.equal(JSON.stringify(body).includes(dir), false);
+    } finally {
+      server.close();
+    }
+  });
+
+  await suite.test('Real NftablesManagerError/FirewallServiceError from missing nft binary preserves error.code without leaking host paths or stderr', async (t) => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-fw-nft-'));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+    const missingNftBinary = path.join(dir, 'private-missing-nft-binary');
+    const missingConfigPath = path.join(dir, 'private-nftables.conf');
+    const firewallService = createFirewallService({
+      nftablesManager: createNftablesManager({
+        nftPath: missingNftBinary,
+        configPath: missingConfigPath,
+      }),
+      localServerId: 'srv-local-01',
+    });
+    const app = createHttpApp({ firewallService, role: 'owner' });
+    const server = app.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const port = server.address().port;
+
+    try {
+      for (const reqSpec of [
+        {
+          pathname: '/api/firewall/preview',
+          body: {},
+          expectedCodes: ['candidate_syntax_error', 'ruleset_snapshot_failed', 'conflicting_firewall_unknown'],
+        },
+        {
+          pathname: '/api/firewall/ports',
+          body: { port: 8080, protocol: 'tcp' },
+          expectedCodes: ['candidate_syntax_error', 'ruleset_snapshot_failed', 'apply_failed', 'conflicting_firewall_unknown'],
+        },
+      ]) {
+        const res = await fetch(`http://127.0.0.1:${port}${reqSpec.pathname}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(reqSpec.body),
+        });
+        assert.ok(res.status >= 400 && res.status < 600, `Expected error HTTP status on ${reqSpec.pathname}, got ${res.status}`);
+        const payload = await res.json();
+        assert.ok(
+          reqSpec.expectedCodes.includes(payload.error?.code),
+          `Expected preserved operational error code on ${reqSpec.pathname}, got ${payload.error?.code}`,
+        );
+        assert.equal(payload.error?.details, undefined);
+        const serialized = JSON.stringify(payload);
+        assert.equal(serialized.includes(missingNftBinary), false);
+        assert.equal(serialized.includes(missingConfigPath), false);
+        assert.equal(serialized.includes(dir), false);
+        assert.equal(serialized.includes('ENOENT'), false);
+        assert.equal(serialized.includes('spawn '), false);
+      }
+    } finally {
+      server.close();
+    }
+  });
+
+  await suite.test('Real /api/panel/firewall/* gateway enforces Owner/ReadOnly/Site-scoped RBAC and CSRF with real AuthStore and real FirewallService', async (t) => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-fw-gateway-'));
+    t.after(() => rm(dir, { recursive: true, force: true }));
+
+    const store = createAuthStore({ filePath: path.join(dir, 'auth.sqlite') });
+    t.after(() => store.close());
+    const ownerPassword = randomBytes(24).toString('base64url');
+    const roPassword = randomBytes(24).toString('base64url');
+    const smPassword = randomBytes(24).toString('base64url');
+    await store.completeSetup({ setupToken: store.issueSetupToken().token, username: 'owner', password: ownerPassword });
+    const ownerBootstrap = await store.login({ username: 'owner', password: ownerPassword });
+    await store.users.create(
+      ownerBootstrap.token,
+      (session) => session,
+      { username: 'auditor', password: roPassword, role: 'read_only', active: true },
+    );
+    await store.users.createSiteManager({
+      username: 'sitemgr',
+      password: smPassword,
+      websiteId: '11111111-1111-4111-8111-111111111111',
+      websiteLookup: () => true,
+    });
+    store.revokeSession(ownerBootstrap.token);
+
+    const tcpTarget = net.createServer((socket) => socket.end());
+    tcpTarget.listen(0, '127.0.0.1');
+    await once(tcpTarget, 'listening');
+    t.after(() => new Promise((resolve) => tcpTarget.close(resolve)));
+    const tcpTargetPort = tcpTarget.address().port;
+
+    const firewallService = createFirewallService({
+      crowdsecManager: createCrowdsecManager({ cscliPath: path.join(dir, 'missing-cscli') }),
+      localServerId: 'srv-local-01',
+    });
+    const proxyToken = 'q'.repeat(43);
+
+    const probe = net.createServer();
+    probe.listen(0, '127.0.0.1');
+    await once(probe, 'listening');
+    const webPort = probe.address().port;
+    await new Promise((resolve) => probe.close(resolve));
+    const origin = `http://127.0.0.1:${webPort}`;
+
+    const apiServer = http.createServer(createAuthenticatedApi({
+      store,
+      publicOrigin: origin,
+      development: true,
+      ownerMfaRequired: false,
+      proxyToken,
+      createHandler: () => {
+        const app = express();
+        app.use(express.json());
+        mountFirewallRoutes(app, { firewallService, localServerId: 'srv-local-01' });
+        return app;
+      },
+    }));
+    apiServer.listen(0, '127.0.0.1');
+    await once(apiServer, 'listening');
+    t.after(() => new Promise((resolve) => { apiServer.close(resolve); apiServer.closeAllConnections?.(); }));
+
+    const panelServer = createPanelServer({
+      allowedClientIps: '127.0.0.1',
+      apiHost: '127.0.0.1',
+      apiPort: apiServer.address().port,
+      proxyToken,
+      publicOrigin: origin,
+      webRoot: dir,
+    });
+    panelServer.listen(webPort, '127.0.0.1');
+    await once(panelServer, 'listening');
+    t.after(() => new Promise((resolve) => { panelServer.close(resolve); panelServer.closeAllConnections?.(); }));
+
+    async function login(username, password) {
+      const res = await fetch(`${origin}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin },
+        body: JSON.stringify({ username, password }),
+      });
+      assert.equal(res.status, 200);
+      const cookie = res.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
+      const sess = await (await fetch(`${origin}/api/auth/session`, { headers: { cookie } })).json();
+      return { cookie, csrfToken: sess.data.csrfToken };
+    }
+
+    // Legacy /api/firewall/* returns 404 through panel gateway; unauthenticated /api/panel/firewall/* returns 401
+    assert.equal((await fetch(`${origin}/api/firewall/status`)).status, 404);
+    assert.equal((await fetch(`${origin}/api/panel/firewall/status`)).status, 401);
+
+    // Owner: GET status/service-profiles/ports -> 200, bans -> 400 decisions_list_failed; mutation without CSRF -> 403, with CSRF -> 200
+    const owner = await login('owner', ownerPassword);
+    for (const ep of ['status', 'service-profiles', 'ports']) {
+      const res = await fetch(`${origin}/api/panel/firewall/${ep}`, { headers: { cookie: owner.cookie } });
+      assert.equal(res.status, 200, `Owner GET /api/panel/firewall/${ep} must return 200`);
+    }
+    const ownerBansRes = await fetch(`${origin}/api/panel/firewall/bans`, { headers: { cookie: owner.cookie } });
+    assert.equal(ownerBansRes.status, 400);
+    assert.equal((await ownerBansRes.json()).error.code, 'decisions_list_failed');
+
+    const noCsrfRes = await fetch(`${origin}/api/panel/firewall/scan`, {
+      method: 'POST',
+      headers: { cookie: owner.cookie, origin, 'content-type': 'application/json' },
+      body: JSON.stringify({ host: '127.0.0.1', port: tcpTargetPort }),
+    });
+    assert.equal(noCsrfRes.status, 403);
+
+    const withCsrfRes = await fetch(`${origin}/api/panel/firewall/scan`, {
+      method: 'POST',
+      headers: { cookie: owner.cookie, origin, 'x-csrf-token': owner.csrfToken, 'content-type': 'application/json' },
+      body: JSON.stringify({ host: '127.0.0.1', port: tcpTargetPort }),
+    });
+    assert.equal(withCsrfRes.status, 200);
+    assert.equal((await withCsrfRes.json()).data.reachable, true);
+
+    // Read-only: GET 200, mutation 403
+    const ro = await login('auditor', roPassword);
+    assert.equal((await fetch(`${origin}/api/panel/firewall/status`, { headers: { cookie: ro.cookie } })).status, 200);
+    assert.equal((await fetch(`${origin}/api/panel/firewall/ports`, {
+      method: 'POST',
+      headers: { cookie: ro.cookie, origin, 'x-csrf-token': ro.csrfToken, 'content-type': 'application/json' },
+      body: JSON.stringify({ port: 8080, protocol: 'tcp' }),
+    })).status, 403);
+
+    // Site-scoped: GET 403, mutation 403
+    const sm = await login('sitemgr', smPassword);
+    assert.equal((await fetch(`${origin}/api/panel/firewall/status`, { headers: { cookie: sm.cookie } })).status, 403);
+    assert.equal((await fetch(`${origin}/api/panel/firewall/ports`, {
+      method: 'POST',
+      headers: { cookie: sm.cookie, origin, 'x-csrf-token': sm.csrfToken, 'content-type': 'application/json' },
+      body: JSON.stringify({ port: 8080, protocol: 'tcp' }),
+    })).status, 403);
   });
 });

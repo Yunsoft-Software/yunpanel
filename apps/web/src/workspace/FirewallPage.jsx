@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Badge,
   Button,
   ConfirmDialog,
+  ErrorNotice,
   Icon,
   PageHeading,
   Section,
@@ -20,26 +21,58 @@ import {
   removeCrowdsecBan,
 } from './firewall-client.js';
 import {
+  createResourceState,
+  formatDockerCoexistenceStatus,
+  formatFirewallError,
+  formatFirewallOverallStatus,
   formatPortReachability,
   formatServiceProfileLabel,
   formatProviderFirewallNotice,
+  isFirewallStatusVerified,
   isSpecialPortLocked,
   checkPortProfileAllowed,
-  MAIL_PORTS,
-  DNS_PORTS,
+  normalizeBansPayload,
+  normalizeServiceProfilesPayload,
 } from './firewall-model.js';
 
+function SectionLoadError({ title, message, onRetry, disabled = false }) {
+  return (
+    <div
+      role="alert"
+      className="ws-notice ws-notice-error"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '1rem',
+        flexWrap: 'wrap',
+        marginBottom: '1rem',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+        <Icon name="alert" size={18} />
+        <div>
+          <strong>{title}</strong>
+          <div style={{ fontSize: '0.875rem', marginTop: '0.2rem' }}>{message}</div>
+        </div>
+      </div>
+      <Button icon="refresh" onClick={onRetry} disabled={disabled}>
+        Yeniden dene
+      </Button>
+    </div>
+  );
+}
+
 export default function FirewallPage() {
-  const [statusData, setStatusData] = useState(null);
-  const [portsData, setPortsData] = useState(null);
-  const [profilesData, setProfilesData] = useState(null);
-  const [bansData, setBansData] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [statusRes, setStatusRes] = useState(() => createResourceState('loading'));
+  const [profilesRes, setProfilesRes] = useState(() => createResourceState('loading'));
+  const [portsRes, setPortsRes] = useState(() => createResourceState('loading'));
+  const [bansRes, setBansRes] = useState(() => createResourceState('loading'));
+  const [actionError, setActionError] = useState(null);
   const [actionBusy, setActionBusy] = useState(false);
 
   // Filter state
-  const [filterMode, setFilterMode] = useState('all'); // all, listening, allowed, reachable
+  const [filterMode, setFilterMode] = useState('all');
 
   // Form states: Add Port
   const [newPort, setNewPort] = useState('');
@@ -64,53 +97,154 @@ export default function FirewallPage() {
   // Delete modal state
   const [deleteCandidate, setDeleteCandidate] = useState(null);
 
-  const loadAll = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [st, pt, pr, bn] = await Promise.all([
-        fetchFirewallStatus().catch(() => null),
-        fetchFirewallPorts().catch(() => null),
-        fetchServiceProfiles().catch(() => null),
-        fetchCrowdsecBans().catch(() => []),
-      ]);
-      setStatusData(st);
-      setPortsData(pt);
-      setProfilesData(pr?.serviceProfiles ?? pr);
-      setBansData(Array.isArray(bn) ? bn : []);
-    } catch (err) {
-      setError(err.message || 'Firewall verileri yüklenirken hata oluştu.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const mountedRef = useRef(true);
+  const controllersRef = useRef({
+    status: null,
+    profiles: null,
+    ports: null,
+    bans: null,
+  });
 
   useEffect(() => {
-    loadAll();
+    mountedRef.current = true;
+    const controllers = controllersRef.current;
+    return () => {
+      mountedRef.current = false;
+      for (const key of Object.keys(controllers)) {
+        controllers[key]?.abort();
+        controllers[key] = null;
+      }
+    };
+  }, []);
+
+  const startController = useCallback((key) => {
+    controllersRef.current[key]?.abort();
+    const controller = new AbortController();
+    controllersRef.current[key] = controller;
+    return controller;
+  }, []);
+
+  const loadStatus = useCallback(async () => {
+    const controller = startController('status');
+    setStatusRes(createResourceState('loading'));
+    try {
+      const data = await fetchFirewallStatus({ signal: controller.signal });
+      if (!mountedRef.current || controller.signal.aborted) return;
+      if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        setStatusRes(createResourceState('error', null, 'Güvenlik duvarı durumu doğrulanamadı.'));
+        return;
+      }
+      setStatusRes(createResourceState('ready', data, null));
+    } catch (err) {
+      if (!mountedRef.current || controller.signal.aborted || err?.name === 'AbortError') return;
+      setStatusRes(createResourceState('error', null, formatFirewallError(err, 'Güvenlik duvarı durumu alınamadı.')));
+    }
+  }, [startController]);
+
+  const loadServiceProfiles = useCallback(async () => {
+    const controller = startController('profiles');
+    setProfilesRes(createResourceState('loading'));
+    try {
+      const raw = await fetchServiceProfiles({ signal: controller.signal });
+      if (!mountedRef.current || controller.signal.aborted) return;
+      const normalized = normalizeServiceProfilesPayload(raw);
+      if (!normalized) {
+        setProfilesRes(createResourceState('error', null, 'Servis profilleri doğrulanamadı.'));
+        return;
+      }
+      setProfilesRes(createResourceState('ready', normalized, null));
+    } catch (err) {
+      if (!mountedRef.current || controller.signal.aborted || err?.name === 'AbortError') return;
+      setProfilesRes(createResourceState('error', null, formatFirewallError(err, 'Servis profilleri alınamadı.')));
+    }
+  }, [startController]);
+
+  const loadPorts = useCallback(async () => {
+    const controller = startController('ports');
+    setPortsRes(createResourceState('loading'));
+    try {
+      const data = await fetchFirewallPorts({ signal: controller.signal });
+      if (!mountedRef.current || controller.signal.aborted) return;
+      if (!data || typeof data !== 'object' || !Array.isArray(data.ports)) {
+        setPortsRes(createResourceState('error', null, 'Port ve güvenlik duvarı kuralları doğrulanamadı.'));
+        return;
+      }
+      setPortsRes(createResourceState('ready', data, null));
+    } catch (err) {
+      if (!mountedRef.current || controller.signal.aborted || err?.name === 'AbortError') return;
+      setPortsRes(createResourceState('error', null, formatFirewallError(err, 'Port ve güvenlik duvarı kuralları alınamadı.')));
+    }
+  }, [startController]);
+
+  const loadBans = useCallback(async () => {
+    const controller = startController('bans');
+    setBansRes(createResourceState('loading'));
+    try {
+      const raw = await fetchCrowdsecBans({ signal: controller.signal });
+      if (!mountedRef.current || controller.signal.aborted) return;
+      const normalized = normalizeBansPayload(raw);
+      if (!normalized) {
+        setBansRes(createResourceState('error', null, 'CrowdSec engelleme listesi doğrulanamadı.'));
+        return;
+      }
+      setBansRes(createResourceState('ready', normalized, null));
+    } catch (err) {
+      if (!mountedRef.current || controller.signal.aborted || err?.name === 'AbortError') return;
+      setBansRes(createResourceState('error', null, formatFirewallError(err, 'CrowdSec engelleme listesi alınamadı.')));
+    }
+  }, [startController]);
+
+  const loadAll = useCallback(async () => {
+    setActionError(null);
+    await Promise.allSettled([
+      loadStatus(),
+      loadServiceProfiles(),
+      loadPorts(),
+      loadBans(),
+    ]);
+  }, [loadStatus, loadServiceProfiles, loadPorts, loadBans]);
+
+  useEffect(() => {
+    void loadAll();
   }, [loadAll]);
 
-  // Handle service profile toggle
+  const anyLoading = statusRes.state === 'loading'
+    || profilesRes.state === 'loading'
+    || portsRes.state === 'loading'
+    || bansRes.state === 'loading';
+  const allErrored = statusRes.state === 'error'
+    && profilesRes.state === 'error'
+    && portsRes.state === 'error'
+    && bansRes.state === 'error';
+
+  const statusVerified = statusRes.state === 'ready' && isFirewallStatusVerified(statusRes.data);
+  const statusUnverified = statusRes.state === 'ready' && !statusVerified;
+  const canMutateProfiles = statusVerified && profilesRes.state === 'ready' && !actionBusy;
+  const canMutatePorts = statusVerified && portsRes.state === 'ready' && profilesRes.state === 'ready' && !actionBusy;
+  const canMutateBans = statusVerified && bansRes.state === 'ready' && !actionBusy;
+  const canRunScan = statusVerified && !scanBusy;
+
   async function handleToggleProfile(profileKey) {
-    if (actionBusy || !profilesData) return;
-    const current = Boolean(profilesData[profileKey]);
+    if (!canMutateProfiles || !profilesRes.data) return;
+    const current = Boolean(profilesRes.data[profileKey]);
     const nextVal = !current;
     setActionBusy(true);
-    setError(null);
+    setActionError(null);
     try {
       await updateServiceProfiles({
         profiles: { [profileKey]: nextVal },
       });
-      await loadAll();
+      await Promise.allSettled([loadStatus(), loadServiceProfiles(), loadPorts()]);
     } catch (err) {
-      setError(err.message || 'Servis profili güncellenemedi.');
+      setActionError(formatFirewallError(err, 'Servis profili güncellenemedi.'));
     } finally {
       setActionBusy(false);
     }
   }
 
-  // Handle add port rule
   async function handleAddPort(e) {
     e.preventDefault();
+    if (!canMutatePorts || !profilesRes.data) return;
     setPortError(null);
     const p = Number(newPort);
     if (!Number.isInteger(p) || p < 1 || p > 65535) {
@@ -118,7 +252,7 @@ export default function FirewallPage() {
       return;
     }
 
-    const check = checkPortProfileAllowed(p, profilesData || {});
+    const check = checkPortProfileAllowed(p, profilesRes.data);
     if (!check.allowed) {
       setPortError(check.reason);
       return;
@@ -133,35 +267,35 @@ export default function FirewallPage() {
       });
       setNewPort('');
       setNewComment('');
-      await loadAll();
+      await Promise.allSettled([loadStatus(), loadPorts()]);
     } catch (err) {
-      setPortError(err.message || 'Port kuralı eklenemedi.');
+      setPortError(formatFirewallError(err, 'Port kuralı eklenemedi.'));
     } finally {
       setActionBusy(false);
     }
   }
 
-  // Handle remove port rule
   async function handleConfirmDeletePort() {
-    if (!deleteCandidate) return;
+    if (!deleteCandidate || !canMutatePorts) return;
     setActionBusy(true);
+    setActionError(null);
     try {
       await removeFirewallPortRule({
         port: deleteCandidate.port,
         protocol: deleteCandidate.protocol,
       });
       setDeleteCandidate(null);
-      await loadAll();
+      await Promise.allSettled([loadStatus(), loadPorts()]);
     } catch (err) {
-      setError(err.message || 'Port kuralı silinemedi.');
+      setActionError(formatFirewallError(err, 'Port kuralı silinemedi.'));
     } finally {
       setActionBusy(false);
     }
   }
 
-  // Handle scan
   async function handleRunScan(e) {
     e.preventDefault();
+    if (!canRunScan) return;
     setScanBusy(true);
     setScanError(null);
     setScanResult(null);
@@ -172,15 +306,15 @@ export default function FirewallPage() {
       });
       setScanResult(res);
     } catch (err) {
-      setScanError(err.message || 'Port taraması başarısız oldu.');
+      setScanError(formatFirewallError(err, 'Port taraması başarısız oldu.'));
     } finally {
       setScanBusy(false);
     }
   }
 
-  // Handle ban
   async function handleAddBan(e) {
     e.preventDefault();
+    if (!canMutateBans) return;
     setBanError(null);
     if (!banIp.trim()) {
       setBanError('IP adresi gereklidir.');
@@ -194,29 +328,29 @@ export default function FirewallPage() {
         reason: banReason.trim(),
       });
       setBanIp('');
-      await loadAll();
+      await Promise.allSettled([loadStatus(), loadBans()]);
     } catch (err) {
-      setBanError(err.message || 'Ban eklenemedi.');
+      setBanError(formatFirewallError(err, 'IP engelleme eklenemedi.'));
     } finally {
       setActionBusy(false);
     }
   }
 
-  // Handle unban
   async function handleRemoveBan(item) {
+    if (!canMutateBans) return;
     setActionBusy(true);
+    setActionError(null);
     try {
-      await removeCrowdsecBan({ id: item.id, ip: item.ip });
-      await loadAll();
+      await removeCrowdsecBan({ id: item.id, ip: item.ip ?? item.value });
+      await Promise.allSettled([loadStatus(), loadBans()]);
     } catch (err) {
-      setError(err.message || 'Ban kaldırılamadı.');
+      setActionError(formatFirewallError(err, 'IP engellemesi kaldırılamadı.'));
     } finally {
       setActionBusy(false);
     }
   }
 
-  // Port filtering
-  const allPorts = portsData?.ports || [];
+  const allPorts = portsRes.state === 'ready' ? portsRes.data.ports : [];
   const filteredPorts = allPorts.filter((p) => {
     if (filterMode === 'listening') return p.isListening;
     if (filterMode === 'allowed') return p.isFirewallAllowed;
@@ -224,8 +358,15 @@ export default function FirewallPage() {
     return true;
   });
 
-  const providerNotice = formatProviderFirewallNotice(portsData?.providerFirewall || statusData?.providerFirewall);
-  const activeProfiles = profilesData || { system: true, web: true, localMail: false, authoritativeDns: false };
+  const providerNotice = formatProviderFirewallNotice(
+    portsRes.data?.providerFirewall || statusRes.data?.providerFirewall,
+  );
+  const overallStatus = statusRes.state === 'ready'
+    ? formatFirewallOverallStatus(statusRes.data)
+    : null;
+  const dockerStatus = statusRes.state === 'ready'
+    ? formatDockerCoexistenceStatus(statusRes.data)
+    : null;
 
   return (
     <div className="ws-firewall-page">
@@ -233,23 +374,32 @@ export default function FirewallPage() {
         title="Güvenlik Duvarı ve Port Yönetimi"
         description="Güvenlik duvarı kuralları, servis profilleri, dinleyen portlar ve IP engellemeleri."
         actions={
-          <Button icon="refresh" onClick={loadAll} disabled={loading || actionBusy}>
+          <Button icon="refresh" onClick={loadAll} disabled={anyLoading || actionBusy}>
             Yenile
           </Button>
         }
       />
 
-      {error && (
-        <div className="ws-notice ws-notice-error" style={{ marginBottom: '1.5rem', padding: '1rem', borderLeft: '4px solid var(--ws-danger)', backgroundColor: 'var(--ws-danger-soft)', color: 'var(--ws-danger)', borderRadius: '4px' }}>
-          <strong>Hata:</strong> {error}
+      {actionError && (
+        <div style={{ marginBottom: '1rem' }}>
+          <ErrorNotice error={actionError} />
         </div>
+      )}
+
+      {allErrored && (
+        <SectionLoadError
+          title="Güvenlik duvarı verileri alınamadı"
+          message="Sunucu güvenlik duvarı, servis profilleri, port kuralları ve CrowdSec engelleme verilerine ulaşılamadı. Gerçek durum doğrulanmadan değişiklik yapılamaz."
+          onRetry={loadAll}
+          disabled={actionBusy}
+        />
       )}
 
       {/* Cloud / Provider Firewall Advisory Box */}
       <div className="ws-notice ws-notice-warning" style={{ marginBottom: '1.5rem', padding: '1rem', borderLeft: '4px solid var(--ws-warning)', backgroundColor: 'var(--ws-warning-soft)', color: 'var(--ws-warning)', borderRadius: '4px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}>
           <Icon name="shield" size={18} />
-          <span>Cloud / Sağlayıcı Güvenlik Duvarı Durumu: Bilinmiyor (Unknown)</span>
+          <span>Cloud / Sağlayıcı Güvenlik Duvarı Durumu: Bilinmiyor</span>
         </div>
         <p style={{ marginTop: '0.5rem', marginBottom: 0, fontSize: '0.9rem', lineHeight: '1.4' }}>
           {providerNotice.advisory}
@@ -258,134 +408,213 @@ export default function FirewallPage() {
 
       {/* Genel Durum & Nftables / CrowdSec Özeti */}
       <Section title="Genel Güvenlik ve Firewall Durumu">
+        {statusRes.state === 'error' && (
+          <SectionLoadError
+            title="Güvenlik duvarı durumu alınamadı"
+            message={statusRes.error}
+            onRetry={loadStatus}
+            disabled={actionBusy}
+          />
+        )}
+
+        {statusUnverified && (
+          <SectionLoadError
+            title="Güvenlik duvarı durumu doğrulanamadı"
+            message="Sunucu güvenlik duvarı durumu doğrulanamadığı için değişiklik kontrolleri güvenlik amacıyla devre dışı bırakıldı."
+            onRetry={loadStatus}
+            disabled={actionBusy}
+          />
+        )}
+
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
-          <div style={{ padding: '1rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: '6px' }}>
+          <div data-testid="firewall-card-status" style={{ padding: '1rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: '6px' }}>
             <div style={{ fontSize: '0.8rem', color: 'var(--ws-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Firewall Durumu</div>
             <div style={{ marginTop: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Badge state={statusData?.status === 'active' ? 'ready' : (statusData?.status === 'error' ? 'error' : 'stale')}>
-                {statusData?.status === 'active' ? 'Aktif (nftables)' : (statusData?.status ?? 'Yükleniyor')}
-              </Badge>
+              {statusRes.state === 'loading' ? (
+                <Badge state="running">Yükleniyor…</Badge>
+              ) : statusRes.state === 'error' ? (
+                <Badge state="error">Durum alınamadı</Badge>
+              ) : (
+                <Badge state={overallStatus.badgeState}>{overallStatus.label}</Badge>
+              )}
             </div>
             <div style={{ fontSize: '0.8rem', color: 'var(--ws-muted)', marginTop: '0.4rem' }}>
-              Tablo: {statusData?.kernelRules?.hasYunpanelTable ? 'inet yunpanel yüklü' : 'Standart'}
+              {statusRes.state === 'loading'
+                ? 'Tablo durumu doğrulanıyor…'
+                : !statusVerified
+                  ? 'Tablo: Bilinmiyor'
+                  : `Tablo: ${statusRes.data.kernelRules?.hasYunpanelTable ? 'inet yunpanel yüklü' : 'Standart'}`}
             </div>
           </div>
 
-          <div style={{ padding: '1rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: '6px' }}>
-            <div style={{ fontSize: '0.8rem', color: 'var(--ws-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Açılış Kalıcılığı (Boot)</div>
+          <div data-testid="firewall-card-boot" style={{ padding: '1rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: '6px' }}>
+            <div style={{ fontSize: '0.8rem', color: 'var(--ws-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Açılış Kalıcılığı</div>
             <div style={{ marginTop: '0.4rem' }}>
-              <Badge state={statusData?.bootPersistence?.active ? 'ready' : 'stale'}>
-                {statusData?.bootPersistence?.active ? 'nftables.service aktif' : 'Pasif'}
-              </Badge>
+              {statusRes.state === 'loading' ? (
+                <Badge state="running">Yükleniyor…</Badge>
+              ) : !statusVerified || statusRes.data.bootPersistence?.verified === false ? (
+                <Badge state="error">Bilinmiyor</Badge>
+              ) : (
+                <Badge state={statusRes.data.bootPersistence?.active ? 'active' : 'stale'}>
+                  {statusRes.data.bootPersistence?.active ? 'nftables.service aktif' : 'Pasif'}
+                </Badge>
+              )}
             </div>
             <div style={{ fontSize: '0.8rem', color: 'var(--ws-muted)', marginTop: '0.4rem' }}>
-              Sistemd durumu: {statusData?.bootPersistence?.enabled ? 'Etkinleştirildi' : 'Devre dışı'}
+              {statusRes.state === 'loading'
+                ? 'Servis durumu doğrulanıyor…'
+                : !statusVerified || statusRes.data.bootPersistence?.verified === false
+                  ? 'Servis durumu: Bilinmiyor'
+                  : `Servis durumu: ${statusRes.data.bootPersistence?.enabled ? 'Etkinleştirildi' : 'Devre dışı'}`}
             </div>
           </div>
 
-          <div style={{ padding: '1rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: '6px' }}>
-            <div style={{ fontSize: '0.8rem', color: 'var(--ws-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Docker Birlikte Yaşama</div>
+          <div data-testid="firewall-card-docker" style={{ padding: '1rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: '6px' }}>
+            <div style={{ fontSize: '0.8rem', color: 'var(--ws-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Docker Ağ Uyumluluğu</div>
             <div style={{ marginTop: '0.4rem' }}>
-              <Badge state="ready">Korunuyor</Badge>
+              {statusRes.state === 'loading' ? (
+                <Badge state="running">Yükleniyor…</Badge>
+              ) : !statusVerified ? (
+                <Badge state="error">Bilinmiyor</Badge>
+              ) : (
+                <Badge state={dockerStatus.badgeState}>{dockerStatus.label}</Badge>
+              )}
             </div>
             <div style={{ fontSize: '0.8rem', color: 'var(--ws-muted)', marginTop: '0.4rem' }}>
-              Docker bridge ve NAT zincirleri korunur
+              {statusRes.state === 'loading'
+                ? 'Docker ağ kuralları doğrulanıyor…'
+                : !statusVerified
+                  ? 'Docker ağ kuralları doğrulanamadı'
+                  : dockerStatus.detail}
             </div>
           </div>
 
-          <div style={{ padding: '1rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: '6px' }}>
+          <div data-testid="firewall-card-crowdsec" style={{ padding: '1rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: '6px' }}>
             <div style={{ fontSize: '0.8rem', color: 'var(--ws-muted)', textTransform: 'uppercase', fontWeight: 600 }}>CrowdSec Bouncer</div>
             <div style={{ marginTop: '0.4rem' }}>
-              <Badge state={statusData?.crowdsec?.bouncerActive ? 'ready' : 'stale'}>
-                {statusData?.crowdsec?.bouncerActive ? 'Bouncer Aktif' : 'Bouncer Pasif'}
-              </Badge>
+              {statusRes.state === 'loading' ? (
+                <Badge state="running">Yükleniyor…</Badge>
+              ) : !statusVerified ? (
+                <Badge state="error">Bilinmiyor</Badge>
+              ) : (
+                <Badge state={statusRes.data.crowdsec?.bouncerActive ? 'active' : 'stale'}>
+                  {statusRes.data.crowdsec?.bouncerActive ? 'Bouncer Aktif' : 'Bouncer Pasif'}
+                </Badge>
+              )}
             </div>
             <div style={{ fontSize: '0.8rem', color: 'var(--ws-muted)', marginTop: '0.4rem' }}>
-              Aktif Engellemeler: {bansData.length} IP
+              {bansRes.state === 'loading'
+                ? 'Aktif Engellemeler: Yükleniyor…'
+                : bansRes.state === 'error'
+                  ? 'Aktif Engellemeler: Erişilemedi'
+                  : `Aktif Engellemeler: ${bansRes.data.length} IP`}
             </div>
           </div>
         </div>
 
-        {portsData?.summary && (
+        {portsRes.state === 'ready' && portsRes.data?.summary && (
           <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', padding: '0.75rem 1rem', background: 'var(--ws-surface-subtle)', borderRadius: '6px', fontSize: '0.875rem' }}>
-            <span><strong>Dinleyen Portlar:</strong> {portsData.summary.totalListeningPorts}</span>
-            <span><strong>Firewall İzinlileri:</strong> {portsData.summary.totalFirewallAllowedPorts}</span>
-            <span><strong>Dışarıdan Erişilebilir:</strong> {portsData.summary.totalExternallyReachablePorts}</span>
+            <span><strong>Dinleyen Portlar:</strong> {portsRes.data.summary.totalListeningPorts}</span>
+            <span><strong>Firewall İzinlileri:</strong> {portsRes.data.summary.totalFirewallAllowedPorts}</span>
+            <span><strong>Dışarıdan Erişilebilir:</strong> {portsRes.data.summary.totalExternallyReachablePorts}</span>
             <span style={{ marginLeft: 'auto', color: 'var(--ws-muted)' }}>
-              Son Doğrulama: {new Date(portsData.summary.lastVerifiedAt).toLocaleTimeString('tr-TR')}
+              Son Doğrulama: {new Date(portsRes.data.summary.lastVerifiedAt).toLocaleTimeString('tr-TR')}
             </span>
           </div>
         )}
       </Section>
 
-      {/* Servis Profilleri (Service Profiles) */}
+      {/* Servis Profilleri */}
       <Section
         title="Sunucu Servis Profilleri"
-        description="Local-mail ve authoritative-DNS servis profilleri etkin olmadığında gereksiz portların açılması engellenir."
+        description="Yerel e-posta ve yetkili DNS servis profilleri etkin olmadığında ilgili portların açılması engellenir."
       >
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
-          {/* Sistem / SSH */}
-          <div style={{ padding: '1rem', border: '1px solid var(--ws-border)', borderRadius: '6px', background: 'var(--ws-surface)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <strong>Sistem / SSH</strong>
-              <Badge state="ready">Zorunlu / Korumalı</Badge>
-            </div>
-            <p style={{ fontSize: '0.85rem', color: 'var(--ws-muted)', margin: '0.5rem 0' }}>
-              SSH bağlantı portu (22). Kilitlenmeye karşı korumalıdır, kaldırılamaz.
-            </p>
+        {profilesRes.state === 'loading' ? (
+          <div className="ws-loading" role="status">
+            <span className="ws-spinner" />
+            Servis profilleri yükleniyor…
           </div>
+        ) : profilesRes.state === 'error' ? (
+          <SectionLoadError
+            title="Servis profilleri alınamadı"
+            message={profilesRes.error}
+            onRetry={loadServiceProfiles}
+            disabled={actionBusy}
+          />
+        ) : (
+          <>
+          {!statusVerified && (
+            <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.85rem', color: 'var(--ws-muted)' }}>
+              Güvenlik duvarı durumu doğrulanmadan servis profilleri değiştirilemez.
+            </p>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
+            {/* Sistem / SSH */}
+            <div style={{ padding: '1rem', border: '1px solid var(--ws-border)', borderRadius: '6px', background: 'var(--ws-surface)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <strong>Sistem / SSH</strong>
+                <Badge state="active">Zorunlu / Korumalı</Badge>
+              </div>
+              <p style={{ fontSize: '0.85rem', color: 'var(--ws-muted)', margin: '0.5rem 0' }}>
+                SSH bağlantı portu (22). Kilitlenmeye karşı korumalıdır, kaldırılamaz.
+              </p>
+            </div>
 
-          {/* Web */}
-          <div style={{ padding: '1rem', border: '1px solid var(--ws-border)', borderRadius: '6px', background: 'var(--ws-surface)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <strong>Web Hizmetleri</strong>
-              <Badge state="ready">Aktif</Badge>
+            {/* Web */}
+            <div style={{ padding: '1rem', border: '1px solid var(--ws-border)', borderRadius: '6px', background: 'var(--ws-surface)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <strong>Web Hizmetleri</strong>
+                <Badge state={profilesRes.data.web ? 'active' : 'stale'}>
+                  {profilesRes.data.web ? 'Aktif' : 'Devre Dışı'}
+                </Badge>
+              </div>
+              <p style={{ fontSize: '0.85rem', color: 'var(--ws-muted)', margin: '0.5rem 0' }}>
+                HTTP (80) ve HTTPS (443) web trafiği.
+              </p>
             </div>
-            <p style={{ fontSize: '0.85rem', color: 'var(--ws-muted)', margin: '0.5rem 0' }}>
-              HTTP (80) ve HTTPS (443) web trafiği.
-            </p>
-          </div>
 
-          {/* Local Mail */}
-          <div style={{ padding: '1rem', border: '1px solid var(--ws-border)', borderRadius: '6px', background: 'var(--ws-surface)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <strong>Yerel E-Posta (Local Mail)</strong>
-              <Badge state={activeProfiles.localMail ? 'ready' : 'stale'}>
-                {activeProfiles.localMail ? 'Etkin' : 'Devre Dışı'}
-              </Badge>
+            {/* Yerel E-Posta */}
+            <div style={{ padding: '1rem', border: '1px solid var(--ws-border)', borderRadius: '6px', background: 'var(--ws-surface)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <strong>Yerel E-Posta</strong>
+                <Badge state={profilesRes.data.localMail ? 'active' : 'stale'}>
+                  {profilesRes.data.localMail ? 'Etkin' : 'Devre Dışı'}
+                </Badge>
+              </div>
+              <p style={{ fontSize: '0.85rem', color: 'var(--ws-muted)', margin: '0.5rem 0' }}>
+                SMTP, IMAP ve POP3 portları (25, 143, 465, 587, 993). Pasifken bu portlar açılamaz.
+              </p>
+              <Button
+                variant={profilesRes.data.localMail ? 'secondary' : 'primary'}
+                disabled={!canMutateProfiles}
+                onClick={() => handleToggleProfile('localMail')}
+              >
+                {profilesRes.data.localMail ? 'Profili Devre Dışı Bırak' : 'Profili Etkinleştir'}
+              </Button>
             </div>
-            <p style={{ fontSize: '0.85rem', color: 'var(--ws-muted)', margin: '0.5rem 0' }}>
-              SMTP, IMAP, POP3 portları (25, 143, 465, 587, 993). Pasifken bu portlar açılamaz.
-            </p>
-            <Button
-              variant={activeProfiles.localMail ? 'secondary' : 'primary'}
-              disabled={actionBusy}
-              onClick={() => handleToggleProfile('localMail')}
-            >
-              {activeProfiles.localMail ? 'Profili Devre Dışı Bırak' : 'Profili Etkinleştir'}
-            </Button>
-          </div>
 
-          {/* Authoritative DNS */}
-          <div style={{ padding: '1rem', border: '1px solid var(--ws-border)', borderRadius: '6px', background: 'var(--ws-surface)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <strong>Yetkili DNS (Authoritative DNS)</strong>
-              <Badge state={activeProfiles.authoritativeDns ? 'ready' : 'stale'}>
-                {activeProfiles.authoritativeDns ? 'Etkin' : 'Devre Dışı'}
-              </Badge>
+            {/* Yetkili DNS */}
+            <div style={{ padding: '1rem', border: '1px solid var(--ws-border)', borderRadius: '6px', background: 'var(--ws-surface)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <strong>Yetkili DNS</strong>
+                <Badge state={profilesRes.data.authoritativeDns ? 'active' : 'stale'}>
+                  {profilesRes.data.authoritativeDns ? 'Etkin' : 'Devre Dışı'}
+                </Badge>
+              </div>
+              <p style={{ fontSize: '0.85rem', color: 'var(--ws-muted)', margin: '0.5rem 0' }}>
+                DNS portu (53 TCP/UDP). Pasifken DNS portu açılamaz.
+              </p>
+              <Button
+                variant={profilesRes.data.authoritativeDns ? 'secondary' : 'primary'}
+                disabled={!canMutateProfiles}
+                onClick={() => handleToggleProfile('authoritativeDns')}
+              >
+                {profilesRes.data.authoritativeDns ? 'Profili Devre Dışı Bırak' : 'Profili Etkinleştir'}
+              </Button>
             </div>
-            <p style={{ fontSize: '0.85rem', color: 'var(--ws-muted)', margin: '0.5rem 0' }}>
-              DNS portu (53 TCP/UDP). Pasifken DNS portu açılamaz.
-            </p>
-            <Button
-              variant={activeProfiles.authoritativeDns ? 'secondary' : 'primary'}
-              disabled={actionBusy}
-              onClick={() => handleToggleProfile('authoritativeDns')}
-            >
-              {activeProfiles.authoritativeDns ? 'Profili Devre Dışı Bırak' : 'Profili Etkinleştir'}
-            </Button>
           </div>
-        </div>
+          </>
+        )}
       </Section>
 
       {/* Port ve Kural Listesi */}
@@ -396,24 +625,28 @@ export default function FirewallPage() {
           <div className="ws-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
             <Button
               variant={filterMode === 'all' ? 'primary' : 'secondary'}
+              disabled={portsRes.state !== 'ready'}
               onClick={() => setFilterMode('all')}
             >
-              Tümü ({allPorts.length})
+              {portsRes.state === 'ready' ? `Tümü (${allPorts.length})` : 'Tümü'}
             </Button>
             <Button
               variant={filterMode === 'listening' ? 'primary' : 'secondary'}
+              disabled={portsRes.state !== 'ready'}
               onClick={() => setFilterMode('listening')}
             >
               Dinleyenler
             </Button>
             <Button
               variant={filterMode === 'allowed' ? 'primary' : 'secondary'}
+              disabled={portsRes.state !== 'ready'}
               onClick={() => setFilterMode('allowed')}
             >
               Firewall İzinlileri
             </Button>
             <Button
               variant={filterMode === 'reachable' ? 'primary' : 'secondary'}
+              disabled={portsRes.state !== 'ready'}
               onClick={() => setFilterMode('reachable')}
             >
               Dış Erişilebilir
@@ -421,90 +654,104 @@ export default function FirewallPage() {
           </div>
         }
       >
-        <div className="ws-table-scroll">
-          <table className="ws-table" style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ borderBottom: '2px solid var(--ws-border)', color: 'var(--ws-muted)', fontSize: '0.85rem' }}>
-                <th style={{ padding: '0.75rem' }}>Port / Protokol</th>
-                <th style={{ padding: '0.75rem' }}>Dinleyen Adres / Proses</th>
-                <th style={{ padding: '0.75rem' }}>İzin Politikası</th>
-                <th style={{ padding: '0.75rem' }}>Kaynak IP/CIDR</th>
-                <th style={{ padding: '0.75rem' }}>Servis Profili</th>
-                <th style={{ padding: '0.75rem' }}>Dinliyor?</th>
-                <th style={{ padding: '0.75rem' }}>Firewall İzinli?</th>
-                <th style={{ padding: '0.75rem' }}>Dış Erişilebilir?</th>
-                <th style={{ padding: '0.75rem' }}>İşlem</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredPorts.length === 0 ? (
-                <tr>
-                  <td colSpan={9} style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--ws-muted)' }}>
-                    Bu filtreye uygun port kuralı bulunamadı.
-                  </td>
+        {portsRes.state === 'loading' ? (
+          <div className="ws-loading" role="status">
+            <span className="ws-spinner" />
+            Port ve güvenlik duvarı kuralları yükleniyor…
+          </div>
+        ) : portsRes.state === 'error' ? (
+          <SectionLoadError
+            title="Port ve güvenlik duvarı kuralları alınamadı"
+            message={portsRes.error}
+            onRetry={loadPorts}
+            disabled={actionBusy}
+          />
+        ) : (
+          <div className="ws-table-scroll">
+            <table className="ws-table" style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid var(--ws-border)', color: 'var(--ws-muted)', fontSize: '0.85rem' }}>
+                  <th style={{ padding: '0.75rem' }}>Port / Protokol</th>
+                  <th style={{ padding: '0.75rem' }}>Dinleyen Adres / Proses</th>
+                  <th style={{ padding: '0.75rem' }}>İzin Politikası</th>
+                  <th style={{ padding: '0.75rem' }}>Kaynak IP/CIDR</th>
+                  <th style={{ padding: '0.75rem' }}>Servis Profili</th>
+                  <th style={{ padding: '0.75rem' }}>Dinliyor?</th>
+                  <th style={{ padding: '0.75rem' }}>Firewall İzinli?</th>
+                  <th style={{ padding: '0.75rem' }}>Dış Erişilebilir?</th>
+                  <th style={{ padding: '0.75rem' }}>İşlem</th>
                 </tr>
-              ) : (
-                filteredPorts.map((p) => {
-                  const reach = formatPortReachability(p);
-                  const isLocked = isSpecialPortLocked(p.port, p.serviceProfile);
+              </thead>
+              <tbody>
+                {filteredPorts.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--ws-muted)' }}>
+                      Bu filtreye uygun port kuralı bulunamadı.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredPorts.map((p) => {
+                    const reach = formatPortReachability(p);
+                    const isLocked = isSpecialPortLocked(p.port, p.serviceProfile);
 
-                  return (
-                    <tr key={`${p.protocol}:${p.port}`} style={{ borderBottom: '1px solid var(--ws-border)' }}>
-                      <td style={{ padding: '0.75rem', fontWeight: 600 }}>
-                        {p.port} / {String(p.protocol).toUpperCase()}
-                      </td>
-                      <td style={{ padding: '0.75rem', fontSize: '0.875rem' }}>
-                        {p.isListening ? (
-                          <span>
-                            {p.listenAddress} {p.process ? `(${p.process})` : ''}
+                    return (
+                      <tr key={`${p.protocol}:${p.port}`} style={{ borderBottom: '1px solid var(--ws-border)' }}>
+                        <td style={{ padding: '0.75rem', fontWeight: 600 }}>
+                          {p.port} / {String(p.protocol).toUpperCase()}
+                        </td>
+                        <td style={{ padding: '0.75rem', fontSize: '0.875rem' }}>
+                          {p.isListening ? (
+                            <span>
+                              {p.listenAddress} {p.process ? `(${p.process})` : ''}
+                            </span>
+                          ) : (
+                            <span style={{ color: 'var(--ws-muted)' }}>Dinlemiyor</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '0.75rem' }}>
+                          <span style={{ fontWeight: 600, color: p.isFirewallAllowed ? 'var(--ws-success)' : 'var(--ws-danger)' }}>
+                            {String(p.policy || 'ALLOW').toUpperCase()}
                           </span>
-                        ) : (
-                          <span style={{ color: 'var(--ws-muted)' }}>Dinlemiyor</span>
-                        )}
-                      </td>
-                      <td style={{ padding: '0.75rem' }}>
-                        <span style={{ fontWeight: 600, color: p.isFirewallAllowed ? 'var(--ws-success)' : 'var(--ws-danger)' }}>
-                          {String(p.policy || 'ALLOW').toUpperCase()}
-                        </span>
-                      </td>
-                      <td style={{ padding: '0.75rem', fontSize: '0.85rem' }}>
-                        {p.sourceCidr || p.source || '0.0.0.0/0'}
-                      </td>
-                      <td style={{ padding: '0.75rem', fontSize: '0.85rem' }}>
-                        {formatServiceProfileLabel(p.serviceProfile)}
-                      </td>
-                      <td style={{ padding: '0.75rem' }}>
-                        {p.isListening ? <Badge state="ready">Evet</Badge> : <Badge state="stale">Hayır</Badge>}
-                      </td>
-                      <td style={{ padding: '0.75rem' }}>
-                        {p.isFirewallAllowed ? <Badge state="ready">Evet</Badge> : <Badge state="error">Hayır</Badge>}
-                      </td>
-                      <td style={{ padding: '0.75rem' }}>
-                        <Badge state={reach.badgeState}>{reach.label}</Badge>
-                      </td>
-                      <td style={{ padding: '0.75rem' }}>
-                        {isLocked ? (
-                          <span style={{ fontSize: '0.8rem', color: 'var(--ws-muted)' }}>Kilitli</span>
-                        ) : p.isFirewallAllowed ? (
-                          <Button
-                            variant="secondary"
-                            onClick={() => setDeleteCandidate(p)}
-                            disabled={actionBusy}
-                            style={{ fontSize: '0.8rem', padding: '0.2rem 0.5rem' }}
-                          >
-                            Kuralı Sil
-                          </Button>
-                        ) : (
-                          <span style={{ fontSize: '0.8rem', color: 'var(--ws-muted)' }}>-</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+                        </td>
+                        <td style={{ padding: '0.75rem', fontSize: '0.85rem' }}>
+                          {p.sourceCidr || p.source || '0.0.0.0/0'}
+                        </td>
+                        <td style={{ padding: '0.75rem', fontSize: '0.85rem' }}>
+                          {formatServiceProfileLabel(p.serviceProfile)}
+                        </td>
+                        <td style={{ padding: '0.75rem' }}>
+                          {p.isListening ? <Badge state="active">Evet</Badge> : <Badge state="stale">Hayır</Badge>}
+                        </td>
+                        <td style={{ padding: '0.75rem' }}>
+                          {p.isFirewallAllowed ? <Badge state="active">Evet</Badge> : <Badge state="error">Hayır</Badge>}
+                        </td>
+                        <td style={{ padding: '0.75rem' }}>
+                          <Badge state={reach.badgeState === 'ready' ? 'active' : reach.badgeState}>{reach.label}</Badge>
+                        </td>
+                        <td style={{ padding: '0.75rem' }}>
+                          {isLocked ? (
+                            <span style={{ fontSize: '0.8rem', color: 'var(--ws-muted)' }}>Kilitli</span>
+                          ) : p.isFirewallAllowed ? (
+                            <Button
+                              variant="secondary"
+                              onClick={() => setDeleteCandidate(p)}
+                              disabled={!canMutatePorts}
+                              style={{ fontSize: '0.8rem', padding: '0.2rem 0.5rem' }}
+                            >
+                              Kuralı Sil
+                            </Button>
+                          ) : (
+                            <span style={{ fontSize: '0.8rem', color: 'var(--ws-muted)' }}>-</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {/* Yeni Port Kuralı Ekle Formu */}
         <div style={{ marginTop: '1.5rem', padding: '1rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: '6px' }}>
@@ -513,6 +760,11 @@ export default function FirewallPage() {
             <div style={{ color: 'var(--ws-danger)', marginBottom: '0.75rem', fontSize: '0.875rem' }}>
               <strong>Uyarı:</strong> {portError}
             </div>
+          )}
+          {(!statusVerified || portsRes.state !== 'ready' || profilesRes.state !== 'ready') && (
+            <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.85rem', color: 'var(--ws-muted)' }}>
+              Port kuralı ekleyebilmek için güvenlik duvarı durumu, port listesi ve servis profilleri doğrulanmış olmalıdır.
+            </p>
           )}
           <form onSubmit={handleAddPort} style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <div>
@@ -524,6 +776,7 @@ export default function FirewallPage() {
                 placeholder="Örn. 8080"
                 value={newPort}
                 onChange={(e) => setNewPort(e.target.value)}
+                disabled={!canMutatePorts}
                 required
                 style={{ padding: '0.4rem 0.6rem', border: '1px solid var(--ws-control-border)', borderRadius: '4px', width: '120px' }}
               />
@@ -534,6 +787,7 @@ export default function FirewallPage() {
               <select id="firewall-new-protocol"
                 value={newProto}
                 onChange={(e) => setNewProto(e.target.value)}
+                disabled={!canMutatePorts}
                 style={{ padding: '0.4rem 0.6rem', border: '1px solid var(--ws-control-border)', borderRadius: '4px' }}
               >
                 <option value="tcp">TCP</option>
@@ -549,6 +803,7 @@ export default function FirewallPage() {
                 placeholder="0.0.0.0/0"
                 value={newSource}
                 onChange={(e) => setNewSource(e.target.value)}
+                disabled={!canMutatePorts}
                 style={{ padding: '0.4rem 0.6rem', border: '1px solid var(--ws-control-border)', borderRadius: '4px', width: '160px' }}
               />
             </div>
@@ -560,11 +815,12 @@ export default function FirewallPage() {
                 placeholder="Özel servis açıklaması"
                 value={newComment}
                 onChange={(e) => setNewComment(e.target.value)}
+                disabled={!canMutatePorts}
                 style={{ padding: '0.4rem 0.6rem', border: '1px solid var(--ws-control-border)', borderRadius: '4px', width: '200px' }}
               />
             </div>
 
-            <Button type="submit" variant="primary" disabled={actionBusy}>
+            <Button type="submit" variant="primary" disabled={!canMutatePorts}>
               Port Kuralını Ekle
             </Button>
           </form>
@@ -574,16 +830,22 @@ export default function FirewallPage() {
       {/* Hedef Port Taraması & Doğrulama */}
       <Section
         title="Hedef Port Taraması ve Doğrulama"
-        description="Host/port taraması güvenlik kuralı gereği yalnızca izin verilen test hedeflerinde (127.0.0.1, 157.180.11.28, server.cryptoraichu.website) yapılabilir. .44 ve yetkisiz hedefler reddedilir."
+        description="Port erişilebilirlik testi yalnızca izinli sunucu hedeflerinde çalıştırılabilir."
       >
+        {!statusVerified && (
+          <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.85rem', color: 'var(--ws-muted)' }}>
+            Güvenlik duvarı durumu doğrulanmadan port erişilebilirlik testi çalıştırılamaz.
+          </p>
+        )}
         <form onSubmit={handleRunScan} style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: '1rem' }}>
           <div>
             <label htmlFor="firewall-scan-host" style={{ display: 'block', fontSize: '0.8rem', color: 'var(--ws-muted)', marginBottom: '0.25rem' }}>Hedef Host / IP</label>
-              <input id="firewall-scan-host"
+            <input id="firewall-scan-host"
               type="text"
               value={scanHost}
               onChange={(e) => setScanHost(e.target.value)}
               placeholder="127.0.0.1"
+              disabled={!canRunScan}
               required
               style={{ padding: '0.4rem 0.6rem', border: '1px solid var(--ws-control-border)', borderRadius: '4px', width: '180px' }}
             />
@@ -591,18 +853,19 @@ export default function FirewallPage() {
 
           <div>
             <label htmlFor="firewall-scan-port" style={{ display: 'block', fontSize: '0.8rem', color: 'var(--ws-muted)', marginBottom: '0.25rem' }}>Port</label>
-              <input id="firewall-scan-port"
+            <input id="firewall-scan-port"
               type="number"
               min="1"
               max="65535"
               value={scanPort}
               onChange={(e) => setScanPort(e.target.value)}
+              disabled={!canRunScan}
               required
               style={{ padding: '0.4rem 0.6rem', border: '1px solid var(--ws-control-border)', borderRadius: '4px', width: '100px' }}
             />
           </div>
 
-          <Button type="submit" variant="secondary" disabled={scanBusy}>
+          <Button type="submit" variant="secondary" disabled={!canRunScan}>
             {scanBusy ? 'Taranıyor...' : 'Portu Test Et'}
           </Button>
         </form>
@@ -617,69 +880,94 @@ export default function FirewallPage() {
           <div style={{ padding: '0.75rem 1rem', background: scanResult.reachable ? 'var(--ws-success-soft)' : 'var(--ws-danger-soft)', border: `1px solid ${scanResult.reachable ? 'var(--ws-success)' : 'var(--ws-danger)'}`, borderRadius: '6px', fontSize: '0.875rem' }}>
             <strong>Hedef:</strong> {scanResult.host}:{scanResult.port} |{' '}
             <strong>Durum:</strong> {scanResult.reachable ? 'Bağlantı Başarılı (Erişilebilir)' : 'Erişilemedi (Bağlantı Reddedildi / Zaman Aşımı)'} |{' '}
-            <strong>Gecikme (RTT):</strong> {scanResult.rttMs} ms
+            <strong>Gecikme:</strong> {scanResult.rttMs} ms
           </div>
         )}
       </Section>
 
-      {/* CrowdSec Ban & Tehdit Yönetimi */}
+      {/* CrowdSec Tehdit ve Engelleme Yönetimi */}
       <Section
-        title="CrowdSec Tehdit ve Ban Yönetimi"
-        description="CrowdSec bouncer ve aktif IP yasakları aynı güvenlik bağlamında yönetilir."
+        title="CrowdSec Tehdit ve Engelleme Yönetimi"
+        description="CrowdSec bouncer ve aktif IP engellemeleri aynı güvenlik bağlamında yönetilir."
       >
-        <div className="ws-table-scroll" style={{ marginBottom: '1rem' }}>
-          <table className="ws-table" style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ borderBottom: '2px solid var(--ws-border)', color: 'var(--ws-muted)', fontSize: '0.85rem' }}>
-                <th style={{ padding: '0.75rem' }}>Engellenen IP</th>
-                <th style={{ padding: '0.75rem' }}>Süre</th>
-                <th style={{ padding: '0.75rem' }}>Sebep</th>
-                <th style={{ padding: '0.75rem' }}>Kaynak</th>
-                <th style={{ padding: '0.75rem' }}>Bitiş Zamanı</th>
-                <th style={{ padding: '0.75rem' }}>İşlem</th>
-              </tr>
-            </thead>
-            <tbody>
-              {bansData.length === 0 ? (
-                <tr>
-                  <td colSpan={6} style={{ padding: '1rem', textAlign: 'center', color: 'var(--ws-muted)' }}>
-                    Şu anda aktif CrowdSec engellemesi bulunmuyor.
-                  </td>
+        {bansRes.state === 'loading' ? (
+          <div className="ws-loading" role="status" style={{ marginBottom: '1rem' }}>
+            <span className="ws-spinner" />
+            CrowdSec engelleme listesi yükleniyor…
+          </div>
+        ) : bansRes.state === 'error' ? (
+          <SectionLoadError
+            title="CrowdSec engelleme listesi alınamadı"
+            message={bansRes.error}
+            onRetry={loadBans}
+            disabled={actionBusy}
+          />
+        ) : (
+          <div className="ws-table-scroll" style={{ marginBottom: '1rem' }}>
+            <table className="ws-table" style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid var(--ws-border)', color: 'var(--ws-muted)', fontSize: '0.85rem' }}>
+                  <th style={{ padding: '0.75rem' }}>Engellenen IP</th>
+                  <th style={{ padding: '0.75rem' }}>Süre</th>
+                  <th style={{ padding: '0.75rem' }}>Sebep</th>
+                  <th style={{ padding: '0.75rem' }}>Kaynak</th>
+                  <th style={{ padding: '0.75rem' }}>Bitiş Zamanı</th>
+                  <th style={{ padding: '0.75rem' }}>İşlem</th>
                 </tr>
-              ) : (
-                bansData.map((item) => (
-                  <tr key={item.id ?? item.ip} style={{ borderBottom: '1px solid var(--ws-border)' }}>
-                    <td style={{ padding: '0.75rem', fontWeight: 600 }}>{item.ip}</td>
-                    <td style={{ padding: '0.75rem', fontSize: '0.85rem' }}>{item.duration || 'Belirsiz'}</td>
-                    <td style={{ padding: '0.75rem', fontSize: '0.85rem' }}>{item.reason || '-'}</td>
-                    <td style={{ padding: '0.75rem', fontSize: '0.85rem' }}>{item.origin || 'crowdsec'}</td>
-                    <td style={{ padding: '0.75rem', fontSize: '0.85rem' }}>
-                      {item.expiresAt ? new Date(item.expiresAt).toLocaleString('tr-TR') : '-'}
-                    </td>
-                    <td style={{ padding: '0.75rem' }}>
-                      <Button
-                        variant="secondary"
-                        onClick={() => handleRemoveBan(item)}
-                        disabled={actionBusy}
-                        style={{ fontSize: '0.8rem', padding: '0.2rem 0.5rem' }}
-                      >
-                        Engeli Kaldır
-                      </Button>
+              </thead>
+              <tbody>
+                {bansRes.data.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} style={{ padding: '1rem', textAlign: 'center', color: 'var(--ws-muted)' }}>
+                      Şu anda aktif CrowdSec engellemesi bulunmuyor.
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                ) : (
+                  bansRes.data.map((item) => {
+                    const banAddress = item.ip ?? item.value ?? '-';
+                    const banOrigin = item.origin ?? item.source ?? 'crowdsec';
+                    return (
+                      <tr key={item.id ?? banAddress} style={{ borderBottom: '1px solid var(--ws-border)' }}>
+                        <td style={{ padding: '0.75rem', fontWeight: 600 }}>{banAddress}</td>
+                        <td style={{ padding: '0.75rem', fontSize: '0.85rem' }}>{item.duration || 'Belirsiz'}</td>
+                        <td style={{ padding: '0.75rem', fontSize: '0.85rem' }}>{item.reason || '-'}</td>
+                        <td style={{ padding: '0.75rem', fontSize: '0.85rem' }}>{banOrigin}</td>
+                        <td style={{ padding: '0.75rem', fontSize: '0.85rem' }}>
+                          {item.expiresAt ? new Date(item.expiresAt).toLocaleString('tr-TR') : '-'}
+                        </td>
+                        <td style={{ padding: '0.75rem' }}>
+                          <Button
+                            variant="secondary"
+                            onClick={() => handleRemoveBan(item)}
+                            disabled={!canMutateBans}
+                            style={{ fontSize: '0.8rem', padding: '0.2rem 0.5rem' }}
+                          >
+                            Engeli Kaldır
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
 
-        {/* Manuel IP Ban Ekle */}
+        {/* Manuel IP Engelleme Ekle */}
         <div style={{ padding: '1rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: '6px' }}>
           <h4 style={{ margin: '0 0 1rem 0' }}>Manuel IP Engelleme Ekle</h4>
           {banError && (
             <div style={{ color: 'var(--ws-danger)', marginBottom: '0.75rem', fontSize: '0.875rem' }}>
               <strong>Hata:</strong> {banError}
             </div>
+          )}
+          {(!statusVerified || bansRes.state !== 'ready') && (
+            <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.85rem', color: 'var(--ws-muted)' }}>
+              {bansRes.state !== 'ready'
+                ? 'CrowdSec engelleme listesi doğrulanmadan manuel IP engelleme yapılamaz.'
+                : 'Güvenlik duvarı durumu doğrulanmadan manuel IP engelleme yapılamaz.'}
+            </p>
           )}
           <form onSubmit={handleAddBan} style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <div>
@@ -689,6 +977,7 @@ export default function FirewallPage() {
                 placeholder="Örn. 198.51.100.25"
                 value={banIp}
                 onChange={(e) => setBanIp(e.target.value)}
+                disabled={!canMutateBans}
                 required
                 style={{ padding: '0.4rem 0.6rem', border: '1px solid var(--ws-control-border)', borderRadius: '4px', width: '160px' }}
               />
@@ -699,6 +988,7 @@ export default function FirewallPage() {
               <select id="firewall-ban-duration"
                 value={banDuration}
                 onChange={(e) => setBanDuration(e.target.value)}
+                disabled={!canMutateBans}
                 style={{ padding: '0.4rem 0.6rem', border: '1px solid var(--ws-control-border)', borderRadius: '4px' }}
               >
                 <option value="1h">1 Saat</option>
@@ -712,14 +1002,15 @@ export default function FirewallPage() {
               <label htmlFor="firewall-ban-reason" style={{ display: 'block', fontSize: '0.8rem', color: 'var(--ws-muted)', marginBottom: '0.25rem' }}>Sebep</label>
               <input id="firewall-ban-reason"
                 type="text"
-                placeholder="Kötü niyetli trafik / brute force"
+                placeholder="Kötü niyetli trafik veya yetkisiz erişim denemesi"
                 value={banReason}
                 onChange={(e) => setBanReason(e.target.value)}
-                style={{ padding: '0.4rem 0.6rem', border: '1px solid var(--ws-control-border)', borderRadius: '4px', width: '220px' }}
+                disabled={!canMutateBans}
+                style={{ padding: '0.4rem 0.6rem', border: '1px solid var(--ws-control-border)', borderRadius: '4px', width: '240px' }}
               />
             </div>
 
-            <Button type="submit" variant="secondary" disabled={actionBusy}>
+            <Button type="submit" variant="secondary" disabled={!canMutateBans}>
               IP Engelle
             </Button>
           </form>
@@ -732,6 +1023,7 @@ export default function FirewallPage() {
           title="Port Kuralını Sil"
           message={`${deleteCandidate.port} / ${String(deleteCandidate.protocol).toUpperCase()} kuralı silinecek ve firewall kapatılacak. Onaylıyor musunuz?`}
           busy={actionBusy}
+          disabled={!canMutatePorts}
           onCancel={() => setDeleteCandidate(null)}
           onConfirm={handleConfirmDeletePort}
           confirmLabel="Kuralı Sil"
