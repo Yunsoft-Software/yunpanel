@@ -3,7 +3,7 @@
 - **Kaynak rapor:** `.local/manuel-test/buyer-review-20261121/YunPanel-alici-gozu-raporu.md` (numaralı bulgular 1–12; ek kanıtlar: `live-focused-evidence.json`, `live-actions-evidence.json`, `lab-buyer-actions-evidence.json`)
 - **`.28` salt-okunur başlangıç kanıtı:** `.local/manuel-test/buyer-fixes-20261121/live-baseline.json` (`0.3.0-2026112101` / `491a7bfa`, `health: 200`, `licenseTier: free`; `/api/firewall/*` 4×404; `/api/panel/firewall/{status,service-profiles,ports}` 200, `bans` `400 decisions_list_failed`)
 - **Çalışma dalı:** `21-11-2026` (başlangıç `HEAD`: `53e0e31f`)
-- **Sınırlar:** `.28` üzerinde yazma/kurulum/servis yeniden başlatma/lisans veya güvenlik duvarı değişikliği yapılmadı; `.44` erişimi ve `git push` yok; `T883` bu iş üzerinden kapatılmadı; 5 mevcut yerel kullanıcı değişikliği korundu.
+- **Sınırlar:** Kaynak ve yerel paket hazırlığı `.28` dışında yürütüldü. `.28` kabulünde paket kurulumu ve yalnız bu teste ait geçici statik sitenin yaşam döngüsü çalıştırıldı. Lisans, güvenlik duvarı kuralları ve mevcut müşteri hesapları korunuyor. `T883` açık. Beş mevcut yerel kullanıcı değişikliği korundu.
 
 ## Commit ve Bağımsız İnceleme İzi (`21-11-2026`)
 
@@ -50,3 +50,12 @@
    - Üst başlıkta `Sunucu Yöneticisi` etiketi, sol menü + üst barda tek `Uygulama Marketi` girişi, ilk ekranda Owner sonraki adım / sağlık yönlendirmesi, global aramada `yedek`/`dosya`/`ssl` yazınca site görev hedefleri, `/domains` ve DNS/Güncelleme ekranlarında Türkçe metinler ve `320px/390px` mobilde taşmasız `SiteNavigation` doğrulanır.
 5. **Bulgu 8 — İsteğe Bağlı Önekli Geçici Site Kontrolü ve Zorunlu Temizlik:**
    - Gerek görülürse yalnızca `ypcheck-20261121-<rastgele>.local` (veya tekil test öneki) ile bir geçici site oluşturularak taslak/hazır geçişi gözlenir; ardından **aynı oturumda panelin normal silme akışıyla kaldırılır** ve site dosya kökü, Nginx kaydı, Unix kullanıcısı ile kayıt dosyasının tamamen temizlendiği, kardeş yayınların `200` korunduğu doğrulanır. İlgisiz kaynaklara dokunulmaz.
+
+## `.28` Canlı Kabulü — `0.3.0-2026112102`
+
+- Tam kaynak doğrulaması (`python3 orkestra/orchestrator.py verify`) ve beş dosyalık odak doğrulaması (7/7) geçti. Linux amd64 paketinin SHA-256 değeri `ee6e3660799050a0741e162ce7f77e4851834bc22696a083bcdc9c970c32403d`. `.28` paket kimliği ve API sürümü `8adbb4d8b1c32d6714adab44e191a88890e71ca7` ile eşleşti. Sağlık HTTP 200. Nginx yapılandırma testi, paket denetimi ve yedi servis durumu geçti.
+- Kurulum öncesi ve sonrası alan adı, site, uygulama ve sertifika kayıtlarının SHA-256 değerleri eşleşti. Sunucu kayıt dosyasının özeti değişti. Diğer sistem paketleri ve Docker envanteri eşleşti. Kayıtlar `.local/manuel-test/buyer-fixes-20261121/install-summary.json`, `pre-host.log` ve `post-host.log` içinde.
+- **Güvenlik duvarı.** Chrome ve Firefox dört isteği de doğru yönetim adresine gönderdi. 404 sayısı sıfır. Durum, servis profilleri ve portlar HTTP 200. `bans` HTTP 400 döndü. `.28` üzerinde CrowdSec servisi pasif ve `cscli` bulunmuyor. Ekran bu bölümün okunamadığını gösteriyor ve IP engelleme işlemini kilitliyor.
+- **Premium ve arayüz.** Chrome ve Firefox’ta Free Owner için Bayiler, Müşteriler ve Kullanıcılar ekranındaki erken uyarı, lisans sayfasına gidiş ve aynı işe dönüş geçti. Yeni site sihirbazının iki Premium sahiplik seçeneği önceden durduruluyor. Yönetim hesabıyla ilerleme açık. Türkçe yönetici rolü ile alan adı, DNS ve güncelleme ekranları, ilk iş rehberi, tek Market girişi, yedek/dosya/SSL araması ve 320/390 pikselde taşmasız site araçları geçti. Premium olumlu akışı ve beş rol, izole gerçek API/SQLite ve imzalı yerel lisansla sınandı.
+- **Geçici site.** Panelde statik site oluşturma HTTP 201. Kurulum yaklaşık sekiz saniyede hazır bildirildi. Yüklenen içerik gerçek HTTP 200 ile geldi. Dosya yöneticisi içeriği gördü. Normal kaldırma sonrasında dosya kökü, Unix hesabı/grubu ve Nginx kaydı yoktu. Bu koşuda önceden HTTP 200 dönen kardeş yayın bulunmadı.
+- Canlı tarayıcı ve site kanıtı `.local/manuel-test/buyer-fixes-20261121/live-acceptance.json` ile `live-site-journey.json` içinde. Dış depodan boş VM’ye kurtarma, ikinci ağda DNS, canlı WAF ve gerçek Plesk dışa aktarımı dış ortam kabulünde açık.
