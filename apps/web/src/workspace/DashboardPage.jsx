@@ -5,6 +5,7 @@ import { certificateState, formatBytes, formatDate, siteHref } from './site-mode
 import { knownCount } from './resource-model.js';
 import { websiteCount } from './ui/ux-model.js';
 import { readableItems, usagePercent } from './ui/console-model.js';
+import { buildOwnerNextActions } from './next-actions-model.js';
 import UsageHistory from './ui/UsageHistory.jsx';
 
 export function UsageRing({ label, value, detail }) {
@@ -77,6 +78,7 @@ export default function DashboardPage() {
   const server = readableItems(servers)[0];
   const disk = server?.inventory?.filesystem;
   const diskUsage = usagePercent(disk?.usedBytes, disk?.totalBytes);
+  const nextActions = isOwner ? buildOwnerNextActions({ domains, websites, certificates, servers, jobs }) : null;
   const metrics = [
     ['Web siteleri', websiteCount(websites) ?? knownCount(domains), 'Bağımsız çalışma alanı', 'globe', '/websites', 'Siteleri aç'],
     ['Uygulamalar', knownCount(applications), 'Kayıtlı yayın uygulaması', 'code', '/websites', 'Site yönetimi'],
@@ -101,6 +103,24 @@ export default function DashboardPage() {
     ) : diskUsage !== null && diskUsage >= 85 ? (
       <div className="ws-notice ws-notice-warn" role="alert" aria-live="polite"><Icon name="alert" /><div><strong>Disk alanı azalıyor · %{Math.round(diskUsage)}</strong><p>Yeni dağıtımlar ve yedekler için kullanılabilir alanı kontrol edin.</p></div>{isOwner && <LinkButton to="/servers">Sunucuyu incele</LinkButton>}</div>
     ) : null}
+    {nextActions && nextActions.items.length > 0 && (
+      <Section title="Öncelikli sonraki adımlar" description="Sunucu sağlığı, işlemler ve site uyarılarına göre önerilen eylemler">
+        <div className="ws-section-body" data-next-actions="dashboard">
+          <div className="ws-alert-list" aria-label="Genel bakış sonraki adımları">
+            {nextActions.items.map((item) => (
+              <div className="ws-alert-item" key={item.id}>
+                <Icon name={item.severity === 'danger' || item.severity === 'warning' ? 'alert' : 'globe'} />
+                <div>
+                  <strong>{item.title}</strong>
+                  <p>{item.detail}</p>
+                </div>
+                <LinkButton to={item.to} variant={item.severity === 'danger' ? 'primary' : 'secondary'}>{item.cta}</LinkButton>
+              </div>
+            ))}
+          </div>
+        </div>
+      </Section>
+    )}
     <div className="ws-console-grid">
       <Section title="Performans" description="Canlı sunucu kaynak kullanımı" actions={<div className="ws-actions" style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}><Badge state={telemetryIntervalMs > 0 ? 'active' : 'draft'}>{telemetryIntervalMs > 0 ? 'Canlı' : 'Duraklatıldı'}</Badge><select aria-label="Yenileme aralığı" style={{ width: 'auto', minWidth: '88px', height: '34px', minHeight: '34px', padding: '0 26px 0 10px' }} value={telemetryIntervalMs} onChange={(event) => setTelemetryIntervalMs?.(Number(event.target.value))}><option value={3000}>3 sn</option><option value={5000}>5 sn</option><option value={15000}>15 sn</option><option value={0}>Duraklat</option></select><Button icon="refresh" onClick={() => servers.refresh?.()}>Şimdi ölç</Button></div>}>
         <CollectionNotice resource={servers} label="Sunucu" />

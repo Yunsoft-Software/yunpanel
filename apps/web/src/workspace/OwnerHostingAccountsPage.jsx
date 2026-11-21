@@ -6,6 +6,7 @@ import { Badge, Button, EmptyState, ErrorNotice, LinkButton, Modal, PageHeading,
 import { HostingProfileDialog } from './HostingAccountsPanel.jsx';
 import { createHostingAccountClient, hostingAccountMessage } from './hosting-account-client.js';
 import { buildLicenseSettingsPath, isLicenseLoaded, isPremiumRequired } from './license-client.js';
+import { buildResellerAccountQuotaMetrics } from './quota-model.js';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
 
@@ -81,12 +82,23 @@ function AccountsWorkspace({ kind }) {
       <div className="ws-section-body"><ErrorNotice error={error} />{loading && <p role="status">Hesaplar yükleniyor…</p>}</div>
       {!loading && !error && page && (page.accounts.length ? <div className="ws-table-wrap"><table className="ws-table">
         <thead><tr><th scope="col">Hesap</th><th scope="col">Durum</th><th scope="col">Web siteleri</th>{kind === 'reseller' && <th scope="col">Müşteriler</th>}<th scope="col">İşlemler</th></tr></thead>
-        <tbody>{page.accounts.map(account => <tr key={account.id}><th scope="row">{account.username}</th><td><Badge state={account.active ? 'active' : 'off'}>{account.active ? 'Etkin' : 'Giriş kapalı'}</Badge></td>
-          <td>{account.usage?.websites ?? 'Ölçülmedi'}{kind === 'reseller' && account.limits.maxWebsites !== null ? ` / ${account.limits.maxWebsites}` : ''}</td>
-          {kind === 'reseller' && <td>{account.usage.customers}{account.limits.maxCustomers !== null ? ` / ${account.limits.maxCustomers}` : ''}</td>}
-          <td><div className="ws-actions"><Button disabled={Boolean(dialog)} onClick={() => setDialog({ type: 'profile', account })}>Hesabı yönet</Button>
-            {kind === 'customer' && <><Link className="ws-button" to={`/websites?customer=${encodeURIComponent(account.id)}`}>Web siteleri</Link>{account.active && <Link className="ws-button" to={`/websites/new?customer=${encodeURIComponent(account.id)}`}>Site ekle</Link>}</>}</div></td>
-        </tr>)}</tbody></table></div> : <EmptyState title={`Henüz ${label.toLocaleLowerCase('tr')} yok`} detail={premiumRequired ? `Yeni ${label.toLocaleLowerCase('tr')} hesabı açmak için önce YunPanel Premium lisansını etkinleştirin.` : 'Yeni hesabı oluşturduktan sonra site ekleyebilirsiniz.'} icon="user" />)}
+        <tbody>{page.accounts.map(account => {
+          const metrics = buildResellerAccountQuotaMetrics(account);
+          return <tr key={account.id}><th scope="row">{account.username}</th><td><Badge state={account.active ? 'active' : 'off'}>{account.active ? 'Etkin' : 'Giriş kapalı'}</Badge></td>
+            <td>
+              <span>{metrics.websites.measured ? metrics.websites.summaryText : metrics.websites.usageText}</span>
+              {metrics.websites.reservedCount > 0 && <span className="ws-field-hint" style={{ display: 'block' }}>{metrics.websites.reservedCount} bekleyen tahsis dahil</span>}
+              {metrics.websites.reservedCount === 0 && metrics.websites.includesReservations && <span className="ws-field-hint" style={{ display: 'block' }}>Bekleyen tahsisler dahil</span>}
+              {metrics.websites.isFull && <span className="ws-field-hint" style={{ color: 'var(--ws-warning)', display: 'block' }}>Kota doldu</span>}
+            </td>
+            {kind === 'reseller' && <td>
+              <span>{metrics.customers.measured ? metrics.customers.summaryText : metrics.customers.usageText}</span>
+              {metrics.customers.isFull && <span className="ws-field-hint" style={{ color: 'var(--ws-warning)', display: 'block' }}>Kota doldu</span>}
+            </td>}
+            <td><div className="ws-actions"><Button disabled={Boolean(dialog)} onClick={() => setDialog({ type: 'profile', account })}>Hesabı yönet</Button>
+              {kind === 'customer' && <><Link className="ws-button" to={`/websites?customer=${encodeURIComponent(account.id)}`}>Web siteleri</Link>{account.active && <Link className="ws-button" to={`/websites/new?customer=${encodeURIComponent(account.id)}`}>Site ekle</Link>}</>}</div></td>
+          </tr>;
+        })}</tbody></table></div> : <EmptyState title={`Henüz ${label.toLocaleLowerCase('tr')} yok`} detail={premiumRequired ? `Yeni ${label.toLocaleLowerCase('tr')} hesabı açmak için önce YunPanel Premium lisansını etkinleştirin.` : 'Yeni hesabı oluşturduktan sonra site ekleyebilirsiniz.'} icon="user" />)}
       <footer className="ws-pagination"><span>{page ? `${page.total} hesap` : 'Hesap sayısı bekleniyor'}</span><div className="ws-actions">
         <Button disabled={loading || Boolean(dialog) || offset === 0} onClick={() => setOffset(value => Math.max(0, value - LIMIT))}>Önceki</Button>
         <span>Sayfa {Math.floor(offset / LIMIT) + 1}</span><Button disabled={loading || Boolean(dialog) || !page || offset + LIMIT >= page.total} onClick={() => setOffset(value => value + LIMIT)}>Sonraki</Button>

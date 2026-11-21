@@ -5,9 +5,11 @@ import { Link, useSearchParams } from 'react-router';
 import { domainTreeRows } from '../domain-tree.js';
 import { usePanelSession } from '../panel-session.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
-import { Button, CollectionNotice, EmptyState, ErrorNotice, LinkButton, PageHeading, Section } from './PanelKit.jsx';
+import { Button, Badge, CollectionNotice, EmptyState, ErrorNotice, Icon, LinkButton, PageHeading, Section } from './PanelKit.jsx';
 import { filterWebsiteListDomains, siteListPage } from './site-list-model.js';
 import { createWebsiteTaskResolver, siteListFilterParams, clearSiteListFilters } from './website-task-model.js';
+import { buildCustomerQuotaSnapshot, buildCustomerSiteQuotaBreakdown } from './quota-model.js';
+import { buildCustomerNextActions, buildOwnerNextActions, buildResellerNextActions } from './next-actions-model.js';
 import WebsiteTaskCard from './WebsiteTaskCard.jsx';
 import WebsiteRemovalRecoveryPanel from './WebsiteRemovalRecoveryPanel.jsx';
 import { useWebsitePreferences } from './useWebsitePreferences.js';
@@ -16,13 +18,15 @@ import './ui/console-lists.css';
 import './ui/website-task-cards.css';
 
 export default function WebsitesPage() {
-  const { domains, websites, applications, certificates, isOwner, isReseller, isCustomer, hostingProfile, canManage, refreshAll } = useWorkspace();
+  const { domains, websites, applications, certificates, servers, jobs, isOwner, isReseller, isCustomer, hostingProfile, canManage, refreshAll } = useWorkspace();
   const { session } = usePanelSession();
   const [params, setParams] = useSearchParams();
   const { preferences, change: changePreferences, saved } = useWebsitePreferences();
   const [collapsed, setCollapsed] = useState(() => new Set());
   const customerId = isOwner ? params.get('customer') : null;
+  const selfAccountId = isCustomer ? (session?.user?.id ?? null) : null;
   const [customer, setCustomer] = useState(null), [customerError, setCustomerError] = useState(null);
+  const [selfAccount, setSelfAccount] = useState(null);
   useEffect(() => {
     let active = true; const controller = new AbortController(); setCustomer(null); setCustomerError(null);
     if (customerId) panelRequest(`/users/hosting/accounts/${encodeURIComponent(customerId)}`, { signal: controller.signal }).then(value => {
@@ -32,6 +36,15 @@ export default function WebsitesPage() {
     }).catch(error => { if (active && error.name !== 'AbortError') setCustomerError(hostingAccountMessage(error)); });
     return () => { active = false; controller.abort(); };
   }, [customerId]);
+  useEffect(() => {
+    let active = true; const controller = new AbortController();
+    if (!selfAccountId) { setSelfAccount(null); return () => { active = false; controller.abort(); }; }
+    panelRequest(`/users/hosting/accounts/${encodeURIComponent(selfAccountId)}`, { signal: controller.signal }).then(value => {
+      const account = readHostingAccount(value);
+      if (active && account.id === selfAccountId && account.kind === 'customer') setSelfAccount(account);
+    }).catch(() => { /* Keep previous verified state or pending indicator; never fabricate usage. */ });
+    return () => { active = false; controller.abort(); };
+  }, [selfAccountId, websites.status, domains.status, websites.items.length, domains.items.length]);
 
   const query = params.get('q') ?? params.get('search') ?? params.get('query') ?? '';
   const type = ['proxy', 'static'].includes(params.get('type')) ? params.get('type') : 'all';
@@ -57,52 +70,194 @@ export default function WebsitesPage() {
   function toggle(id) {
     setCollapsed((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   }
-  const websiteCount = websites.status === 'ready' ? new Set(websites.items.map(site => site.id)).size : null;
-  const isSuspended = session?.user?.active === false || hostingProfile?.active === false;
-  const isQuotaReached = hostingProfile?.quotas?.maxWebsites !== null && hostingProfile?.quotas?.maxWebsites !== undefined && websiteCount >= hostingProfile.quotas.maxWebsites;
+  const isSuspended = session?.user?.active === false || selfAccount?.active === false || hostingProfile?.active === false;
+  const customerQuota = useMemo(
+    () => (isCustomer ? buildCustomerQuotaSnapshot({ hostingProfile, account: selfAccount }) : null),
+    [isCustomer, hostingProfile, selfAccount],
+  );
+  const isQuotaReached = Boolean((selfAccount?.quotas ?? hostingProfile?.quotas) && customerQuota?.isWebsiteQuotaFull);
+  const customerSiteBreakdown = useMemo(
+    () => (isCustomer ? buildCustomerSiteQuotaBreakdown(websites.items, visibleDomains) : []),
+    [isCustomer, websites.items, visibleDomains],
+  );
+  const ownerNextActions = useMemo(
+    () => (isOwner && canManage ? buildOwnerNextActions({ domains, websites, certificates, servers, jobs }) : null),
+    [isOwner, canManage, domains, websites, certificates, servers, jobs],
+  );
+  const resellerNextActions = useMemo(
+    () => (isReseller && !isOwner ? buildResellerNextActions({ domains }) : null),
+    [isReseller, isOwner, domains],
+  );
+  const customerNextActions = useMemo(
+    () => (isCustomer ? buildCustomerNextActions({ domains: visibleDomains, certificates }) : null),
+    [isCustomer, visibleDomains, certificates],
+  );
 
   return <>
     {customerId && <p className="ws-notice" role="status">{customer ? `${customer.username} hesabının web siteleri` : customerError ? 'Müşteri siteleri doğrulanamadı.' : 'Müşterinin web siteleri yükleniyor…'} <Link to="/websites">Tüm siteler</Link></p>}
     <ErrorNotice error={customerError} />
     <PageHeading title={isReseller ? 'Sitelerim' : 'Web Siteleri'} description={isReseller ? 'Müşterilerinize ait web sitelerini ve yayın araçlarını yönetin.' : isCustomer ? 'Web sitenizin dosya, e-posta ve veritabanı araçlarını buradan yönetin.' : 'Barındırılan web siteleri, alt alan adları ve yayın araçları.'} actions={<><Button icon="refresh" onClick={refreshAll}>Yenile</Button>{isOwner && canManage && <LinkButton to="/docker" icon="box">Uygulama Marketi</LinkButton>}{isOwner && canManage && <LinkButton to="/websites/new" icon="plus" variant="primary">Web sitesi ekle</LinkButton>}{isOwner && canManage && <LinkButton to="/websites/new?mode=subdomain" icon="plus">Alt alan adı ekle</LinkButton>}{isReseller && <LinkButton to="/customers" icon="user" variant="primary">Müşterilerim</LinkButton>}</>} />
     {isOwner && canManage && <WebsiteRemovalRecoveryPanel onChanged={refreshAll} />}
-    {isCustomer && (
-      <Section title="Barındırma Kaynakları ve Kotalar" description="Hesabınıza tahsis edilen kaynak kullanım durumu">
-        {isSuspended && (
-          <div className="ws-notice ws-notice-danger" role="alert">
-            <strong>Kaynaklar Kilitli:</strong> Hesabınız askıya alınmıştır ve barındırma kaynaklarınız kilitli durumdadır. Yeniden etkinleştirmek için bayinizle iletişime geçin.
+    {isOwner && canManage && ownerNextActions && (
+      <Section
+        title="Öncelikli durum ve sonraki adımlar"
+        description="Sunucu sağlığı, dikkat gerektiren siteler ve hızlı yönetim girişleri"
+        actions={<div className="ws-actions">{ownerNextActions.quickEntries.map((entry) => <LinkButton key={entry.to} to={entry.to} icon={entry.icon}>{entry.label}</LinkButton>)}</div>}
+      >
+        <div className="ws-section-body" data-next-actions="owner">
+          {ownerNextActions.items.length > 0 ? (
+            <div className="ws-alert-list" aria-label="Öncelikli yönetici adımları">
+              {ownerNextActions.items.map((item) => (
+                <div className="ws-alert-item" key={item.id}>
+                  <Icon name={item.severity === 'danger' || item.severity === 'warning' ? 'alert' : 'globe'} />
+                  <div>
+                    <strong>{item.title}</strong>
+                    <p>{item.detail}</p>
+                  </div>
+                  <LinkButton to={item.to} variant={item.severity === 'danger' ? 'primary' : 'secondary'}>{item.cta}</LinkButton>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="ws-health-clear">
+              <Icon name="check" />
+              <span>Acil müdahale gerektiren sunucu veya site uyarısı görünmüyor.</span>
+            </div>
+          )}
+        </div>
+      </Section>
+    )}
+    {isReseller && !isOwner && resellerNextActions && resellerNextActions.items.length > 0 && (
+      <Section title="Sonraki adımlar" description="Müşterileriniz ve barındırılan siteler için önerilen işlemler">
+        <div className="ws-section-body" data-next-actions="reseller">
+          <div className="ws-alert-list" aria-label="Bayi sonraki adımları">
+            {resellerNextActions.items.map((item) => (
+              <div className="ws-alert-item" key={item.id}>
+                <Icon name="globe" />
+                <div>
+                  <strong>{item.title}</strong>
+                  <p>{item.detail}</p>
+                </div>
+                {item.to && <LinkButton to={item.to} variant="primary">{item.cta}</LinkButton>}
+              </div>
+            ))}
           </div>
-        )}
-        {isQuotaReached && (
-          <div className="ws-notice ws-notice-warning" role="alert">
-            <strong>Kota Sınırı:</strong> Web sitesi kotanız ({websiteCount ?? 'Ölçülmedi'} / {hostingProfile.quotas.maxWebsites}) sınırına ulaşmıştır. Yeni site talepleri için bayinizle iletişime geçin.
-          </div>
-        )}
-        <div className="ws-quota-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: '1rem' }}>
-          <div style={{ padding: '0.75rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: 'var(--ws-radius-small, 9px)' }}>
-            <span className="ws-muted" style={{ fontSize: '0.85rem' }}>Web Siteleri</span>
-            <div style={{ fontSize: '1.25rem', fontWeight: 600, marginTop: '0.25rem' }}>
-              {websiteCount ?? 'Ölçülmedi'} / {hostingProfile?.quotas?.maxWebsites ?? 'Sınırsız'}
+        </div>
+      </Section>
+    )}
+    {isCustomer && customerQuota && (
+      <Section
+        title="Barındırma Kaynakları ve Kotalar"
+        description={`${customerQuota.managementContext.label} · ${customerQuota.measurementLabel}`}
+      >
+        <div className="ws-section-body" data-customer-quotas="true">
+          <p className="ws-muted" data-customer-management={customerQuota.managementContext.kind}>
+            <strong>{customerQuota.managementContext.label}:</strong> {customerQuota.managementContext.detail}
+          </p>
+          {isSuspended && (
+            <div className="ws-notice ws-notice-danger" role="alert">
+              <strong>Kaynaklar Kilitli:</strong> Hesabınız askıya alınmıştır ve yeni kaynak işlemleri kilitlidir. {customerQuota.managementContext.detail}
+            </div>
+          )}
+          {isQuotaReached && (
+            <div className="ws-notice ws-notice-warning" role="alert">
+              <strong>Kota Sınırı:</strong> Web sitesi kotanız ({customerQuota.websites.summaryText}) sınırına ulaşmıştır. {customerQuota.managementContext.detail}
+            </div>
+          )}
+          <div data-quota-group="enforced" style={{ marginBottom: '0.85rem' }}>
+            <p className="ws-muted" style={{ marginBottom: '0.45rem', fontSize: '0.85rem' }}>Uygulanan kota</p>
+            <div className="ws-quota-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: '1rem', alignItems: 'stretch' }}>
+              {customerQuota.enforced.map((metric) => (
+                <div
+                  key={metric.key}
+                  data-quota-metric={metric.key}
+                  data-quota-status={metric.status}
+                  data-quota-enforced="true"
+                  style={{ padding: '0.85rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: 'var(--ws-radius-small, 9px)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.4rem' }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+                    <span className="ws-muted" style={{ fontSize: '0.85rem' }}>{metric.label}</span>
+                    <Badge state={metric.badgeState}>{metric.badgeLabel}</Badge>
+                  </div>
+                  <div style={{ fontSize: '1.15rem', fontWeight: 600 }}>
+                    {metric.measured ? metric.summaryText : metric.usageText}
+                  </div>
+                  <small className="ws-muted">{metric.detailText}</small>
+                </div>
+              ))}
             </div>
           </div>
-          <div style={{ padding: '0.75rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: 'var(--ws-radius-small, 9px)' }}>
-            <span className="ws-muted" style={{ fontSize: '0.85rem' }}>Disk Alanı</span>
-            <div style={{ fontSize: '1.25rem', fontWeight: 600, marginTop: '0.25rem' }}>
-              {hostingProfile?.usage?.diskMb !== undefined && hostingProfile?.usage?.diskMb !== null ? `${hostingProfile.usage.diskMb} MB` : '—'} / {hostingProfile?.quotas?.maxDiskMb != null ? hostingProfile.quotas.maxDiskMb + ' MB' : 'Sınırsız'}
+          <div data-quota-group="unmeasured">
+            <p className="ws-muted" style={{ marginBottom: '0.45rem', fontSize: '0.85rem' }}>Kayıtlı kaynak sınırları · Otomatik ölçülmüyor ve uygulanmıyor</p>
+            <div className="ws-quota-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: '1rem', alignItems: 'stretch' }}>
+              {customerQuota.unmeasured.map((metric) => (
+                <div
+                  key={metric.key}
+                  data-quota-metric={metric.key}
+                  data-quota-status={metric.status}
+                  data-quota-enforced="false"
+                  style={{ padding: '0.85rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: 'var(--ws-radius-small, 9px)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.4rem' }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+                    <span className="ws-muted" style={{ fontSize: '0.85rem' }}>{metric.label}</span>
+                    <Badge state={metric.badgeState}>{metric.badgeLabel}</Badge>
+                  </div>
+                  <div style={{ fontSize: '1.15rem', fontWeight: 600 }}>
+                    {metric.measured ? metric.summaryText : metric.usageText}
+                  </div>
+                  <small className="ws-muted">{metric.detailText}</small>
+                </div>
+              ))}
             </div>
           </div>
-          <div style={{ padding: '0.75rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: 'var(--ws-radius-small, 9px)' }}>
-            <span className="ws-muted" style={{ fontSize: '0.85rem' }}>Aylık Trafik</span>
-            <div style={{ fontSize: '1.25rem', fontWeight: 600, marginTop: '0.25rem' }}>
-              {hostingProfile?.usage?.trafficMb !== undefined && hostingProfile?.usage?.trafficMb !== null ? `${hostingProfile.usage.trafficMb} MB` : '—'} / {hostingProfile?.quotas?.maxTrafficMb != null ? hostingProfile.quotas.maxTrafficMb + ' MB' : 'Sınırsız'}
+          {customerSiteBreakdown.length > 0 && (
+            <div data-customer-site-breakdown="true" style={{ marginTop: '1rem' }}>
+              <p className="ws-muted" style={{ marginBottom: '0.5rem' }}>Site bazında kaynak dağılımı</p>
+              <ul className="ws-alert-list" aria-label="Site bazında kaynak dağılımı" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                {customerSiteBreakdown.map((site) => (
+                  <li className="ws-alert-item" key={site.id}>
+                    <Icon name="globe" />
+                    <div>
+                      <strong><Link to={site.href}>{site.name}</Link></strong>
+                      <p>{site.runtimeLabel}</p>
+                    </div>
+                    <Badge state={site.statusState}>{site.statusLabel}</Badge>
+                  </li>
+                ))}
+              </ul>
             </div>
-          </div>
-          <div style={{ padding: '0.75rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: 'var(--ws-radius-small, 9px)' }}>
-            <span className="ws-muted" style={{ fontSize: '0.85rem' }}>Veritabanları</span>
-            <div style={{ fontSize: '1.25rem', fontWeight: 600, marginTop: '0.25rem' }}>
-              {hostingProfile?.usage?.databases !== undefined && hostingProfile?.usage?.databases !== null ? hostingProfile.usage.databases : '—'} / {hostingProfile?.quotas?.maxDatabases != null ?? 'Sınırsız'}
+          )}
+        </div>
+      </Section>
+    )}
+    {isCustomer && customerNextActions && (
+      <Section
+        title="Yapılacak adımlar"
+        description={customerNextActions.allClear ? 'Tüm temel yayın kontrolleri tamamlandı' : 'Sitenizi yayına hazırlamak için bekleyen adımlar'}
+        actions={customerNextActions.quickLinks.length > 0 ? <div className="ws-actions">{customerNextActions.quickLinks.map((entry) => <LinkButton key={entry.to} to={entry.to} icon={entry.icon}>{entry.label}</LinkButton>)}</div> : undefined}
+      >
+        <div className="ws-section-body" data-next-actions="customer">
+          {customerNextActions.allClear ? (
+            <div className="ws-health-clear">
+              <Icon name="check" />
+              <span>{customerNextActions.summaryText}</span>
             </div>
-          </div>
+          ) : customerNextActions.items.length > 0 ? (
+            <div className="ws-alert-list" aria-label="Müşteri yapılacak adımları">
+              {customerNextActions.items.map((item) => (
+                <div className="ws-alert-item" key={item.id}>
+                  <Icon name={item.severity === 'danger' || item.severity === 'warning' ? 'alert' : 'globe'} />
+                  <div>
+                    <strong>{item.title}</strong>
+                    <p>{item.detail}</p>
+                  </div>
+                  <LinkButton to={item.to} variant="primary">{item.cta}</LinkButton>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="ws-muted">Hesabınıza ilk web sitesi bağlandığında DNS, SSL, e-posta ve yedekleme adımları burada listelenir.</p>
+          )}
         </div>
       </Section>
     )}

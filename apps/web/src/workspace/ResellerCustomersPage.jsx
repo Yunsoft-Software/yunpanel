@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { panelRequest } from '../api.js';
 import { usePanelSession } from '../panel-session.jsx';
 import { requestJson, sessionGeneration, setSession } from '../session-client.js';
-import { Badge, Button, EmptyState, ErrorNotice, Modal, PageHeading, Section } from './PanelKit.jsx';
+import { Badge, Button, EmptyState, ErrorNotice, Icon, Modal, PageHeading, Section } from './PanelKit.jsx';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
 import { createHostingAccountClient, hostingAccountMessage } from './hosting-account-client.js';
+import { buildResellerAccountQuotaMetrics } from './quota-model.js';
+import { buildResellerNextActions } from './next-actions-model.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
 
 const LIMIT = 25;
@@ -81,18 +83,48 @@ export default function ResellerCustomersPage() {
     setNotice(message);
     refresh();
   };
+  const nextActions = ready && page ? buildResellerNextActions({ reseller, customers: page.accounts }) : null;
 
   return <>
     <PageHeading
       eyebrow="Bayi yönetimi"
       title="Müşterilerim"
-      description="Yalnız size bağlı müşteri giriş hesaplarını yönetin. Site yetkileri ve sunucu kaynakları bu ekrandan verilmez."
+      description="Size bağlı müşteri hesaplarını oluşturun, web sitesi ve kaynak kotalarını tahsis edin ve giriş durumlarını yönetin."
       actions={<>
         <Button icon="refresh" disabled={locked} onClick={refresh}>Yenile</Button>
         <Button icon="plus" variant="primary" disabled={locked || !reseller?.active} onClick={() => { setNotice(''); setDialog({ type: 'create' }); }}>Müşteri ekle</Button>
       </>}
     />
     {notice && <div className="ws-notice" role="status">{notice}</div>}
+    {nextActions && nextActions.items.length > 0 && (
+      <Section title="Sonraki adımlar" description="Müşteri kurulum ve kota durumunuza göre önerilen işlemler">
+        <div className="ws-section-body" data-next-actions="reseller-customers">
+          <div className="ws-alert-list" aria-label="Bayi sonraki adımları">
+            {nextActions.items.map((item) => {
+              const targetAccount = item.targetAccountId ? page?.accounts?.find((account) => account.id === item.targetAccountId) : null;
+              return (
+                <div className="ws-alert-item" key={item.id}>
+                  <Icon name={item.severity === 'warning' ? 'alert' : 'user'} />
+                  <div>
+                    <strong>{item.title}</strong>
+                    <p>{item.detail}</p>
+                  </div>
+                  {item.actionType === 'create_customer' && (
+                    <Button variant="primary" disabled={locked || !reseller?.active} onClick={() => { setNotice(''); setDialog({ type: 'create' }); }}>{item.cta}</Button>
+                  )}
+                  {item.actionType === 'allocate_site' && targetAccount && (
+                    <Button variant="primary" disabled={locked} onClick={() => { setNotice(''); setDialog({ type: 'allocate', account: targetAccount }); }}>{item.cta}</Button>
+                  )}
+                  {item.actionType === 'edit_quotas' && targetAccount && (
+                    <Button disabled={locked} onClick={() => { setNotice(''); setDialog({ type: 'quotas', account: targetAccount }); }}>{item.cta}</Button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </Section>
+    )}
     <Section
       title="Müşteri hesapları"
       description={reseller ? 'Kayıtlı müşteri: ' + reseller.usage.customers + ' / ' + (reseller.limits.maxCustomers === null ? 'Sınırsız' : reseller.limits.maxCustomers) + ' · Web sitesi: ' + reseller.usage.websites + ' / ' + (reseller.limits.maxWebsites === null ? 'Sınırsız' : reseller.limits.maxWebsites) : 'Güncel bayi profili doğrulanıyor.'}
@@ -101,7 +133,7 @@ export default function ResellerCustomersPage() {
         <ErrorNotice error={state.status === 'error' ? hostingAccountMessage(state.error) : null} />
         {state.status === 'error' && <Button onClick={refresh}>Listeyi yeniden yükle</Button>}
         {state.status !== 'error' && !page && <p role="status">Müşteriler yükleniyor…</p>}
-        <p className="ws-muted">Bu ekran paket, abonelik, sahiplik transferi veya site grant'i oluşturmaz. Hesabı askıya almak Website süreçlerini durdurmaz.</p>
+        <p className="ws-muted">Giriş hesabını askıya almak müşterinin panele girişini ve yeni site tahsisini engeller; mevcut web sitelerinin yayını durmaz. Yayını durdurmak için ilgili site ayarlarını kullanın.</p>
         {page?.accounts?.some((a) => !a.active) && (
           <p className="ws-muted" style={{ color: 'var(--ws-danger)' }}>
             <strong>Kaynak Kilidi:</strong> Askıya alınan müşterilere site tahsis edilemez; barındırma kaynakları kilitlidir.
@@ -125,9 +157,8 @@ export default function ResellerCustomersPage() {
           <th scope="col">İşlemler</th>
         </tr></thead>
         <tbody>{page.accounts.map((account) => {
-          const websiteQuota = account.quotas?.maxWebsites;
-          const websiteUsage = account.usage?.websites ?? 0;
-          const isWebsiteQuotaFull = websiteQuota !== null && websiteQuota !== undefined && websiteUsage >= websiteQuota;
+          const metrics = buildResellerAccountQuotaMetrics(account);
+          const isWebsiteQuotaFull = metrics.websites.isFull;
           const isSuspended = !account.active;
           return <tr key={account.id}>
             <th scope="row">{account.username}</th>
@@ -141,17 +172,21 @@ export default function ResellerCustomersPage() {
               )}
             </td>
             <td>
-              <span>{websiteUsage} / {websiteQuota === null || websiteQuota === undefined ? 'Sınırsız' : websiteQuota}</span>
+              <span>{metrics.websites.summaryText}</span>
+              {metrics.websites.reservedCount > 0 && <span className="ws-field-hint" style={{ display: 'block' }}>{metrics.websites.reservedCount} bekleyen tahsis dahil</span>}
               {isWebsiteQuotaFull && <span className="ws-field-hint" style={{ color: 'var(--ws-warning)', display: 'block' }}>Kota doldu</span>}
             </td>
             <td>
-              <span>{account.usage?.diskMb == null ? 'Ölçülmedi' : `${account.usage.diskMb} MB`} / {account.quotas?.maxDiskMb != null ? account.quotas.maxDiskMb + ' MB' : 'Sınırsız'}</span>
+              <span>{metrics.disk.measured ? metrics.disk.summaryText : metrics.disk.usageText}</span>
+              {!metrics.disk.measured && <span className="ws-field-hint" style={{ display: 'block' }}>{metrics.disk.hasLimit ? `Kayıtlı sınır: ${metrics.disk.limitText}` : 'Sınır: Sınırsız'}</span>}
             </td>
             <td>
-              <span>{account.usage?.trafficMb == null ? 'Ölçülmedi' : `${account.usage.trafficMb} MB`} / {account.quotas?.maxTrafficMb != null ? account.quotas.maxTrafficMb + ' MB' : 'Sınırsız'}</span>
+              <span>{metrics.traffic.measured ? metrics.traffic.summaryText : metrics.traffic.usageText}</span>
+              {!metrics.traffic.measured && <span className="ws-field-hint" style={{ display: 'block' }}>{metrics.traffic.hasLimit ? `Kayıtlı sınır: ${metrics.traffic.limitText}` : 'Sınır: Sınırsız'}</span>}
             </td>
             <td>
-              <span>{account.usage?.databases ?? 'Ölçülmedi'} / {account.quotas?.maxDatabases != null ? account.quotas.maxDatabases : 'Sınırsız'}</span>
+              <span>{metrics.databases.measured ? metrics.databases.summaryText : metrics.databases.usageText}</span>
+              {!metrics.databases.measured && <span className="ws-field-hint" style={{ display: 'block' }}>{metrics.databases.hasLimit ? `Kayıtlı sınır: ${metrics.databases.limitText}` : 'Sınır: Sınırsız'}</span>}
             </td>
             <td><div className="ws-actions">
               <Button
@@ -265,7 +300,11 @@ function CustomerDialog({ mode, account, statusTarget, reseller, client, onClose
       <fieldset disabled={busy || reconcile}>
         {status ? <>
           <p><strong>{account.username}</strong> hesabının panel girişini {statusTarget ? 'yeniden açmak' : 'askıya almak'} üzeresiniz.</p>
-          <p className="ws-muted">Bu işlem müşteri profilini, Website kaydını, dosyaları, posta hesaplarını veya host süreçlerini silmez ve durdurmaz.</p>
+          <p className="ws-muted">
+            {statusTarget
+              ? 'Panel girişi yeniden açılır ve yeni site tahsisi yapılabilir. Mevcut web sitelerinin çalışma durumu değiştirilmez.'
+              : 'Müşterinin panele girişi ve bu hesaba yeni site tahsisi durdurulur. Mevcut web sitelerinin yayını, dosyaları ve e-posta hesapları durmaz; bir sitenin yayınını durdurmak için ilgili site ayarlarını kullanın.'}
+          </p>
         </> : <>
           <label>Kullanıcı adı<input value={form.username} onChange={(event) => update('username', event.target.value)} autoComplete="off" autoCapitalize="none" spellCheck={false} maxLength={128} required /></label>
           <label>{creating ? 'İlk parola' : 'Yeni parola (değişmeyecekse boş bırakın)'}<input type="password" value={form.password} onChange={(event) => update('password', event.target.value)} autoComplete="new-password" minLength={12} required={creating} /></label>
@@ -385,8 +424,8 @@ function AllocateSiteDialog({ account, reseller, servers, onClose, onSaved }) {
 
   const isSuspended = !account?.active;
   const websiteQuota = account?.quotas?.maxWebsites;
-  const websiteUsage = account?.usage?.websites ?? 0;
-  const isQuotaFull = websiteQuota !== null && websiteQuota !== undefined && websiteUsage >= websiteQuota;
+  const websiteUsage = typeof account?.usage?.websites === 'number' ? account.usage.websites : null;
+  const isQuotaFull = websiteQuota !== null && websiteQuota !== undefined && websiteUsage !== null && websiteUsage >= websiteQuota;
 
   return (
     <Modal title={`${account.username} · Site Tahsis Et`} onClose={close} busy={busy}>
@@ -536,6 +575,7 @@ function CustomerQuotaDialog({ account, reseller, client, onClose, onSaved }) {
           <ErrorNotice error={error ? (hostingAccountMessage(error) || error.message) : null} />
           <fieldset disabled={busy}>
             <p><strong>{account.username}</strong> müşterisine ayrılacak barındırma kaynak kotalarını belirleyin. Sınırsız yapmak için alanı boş bırakın.</p>
+            <p className="ws-muted">Web Sitesi Kotası yeni site tahsisinde (bekleyen tahsisler dahil) otomatik olarak uygulanır. Disk alanı, aylık trafik ve veritabanı alanları yalnız kayıtlı sınır olarak saklanır; henüz otomatik ölçülmüyor ve uygulanmıyor.</p>
             {reseller?.limits?.maxWebsites !== null && reseller?.limits?.maxWebsites !== undefined && (
               <p className="ws-muted">Maksimum bayi site limitiniz: {reseller.limits.maxWebsites} web sitesi.</p>
             )}
