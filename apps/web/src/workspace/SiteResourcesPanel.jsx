@@ -84,7 +84,7 @@ export function formatEnforcedScopeNote(key, item) {
   if (!item || item.enforcedLimit === null || item.enforcedLimit === undefined) return null;
   if (key === 'databases') return 'Hesap geneli veritabanı sınırı';
   if (key === 'diskSpaceMb') {
-    return item.enforcementMode === 'native_quota_available'
+    return item.enforcementScope === 'native_filesystem_quota'
       ? 'Sunucu disk kotası'
       : 'Dosya Yöneticisi yazmaları';
   }
@@ -93,8 +93,10 @@ export function formatEnforcedScopeNote(key, item) {
 }
 
 export function formatTrafficGuardWarning(key, item) {
-  if (key !== 'trafficMb' || !item || item.enforcedLimit === null || item.enforcedLimit === undefined) return null;
-  if (item.trafficGuardReady === false) {
+  if (key !== 'trafficMb' || !item || item.trafficGuardReady !== false) return null;
+  const enforcedOrRequested = (item.enforcedLimit !== null && item.enforcedLimit !== undefined)
+    || item.trafficEnforcementRequested === true;
+  if (enforcedOrRequested) {
     return 'Trafik sınırının etkinleşmesi için site ayarlarını yeniden uygulayın';
   }
   return null;

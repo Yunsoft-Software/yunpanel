@@ -101,6 +101,10 @@ test('formatEnforcedScopeNote, formatTrafficGuardWarning, and formatDiskSharedRo
   );
   assert.equal(
     formatEnforcedScopeNote('diskSpaceMb', { enforcedLimit: 500, enforcementMode: 'native_quota_available' }),
+    'Dosya Yöneticisi yazmaları',
+  );
+  assert.equal(
+    formatEnforcedScopeNote('diskSpaceMb', { enforcedLimit: 500, enforcementScope: 'native_filesystem_quota' }),
     'Sunucu disk kotası',
   );
   assert.equal(
@@ -112,7 +116,12 @@ test('formatEnforcedScopeNote, formatTrafficGuardWarning, and formatDiskSharedRo
     formatTrafficGuardWarning('trafficMb', { enforcedLimit: 10240, trafficGuardReady: false }),
     'Trafik sınırının etkinleşmesi için site ayarlarını yeniden uygulayın',
   );
+  assert.equal(
+    formatTrafficGuardWarning('trafficMb', { enforcedLimit: null, trafficEnforcementRequested: true, trafficGuardReady: false }),
+    'Trafik sınırının etkinleşmesi için site ayarlarını yeniden uygulayın',
+  );
   assert.equal(formatTrafficGuardWarning('trafficMb', { enforcedLimit: 10240, trafficGuardReady: true }), null);
+  assert.equal(formatTrafficGuardWarning('trafficMb', { enforcedLimit: null, trafficEnforcementRequested: false, trafficGuardReady: false }), null);
   assert.equal(formatTrafficGuardWarning('trafficMb', { enforcedLimit: null, trafficGuardReady: false }), null);
 
   assert.equal(
