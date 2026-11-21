@@ -248,6 +248,10 @@ test('SiteDetailPage surfaces "Web Sunucusu & Nginx" (hosting) and "Alan Adları
   );
   assert.match(
     siteDetailSource,
-    /\['Alan Adı, Güvenlik ve E-posta',\s*\['hosting',\s*'domains',\s*'ssl',\s*'dns',\s*'mail'\]\]/,
+    /\['Sık kullanılan araçlar',\s*\['files',\s*'databases',\s*'ssl',\s*'mail',\s*'backup',\s*'wordpress'\]\]/,
+  );
+  assert.match(
+    siteDetailSource,
+    /\['Geliştirici ve sunucu araçları',\s*\['hosting',\s*'domains',\s*'dns'/,
   );
 });

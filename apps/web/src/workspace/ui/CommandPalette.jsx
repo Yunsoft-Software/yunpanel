@@ -22,10 +22,10 @@ export default function CommandPalette({ domains, canManage, isOwner = false, is
     if (event.key === 'Enter') { event.preventDefault(); open(entries[selected]); }
   }
   return <Modal title="Hızlı erişim" onClose={onClose}>
-    <div className="ws-command-search"><Icon name="search" /><label className="ws-sr-only" htmlFor={`${id}-input`}>Site veya panel bölümü ara</label>
-      <input id={`${id}-input`} autoFocus role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls={`${id}-results`} aria-describedby={`${id}-hint`} aria-activedescendant={entries.length ? `${id}-option-${selected}` : undefined} type="text" autoComplete="off" spellCheck={false} maxLength={253} placeholder="Alan adı, SSL için site, panel bölümü…" value={query} onChange={(event) => { setQuery(event.target.value); setIndex(0); }} onKeyDown={keydown} />
+    <div className="ws-command-search"><Icon name="search" /><label className="ws-sr-only" htmlFor={`${id}-input`}>Site, günlük araç veya panel bölümü ara</label>
+      <input id={`${id}-input`} autoFocus role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls={`${id}-results`} aria-describedby={`${id}-hint`} aria-activedescendant={entries.length ? `${id}-option-${selected}` : undefined} type="text" autoComplete="off" spellCheck={false} maxLength={253} placeholder="Alan adı, yedek, dosya, SSL, posta, terminal veya bölüm ara…" value={query} onChange={(event) => { setQuery(event.target.value); setIndex(0); }} onKeyDown={keydown} />
     </div>
-    <p id={`${id}-hint`} className="ws-muted">↑ ↓ ile seçin, Enter ile açın. Buradan hiçbir sunucu işlemi başlatılmaz.</p>
+    <p id={`${id}-hint`} className="ws-muted">↑ ↓ ile seçin, Enter ile açın. Site görevleri doğrudan ilgili site aracına gider.</p>
     <div id={`${id}-results`} role="listbox" aria-label="Hızlı erişim sonuçları" className="ws-command-results">
       {entries.map((entry, offset) => <Link key={entry.id} id={`${id}-option-${offset}`} to={entry.to} role="option" aria-selected={offset === selected} tabIndex={-1} className="ws-command-result" onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setIndex(offset)} onClick={onClose}><Icon name={entry.icon} /><span><strong>{entry.label}</strong><small>{entry.detail}</small></span><Icon name="arrow" /></Link>)}
     </div>

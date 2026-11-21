@@ -156,3 +156,31 @@ test('php runtime assigns PHP tool label and python assigns Python', () => {
   });
   assert.equal(pythonResult.secondaryTools.find((t) => t.key === 'node')?.label, 'Python');
 });
+
+test('draft, staged, and error sites disable misleading external/files actions and expose actionable Turkish next steps', () => {
+  const draftOwner = resolve({ domains: ready([{ ...domain, state: 'draft' }]), isOwner: true });
+  assert.equal(draftOwner.canOpenSite, false);
+  assert.equal(href(draftOwner, 'files'), null);
+  assert.match(draftOwner.tools.find((t) => t.key === 'files').reason, /İlk yayın tamamlandıktan sonra/);
+  assert.equal(draftOwner.nextStepAction.label, 'Kuruluma devam et');
+
+  const draftCustomer = resolve({ domains: ready([{ ...domain, state: 'draft' }]), isOwner: false });
+  assert.equal(draftCustomer.canOpenSite, false);
+  assert.equal(draftCustomer.nextStepAction.label, 'Kurulum durumunu gör');
+  assert.match(draftCustomer.nextStepAction.note, /yöneticinize bilgi verebilirsiniz/);
+
+  const errorSite = resolve({ domains: ready([{ ...domain, state: 'error' }]) });
+  assert.equal(errorSite.canOpenSite, false);
+  assert.equal(errorSite.nextStepAction.label, 'Kurulum nedenini gör');
+  assert.equal(errorSite.nextStepAction.to, '/websites/domain-a/logs');
+
+  const stagedSite = resolve({ domains: ready([{ ...domain, state: 'staged' }]) });
+  assert.equal(stagedSite.canOpenSite, false);
+  assert.equal(stagedSite.nextStepAction.label, 'Yayına al / İncele');
+  assert.equal(stagedSite.nextStepAction.to, '/websites/domain-a/domains');
+
+  const activeSite = resolve({ domains: ready([{ ...domain, state: 'active' }]) });
+  assert.equal(activeSite.canOpenSite, true);
+  assert.equal(activeSite.nextStepAction, null);
+  assert.equal(href(activeSite, 'files'), '/websites/domain-a/files');
+});

@@ -6,6 +6,25 @@ import { panelRequest, waitForJob } from './api.js';
 
 const initialForm = { mode: 'domain', parentDomainId: '', prefix: '', primaryDomain: '', aliases: '', targetType: 'proxy', targetValue: '4301', redirectStatus: 301, preservePath: true, httpsMode: 'off' };
 
+const ACCESS_LABELS = Object.freeze({
+  ready: 'Hazır',
+  checking: 'Kontrol ediliyor',
+  loading: 'Yükleniyor',
+  protected: 'Korumalı',
+  stale: 'Gecikmiş',
+  error: 'Hata',
+  unavailable: 'Erişilemiyor',
+});
+
+const ACTION_LABELS = Object.freeze({
+  stage: 'Hazırlama',
+  activate: 'Yayınlama',
+});
+
+function formatAccessLabel(access) {
+  return ACCESS_LABELS[access] ?? access ?? 'Bilinmiyor';
+}
+
 export default function DomainManager({ domains, domainAccess, certificates, certificateAccess, servers, onChanged }) {
   const [form, setForm] = useState(initialForm);
   const [busyId, setBusyId] = useState(null);
@@ -66,7 +85,7 @@ export default function DomainManager({ domains, domainAccess, certificates, cer
     try {
       const job = await panelRequest(`/domains/${domain.id}/${action}`, { method: 'POST', body: {} });
       await waitForJob(job.id);
-      setMessage(`${domain.primaryDomain}: ${action} succeeded.`);
+      setMessage(`${domain.primaryDomain}: ${ACTION_LABELS[action] ?? action} tamamlandı.`);
       onChanged();
     } catch (requestError) {
       setError(`${domain.primaryDomain}: ${requestError.message}`);
@@ -116,7 +135,7 @@ export default function DomainManager({ domains, domainAccess, certificates, cer
           await waitForJob(postActivate.id);
         } catch {}
       }
-      setMessage(`${domain.primaryDomain}: ${staging ? 'ACME validation' : 'certificate issuance'} succeeded.`);
+      setMessage(`${domain.primaryDomain}: ${staging ? 'ACME doğrulaması' : 'sertifika oluşturma'} tamamlandı.`);
       onChanged();
     } catch (requestError) {
       setError(`${domain.primaryDomain}: ${requestError.message}`);
@@ -134,7 +153,7 @@ export default function DomainManager({ domains, domainAccess, certificates, cer
     try {
       const job = await panelRequest(`/certificates/${certificate.id}/renew`, { method: 'POST', body: { dryRun: true } });
       await waitForJob(job.id, { attempts: 900 });
-      setMessage(`${certificate.certName}: renewal dry-run succeeded.`);
+      setMessage(`${certificate.certName}: yenileme testi tamamlandı.`);
       onChanged();
     } catch (requestError) {
       setError(`${certificate.certName}: ${requestError.message}`);
@@ -149,37 +168,37 @@ export default function DomainManager({ domains, domainAccess, certificates, cer
       {message && <div className="operation-result" role="status"><span>{message}</span></div>}
       {error && <div className="operation-error" role="alert">{error}</div>}
       <section className="panel domain-panel">
-        <div className="panel-heading"><div><p className="eyebrow">Domains and subdomains</p><h2>Domain hierarchy</h2></div><span className="panel-meta">{domainAccess}</span></div>
+        <div className="panel-heading"><div><p className="eyebrow">Alan adları ve alt alan adları</p><h2>Alan adı hiyerarşisi</h2></div><span className="panel-meta">{formatAccessLabel(domainAccess)}</span></div>
         <DomainList domains={domains} access={domainAccess} busyId={busyId} onAction={runDomainAction} onIssue={issueCertificate} onAddSubdomain={addSubdomain} />
       </section>
       <section className="panel domain-panel">
-        <div className="panel-heading"><div><p className="eyebrow">Nginx configuration</p><h2>{isSubdomain ? 'New subdomain' : 'New domain'}</h2></div></div>
+        <div className="panel-heading"><div><p className="eyebrow">Nginx yapılandırması</p><h2>{isSubdomain ? 'Yeni alt alan adı' : 'Yeni alan adı'}</h2></div></div>
         <form onSubmit={createDomain}>
           <fieldset className="inline-form domain-create-fields" disabled={busyId !== null || domainAccess !== 'ready'}>
-            <legend className="domain-form-legend">Domain configuration</legend>
-            <label>Type<select value={form.mode} onChange={(event) => update('mode', event.target.value)}><option value="domain">Independent domain</option><option value="subdomain">Subdomain of an existing domain</option></select></label>
+            <legend className="domain-form-legend">Alan adı yapılandırması</legend>
+            <label>Kayıt türü<select value={form.mode} onChange={(event) => update('mode', event.target.value)}><option value="domain">Bağımsız alan adı</option><option value="subdomain">Mevcut alan adının alt alan adı</option></select></label>
             {isSubdomain ? <>
-              <label>Parent domain<select value={form.parentDomainId} required onChange={(event) => update('parentDomainId', event.target.value)}><option value="">Select parent domain</option>{domains.map((domain) => <option key={domain.id} value={domain.id}>{domain.primaryDomain}</option>)}</select></label>
-              <label>Subdomain prefix<input ref={nameInput} value={form.prefix} placeholder="api" required onChange={(event) => update('prefix', event.target.value)} /><span className="domain-form-hint">{parent ? `${form.prefix.trim() || 'prefix'}.${parent.primaryDomain}` : 'Select a parent first. The subdomain uses that server.'}</span></label>
+              <label>Üst alan adı<select value={form.parentDomainId} required onChange={(event) => update('parentDomainId', event.target.value)}><option value="">Üst alan adı seçin</option>{domains.map((domain) => <option key={domain.id} value={domain.id}>{domain.primaryDomain}</option>)}</select></label>
+              <label>Alt alan adı öneki<input ref={nameInput} value={form.prefix} placeholder="api" required onChange={(event) => update('prefix', event.target.value)} /><span className="domain-form-hint">{parent ? `${form.prefix.trim() || 'onek'}.${parent.primaryDomain}` : 'Önce üst alan adını seçin. Alt alan adı aynı sunucuyu kullanır.'}</span></label>
             </> : <>
-              <label>Primary domain<input ref={nameInput} value={form.primaryDomain} placeholder="example.com" required onChange={(event) => update('primaryDomain', event.target.value)} /></label>
+              <label>Ana alan adı<input ref={nameInput} value={form.primaryDomain} placeholder="example.com" required onChange={(event) => update('primaryDomain', event.target.value)} /></label>
             </>}
-            <label>Aliases, comma separated<input value={form.aliases} onChange={(event) => update('aliases', event.target.value)} /><span className="domain-form-hint">Aliases share this target; they are not independent subdomains.</span></label>
-            <label>Target type<select value={form.targetType} onChange={(event) => setForm((current) => ({ ...current, targetType: event.target.value, targetValue: event.target.value === 'proxy' ? '4301' : '' }))}><option value="proxy">Loopback proxy</option><option value="static">Static root</option><option value="redirect">Yönlendirme</option></select></label>
-            <label>{form.targetType === 'proxy' ? 'Upstream port' : form.targetType === 'redirect' ? 'Hedef adres' : 'Absolute web root'}<input type={form.targetType === 'proxy' ? 'number' : form.targetType === 'redirect' ? 'url' : 'text'} placeholder={form.targetType === 'redirect' ? 'https://yeni-alan.com' : undefined} min={form.targetType === 'proxy' ? 1024 : undefined} max={form.targetType === 'proxy' ? 65535 : undefined} value={form.targetValue} required onChange={(event) => update('targetValue', event.target.value)} /></label>
+            <label>Aliaslar (virgülle ayırın)<input value={form.aliases} onChange={(event) => update('aliases', event.target.value)} /><span className="domain-form-hint">Aliaslar aynı hedefi paylaşır; bağımsız alt alan adı oluşturmaz.</span></label>
+            <label>Hedef türü<select value={form.targetType} onChange={(event) => setForm((current) => ({ ...current, targetType: event.target.value, targetValue: event.target.value === 'proxy' ? '4301' : '' }))}><option value="proxy">Yerel proxy</option><option value="static">Statik dizin</option><option value="redirect">Yönlendirme</option></select></label>
+            <label>{form.targetType === 'proxy' ? 'Uygulama portu' : form.targetType === 'redirect' ? 'Hedef adres' : 'Tam yayın dizini'}<input type={form.targetType === 'proxy' ? 'number' : form.targetType === 'redirect' ? 'url' : 'text'} placeholder={form.targetType === 'redirect' ? 'https://yeni-alan.com' : undefined} min={form.targetType === 'proxy' ? 1024 : undefined} max={form.targetType === 'proxy' ? 65535 : undefined} value={form.targetValue} required onChange={(event) => update('targetValue', event.target.value)} /></label>
             {form.targetType === 'redirect' && <>
               <label>Yönlendirme türü<select value={form.redirectStatus} onChange={(event) => update('redirectStatus', Number(event.target.value))}><option value={301}>Kalıcı (301)</option><option value={302}>Geçici (302)</option></select></label>
               <label className="domain-form-check"><input type="checkbox" checked={form.preservePath} onChange={(event) => update('preservePath', event.target.checked)} />Yolu koru</label>
             </>}
-            <label>HTTPS<select value={form.httpsMode} onChange={(event) => update('httpsMode', event.target.value)}><option value="off">Off</option><option value="managed">Managed</option></select></label>
-            <button className="primary-button" type="submit" disabled={servers.length !== 1 || (isSubdomain && !parent)}>{busyId === 'create' ? 'Creating…' : isSubdomain ? 'Create subdomain' : 'Create domain'}</button>
+            <label>HTTPS<select value={form.httpsMode} onChange={(event) => update('httpsMode', event.target.value)}><option value="off">Kapalı</option><option value="managed">Yönetilen</option></select></label>
+            <button className="primary-button" type="submit" disabled={servers.length !== 1 || (isSubdomain && !parent)}>{busyId === 'create' ? 'Oluşturuluyor…' : isSubdomain ? 'Alt alan adı oluştur' : 'Alan adı oluştur'}</button>
           </fieldset>
         </form>
-        <p className="domain-form-hint">Creating a domain does not publish DNS records or enable mail. Existing domains are not automatically regrouped.</p>
+        <p className="domain-form-hint">Alan adı oluşturmak DNS kayıtlarını yayımlamaz veya e-posta hizmetini etkinleştirmez. Mevcut alan adları otomatik olarak yeniden gruplanmaz.</p>
       </section>
       <section className="panel domain-panel">
-        <div className="panel-heading"><div><p className="eyebrow">ACME / TLS</p><h2>Certificates</h2></div><span className="panel-meta">{certificateAccess}</span></div>
-        <div className="inline-form"><label>ACME account email<input ref={emailInput} type="email" required value={email} disabled={busyId !== null} onChange={(event) => setEmail(event.target.value)} /></label></div>
+        <div className="panel-heading"><div><p className="eyebrow">ACME / TLS</p><h2>Sertifikalar</h2></div><span className="panel-meta">{formatAccessLabel(certificateAccess)}</span></div>
+        <div className="inline-form"><label>ACME hesap e-postası<input ref={emailInput} type="email" required value={email} disabled={busyId !== null} onChange={(event) => setEmail(event.target.value)} /></label></div>
         <CertificateList certificates={certificates} access={certificateAccess} busyId={busyId} onRenew={renewCertificate} />
       </section>
     </>

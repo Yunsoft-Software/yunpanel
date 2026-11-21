@@ -14,9 +14,14 @@
 .ws-settings-advanced { margin: 1rem 0; padding: .9rem 1rem; border: 1px solid var(--ws-border); border-radius: var(--ws-radius); }
 .ws-settings-advanced > summary { cursor: pointer; font-weight: 600; }
 .ws-settings-advanced[open] > summary { margin-bottom: 1rem; }
+.workspace-shell .ws-site-tool-mobile { display: none; }
 .workspace-shell .ws-site-tool-select { display: none; }
-@media (max-width: 600px) {
-  .workspace-shell .ws-site-tool-select { display: grid; gap: .4rem; margin: .8rem 0 1rem; }
+.ws-site-tool-mobile-primary { display: flex; flex-wrap: wrap; gap: .4rem; min-width: 0; }
+.ws-site-tool-mobile-primary a { display: inline-flex; align-items: center; gap: .35rem; min-height: 36px; padding: .35rem .6rem; border: 1px solid var(--ws-border); border-radius: var(--ws-radius); white-space: normal; overflow-wrap: anywhere; max-width: 100%; font-size: .8rem; }
+@media (max-width: 640px) {
+  .workspace-shell .ws-site-tool-mobile { display: grid; gap: .55rem; width: 100%; min-width: 0; }
+  .workspace-shell .ws-site-tool-select { display: grid; gap: .35rem; margin: 0; width: 100%; min-width: 0; }
+  .workspace-shell .ws-site-tool-select select { width: 100%; max-width: 100%; min-height: 40px; }
   .ws-site-tool-desktop { display: none; }
   .ws-website-task-quick { padding: .6rem; }
 }

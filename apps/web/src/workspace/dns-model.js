@@ -113,12 +113,12 @@ export function dnssecPresentation(status) {
 export function dnsSecondaryPresentation(value) {
   const status = typeof value?.status === 'string' ? value.status : 'unknown';
   const presentation = {
-    disabled: ['off', 'Secondary DNS kapalı'],
-    synced: ['active', 'Secondary DNS senkron'],
-    drift: ['warning', 'Secondary DNS serial farkı'],
-    unverifiable: ['warning', 'Secondary DNS doğrulanamıyor'],
-    primary_kind_required: ['error', 'Primary zone gerekli'],
-  }[status] ?? ['unknown', status === 'unknown' ? 'Secondary DNS durumu bilinmiyor' : status];
+    disabled: ['off', 'İkincil DNS kapalı'],
+    synced: ['active', 'İkincil DNS uyumlu'],
+    drift: ['warning', 'İkincil DNS seri farkı'],
+    unverifiable: ['warning', 'İkincil DNS doğrulanamıyor'],
+    primary_kind_required: ['error', 'Birincil bölge gerekli'],
+  }[status] ?? ['unknown', status === 'unknown' ? 'İkincil DNS durumu bilinmiyor' : status];
   const stateAllowsReady = status === 'disabled' || status === 'synced';
   const policyGate = typeof value?.policy?.healthGate === 'string' ? value.policy.healthGate : null;
   const ready = stateAllowsReady && value?.ready === true && policyGate !== 'block';
@@ -133,9 +133,9 @@ export function dnsSecondaryPresentation(value) {
 export function dnsSecondaryTargetPresentation(target) {
   const status = typeof target?.status === 'string' ? target.status : 'unknown';
   const presentation = {
-    synced: ['active', 'Senkron'],
-    stale: ['warning', 'Primary serial gerisinde'],
-    ahead: ['error', 'Primary serial ilerisinde'],
+    synced: ['active', 'Uyumlu'],
+    stale: ['warning', 'Birincil serinin gerisinde'],
+    ahead: ['error', 'Birincil serinin ilerisinde'],
     unverifiable: ['warning', 'Doğrulanamıyor'],
   }[status] ?? ['unknown', status === 'unknown' ? 'Bilinmiyor' : status];
   return Object.freeze({

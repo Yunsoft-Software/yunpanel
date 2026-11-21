@@ -67,6 +67,62 @@ test('domain navigation uses encoded Domain ID and preserves bounded search', ()
   assert.equal(commandEntries({ query: 'a'.repeat(400) }).at(-1).to, `/websites?q=${'a'.repeat(253)}`);
   assert.equal(commandEntries({ domains: { status: 'forbidden', items: [{ id: 'secret', primaryDomain: 'secret.test' }] } }).some((entry) => entry.id === 'domain:secret'), false);
 });
+test('command search connects daily Turkish site tasks to direct site-scoped tools and blocks read-only', () => {
+  const domains = { status: 'ready', items: [{ id: 'dom-1', primaryDomain: 'pilot.example.test' }] };
+  for (const [term, expectedTab] of [
+    ['yedek', 'backup'],
+    ['dosya', 'files'],
+    ['ssl', 'ssl'],
+    ['posta', 'mail'],
+    ['terminal', 'terminal'],
+    ['veritabanı', 'databases'],
+    ['dns', 'dns'],
+    ['günlük', 'logs'],
+    ['cron', 'cron'],
+  ]) {
+    const entries = commandEntries({ canManage: true, isCustomer: true, domains, query: term });
+    const siteTaskIndex = entries.findIndex((entry) => entry.to === `/websites/dom-1/${expectedTab}`);
+    const fallbackIndex = entries.findIndex((entry) => entry.id === 'search-all');
+    assert.ok(siteTaskIndex >= 0, `Expected site task /websites/dom-1/${expectedTab} for query "${term}"`);
+    assert.ok(siteTaskIndex < fallbackIndex, `Site task for "${term}" must appear before generic fallback`);
+
+    // Read-only must NEVER get management site task routes
+    const roEntries = commandEntries({ canManage: false, isOwner: false, domains, query: term });
+    assert.equal(roEntries.some((entry) => entry.to === `/websites/dom-1/${expectedTab}`), false);
+    assert.equal(roEntries.some((entry) => ['/backup', '/ssl', '/files', '/mail', '/databases', '/cron'].includes(entry.to)), false);
+  }
+});
+test('command search never lets hostname or substring collisions hijack domain matches while scoping compound task queries', () => {
+  const domains = {
+    status: 'ready',
+    items: [
+      { id: 'dom-alpha', primaryDomain: 'alpha.example.test' },
+      { id: 'dom-blog', primaryDomain: 'blog.example.com' },
+      { id: 'dom-mail', primaryDomain: 'mail.example.com' },
+      { id: 'dom-adblock', primaryDomain: 'adblock.test' },
+    ],
+  };
+
+  for (const [query, expectedDomainId] of [
+    ['blog.example.com', 'dom-blog'],
+    ['blog', 'dom-blog'],
+    ['mail.example.com', 'dom-mail'],
+    ['adblock.test', 'dom-adblock'],
+  ]) {
+    const entries = commandEntries({ canManage: true, isOwner: true, domains, query });
+    assert.equal(entries[0]?.id, `domain:${expectedDomainId}`, `Expected "${query}" to rank domain:${expectedDomainId} first, got ${JSON.stringify(entries.map((e) => e.id))}`);
+    assert.equal(entries.some((entry) => entry.id.startsWith('domain-task:')), false, `Hostname/domain search "${query}" must not inject unrelated site tasks`);
+  }
+
+  // Compound domain + task queries scope strictly to the matching domain
+  const blogBackup = commandEntries({ canManage: true, isOwner: true, domains, query: 'blog.example.com yedek' });
+  const blogBackupTasks = blogBackup.filter((entry) => entry.id.startsWith('domain-task:'));
+  assert.deepEqual(blogBackupTasks.map((entry) => entry.to), ['/websites/dom-blog/backup']);
+
+  const alphaSsl = commandEntries({ canManage: true, isCustomer: true, domains, query: 'alpha ssl' });
+  const alphaSslTasks = alphaSsl.filter((entry) => entry.id.startsWith('domain-task:'));
+  assert.deepEqual(alphaSslTasks.map((entry) => entry.to), ['/websites/dom-alpha/ssl']);
+});
 test('site tools follow three task families and expose DNS, Git and logs', () => {
   const groups = groupSiteTabs(SITE_TABS);
   assert.deepEqual(groups.map((group) => group.id), ['dashboard', 'hosting', 'mail']);
@@ -125,11 +181,13 @@ test('source: command palette uses actual Owner context and preferences are not 
   const palette = await source('ui/CommandPalette.jsx');
   assert.match(palette, /commandEntries\(\{ query, canManage, isOwner, isReseller(?:, isCustomer)?, domains \}\)/);
 });
-test('source: no More-only site navigation and tools wrap on narrow screens', async () => {
+test('source: mobile site navigation shows primary task bar plus single selector and tools wrap on narrow screens', async () => {
   const nav = await source('ui/SiteNavigation.jsx');
   assert.match(nav, /groupSiteTabs\(tabs\)/);
   assert.match(nav, /activeTab === 'resources' \? 'databases'/);
-  assert.doesNotMatch(nav, /<details|<summary|Diğer/);
+  assert.doesNotMatch(nav, /<details|<summary/);
+  assert.match(nav, /ws-site-tool-mobile-primary/);
+  assert.match(nav, /Diğer site araçları/);
   assert.match(nav, /siteHref\(domainId, key\)/);
   const css = await source('ui/plesk-navigation.css');
   assert.match(css, /flex-wrap: wrap/);

@@ -17,9 +17,10 @@ export default function WebsiteTaskCard({ row, tasks, certificates, filtering, o
   const [toolsOpen, setToolsOpen] = useState(false);
   const { domain, depth, childCount, expanded, warning, contextOnly } = row;
   const ssl = certificateState(domain, tasks.domainReady && certificates?.status === 'ready' ? certificates.items : null);
-  const url = tasks.domainReady ? externalSiteUrl(domain) : null;
+  const url = tasks.domainReady && domain.state === 'active' ? externalSiteUrl(domain) : null;
   const isSubdomain = Boolean(domain.parentDomainId);
   const isSuspended = domain.state === 'suspended' || domain.status === 'suspended';
+  const nextStep = !isSuspended ? tasks.nextStepAction ?? null : null;
   const cardClasses = [
     'ws-website-task-card',
     'yp-spotlight-card',
@@ -39,12 +40,14 @@ export default function WebsiteTaskCard({ row, tasks, certificates, filtering, o
         <Badge state={tasks.domainReady ? domain.state : 'unknown'} />
         <Badge state={ssl.state}>{ssl.label}</Badge>
         {isSuspended && <LinkButton to={`${siteHref(domain.id, 'settings')}?quickResume=1`} variant="primary" icon="check" aria-label={`${domain.primaryDomain} yayınını etkinleştir`}>Yayını Etkinleştir</LinkButton>}
+        {nextStep && <LinkButton to={nextStep.to} variant="primary" icon={nextStep.icon} aria-label={`${domain.primaryDomain} · ${nextStep.label}`}>{nextStep.label}</LinkButton>}
         {!isSubdomain && childCount > 0 && <Button disabled={filtering} icon="chevron" aria-expanded={expanded} aria-label={`${domain.primaryDomain} alt alan adlarını ${expanded ? 'daralt' : 'genişlet'}`} onClick={() => onToggle(domain.id)}>{childCount} alt alan adı · {expanded ? 'Daralt' : 'Göster'}</Button>}
         {url && <a href={url} target="_blank" rel="noopener noreferrer" className="ws-button" aria-label={`${domain.primaryDomain} sitesini yeni sekmede aç`}><Icon name="external" />Siteyi aç</a>}
         <LinkButton to={siteHref(domain.id)} icon="arrow" aria-label={`${domain.primaryDomain} site genel bakışını aç`}>Yönet</LinkButton>
       </div>
     </header>
     {warning && <p className="ws-website-task-warning"><Icon name="alert" />Üst alan adı bağlantısını kontrol edin.</p>}
+    {nextStep?.note && <p className="ws-website-task-warning" role="status"><Icon name="alert" />{nextStep.note}</p>}
     <nav className="ws-website-task-quick" aria-label={`${domain.primaryDomain} hızlı araçlar`}>
       <div className="ws-website-task-quick-primary">
         {tasks.tools.filter((tool) => ['files', 'databases', 'ssl', 'dns', 'wordpress'].includes(tool.key)).map((tool) => <TaskLink key={tool.key} tool={tool} domainName={domain.primaryDomain} id={id} />)}

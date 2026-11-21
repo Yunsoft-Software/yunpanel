@@ -46,7 +46,29 @@ export function createWebsiteTaskResolver({ domains, websites, applications, can
     function tool([key, label, icon], reason = domainProblem) {
       return { key, label, icon, href: reason ? null : siteHref(domain.id, key), reason };
     }
-    const tools = primaryTools.map((entry) => tool(entry, ['databases', 'mail'].includes(entry[0]) ? bindingProblem : domainProblem));
+    const isDraftSite = !domainProblem && domain?.state === 'draft';
+    const isErrorSite = !domainProblem && domain?.state === 'error';
+    const isStagedSite = !domainProblem && domain?.state === 'staged';
+    const filesReason = domainProblem ?? (isDraftSite ? 'İlk yayın tamamlandıktan sonra açılır.' : null);
+    const tools = primaryTools.map((entry) => tool(
+      entry,
+      entry[0] === 'files'
+        ? filesReason
+        : ['databases', 'mail'].includes(entry[0])
+          ? bindingProblem
+          : domainProblem,
+    ));
+    const nextStepAction = domainProblem
+      ? null
+      : isDraftSite
+        ? (isOwner
+          ? { label: 'Kuruluma devam et', to: siteHref(domain.id, 'overview'), icon: 'arrow', note: null }
+          : { label: 'Kurulum durumunu gör', to: siteHref(domain.id, 'overview'), icon: 'arrow', note: 'Yayın hazır değil; kurulum için yöneticinize bilgi verebilirsiniz.' })
+        : isErrorSite
+          ? { label: 'Kurulum nedenini gör', to: siteHref(domain.id, 'logs'), icon: 'alert', note: 'Site kurulumunda veya yayında hata oluştu; kayıtları inceleyin.' }
+          : isStagedSite
+            ? { label: 'Yayına al / İncele', to: siteHref(domain.id, 'domains'), icon: 'arrow', note: 'Site hazırlandı ancak henüz etkinleştirilmedi.' }
+            : null;
     // Files stays visible even for an unbound/unsupported Website. The existing
     // SiteFilesPanel provides its verified setup/unsupported/error explanation.
     const secondaryTools = [
@@ -72,6 +94,9 @@ export function createWebsiteTaskResolver({ domains, websites, applications, can
     }
     return {
       domainReady: !domainProblem,
+      siteState: domain?.state ?? null,
+      canOpenSite: !domainProblem && domain?.state === 'active',
+      nextStepAction,
       runtimeLabel: website
         ? (Object.hasOwn(runtimeLabels, website.runtimeType) ? runtimeLabels[website.runtimeType] : 'Tür bilgisi alınamadı')
         : (domain?.targetType === 'proxy' ? 'Yönlendirme / Proxy' : domain?.targetType === 'static' ? 'Statik site' : 'Alan adı kaydı'),

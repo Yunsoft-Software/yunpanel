@@ -35,9 +35,9 @@ test('BUG-20260923-02: website removal action is available on list task cards fo
   assert.equal(nonOwnerTasks.removeHref, null);
 });
 
-test('BUG-20260923-02: site detail header and overview link to removal lifecycle', async () => {
+test('BUG-20260923-02: site removal lives strictly in Site Ayarları danger zone without repeating in every tab header', async () => {
   const detailText = await source('SiteDetailPage.jsx');
-  assert.match(detailText, /Siteyi sil/);
+  assert.doesNotMatch(detailText, /tab !== 'settings' && <LinkButton[^>]+>Siteyi sil/);
   assert.match(detailText, /onChanged=\{refreshAll\}/);
   assert.match(detailText, /<WebsiteRemovalPanel domainId=\{domain\.id\} onChanged=\{refreshAll\} \/>/);
 });

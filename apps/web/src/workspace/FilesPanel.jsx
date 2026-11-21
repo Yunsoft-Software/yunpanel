@@ -3,8 +3,8 @@ import { useSearchParams } from 'react-router';
 import { createElFinderHandoff, downloadSiteFile, panelRequest, uploadSiteFile } from '../api.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { useFileWorkspaceSession } from './FileWorkspaceSession.jsx';
-import { formatBytes, formatDate } from './site-model.js';
-import { Button, ConfirmDialog, EmptyState, ErrorNotice, Icon, Modal, Section } from './PanelKit.jsx';
+import { formatBytes, formatDate, siteHref } from './site-model.js';
+import { Button, ConfirmDialog, EmptyState, ErrorNotice, Icon, LinkButton, Modal, Section } from './PanelKit.jsx';
 import {
   availableFileActions, checkItemConflict, fileChild, fileCrumbs, fileKind,
   fileListing, fileParent, formatPermissions, isArchiveFile, paginateFiles,
@@ -14,11 +14,26 @@ import {
 import { packZip, unpackZip } from './ui/zip-util.js';
 import './ui/file-workspace.css';
 
-// A changed Website must discard caches, selection, in-flight reads and editor state.
-export default function FilesPanel({ websiteId, serverId, runtimeType }) {
-  return <FileWorkspace key={`${websiteId}:${serverId}:${runtimeType}`} websiteId={websiteId} serverId={serverId} runtimeType={runtimeType} />;
+const NOT_DEPLOYED_MESSAGE = 'Bu sitenin henüz etkin bir yayını bulunmuyor. Site kurulumu tamamlandıktan veya ilk yayın yapıldıktan sonra Dosya Yöneticisi kullanılabilir.';
+
+function isNotDeployedError(failure) {
+  if (!failure) return false;
+  if (failure.code === 'site_files_not_deployed') return true;
+  const raw = typeof failure === 'string' ? failure : failure.message;
+  return typeof raw === 'string' && /does not have an active release|active release/i.test(raw);
 }
-function FileWorkspace({ websiteId, serverId, runtimeType }) {
+
+function formatFileError(failure, fallback = 'Dosya işlemi tamamlanamadı.') {
+  if (isNotDeployedError(failure)) return NOT_DEPLOYED_MESSAGE;
+  const raw = typeof failure === 'string' ? failure : failure?.message;
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : fallback;
+}
+
+// A changed Website must discard caches, selection, in-flight reads and editor state.
+export default function FilesPanel({ websiteId, serverId, runtimeType, domainId = null }) {
+  return <FileWorkspace key={`${websiteId}:${serverId}:${runtimeType}`} websiteId={websiteId} serverId={serverId} runtimeType={runtimeType} domainId={domainId} />;
+}
+function FileWorkspace({ websiteId, serverId, runtimeType, domainId = null }) {
   const { canManage } = useWorkspace();
   const [searchParams, setSearchParams] = useSearchParams();
   const supported = ['static', 'node', 'php', 'python'].includes(runtimeType);
@@ -27,7 +42,7 @@ function FileWorkspace({ websiteId, serverId, runtimeType }) {
   const urlPath = searchParams.get('path');
   const validUrlPath = urlPath && validRelativePath(urlPath) ? urlPath : null;
   const effectiveInitialPath = validUrlPath ?? initialPath;
-  const [view, setView] = useState({ path: effectiveInitialPath, entries: [], loading: true, loaded: false, error: null });
+  const [view, setView] = useState({ path: effectiveInitialPath, entries: [], loading: true, loaded: false, error: null, errorCode: null });
   const lastLoadedPath = useRef(effectiveInitialPath);
   const autoOpenedRef = useRef(false);
   const [folders, setFolders] = useState({});
@@ -77,19 +92,24 @@ function FileWorkspace({ websiteId, serverId, runtimeType }) {
     lastLoadedPath.current = nextPath;
     const current = ++generation.current;
     read.current?.abort(); const controller = new AbortController(); read.current = controller;
-    setView((value) => ({ ...value, loading: true, error: null }));
+    setView((value) => ({ ...value, loading: true, error: null, errorCode: null }));
     try {
       const result = await panelRequest(`${base}?path=${encodeURIComponent(nextPath)}`, { signal: controller.signal });
       const items = fileListing(result, nextPath);
       if (!alive.current || current !== generation.current) return;
-      setView({ path: nextPath, entries: items, loading: false, loaded: true, error: null });
+      setView({ path: nextPath, entries: items, loading: false, loaded: true, error: null, errorCode: null });
       rememberPath(nextPath);
       setSelected([]); cacheFolders(nextPath, items);
       setExpanded((value) => new Set([...value, '', ...fileCrumbs(nextPath).map((crumb) => crumb.path)]));
       setPage(1);
     } catch (failure) {
       if (alive.current && current === generation.current && failure.name !== 'AbortError') {
-        setView((value) => ({ ...value, loading: false, error: failure.message }));
+        setView((value) => ({
+          ...value,
+          loading: false,
+          error: formatFileError(failure, 'Dosya listesi alınamadı.'),
+          errorCode: isNotDeployedError(failure) ? 'site_files_not_deployed' : (failure.code ?? null),
+        }));
       }
     }
   }, [base, cacheFolders, rememberPath]);
@@ -108,7 +128,7 @@ function FileWorkspace({ websiteId, serverId, runtimeType }) {
       if (treePending.current.has(path)) return;
       treePending.current.add(path); setTreeLoading((value) => new Set([...value, path]));
       try { const result = await request(`${base}?path=${encodeURIComponent(path)}`); if (!alive.current) return; cacheFolders(path, fileListing(result, path)); }
-      catch (failure) { if (alive.current && failure.name !== 'AbortError') setTreeError(failure.message); return; }
+      catch (failure) { if (alive.current && failure.name !== 'AbortError') setTreeError(formatFileError(failure, 'Klasör listesi alınamadı.')); return; }
       finally { treePending.current.delete(path); if (alive.current) setTreeLoading((value) => { const next = new Set(value); next.delete(path); return next; }); }
     }
     if (alive.current) setExpanded((value) => new Set([...value, path]));
@@ -174,7 +194,7 @@ function FileWorkspace({ websiteId, serverId, runtimeType }) {
     if (pending.current || !canManage) return;
     pending.current = true; setBusy(true); setError(null); setNotice('');
     try { await action(); if (alive.current) { success?.(); await load(view.path); } }
-    catch (failure) { if (alive.current && failure.name !== 'AbortError') setError(failure.message); }
+    catch (failure) { if (alive.current && failure.name !== 'AbortError') setError(formatFileError(failure)); }
     finally { pending.current = false; if (alive.current) setBusy(false); }
   }
   async function createOrRename(event) {
@@ -340,7 +360,7 @@ function FileWorkspace({ websiteId, serverId, runtimeType }) {
         window.open('/tools/elfinder/', '_blank');
         setNotice('elFinder dosya yöneticisi yeni pencerede açıldı.');
       }
-    } catch (err) { setError(err.message ?? 'elFinder oturumu açılamadı.'); }
+    } catch (err) { setError(formatFileError(err, 'elFinder oturumu açılamadı.')); }
   }
   async function openFile(entry) {
     if (locked || entry.type !== 'file' || !canManage) return;
@@ -353,7 +373,7 @@ function FileWorkspace({ websiteId, serverId, runtimeType }) {
     try {
       const result = await request(`${base}/text?path=${encodeURIComponent(entry.path)}`);
       if (alive.current) setEditor({ ...entry, content: result.content, saved: result.content, sha256: result.sha256 });
-    } catch (failure) { if (alive.current && failure.name !== 'AbortError') setError(failure.message); }
+    } catch (failure) { if (alive.current && failure.name !== 'AbortError') setError(formatFileError(failure, 'Dosya açılamadı.')); }
     finally { if (alive.current) setEditorLoading(false); }
   }
   useEffect(() => {
@@ -419,7 +439,7 @@ function FileWorkspace({ websiteId, serverId, runtimeType }) {
         setUpload((value) => value ? { ...value, items: value.items.map((item, i) => i === index ? { ...item, state: 'uploaded' } : item) } : value);
       }
       if (alive.current) { setUpload(null); setNotice(`${target.items.length} dosya yüklendi.`); await load(view.path); }
-    } catch (failure) { if (alive.current) setError(`${failure.message} Tamamlanan dosyalar korundu; yeniden deneme yalnız kalan dosyaları yükler.`); }
+    } catch (failure) { if (alive.current) setError(`${formatFileError(failure)} Tamamlanan dosyalar korundu; yeniden deneme yalnız kalan dosyaları yükler.`); }
     finally { pending.current = false; if (alive.current) setBusy(false); }
   }
   function select(path) { setSelected((value) => value.includes(path) ? value.filter((item) => item !== path) : [...value, path]); }
@@ -451,7 +471,7 @@ function FileWorkspace({ websiteId, serverId, runtimeType }) {
       <div className="yf-body"><aside className="yf-folders">{tree}</aside><div className="yf-content">
         <div className="yf-tools"><Button className="yf-mobile-folders" icon="folder" onClick={() => setTreeOpen(true)}>Klasörler</Button><label className="yf-search"><Icon name="search" size={17} /><span className="ws-sr-only">Bu klasörde ara</span><input type="search" placeholder="Bu klasörde ara…" value={query} onChange={(event) => handleQueryChange(event.target.value)} /></label><label className="yf-sort"><span className="ws-sr-only">Dosya sıralaması</span><select value={sort} onChange={(event) => handleSortChange(event.target.value)}><option value="name">Ada göre</option><option value="modified">Son değişen</option><option value="size">Boyuta göre</option></select></label><div className="yf-view" aria-label="Dosya görünümü"><Button icon="jobs" aria-label="Liste görünümü" aria-pressed={layout === 'list'} onClick={() => setLayout('list')} /><Button icon="dashboard" aria-label="Izgara görünümü" aria-pressed={layout === 'grid'} onClick={() => setLayout('grid')} /></div></div>
         <div className="yf-selection"><label><input ref={allBox} aria-label="Görünen öğeleri seç" type="checkbox" checked={allSelected} disabled={!entries.length || locked} onChange={() => setSelected((value) => toggleVisibleSelection(value, entries))} /><span>{selected.length ? `${selected.length} öğe seçili` : `${entries.length} öğe`}</span></label>{selected.length > 0 ? <div className="yf-selection-actions"><Button disabled={!mutable} icon="trash" onClick={() => openDialog({ kind: 'delete', paths: [...selected] })}>Seçilenleri Sil</Button><Button disabled={!mutable} icon="file" onClick={() => openDialog({ kind: 'copy', paths: [...selected], destination: view.path })}>Kopyala</Button><Button disabled={!mutable} icon="arrow" onClick={() => openDialog({ kind: 'move', paths: [...selected], destination: view.path })}>Taşı</Button><Button disabled={!mutable} icon="folder" onClick={() => openDialog({ kind: 'archive', paths: [...selected], name: `${view.path ? view.path.split('/').at(-1) : 'arsiv'}.zip`, format: 'zip' })}>Arşivle</Button><Button disabled={locked} onClick={() => setSelected([])}>Seçimi kaldır</Button></div> : <label className="yf-hidden"><input type="checkbox" checked={hidden} onChange={(event) => handleHiddenChange(event.target.checked)} /><span>Gizli dosyalar</span></label>}</div>
-        {view.error && <div className="yf-list-error"><ErrorNotice error={view.error} /><Button onClick={() => load(view.path)} disabled={locked}>Yeniden dene</Button><p>Son liste korunuyor; güncel veri alınana kadar değişiklik yapılamaz.</p></div>}
+        {view.error && <div className="yf-list-error" data-files-not-deployed={view.errorCode === 'site_files_not_deployed' ? 'true' : undefined}><ErrorNotice error={view.error} /><div className="ws-actions"><Button onClick={() => load(view.path)} disabled={locked}>Yeniden dene</Button>{view.errorCode === 'site_files_not_deployed' && domainId && <><LinkButton variant="primary" to={siteHref(domainId, 'overview')}>Site özetine dön</LinkButton><LinkButton to={siteHref(domainId, 'domains')}>Yayın durumunu incele</LinkButton></>}</div><p>{view.errorCode === 'site_files_not_deployed' ? 'İlk yayın tamamlandığında dosya listesi otomatik olarak erişilebilir hale gelir.' : 'Son liste korunuyor; güncel veri alınana kadar değişiklik yapılamaz.'}</p></div>}
         <div className="yf-results" aria-busy={view.loading || editorLoading}>
           {(view.loading || editorLoading) && <div className="yf-busy" role="status"><span className="ws-spinner" />{editorLoading ? 'Dosya açılıyor…' : 'Dosyalar yükleniyor…'}</div>}
           {view.loaded && !view.loading && entries.length === 0 && <EmptyState icon={query ? 'search' : 'folder'} title={query ? 'Eşleşen dosya yok' : 'Bu klasör boş'} detail={query ? 'Başka bir dosya adı arayın.' : 'Dosyalarınızı sürükleyin veya Yükle düğmesini kullanın.'} />}

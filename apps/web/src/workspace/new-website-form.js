@@ -5,6 +5,18 @@ const EXISTING_APPLICATION_TYPES = Object.freeze({
 
 export const JAMSTACK_FRAMEWORK_PRESETS = Object.freeze([
   Object.freeze({
+    id: 'php_wordpress',
+    label: 'PHP-FPM / WordPress / Laravel',
+    category: 'PHP',
+    sourceMode: 'new_php',
+    entryFile: 'index.php',
+    outputDir: 'public',
+    healthPath: '/',
+    defaultPort: 9000,
+    buildCommand: 'composer install',
+    startCommand: '',
+  }),
+  Object.freeze({
     id: 'nextjs',
     label: 'Next.js (App Router / SSR)',
     category: 'JAMstack / SSR',
@@ -98,18 +110,6 @@ export const JAMSTACK_FRAMEWORK_PRESETS = Object.freeze([
     healthPath: '/',
     defaultPort: 8080,
     buildCommand: 'docker compose up -d',
-    startCommand: '',
-  }),
-  Object.freeze({
-    id: 'php_wordpress',
-    label: 'PHP-FPM / WordPress / Laravel',
-    category: 'PHP',
-    sourceMode: 'new_php',
-    entryFile: 'index.php',
-    outputDir: 'public',
-    healthPath: '/',
-    defaultPort: 9000,
-    buildCommand: 'composer install',
     startCommand: '',
   }),
 ]);

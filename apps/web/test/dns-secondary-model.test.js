@@ -8,11 +8,11 @@ import {
 test('Secondary DNS presentation fails closed for configured unsynced states', () => {
   assert.deepEqual(
     dnsSecondaryPresentation({ status: 'synced', ready: true }),
-    { state: 'active', label: 'Secondary DNS senkron', ready: true, blocking: false, recovery: 'none' },
+    { state: 'active', label: 'İkincil DNS uyumlu', ready: true, blocking: false, recovery: 'none' },
   );
   assert.deepEqual(
     dnsSecondaryPresentation({ status: 'disabled', ready: true }),
-    { state: 'off', label: 'Secondary DNS kapalı', ready: true, blocking: false, recovery: 'none' },
+    { state: 'off', label: 'İkincil DNS kapalı', ready: true, blocking: false, recovery: 'none' },
   );
 
   for (const status of ['drift', 'unverifiable', 'primary_kind_required']) {
@@ -33,7 +33,7 @@ test('Secondary DNS presentation honors backend health gate, severity and recove
       ready: false,
       policy: { healthGate: 'block', severity: 'error', recovery: 'manual_intervention' },
     }),
-    { state: 'error', label: 'Primary zone gerekli', ready: false, blocking: true, recovery: 'manual_intervention' },
+    { state: 'error', label: 'Birincil bölge gerekli', ready: false, blocking: true, recovery: 'manual_intervention' },
   );
   assert.deepEqual(
     dnsSecondaryPresentation({
@@ -41,14 +41,14 @@ test('Secondary DNS presentation honors backend health gate, severity and recove
       ready: false,
       policy: { healthGate: 'block', severity: 'error', recovery: 'observe_only' },
     }),
-    { state: 'error', label: 'Secondary DNS serial farkı', ready: false, blocking: true, recovery: 'observe_only' },
+    { state: 'error', label: 'İkincil DNS seri farkı', ready: false, blocking: true, recovery: 'observe_only' },
   );
 });
 
 test('Secondary DNS target presentation distinguishes stale, ahead and unverifiable serials', () => {
   assert.deepEqual(
     dnsSecondaryTargetPresentation({ status: 'synced', ready: true }),
-    { state: 'active', label: 'Senkron', ready: true },
+    { state: 'active', label: 'Uyumlu', ready: true },
   );
   assert.equal(dnsSecondaryTargetPresentation({ status: 'stale', ready: false }).state, 'warning');
   assert.equal(dnsSecondaryTargetPresentation({ status: 'ahead', ready: false }).state, 'error');

@@ -734,6 +734,10 @@ html .workspace-shell .ws-plesk-site-navigation {
   background: var(--ws-surface) !important;
 }
 
+html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-mobile {
+  display: none !important;
+}
+
 html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-group {
   display: inline-flex !important;
   flex-wrap: wrap !important;
@@ -1464,6 +1468,74 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
 }
 
 @media (max-width: 640px) {
+  /* 3b. Phone SiteNavigation: visible wrapping primary task bar + single 'Diğer site araçları' selector */
+  html .workspace-shell .ws-plesk-site-navigation {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 8px !important;
+    padding: 10px !important;
+    overflow-x: visible !important;
+    max-width: 100% !important;
+  }
+
+  html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-desktop {
+    display: none !important;
+  }
+
+  html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-mobile {
+    display: grid !important;
+    gap: 8px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-mobile-primary {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 6px !important;
+    min-width: 0 !important;
+  }
+
+  html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-mobile-primary a {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 5px !important;
+    min-height: 36px !important;
+    padding: 6px 10px !important;
+    border: 1px solid var(--ws-border) !important;
+    border-radius: 6px !important;
+    background: var(--ws-surface-subtle) !important;
+    color: var(--ws-text) !important;
+    font-size: 12.5px !important;
+    font-weight: 500 !important;
+    text-decoration: none !important;
+    white-space: normal !important;
+    max-width: 100% !important;
+  }
+
+  html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-mobile-primary a[aria-current='page'] {
+    border-color: var(--ws-accent) !important;
+    background: var(--ws-accent-soft, var(--ws-surface-hover)) !important;
+    font-weight: 600 !important;
+  }
+
+  html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-select {
+    display: grid !important;
+    gap: 4px !important;
+    margin: 0 !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    color: var(--ws-muted) !important;
+  }
+
+  html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-select select {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-height: 40px !important;
+  }
+
   /* 5. Phone Session Bar & Single-Row Toolbar */
   html .authenticated-panel .auth-sessionbar {
     padding: 4px 10px !important;

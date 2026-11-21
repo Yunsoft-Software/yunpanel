@@ -42,12 +42,15 @@ test('SCN-MOB-02: WebsitesPage & WebsiteTaskCard use 2-column symmetrical quick 
   assert.match(themeCss, /@media\s*\(max-width:\s*640px\)\s*\{[\s\S]*?\.ws-website-task-grid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)\s*!important/);
 });
 
-test('SCN-MOB-03: SiteNavigation renders as a single-row horizontally scrollable tab strip on mobile and code blocks never overflow', async () => {
+test('SCN-MOB-03: SiteNavigation shows wrapping primary task bar + selector on phones (<=640px) and code blocks never overflow', async () => {
   const themeCss = await readSrc('workspace/design-system/theme.css');
 
-  // Single-row horizontal scroll on <= 768px
+  // Tablet strip on <= 768px
   assert.match(themeCss, /@media\s*\(max-width:\s*768px\)\s*\{[\s\S]*?html\s+\.workspace-shell\s+\.ws-plesk-site-navigation\s*\{[\s\S]*?flex-wrap:\s*nowrap\s*!important[\s\S]*?overflow-x:\s*auto\s*!important/);
-  assert.match(themeCss, /@media\s*\(max-width:\s*768px\)\s*\{[\s\S]*?\.ws-plesk-site-navigation\s+\.ws-site-tool-select\s*\{\s*display:\s*none\s*!important/);
+  // Phone <= 640px: visible wrapping primary task bar + single selector (overrides desktop/tablet hide)
+  assert.match(themeCss, /@media\s*\(max-width:\s*640px\)\s*\{[\s\S]*?\.ws-plesk-site-navigation\s+\.ws-site-tool-mobile\s*\{[\s\S]*?display:\s*grid\s*!important/);
+  assert.match(themeCss, /@media\s*\(max-width:\s*640px\)\s*\{[\s\S]*?\.ws-plesk-site-navigation\s+\.ws-site-tool-mobile-primary\s*\{[\s\S]*?flex-wrap:\s*wrap\s*!important/);
+  assert.match(themeCss, /@media\s*\(max-width:\s*640px\)\s*\{[\s\S]*?\.ws-plesk-site-navigation\s+\.ws-site-tool-select\s*\{[\s\S]*?display:\s*grid\s*!important/);
 
   // Code block containment for /hosting Nginx preview
   assert.match(themeCss, /html\s+\.workspace-shell\s+pre\.ws-code-block[\s\S]*?max-width:\s*100%\s*!important[\s\S]*?white-space:\s*pre-wrap\s*!important/);

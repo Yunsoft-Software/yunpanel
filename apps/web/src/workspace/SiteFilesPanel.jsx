@@ -22,12 +22,12 @@ export default function SiteFilesPanel({ domainId, legacyRepair = null }) {
   const access = resolveSiteFilesAccess(input);
   return <FileWorkspaceSession key={identity} input={input}>
     <SiteFilesContent access={access} domains={domains} websites={websites}
-      canManage={canManage} refreshAll={refreshAll} legacyRepair={legacyRepair} />
+      canManage={canManage} refreshAll={refreshAll} legacyRepair={legacyRepair} domainId={domainId} />
   </FileWorkspaceSession>;
 }
-function SiteFilesContent({ access, domains, websites, canManage, refreshAll, legacyRepair }) {
+function SiteFilesContent({ access, domains, websites, canManage, refreshAll, legacyRepair, domainId }) {
   if (access.state === 'ready') return <FilesPanel key={access.website.id}
-    serverId={access.website.serverId} websiteId={access.website.id} runtimeType={access.website.runtimeType} />;
+    serverId={access.website.serverId} websiteId={access.website.id} runtimeType={access.website.runtimeType} domainId={domainId} />;
   // Preserve the existing Owner-only migration flow, without guessing a binding.
   if (access.state === 'unbound' && legacyRepair) return legacyRepair;
   const busy = [domains.status, websites.status].some((status) => ['idle', 'loading', 'refreshing'].includes(status));

@@ -109,7 +109,7 @@ function SiteWorkspace({ websiteId, tab }) {
   if (!tabs.some(([key]) => key === tab)) return <><PageHeading title={domain.primaryDomain} /><EmptyState title="Bu hedefte bu araç kullanılamaz" detail="Yalnız bu sitenin çalışma türüyle desteklenen yönetim araçları gösterilir." action={<LinkButton to={siteHref(domain.id)}>Siteye dön</LinkButton>} /></>;
   const ssl = certificateState(domain, certificates.status === 'ready' ? certificates.items : null);
   const server = servers.items.find((item) => item.id === domain.serverId);
-  const url = externalSiteUrl(domain);
+  const url = domain.state === 'active' ? externalSiteUrl(domain) : null;
   const copySite = isOwner && canManage && server?.executionMode === 'local'
     && website?.serverId === server.id && ['static', 'php'].includes(website.runtimeType)
     && application?.type === website.runtimeType && application.serverId === server.id && website.applicationId === application.id;
@@ -131,7 +131,7 @@ function SiteWorkspace({ websiteId, tab }) {
     ['php', 'PHP Ayarları', 'code'], ['wordpress', 'WordPress', 'code'],
     ['node', application?.type === 'node' ? 'Node.js' : application?.type === 'php' ? 'PHP / WordPress' : application?.type === 'python' ? 'Python' : (application?.type === 'docker' || website?.runtimeType === 'docker') ? 'Docker' : 'Uygulama', 'code'],
     ['deploy', 'Git / Yayınlama', 'git'], ['logs', 'Günlükler', 'file'], ['analytics', 'İstatistikler', 'dashboard'],
-    ['dns', 'DNS', 'globe'], ['mail', 'Posta', 'mail'], ['cron', 'Zamanlanmış Görevler', 'clock'], ['backup', 'Yedekleme ve Geri Yükleme', 'archive'],
+    ['dns', 'DNS', 'globe'], ['mail', 'E-posta', 'mail'], ['cron', 'Zamanlanmış Görevler', 'clock'], ['backup', 'Yedekleme ve Geri Yükleme', 'archive'],
     ['access', 'Erişim Hesapları', 'shield'],
   ].filter(([key]) => tabs.some(([tabKey]) => key === tabKey));
   const hostingTools = ['hosting', 'dns', 'domains', 'access', 'terminal', 'cron'];
@@ -154,14 +154,13 @@ function SiteWorkspace({ websiteId, tab }) {
     access: 'SFTP, SSH ve sistem erişimi',
   };
   const toolCategories = [
-    ['Dosyalar, Veritabanı ve Uygulama', ['files', 'databases', 'php', 'wordpress', 'node', 'deploy']],
-    ['Alan Adı, Güvenlik ve E-posta', ['hosting', 'domains', 'ssl', 'dns', 'mail']],
-    ['İzleme, Yedekleme ve Sistem', ['logs', 'analytics', 'backup', 'cron', 'access']],
+    ['Sık kullanılan araçlar', ['files', 'databases', 'ssl', 'mail', 'backup', 'wordpress']],
+    ['Geliştirici ve sunucu araçları', ['hosting', 'domains', 'dns', 'php', 'node', 'deploy', 'logs', 'analytics', 'cron', 'access']],
   ];
   const toolLinks = (items) => (
     <div className="yp-plesk-tool-groups" data-hosting-tools={hostingTools.length}>
       {toolCategories.map(([groupTitle, groupKeys]) => {
-        const groupItems = items.filter(([key]) => groupKeys.includes(key));
+        const groupItems = groupKeys.map((key) => items.find(([itemKey]) => itemKey === key)).filter(Boolean);
         if (!groupItems.length) return null;
         return (
           <div className="yp-plesk-tool-group" key={groupTitle}>
@@ -184,7 +183,7 @@ function SiteWorkspace({ websiteId, tab }) {
   );
   return <>
     <nav className="ws-breadcrumb" aria-label="Site konumu"><Link to={returnTo}>{isReseller ? 'Sitelerim' : 'Web Siteleri'}</Link>{parentTrail(domain, domains.items).map((parent) => <Fragment key={parent.id}><span aria-hidden="true">/</span><Link to={siteHref(parent.id)}>{parent.primaryDomain}</Link></Fragment>)}<span aria-hidden="true">/</span><span>{domain.primaryDomain}</span></nav>
-    <PageHeading title={domain.primaryDomain} description={`${domain.parentDomainId ? 'Alt alan adı' : 'Web sitesi'} · ${server?.displayName ?? server?.name ?? server?.hostname ?? 'Sunucu bilgisi bekleniyor'}`} actions={<>{url && <a href={url} target="_blank" rel="noopener noreferrer" className="ws-button"><Icon name="external" />Siteyi aç</a>}{copySite && <SiteCopyDialog key={`${website.id}:${application.id}:${website.runtimeType}`} website={website} />}{isOwner && <LinkButton to={`/websites/new?parent=${encodeURIComponent(domain.id)}`} icon="plus">Alt alan adı ekle</LinkButton>}<Button onClick={refreshAll} icon="refresh">Yenile</Button>{website && isOwner && canManage && tab !== 'settings' && <LinkButton to={siteHref(domain.id, 'settings')} icon="trash">Siteyi sil</LinkButton>}</>} />
+    <PageHeading title={domain.primaryDomain} description={`${domain.parentDomainId ? 'Alt alan adı' : 'Web sitesi'} · ${server?.displayName ?? server?.name ?? server?.hostname ?? 'Sunucu bilgisi bekleniyor'}`} actions={<>{url && <a href={url} target="_blank" rel="noopener noreferrer" className="ws-button"><Icon name="external" />Siteyi aç</a>}{copySite && <SiteCopyDialog key={`${website.id}:${application.id}:${website.runtimeType}`} website={website} />}{isOwner && <LinkButton to={`/websites/new?parent=${encodeURIComponent(domain.id)}`} icon="plus">Alt alan adı ekle</LinkButton>}<Button onClick={refreshAll} icon="refresh">Yenile</Button></>} />
     <div className="ws-site-meta"><Badge state={domain.state} /><Badge state={ssl.state}>{ssl.label}</Badge><span>{runtimeLabel}</span></div>
     <SiteNavigation tabs={tabs} activeTab={tab} domainId={domain.id} query={query} />
     <CollectionNotice resource={domains} label="Alan adı verisi" />
@@ -192,6 +191,33 @@ function SiteWorkspace({ websiteId, tab }) {
     {['node', 'deploy', 'overview', 'resources', 'databases'].includes(tab) && <CollectionNotice resource={applications} label="Uygulama verisi" />}
     {['node', 'deploy'].includes(tab) && !website?.applicationId && matches.length > 0 && <div className="ws-notice"><div><strong>Uygulama bağlantısını kontrol edin</strong><p>İşlemler aşağıda seçilen uygulamayı etkiler. Bu eski kaydın kalıcı site bağlantısı henüz kurulmamıştır.</p></div><label>Uygulama<select value={application?.id ?? ''} onChange={(event) => { setParams((current) => { const next = new URLSearchParams(current); if (event.target.value) next.set('application', event.target.value); else next.delete('application'); return next; }); }}><option value="">{matches.length > 1 ? 'Uygulamayı seçin' : 'Tek hedef eşleşmesi'}</option>{matches.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div>}
     {tab === 'overview' && <>
+      {domain.state === 'draft' && (
+        <div className="ws-notice ws-notice-warn" role="status" data-site-state-notice="draft">
+          <div>
+            <strong>Site henüz yayında değil (Taslak)</strong>
+            <p>{isOwner ? 'İlk yayın tamamlandıktan sonra site adresi ve Dosya Yöneticisi aktif olur. Alan adları ekranından yayına alabilir veya kuruluma devam edebilirsiniz.' : 'Yayın hazır değil; kurulum için yöneticinize bilgi verebilirsiniz.'}</p>
+          </div>
+          {isOwner && <LinkButton variant="primary" to={siteHref(domain.id, 'domains')} icon="arrow">Kuruluma devam et</LinkButton>}
+        </div>
+      )}
+      {domain.state === 'error' && (
+        <div className="ws-notice ws-notice-error" role="alert" data-site-state-notice="error">
+          <div>
+            <strong>Site kurulumu veya yayını başarısız oldu</strong>
+            <p>Hatanın ayrıntısını görmek için site günlüklerini ve son işlem kayıtlarını inceleyin.</p>
+          </div>
+          <LinkButton variant="primary" to={siteHref(domain.id, 'logs')} icon="alert">Kurulum nedenini gör</LinkButton>
+        </div>
+      )}
+      {domain.state === 'staged' && (
+        <div className="ws-notice ws-notice-warn" role="status" data-site-state-notice="staged">
+          <div>
+            <strong>Site hazırlandı, yayına alınmayı bekliyor</strong>
+            <p>Yapılandırma hazırlandı ancak henüz canlı yayına geçirilmedi.</p>
+          </div>
+          <LinkButton variant="primary" to={siteHref(domain.id, 'domains')} icon="arrow">Yayına al / İncele</LinkButton>
+        </div>
+      )}
       <Section title="Site araçları">{toolLinks(shortcuts)}</Section>
       <div className="ws-equal-columns" style={{ marginBottom: '16px' }}>
         <Section title="Yayın bilgileri" actions={<Link to={siteHref(domain.id, 'hosting')}>Barındırma ve DNS</Link>}>

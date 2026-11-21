@@ -13,11 +13,12 @@ test('Domain DNS workspace exposes secondary sync evidence without a mutation pa
   assert.match(panel, /getDnsSecondaryStatus\(selected\.id\)/);
   assert.match(panel, /<SecondaryDnsStatusPanel state=\{secondary\}/);
   assert.match(client, /domainDnsPath\(domainId, '\/secondary'\)/);
-  assert.match(secondaryPanel, /Primary SOA serial/);
-  assert.match(secondaryPanel, /PowerDNS notified_serial/);
+  assert.match(secondaryPanel, /İkincil DNS eşitlemesi/);
+  assert.match(secondaryPanel, /Birincil SOA seri numarası/);
+  assert.match(secondaryPanel, /Bildirilen seri numarası/);
   assert.match(secondaryPanel, /target\.observedSerial/);
   assert.match(secondaryPanel, /target\.errorCode/);
-  assert.match(secondaryPanel, /otomatik Zone Template re-apply/);
+  assert.match(secondaryPanel, /otomatik bölge şablonu değişikliği/);
   assert.match(model, /value\?\.policy\?\.healthGate/);
   assert.match(model, /value\?\.policy\?\.recovery/);
   assert.doesNotMatch(secondaryPanel, /applyDns|previewDns|apiKey|privateKey|window\.(?:alert|confirm|prompt)/i);

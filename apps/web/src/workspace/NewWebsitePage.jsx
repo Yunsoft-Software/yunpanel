@@ -149,6 +149,7 @@ function WebsiteForm({ parentId }) {
   function update(key, value) { setDirty(true); setForm((current) => ({
     ...current,
     [key]: value,
+    ...(key === 'sourceMode' ? { frameworkPreset: '' } : {}),
     ...(['parentDomainId', 'mode', 'sourceMode'].includes(key) ? { applicationId: '', websiteId: '' } : {}),
     ...(key === 'mode' && value === 'subdomain' && current.ownerMode === 'new_admin' ? { ownerMode: 'owner', adminPassword: '' } : {}),
   })); }
@@ -269,12 +270,48 @@ function WebsiteForm({ parentId }) {
         </div>}
         </>}
         {step === 2 && <>        <div className="ws-form-divider" style={{ marginTop: 24 }}><h3>Barındırma türü</h3>
+          <div className="yp-quick-hosting-bar" role="group" aria-label="Hızlı Başlangıç Şablonları" style={{ marginTop: 12, marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+              <strong>Hızlı Başlangıç</strong>
+            </div>
+            <div className="ws-actions" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 8, alignItems: 'stretch' }}>
+              <button
+                type="button"
+                className={`ws-button ${form.sourceMode === 'new_php' ? 'ws-button-primary' : 'ws-button-ghost'} yp-framework-preset-card`}
+                aria-pressed={form.sourceMode === 'new_php'}
+                data-quick-template="wordpress"
+                onClick={() => selectFrameworkPreset('php_wordpress')}
+                style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'space-between', textAlign: 'left', padding: '12px 14px', height: '100%' }}
+              >
+                <span style={{ fontWeight: 600 }}>WordPress / PHP Sitesi</span>
+                <small className="ws-muted" style={{ fontSize: '0.78rem' }}>
+                  PHP-FPM · Dosya yükleme veya WordPress kurulumu
+                </small>
+              </button>
+              <button
+                type="button"
+                className={`ws-button ${form.sourceMode === 'new_static_upload' ? 'ws-button-primary' : 'ws-button-ghost'} yp-framework-preset-card`}
+                aria-pressed={form.sourceMode === 'new_static_upload'}
+                data-quick-template="static_upload"
+                onClick={() => {
+                  setDirty(true);
+                  setForm((current) => ({ ...current, frameworkPreset: 'static_upload', sourceMode: 'new_static_upload', applicationId: '', websiteId: '' }));
+                }}
+                style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'space-between', textAlign: 'left', padding: '12px 14px', height: '100%' }}
+              >
+                <span style={{ fontWeight: 600 }}>Statik Site — Dosya Yükleme</span>
+                <small className="ws-muted" style={{ fontSize: '0.78rem' }}>
+                  HTML / CSS / JS · Doğrudan dosya yükleyerek başlayın
+                </small>
+              </button>
+            </div>
+          </div>
           <div className="yp-jamstack-preset-bar" role="group" aria-label="Uygulama Şablonu Seçin" style={{ marginTop: 12, marginBottom: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-              <strong>Uygulama Şablonu Seçin</strong>
+              <strong>Geliştirici Uygulama Şablonları</strong>
             </div>
             <div className="ws-actions" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 8, alignItems: 'stretch' }}>
-              {JAMSTACK_FRAMEWORK_PRESETS.map((preset) => {
+              {JAMSTACK_FRAMEWORK_PRESETS.filter((preset) => preset.id !== 'php_wordpress').map((preset) => {
                 const active = form.frameworkPreset === preset.id;
                 return (
                   <button
@@ -296,7 +333,7 @@ function WebsiteForm({ parentId }) {
             </div>
           </div>
           <div className="ws-form-grid" style={{ marginTop: 16 }}>
-          <label>Site türü<select aria-label="Site türü" value={form.sourceMode} onChange={(event) => update('sourceMode', event.target.value)}><option value="new_node">Node.js — Git ile yayınla</option><option value="new_static_upload">Statik site — dosya yükleyerek başla</option><option value="new_static">Gelişmiş: statik siteyi Git ile yayınla</option><option value="new_php">PHP / WordPress — dosya yükleyerek başla</option><option value="new_python">Python (FastAPI / Django / Flask) — Git ile yayınla</option><option value="docker_compose">Docker / Compose Proxy</option><option value="existing_node">Kullanılmamış mevcut Node.js uygulaması</option><option value="existing_static">Kullanılmamış mevcut statik uygulama</option><option value="existing_managed_compose">Mevcut Compose Projesi</option><option value="existing_docker">Mevcut Docker Konteyner İş Yükü</option><option value="shared_website">Mevcut Website’i paylaş (shared-site)</option><option value="external_proxy">Gelişmiş: yerel proxy</option></select></label>
+          <label>Site türü<select aria-label="Site türü" value={form.sourceMode} onChange={(event) => update('sourceMode', event.target.value)}><option value="new_php">PHP / WordPress — dosya yükleyerek başla</option><option value="new_static_upload">Statik site — dosya yükleyerek başla</option><option value="new_node">Node.js — Git ile yayınla</option><option value="new_static">Gelişmiş: statik siteyi Git ile yayınla</option><option value="new_python">Python (FastAPI / Django / Flask) — Git ile yayınla</option><option value="docker_compose">Docker / Compose Proxy</option><option value="existing_node">Kullanılmamış mevcut Node.js uygulaması</option><option value="existing_static">Kullanılmamış mevcut statik uygulama</option><option value="existing_managed_compose">Mevcut Compose Projesi</option><option value="existing_docker">Mevcut Docker Konteyner İş Yükü</option><option value="shared_website">Mevcut Website’i paylaş (shared-site)</option><option value="external_proxy">Gelişmiş: yerel proxy</option></select></label>
           {['new_node', 'new_static', 'new_python'].includes(form.sourceMode) && <><label>GitHub repository<input type="url" required placeholder="https://github.com/organization/repository" value={form.repositoryUrl} onChange={(event) => update('repositoryUrl', event.target.value)} /></label><label>Branch<input value={form.branch} required onChange={(event) => update('branch', event.target.value)} /></label></>}
           {['new_node', 'new_python'].includes(form.sourceMode) && <><label>Başlangıç dosyası<input value={form.entryFile} required onChange={(event) => update('entryFile', event.target.value)} /></label><label>Sağlık kontrolü yolu<input value={form.healthPath} required onChange={(event) => update('healthPath', event.target.value)} /></label></>}
           {form.sourceMode === 'new_static' && <label>Build çıktı klasörü<input value={form.outputDir} required onChange={(event) => update('outputDir', event.target.value)} /><span className="ws-field-hint">npm ci ve npm run build kullanılır; index.html sağlık dosyasıdır.</span></label>}

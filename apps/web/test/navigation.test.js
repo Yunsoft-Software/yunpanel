@@ -370,7 +370,7 @@ test('source: WorkspaceApp wires statistics and users routes with proper role gu
 
 test('source: WorkspaceLayout renders role branding and sidebar navigation groups', async () => {
   const layoutSource = await source('WorkspaceLayout.jsx');
-  assert.match(layoutSource, /isOwner \? 'SUNUCU YÖNETİMİ' : isReseller \? 'BAYİ PANELİ' : isCustomer \? 'MÜŞTERİ PANELİ' : 'SİTE YÖNETİMİ'/);
+  assert.match(layoutSource, /isOwner \? 'SUNUCU YÖNETİMİ' : isReseller \? 'BAYİ PANELİ' : isCustomer \? 'MÜŞTERİ PANELİ' : canManage \? 'SİTE YÖNETİMİ' : 'SALT OKUNUR'/);
   assert.match(layoutSource, /groups\.map\(\(group\) =>/);
   assert.match(layoutSource, /group\.items\.map\(\(\[to, label, icon\]\) =>/);
 });
