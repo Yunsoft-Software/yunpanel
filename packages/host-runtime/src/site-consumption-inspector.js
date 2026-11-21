@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { lstat, readFile, realpath } from 'node:fs/promises';
+import { lstat, readdir, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { createApplicationPathContract } from './website-path-contract.js';
 
@@ -161,59 +161,103 @@ export function createLinuxSiteConsumptionAdapter({
     return false;
   }
 
-  async function getDiskUsage(websiteId, providedWebsite = null, { signal = null } = {}) {
+  async function verifySiteDiskRoot(websiteId, providedWebsite = null) {
     let website = providedWebsite;
     if (!website && typeof websiteRegistry?.getWebsite === 'function') {
-      try { website = await websiteRegistry.getWebsite(websiteId); } catch { return failDisk('disk_measurement_failed', 'Site kaydı okunamadığı için disk kullanımı ölçülemedi.'); }
+      try { website = await websiteRegistry.getWebsite(websiteId); } catch { return { ok: false, failure: failDisk('disk_measurement_failed', 'Site kaydı okunamadığı için disk kullanımı ölçülemedi.') }; }
     }
-    if (!website) return failDisk('website_not_found', 'Site kaydı bulunamadığı için disk kullanımı ölçülemedi.');
+    if (!website) return { ok: false, failure: failDisk('website_not_found', 'Site kaydı bulunamadığı için disk kullanımı ölçülemedi.') };
     if (localServerId && website.serverId && website.serverId !== localServerId) {
-      return failDisk('remote_server_unsupported', 'Uzak sunucudaki sitelerin disk kullanımı bu sunucudan doğrudan ölçülemez.');
+      return { ok: false, failure: failDisk('remote_server_unsupported', 'Uzak sunucudaki sitelerin disk kullanımı bu sunucudan doğrudan ölçülemez.') };
     }
 
     const resolved = resolveCanonicalContract(website, pathContractOptions);
-    if (resolved.error) return resolved.error;
+    if (resolved.error) return { ok: false, failure: resolved.error };
     const { containerRoot, currentPath, siteUser, applicationId } = resolved;
 
     let containerReal, verifiedContentRoot;
     try {
       const containerStat = await lstat(containerRoot);
-      if (containerStat.isSymbolicLink() || !containerStat.isDirectory()) return failDisk('site_root_invalid', 'Site uygulama konteyneri geçerli bir dizin değil.');
+      if (containerStat.isSymbolicLink() || !containerStat.isDirectory()) return { ok: false, failure: failDisk('site_root_invalid', 'Site uygulama konteyneri geçerli bir dizin değil.') };
       containerReal = (await realpath(containerRoot)).replace(/\/+$/, '');
       verifiedContentRoot = (await realpath(currentPath)).replace(/\/+$/, '');
     } catch (error) {
-      return error?.code === 'ENOENT'
-        ? failDisk('site_root_not_deployed', 'Site dosya kökü henüz sunucuda oluşturulmadığı için disk kullanımı ölçülemedi.')
-        : failDisk('disk_measurement_failed', 'Site dosya kökü doğrulanamadığı için disk kullanımı ölçülemedi.');
+      return {
+        ok: false,
+        failure: error?.code === 'ENOENT'
+          ? failDisk('site_root_not_deployed', 'Site dosya kökü henüz sunucuda oluşturulmadığı için disk kullanımı ölçülemedi.')
+          : failDisk('disk_measurement_failed', 'Site dosya kökü doğrulanamadığı için disk kullanımı ölçülemedi.'),
+      };
     }
 
     const releaseSegment = verifiedContentRoot.startsWith(`${containerReal}/releases/`) ? verifiedContentRoot.slice(containerReal.length + '/releases/'.length) : null;
     const isDirectRelease = Boolean(releaseSegment && !releaseSegment.includes('/') && releaseSegment !== '.' && releaseSegment !== '..');
     if (verifiedContentRoot !== `${containerReal}/current` && !isDirectRelease) {
-      return failDisk('site_root_invalid', 'Site aktif sürüm kökü uygulama dizini sınırlarının dışında olduğu için disk kullanımı ölçülemedi.');
+      return { ok: false, failure: failDisk('site_root_invalid', 'Site aktif sürüm kökü uygulama dizini sınırlarının dışında olduğu için disk kullanımı ölçülemedi.') };
     }
 
     let contentStat;
-    try { contentStat = await lstat(verifiedContentRoot); } catch { return failDisk('disk_measurement_failed', 'Site aktif sürüm kökü okunamadığı için disk kullanımı ölçülemedi.'); }
+    try { contentStat = await lstat(verifiedContentRoot); } catch { return { ok: false, failure: failDisk('disk_measurement_failed', 'Site aktif sürüm kökü okunamadığı için disk kullanımı ölçülemedi.') }; }
     if (contentStat.isSymbolicLink() || !contentStat.isDirectory()) {
-      return failDisk('site_root_invalid', 'Site aktif sürüm kökü geçerli bir dizin olmadığı için disk kullanımı ölçülemedi.');
+      return { ok: false, failure: failDisk('site_root_invalid', 'Site aktif sürüm kökü geçerli bir dizin olmadığı için disk kullanımı ölçülemedi.') };
     }
 
     const uid = getuid();
     let account = null;
     if (uid === 0 || verifyOwnerUid) {
       try { account = parseManagedPasswdUser(await readFile(passwdPath, 'utf8'), siteUser); } catch { account = null; }
-      if (uid === 0 && !account) return failDisk('site_user_unavailable', 'Site sistem kullanıcısı bulunamadığı için disk kullanımı ölçülemedi.');
+      if (uid === 0 && !account) return { ok: false, failure: failDisk('site_user_unavailable', 'Site sistem kullanıcısı bulunamadığı için disk kullanımı ölçülemedi.') };
       if (account && (contentStat.uid !== account.uid || contentStat.gid !== account.gid)) {
-        return failDisk('site_root_owner_mismatch', 'Site dosya kökünün sistem sahibi beklenen site kullanıcısıyla eşleşmediği için disk kullanımı ölçülemedi.');
+        return { ok: false, failure: failDisk('site_root_owner_mismatch', 'Site dosya kökünün sistem sahibi beklenen site kullanıcısıyla eşleşmediği için disk kullanımı ölçülemedi.') };
       }
     }
 
     try {
       if (await hasSharedRootOverlap(website, [containerRoot, containerReal, verifiedContentRoot], applicationId)) {
-        return failDisk('shared_root_overlap', 'Bu site başka bir siteyle aynı veya iç içe dosya kökünü paylaştığı için tekil disk kullanımı ayrıştırılamadı.');
+        return { ok: false, failure: failDisk('shared_root_overlap', 'Bu site başka bir siteyle aynı veya iç içe dosya kökünü paylaştığı için tekil disk kullanımı ayrıştırılamadı.') };
       }
-    } catch { return failDisk('disk_measurement_failed', 'Site dizin izolasyonu doğrulanamadığı için disk kullanımı ölçülemedi.'); }
+    } catch { return { ok: false, failure: failDisk('disk_measurement_failed', 'Site dizin izolasyonu doğrulanamadığı için disk kullanımı ölçülemedi.') }; }
+
+    return { ok: true, verifiedContentRoot, contentStat, uid, account };
+  }
+
+  /**
+   * Non-Linux dev-only fallback for logical apparent bytes with per-path hard-link counting
+   * (matching Linux GNU `du -s -x -P -l -b`). NEVER runs as uid === 0.
+   */
+  async function measureApparentBytesPortable(rootPath, rootDev, { deadlineMs, signal }) {
+    let totalBytes = 0;
+    const stack = [rootPath];
+    let visited = 0;
+    const MAX_ENTRIES = 100_000;
+    while (stack.length > 0) {
+      if (signal?.aborted) return { ok: false, kind: 'aborted' };
+      if (Date.now() > deadlineMs) return { ok: false, kind: 'timeout' };
+      const current = stack.pop();
+      let st;
+      try { st = await lstat(current); } catch { return { ok: false, kind: 'failed' }; }
+      if (st.dev !== rootDev) continue;
+      visited += 1;
+      if (visited > MAX_ENTRIES) return { ok: false, kind: 'timeout' };
+      if (st.isDirectory()) {
+        totalBytes += Number(st.size) || 0;
+        let entries;
+        try { entries = await readdir(current); } catch { return { ok: false, kind: 'failed' }; }
+        for (const name of entries) {
+          stack.push(path.join(current, name));
+        }
+      } else {
+        // Count every path's logical st_size (including hard links per path, never following symlinks)
+        totalBytes += Number(st.size) || 0;
+      }
+    }
+    return { ok: true, bytes: totalBytes };
+  }
+
+  async function getDiskUsage(websiteId, providedWebsite = null, { signal = null } = {}) {
+    const verified = await verifySiteDiskRoot(websiteId, providedWebsite);
+    if (!verified.ok) return verified.failure;
+    const { verifiedContentRoot, uid, account } = verified;
 
     let command = duPath, args = ['-s', '-x', '-P', '-k', '--', verifiedContentRoot];
     if (uid === 0) {
@@ -241,6 +285,73 @@ export function createLinuxSiteConsumptionAdapter({
     } finally { gate.release(); }
   }
 
+  /**
+   * Consistent quota-enforcement measurement: logical apparent bytes with per-path hard-link
+   * counting (`du -s -x -P -l -b` under dedicated site UID via single-PID `setpriv` on Linux).
+   * Matches `stat.size` and panel upload/edit byte lengths so sparse files and hard links cannot
+   * bypass the managed panel write quota on overwrite or same-size edit.
+   */
+  async function getDiskQuotaBytes(websiteId, providedWebsite = null, { signal = null } = {}) {
+    const verified = await verifySiteDiskRoot(websiteId, providedWebsite);
+    if (!verified.ok) return verified.failure;
+    const { verifiedContentRoot, contentStat, uid, account } = verified;
+
+    const useLinuxGnuDu = process.platform === 'linux';
+    if (uid !== 0 && !allowCurrentUserWithoutSetpriv) {
+      return failDisk('site_user_unavailable', 'Site kullanıcısı izolasyonu olmadan disk ölçümü çalıştırılamaz.');
+    }
+    if (uid === 0 && !useLinuxGnuDu) {
+      return failDisk('disk_measurement_failed', 'Kök yetkiyle kota ölçümü yalnız Linux setpriv + GNU du üzerinde desteklenir.');
+    }
+
+    const slot = await gate.acquire(signal);
+    if (slot === 'busy') return failDisk('disk_measurement_busy', 'Sunucuda yoğun disk ölçümü sürdüğü için istek geçici olarak ertelendi.');
+    if (slot === 'aborted') return failDisk('disk_measurement_aborted', 'Disk ölçümü iptal edildi.');
+
+    try {
+      if (useLinuxGnuDu) {
+        const duArgs = ['-s', '-x', '-P', '-l', '-b', '--', verifiedContentRoot];
+        const command = uid === 0 ? setprivPath : duPath;
+        const args = uid === 0
+          ? [`--reuid=${account.uid}`, `--regid=${account.gid}`, '--clear-groups', '--no-new-privs', '--', duPath, ...duArgs]
+          : duArgs;
+        const result = await runDuProcess(command, args, { timeoutMs, signal });
+        if (!result.ok) {
+          if (result.kind === 'aborted') return failDisk('disk_measurement_aborted', 'Disk ölçümü iptal edildi.');
+          if (result.kind === 'timeout') return failDisk('disk_measurement_timeout', 'Site disk ölçümü zaman sınırını aştığı için tamamlanamadı.');
+          if (uid === 0 && result.kind === 'spawn_error' && result.code === 'ENOENT') return failDisk('site_user_unavailable', 'Site yetki düşürme aracı bulunamadığı için disk kullanımı ölçülemedi.');
+          return failDisk('disk_measurement_failed', 'Site disk kullanımı ölçülemedi.');
+        }
+        const bytes = parseDuKib(result.stdout);
+        if (bytes === null) return failDisk('disk_measurement_failed', 'Disk ölçüm çıktısı doğrulanamadığı için değer gösterilmiyor.');
+        return Object.freeze({
+          ok: true,
+          bytes,
+          spaceMb: Number((bytes / (1024 * 1024)).toFixed(2)),
+          measuredAt: new Date(now()).toISOString(),
+          scope: 'active_release_root_apparent_bytes',
+        });
+      }
+
+      const portable = await measureApparentBytesPortable(verifiedContentRoot, contentStat.dev, {
+        deadlineMs: Date.now() + timeoutMs,
+        signal,
+      });
+      if (!portable.ok) {
+        if (portable.kind === 'aborted') return failDisk('disk_measurement_aborted', 'Disk ölçümü iptal edildi.');
+        if (portable.kind === 'timeout') return failDisk('disk_measurement_timeout', 'Site disk ölçümü zaman sınırını aştığı için tamamlanamadı.');
+        return failDisk('disk_measurement_failed', 'Site disk kullanımı ölçülemedi.');
+      }
+      return Object.freeze({
+        ok: true,
+        bytes: portable.bytes,
+        spaceMb: Number((portable.bytes / (1024 * 1024)).toFixed(2)),
+        measuredAt: new Date(now()).toISOString(),
+        scope: 'active_release_root_apparent_bytes',
+      });
+    } finally { gate.release(); }
+  }
+
   async function getDatabaseUsage(websiteId, providedWebsite = null) {
     if (!databaseBindingRegistry || (typeof databaseBindingRegistry.listBindings !== 'function' && typeof databaseBindingRegistry.listDatabaseBindings !== 'function')) {
       return failDb('database_inventory_unavailable', 'Veritabanı bağlantı envanteri okunamadığı için sayı doğrulanamadı.');
@@ -260,11 +371,36 @@ export function createLinuxSiteConsumptionAdapter({
   async function getTrafficUsage(websiteId, website = null) {
     if (trafficInspector) {
       try {
-        const fn = typeof trafficInspector === 'function' ? trafficInspector : trafficInspector.getTrafficUsage ?? trafficInspector.inspectWebsite;
-        const res = typeof fn === 'function' ? await fn(websiteId, website) : null;
+        const res = typeof trafficInspector === 'function'
+          ? await trafficInspector(websiteId, website)
+          : typeof trafficInspector.getTrafficUsage === 'function'
+            ? await trafficInspector.getTrafficUsage(websiteId, website)
+            : typeof trafficInspector.getWebsiteTraffic === 'function'
+              ? await trafficInspector.getWebsiteTraffic(websiteId)
+              : typeof trafficInspector.inspectWebsite === 'function'
+                ? await trafficInspector.inspectWebsite(websiteId, website)
+                : null;
         const ts = res?.measuredAt != null ? (typeof res.measuredAt === 'number' ? res.measuredAt : Date.parse(res.measuredAt)) : Number.NaN;
         if (res && typeof res.trafficMb === 'number' && Number.isFinite(res.trafficMb) && res.trafficMb >= 0 && typeof res.period === 'string' && res.period.trim() && typeof res.scope === 'string' && res.scope.trim() && Number.isFinite(ts) && ts > 0) {
-          return Object.freeze({ ok: true, trafficMb: res.trafficMb, period: res.period.trim(), scope: res.scope.trim(), measuredAt: new Date(ts).toISOString() });
+          const bytes = typeof res.bytes === 'number' && Number.isFinite(res.bytes) && res.bytes >= 0 ? res.bytes : null;
+          const completeness = typeof res.completeness === 'string' && res.completeness.trim() ? res.completeness.trim() : null;
+          const rotationGapCount = Number.isSafeInteger(res.rotationGapCount) && res.rotationGapCount >= 0 ? res.rotationGapCount : null;
+          const meterStartedAt = typeof res.meterStartedAt === 'string' && res.meterStartedAt.trim() ? res.meterStartedAt.trim() : null;
+          const accountingMode = typeof res.accountingMode === 'string' && res.accountingMode.trim() ? res.accountingMode.trim() : null;
+          const includesStaticAssets = typeof res.includesStaticAssets === 'boolean' ? res.includesStaticAssets : null;
+          return Object.freeze({
+            ok: true,
+            ...(bytes !== null ? { bytes } : {}),
+            ...(completeness !== null ? { completeness } : {}),
+            ...(rotationGapCount !== null ? { rotationGapCount } : {}),
+            ...(meterStartedAt !== null ? { meterStartedAt } : {}),
+            ...(accountingMode !== null ? { accountingMode } : {}),
+            ...(includesStaticAssets !== null ? { includesStaticAssets } : {}),
+            trafficMb: res.trafficMb,
+            period: res.period.trim(),
+            scope: res.scope.trim(),
+            measuredAt: new Date(ts).toISOString(),
+          });
         }
         if (res?.ok === false) return failTraffic(res.reasonCode || 'traffic_source_unavailable', res.reason || 'Aylık trafik verisi okunamadı.');
       } catch { return failTraffic('traffic_source_unavailable', 'Aylık trafik verisi okunamadı.'); }
@@ -272,7 +408,7 @@ export function createLinuxSiteConsumptionAdapter({
     return failTraffic('traffic_source_unavailable', 'Site bazında kalıcı aylık trafik sayacı bulunmuyor; statik dosya isteklerinde Nginx erişim günlüğü kapalı olduğu için eksik trafik verisi gösterilmiyor.');
   }
 
-  return Object.freeze({ getDiskUsage, getDatabaseUsage, getTrafficUsage });
+  return Object.freeze({ getDiskUsage, getDiskQuotaBytes, getDatabaseUsage, getTrafficUsage });
 }
 
 export const siteConsumptionInspectorInternals = Object.freeze({

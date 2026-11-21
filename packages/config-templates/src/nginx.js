@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { formatProxyHostForUrl, normalizeDomainSet, normalizeNginxSettings, normalizeRedirectTarget, stableHexKey } from '@yunpanel/shared';
+import { YUNPANEL_TRAFFIC_LOG_FORMAT } from './nginx-traffic.js';
 import { renderPassengerNodeDirectives } from './passenger-nginx.js';
 
 const SAFE_PATH = /^\/[A-Za-z0-9._/-]+$/;
@@ -179,6 +180,51 @@ function protectedPathAuth(primaryDomain, paths = []) {
   return { maps, directives: `  auth_basic ${realm};\n  auth_basic_user_file ${file};` };
 }
 
+const TRAFFIC_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function normalizeTrafficLogPath(value) {
+  if (value == null) return null;
+  const safe = assertSafeAbsolutePath(value, 'trafficLogPath');
+  if (safe === '/') {
+    throw new NginxTemplateError('invalid_path', 'trafficLogPath cannot be filesystem root');
+  }
+  return safe;
+}
+
+function normalizeTrafficWebsiteId(value) {
+  if (value == null || value === '') return null;
+  if (typeof value !== 'string' || !TRAFFIC_UUID_PATTERN.test(value.trim())) {
+    throw new NginxTemplateError('invalid_traffic_website_id', 'trafficWebsiteId must be a valid UUID');
+  }
+  return value.trim().toLowerCase();
+}
+
+function trafficLimitGuardDirectives(trafficWebsiteId = null) {
+  if (trafficWebsiteId !== null) {
+    return [
+      '  set $yp_block_traffic 0;',
+      `  if ($yunpanel_traffic_site_id = "${trafficWebsiteId}") {`,
+      '    set $yp_block_traffic $yunpanel_traffic_blocked;',
+      '  }',
+      '  if ($uri ~ "^/\\.well-known/acme-challenge/") {',
+      '    set $yp_block_traffic 0;',
+      '  }',
+      '  if ($yp_block_traffic = 1) {',
+      '    return 429;',
+      '  }',
+    ].join('\n');
+  }
+  return [
+    '  set $yp_block_traffic $yunpanel_traffic_blocked;',
+    '  if ($uri ~ "^/\\.well-known/acme-challenge/") {',
+    '    set $yp_block_traffic 0;',
+    '  }',
+    '  if ($yp_block_traffic = 1) {',
+    '    return 429;',
+    '  }',
+  ].join('\n');
+}
+
 function serverBlock({
   names,
   body,
@@ -186,7 +232,10 @@ function serverBlock({
   tls = null,
   clientMaxBodySizeMb = null,
   accessLog = null,
+  trafficLogPath = null,
   errorLog = null,
+  enableTrafficLimitGuard = false,
+  trafficWebsiteId = null,
 }) {
   const listen = tls
     ? '  listen 443 ssl;\n  listen [::]:443 ssl;'
@@ -197,8 +246,12 @@ function serverBlock({
     : '';
   const bodySize = clientMaxBodySizeMb === null ? '' : `\n  client_max_body_size ${clientMaxBodySizeMb}m;`;
   const access = accessLog === null ? '' : `\n  access_log ${accessLog};`;
+  const trafficAccess = trafficLogPath === null
+    ? ''
+    : `\n  access_log ${trafficLogPath} ${YUNPANEL_TRAFFIC_LOG_FORMAT} if=$yunpanel_traffic_log_enabled;`;
   const error = errorLog === null ? '' : `\n  error_log ${errorLog};`;
-  return `server {\n${listen}\n  server_name ${names};${bodySize}${access}${error}${acme}${certificates}\n\n${body}\n}`;
+  const trafficGuard = enableTrafficLimitGuard ? `\n\n${trafficLimitGuardDirectives(trafficWebsiteId)}` : '';
+  return `server {\n${listen}\n  server_name ${names};${bodySize}${access}${trafficAccess}${error}${acme}${certificates}${trafficGuard}\n\n${body}\n}`;
 }
 
 function serviceOverrideBody(override, headers) {
@@ -223,9 +276,15 @@ function renderServerSet({
   mailDiscoverySocketPath = null,
   accessLogPath = undefined,
   errorLogPath = undefined,
+  trafficLogPath = null,
+  enableTrafficLimitGuard = false,
+  trafficWebsiteId = null,
 }) {
   if (typeof canonicalRedirect !== 'boolean' || typeof httpsRedirect !== 'boolean') {
     throw new NginxTemplateError('invalid_redirect_policy', 'Redirect policies must be boolean values');
+  }
+  if (typeof enableTrafficLimitGuard !== 'boolean') {
+    throw new NginxTemplateError('invalid_traffic_limit_guard', 'enableTrafficLimitGuard must be a boolean');
   }
   let names = serverNames(primaryDomain, aliases);
   const preferred = nginxSettings.preferredDomain;
@@ -237,6 +296,8 @@ function renderServerSet({
   }
   const accessLog = accessLogPath === null ? null : assertSafeAbsolutePath(accessLogPath ?? `/var/log/nginx/${names.primary}.access.log`, 'accessLogPath');
   const errorLog = errorLogPath === null ? null : assertSafeAbsolutePath(errorLogPath ?? `/var/log/nginx/${names.primary}.error.log`, 'errorLogPath');
+  const safeTrafficLogPath = normalizeTrafficLogPath(trafficLogPath);
+  const safeTrafficWebsiteId = normalizeTrafficWebsiteId(trafficWebsiteId);
   const blocks = [];
   const challengeOnlyNames = acmeOnlyNames(primaryDomain, aliases, acmeOnlyHostnames);
   const discoverySocket = normalizeMailDiscoverySocket(mailDiscoverySocketPath);
@@ -259,14 +320,15 @@ function renderServerSet({
   const tlsBody = discoveryLocations ? `${discoveryLocations}\n\n${body}` : body;
   if (!canonicalRedirect) {
     const httpBody = tls && httpsRedirect ? redirectBody('https://$host', nginxSettings.headers) : body;
-    blocks.push(serverBlock({ names: names.all, body: httpBody, acmeRoot, clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb, accessLog, errorLog }));
-    if (tls) blocks.push(serverBlock({ names: names.all, body: tlsBody, tls, clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb, accessLog, errorLog }));
+    blocks.push(serverBlock({ names: names.all, body: httpBody, acmeRoot, clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb, accessLog, trafficLogPath: safeTrafficLogPath, errorLog, enableTrafficLimitGuard, trafficWebsiteId: safeTrafficWebsiteId }));
+    if (tls) blocks.push(serverBlock({ names: names.all, body: tlsBody, tls, clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb, accessLog, trafficLogPath: safeTrafficLogPath, errorLog, enableTrafficLimitGuard, trafficWebsiteId: safeTrafficWebsiteId }));
     for (const hostname of challengeOnlyNames) {
       blocks.push(serverBlock({
         names: hostname,
         body: '  location / {\n    return 301 https://$host$request_uri;\n  }',
         acmeRoot,
         accessLog,
+        trafficLogPath: safeTrafficLogPath,
         errorLog,
       }));
     }
@@ -274,7 +336,7 @@ function renderServerSet({
   }
 
   const primaryHttpBody = tls && httpsRedirect ? redirectBody(`https://${names.primary}`, nginxSettings.headers) : body;
-  blocks.push(serverBlock({ names: names.primary, body: primaryHttpBody, acmeRoot, clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb, accessLog, errorLog }));
+  blocks.push(serverBlock({ names: names.primary, body: primaryHttpBody, acmeRoot, clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb, accessLog, trafficLogPath: safeTrafficLogPath, errorLog, enableTrafficLimitGuard, trafficWebsiteId: safeTrafficWebsiteId }));
   if (names.aliases.length > 0) {
     const aliasScheme = tls && httpsRedirect ? 'https' : 'http';
     blocks.push(serverBlock({
@@ -283,11 +345,14 @@ function renderServerSet({
       acmeRoot,
       clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb,
       accessLog,
+      trafficLogPath: safeTrafficLogPath,
       errorLog,
+      enableTrafficLimitGuard,
+      trafficWebsiteId: safeTrafficWebsiteId,
     }));
   }
   if (tls) {
-    blocks.push(serverBlock({ names: names.primary, body: tlsBody, tls, clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb, accessLog, errorLog }));
+    blocks.push(serverBlock({ names: names.primary, body: tlsBody, tls, clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb, accessLog, trafficLogPath: safeTrafficLogPath, errorLog, enableTrafficLimitGuard, trafficWebsiteId: safeTrafficWebsiteId }));
     if (names.aliases.length > 0) {
       blocks.push(serverBlock({
         names: names.aliases.join(' '),
@@ -295,7 +360,10 @@ function renderServerSet({
         tls,
         clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb,
         accessLog,
+        trafficLogPath: safeTrafficLogPath,
         errorLog,
+        enableTrafficLimitGuard,
+        trafficWebsiteId: safeTrafficWebsiteId,
       }));
     }
   }
@@ -305,6 +373,7 @@ function renderServerSet({
       body: '  location / {\n    return 301 https://$host$request_uri;\n  }',
       acmeRoot,
       accessLog,
+      trafficLogPath: safeTrafficLogPath,
       errorLog,
     }));
   }
@@ -321,12 +390,15 @@ function errorPageBody(nginxSettings) {
   return `\n\n${directives}\n\n${locations}`;
 }
 
-function staticBody({ root, nginxSettings }) {
+function staticBody({ root, nginxSettings, trafficLogPath = null }) {
   const { spaFallback, staticAssetCacheSeconds, headers } = nginxSettings;
   const fallback = spaFallback ? 'try_files $uri $uri/ /index.html;' : 'try_files $uri $uri/ =404;';
   const renderedHeaders = headerLines(headers);
   const cache = assetCacheLines(staticAssetCacheSeconds);
-  return `  root ${root};\n  index ${(nginxSettings.indexFiles ?? ['index.html']).join(' ')};\n\n  location / {${renderedHeaders ? `\n${renderedHeaders}` : ''}\n    ${fallback}\n  }\n\n  location ~* \\.(?:css|js|mjs|jpg|jpeg|png|gif|svg|webp|ico|woff|woff2)$ {\n${cache}${renderedHeaders ? `${renderedHeaders}\n` : ''}    try_files $uri =404;\n    access_log off;\n  }${errorPageBody(nginxSettings)}`;
+  const assetAccessLog = trafficLogPath
+    ? `access_log ${trafficLogPath} ${YUNPANEL_TRAFFIC_LOG_FORMAT} if=$yunpanel_traffic_log_enabled;`
+    : 'access_log off;';
+  return `  root ${root};\n  index ${(nginxSettings.indexFiles ?? ['index.html']).join(' ')};\n\n  location / {${renderedHeaders ? `\n${renderedHeaders}` : ''}\n    ${fallback}\n  }\n\n  location ~* \\.(?:css|js|mjs|jpg|jpeg|png|gif|svg|webp|ico|woff|woff2)$ {\n${cache}${renderedHeaders ? `${renderedHeaders}\n` : ''}    try_files $uri =404;\n    ${assetAccessLog}\n  }${errorPageBody(nginxSettings)}`;
 }
 
 function proxyBody({ host, port, nginxSettings }) {
@@ -346,12 +418,15 @@ function passengerBody({ target, nginxSettings }) {
   return `${directives}${renderedHeaders ? `\n${renderedHeaders}` : ''}`;
 }
 
-function phpBody({ root, socketPath, nginxSettings }) {
+function phpBody({ root, socketPath, nginxSettings, trafficLogPath = null }) {
   const renderedHeaders = headerLines(nginxSettings.headers);
   const phpHeaders = headerLines(nginxSettings.headers);
   const intercept = Object.keys(nginxSettings.errorPages ?? {}).length ? '\n    fastcgi_intercept_errors on;' : '';
   const cache = assetCacheLines(nginxSettings.staticAssetCacheSeconds);
-  const assets = cache ? `\n\n  location ~* \\.(?:css|js|mjs|jpg|jpeg|png|gif|svg|webp|ico|woff|woff2)$ {\n${cache}${renderedHeaders ? `${renderedHeaders}\n` : ''}    try_files $uri =404;\n    access_log off;\n  }` : '';
+  const assetAccessLog = trafficLogPath
+    ? `access_log ${trafficLogPath} ${YUNPANEL_TRAFFIC_LOG_FORMAT} if=$yunpanel_traffic_log_enabled;`
+    : 'access_log off;';
+  const assets = cache ? `\n\n  location ~* \\.(?:css|js|mjs|jpg|jpeg|png|gif|svg|webp|ico|woff|woff2)$ {\n${cache}${renderedHeaders ? `${renderedHeaders}\n` : ''}    try_files $uri =404;\n    ${assetAccessLog}\n  }` : '';
   return `  root ${root};\n  index ${(nginxSettings.indexFiles ?? ['index.php', 'index.html']).join(' ')};\n\n  location / {${renderedHeaders ? `\n${renderedHeaders}` : ''}\n    try_files $uri $uri/ /index.php?$query_string;\n  }${assets}\n\n  location ~ \\.php$ {${phpHeaders ? `\n${phpHeaders}` : ''}${intercept}\n    try_files $uri =404;\n    include fastcgi_params;\n    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n    fastcgi_param DOCUMENT_ROOT $document_root;\n    fastcgi_param HTTPS $https if_not_empty;\n    fastcgi_pass unix:${socketPath};\n  }\n\n  location ~ /\\.(?!well-known/) {\n    deny all;\n    access_log off;\n    log_not_found off;\n  }${errorPageBody(nginxSettings)}`;
 }
 
@@ -369,14 +444,18 @@ export function renderStaticSiteConfig({
   nginxSettings = undefined,
   accessLogPath = undefined,
   errorLogPath = undefined,
+  trafficLogPath = null,
+  enableTrafficLimitGuard = false,
+  trafficWebsiteId = null,
 }) {
   const safeRoot = assertSafeAbsolutePath(root, 'root');
+  const safeTrafficLogPath = normalizeTrafficLogPath(trafficLogPath);
   const normalizedTls = normalizeTls(tls);
   const settings = normalizeNginxSettings('static', nginxSettings ?? { spaFallback });
   const scopedRoot = settings.documentRoot ? `${safeRoot}/${settings.documentRoot}` : safeRoot;
-  const body = `${settings.documentRoot ? `  disable_symlinks on from=${safeRoot};\n` : ''}${staticBody({ root: scopedRoot, nginxSettings: settings })}`;
+  const body = `${settings.documentRoot ? `  disable_symlinks on from=${safeRoot};\n` : ''}${staticBody({ root: scopedRoot, nginxSettings: settings, trafficLogPath: safeTrafficLogPath })}`;
   return renderServerSet({
-    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings, accessLogPath, errorLogPath,
+    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings, accessLogPath, errorLogPath, trafficLogPath: safeTrafficLogPath, enableTrafficLimitGuard, trafficWebsiteId,
   });
 }
 
@@ -395,6 +474,9 @@ export function renderProxySiteConfig({
   nginxSettings = undefined,
   accessLogPath = undefined,
   errorLogPath = undefined,
+  trafficLogPath = null,
+  enableTrafficLimitGuard = false,
+  trafficWebsiteId = null,
 }) {
   const host = assertUpstreamHost(upstreamHost);
   const port = assertUpstreamPort(upstreamPort);
@@ -402,7 +484,7 @@ export function renderProxySiteConfig({
   const settings = normalizeNginxSettings('proxy', nginxSettings ?? { websocket });
   const body = proxyBody({ host, port, nginxSettings: settings });
   return renderServerSet({
-    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings, accessLogPath, errorLogPath,
+    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings, accessLogPath, errorLogPath, trafficLogPath, enableTrafficLimitGuard, trafficWebsiteId,
   });
 }
 
@@ -419,12 +501,15 @@ export function renderPassengerSiteConfig({
   nginxSettings = undefined,
   accessLogPath = undefined,
   errorLogPath = undefined,
+  trafficLogPath = null,
+  enableTrafficLimitGuard = false,
+  trafficWebsiteId = null,
 }) {
   const normalizedTls = normalizeTls(tls);
   const settings = normalizeNginxSettings('passenger', nginxSettings ?? {});
   const body = passengerBody({ target, nginxSettings: settings });
   return renderServerSet({
-    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings, isPassenger: true, accessLogPath, errorLogPath,
+    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings, isPassenger: true, accessLogPath, errorLogPath, trafficLogPath, enableTrafficLimitGuard, trafficWebsiteId,
   });
 }
 
@@ -442,18 +527,22 @@ export function renderPhpSiteConfig({
   nginxSettings = undefined,
   accessLogPath = undefined,
   errorLogPath = undefined,
+  trafficLogPath = null,
+  enableTrafficLimitGuard = false,
+  trafficWebsiteId = null,
 }) {
   const safeRoot = assertSafeAbsolutePath(root, 'root');
   const safeSocket = assertSafeAbsolutePath(socketPath, 'socketPath');
+  const safeTrafficLogPath = normalizeTrafficLogPath(trafficLogPath);
   if (!safeSocket.startsWith('/run/php/yunpanel-yunapp-') || !safeSocket.endsWith('.sock')) {
     throw new NginxTemplateError('invalid_php_socket', 'PHP upstream must use a managed YunPanel Website socket');
   }
   const normalizedTls = normalizeTls(tls);
   const settings = normalizeNginxSettings('php', nginxSettings ?? {});
   const scopedRoot = settings.documentRoot ? `${safeRoot}/${settings.documentRoot}` : safeRoot;
-  const body = `${settings.documentRoot ? `  disable_symlinks on from=${safeRoot};\n` : ''}${phpBody({ root: scopedRoot, socketPath: safeSocket, nginxSettings: settings })}`;
+  const body = `${settings.documentRoot ? `  disable_symlinks on from=${safeRoot};\n` : ''}${phpBody({ root: scopedRoot, socketPath: safeSocket, nginxSettings: settings, trafficLogPath: safeTrafficLogPath })}`;
   return renderServerSet({
-    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings, accessLogPath, errorLogPath,
+    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings, accessLogPath, errorLogPath, trafficLogPath: safeTrafficLogPath, enableTrafficLimitGuard, trafficWebsiteId,
   });
 }
 
@@ -470,6 +559,9 @@ export function renderRedirectSiteConfig({
   nginxSettings = undefined,
   accessLogPath = undefined,
   errorLogPath = undefined,
+  trafficLogPath = null,
+  enableTrafficLimitGuard = false,
+  trafficWebsiteId = null,
 }) {
   let forward;
   try { forward = normalizeRedirectTarget(target); }
@@ -479,7 +571,7 @@ export function renderRedirectSiteConfig({
   const body = `  location / {${renderedHeaders ? `\n${renderedHeaders}` : ''}\n    return ${forward.status} ${forward.url}${forward.preservePath ? '$request_uri' : ''};\n  }`;
   return renderServerSet({
     primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizeTls(tls), body,
-    canonicalRedirect: false, httpsRedirect: false, nginxSettings: settings, accessLogPath, errorLogPath,
+    canonicalRedirect: false, httpsRedirect: false, nginxSettings: settings, accessLogPath, errorLogPath, trafficLogPath, enableTrafficLimitGuard, trafficWebsiteId,
   });
 }
 
@@ -510,6 +602,9 @@ export function renderPythonSiteConfig({
   nginxSettings = undefined,
   accessLogPath = undefined,
   errorLogPath = undefined,
+  trafficLogPath = null,
+  enableTrafficLimitGuard = false,
+  trafficWebsiteId = null,
 }) {
   if (!socketPath && !upstreamPort) {
     throw new NginxTemplateError('invalid_upstream', 'Python upstream requires either a socketPath or upstreamPort');
@@ -528,7 +623,7 @@ export function renderPythonSiteConfig({
   const settings = normalizeNginxSettings('python', nginxSettings ?? {});
   const body = pythonBody({ socketPath: safeSocket, upstreamPort: port, nginxSettings: settings });
   return renderServerSet({
-    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings, accessLogPath, errorLogPath,
+    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings, accessLogPath, errorLogPath, trafficLogPath, enableTrafficLimitGuard, trafficWebsiteId,
   });
 }
 

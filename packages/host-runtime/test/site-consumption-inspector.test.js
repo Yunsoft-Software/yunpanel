@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, ftruncateSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -445,4 +445,70 @@ test('createLinuxSiteConsumptionAdapter: database count and traffic honesty', as
   assert.equal(trafficCustom.period, '2026-11');
   assert.equal(trafficCustom.scope, 'vhost_monthly_counter');
   assert.equal(trafficCustom.measuredAt, '2026-11-21T16:41:00.000Z');
+});
+
+test('site-consumption-inspector: getDiskQuotaBytes measures logical apparent bytes + per-path hard links (sparse/hardlink safe) and fails closed on shared roots', async () => {
+  const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'yunpanel-quota-bytes-'));
+  try {
+    const staticPublishRoot = path.join(tmpDir, 'static-sites');
+    const relA = path.join(staticPublishRoot, APP_A, 'releases', 'rel-1');
+    mkdirSync(relA, { recursive: true });
+    symlinkSync(relA, path.join(staticPublishRoot, APP_A, 'current'));
+
+    // 1. Sparse file (4 MiB logical size, 0 allocated data blocks!)
+    const sparsePath = path.join(relA, 'sparse.bin');
+    const fd = openSync(sparsePath, 'w');
+    ftruncateSync(fd, 4 * 1024 * 1024);
+    closeSync(fd);
+
+    // 2. Hard-linked pair (2 x 256 KiB = 512 KiB logical per-path!)
+    const hardA = path.join(relA, 'hard-a.bin');
+    const hardB = path.join(relA, 'hard-b.bin');
+    writeFileSync(hardA, Buffer.alloc(256 * 1024, 0x41));
+    linkSync(hardA, hardB);
+
+    // 3. Symlink to large external file MUST NOT be followed!
+    const externalBig = path.join(tmpDir, 'external-10mb.bin');
+    writeFileSync(externalBig, Buffer.alloc(10 * 1024 * 1024, 0x42));
+    symlinkSync(externalBig, path.join(relA, 'ext-link.bin'));
+
+    const siteA = { id: SITE_A, serverId: SERVER_LOCAL, runtimeType: 'static', applicationId: APP_A };
+    const adapter = createLinuxSiteConsumptionAdapter({
+      websiteRegistry: { async getWebsite(id) { return id === SITE_A ? siteA : null; }, async listWebsites() { return [siteA]; } },
+      domainRegistry: { async listDomains() { return []; } },
+      localServerId: SERVER_LOCAL,
+      pathContractOptions: { staticPublishRoot },
+      allowCurrentUserWithoutSetpriv: true,
+    });
+
+    const quotaRes = await adapter.getDiskQuotaBytes(SITE_A, siteA);
+    assert.equal(quotaRes.ok, true);
+    assert.equal(quotaRes.scope, 'active_release_root_apparent_bytes');
+    // Must count 4 MiB sparse + 2 x 256 KiB hardlinks = 4.5 MiB (and NOT the 10 MiB external symlink!)
+    const expectedMin = (4 * 1024 * 1024) + (2 * 256 * 1024);
+    assert.ok(quotaRes.bytes >= expectedMin, `expected >= ${expectedMin} apparent bytes, got ${quotaRes.bytes}`);
+    assert.ok(quotaRes.bytes < expectedMin + (256 * 1024), `symlink must not be followed, got ${quotaRes.bytes}`);
+
+    // Shared/nested root MUST fail closed with shared_root_overlap
+    const siteOverlap = {
+      id: SITE_OVERLAP,
+      serverId: SERVER_LOCAL,
+      runtimeType: 'static',
+      applicationId: APP_SUB,
+      documentRoot: path.join(relA, 'nested'),
+    };
+    const overlapAdapter = createLinuxSiteConsumptionAdapter({
+      websiteRegistry: { async getWebsite(id) { return id === SITE_A ? siteA : siteOverlap; }, async listWebsites() { return [siteA, siteOverlap]; } },
+      domainRegistry: { async listDomains() { return []; } },
+      localServerId: SERVER_LOCAL,
+      pathContractOptions: { staticPublishRoot },
+      allowCurrentUserWithoutSetpriv: true,
+    });
+    const overlapRes = await overlapAdapter.getDiskQuotaBytes(SITE_A, siteA);
+    assert.equal(overlapRes.ok, false);
+    assert.equal(overlapRes.reasonCode, 'shared_root_overlap');
+    assert.equal(overlapRes.bytes, null);
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
 });

@@ -43,10 +43,17 @@ function configNameForDomain(primaryDomain) {
   return `yunpanel-${nginxConfigFileName(primaryDomain)}`;
 }
 
-function renderDomainConfig(spec) {
+function renderDomainConfig(spec, { defaultTrafficLogPath = null, defaultEnableTrafficLimitGuard = false } = {}) {
   if (!spec || typeof spec !== 'object' || Array.isArray(spec)) {
     throw new NginxManagerError('invalid_domain_spec', 'Domain spec must be an object');
   }
+  const resolvedTrafficLogPath = spec.trafficLogPath !== undefined ? spec.trafficLogPath : defaultTrafficLogPath;
+  const resolvedEnableTrafficLimitGuard = spec.enableTrafficLimitGuard !== undefined
+    ? spec.enableTrafficLimitGuard
+    : defaultEnableTrafficLimitGuard;
+  const resolvedTrafficWebsiteId = (resolvedTrafficLogPath != null || resolvedEnableTrafficLimitGuard === true)
+    ? (spec.trafficWebsiteId ?? spec.websiteId ?? null)
+    : null;
   const common = {
     primaryDomain: spec.primaryDomain,
     aliases: spec.aliases ?? [],
@@ -55,6 +62,9 @@ function renderDomainConfig(spec) {
     tls: spec.tls ?? null,
     canonicalRedirect: spec.canonicalRedirect === true,
     httpsRedirect: spec.httpsRedirect !== false,
+    ...(resolvedTrafficLogPath != null ? { trafficLogPath: resolvedTrafficLogPath } : {}),
+    ...(resolvedEnableTrafficLimitGuard === true ? { enableTrafficLimitGuard: true } : {}),
+    ...(resolvedTrafficWebsiteId != null ? { trafficWebsiteId: resolvedTrafficWebsiteId } : {}),
   };
   if (spec.targetType === 'static') {
     return renderStaticSiteConfig({
@@ -138,6 +148,8 @@ export function createNginxManager({
   sitesDir = '/etc/nginx/sites-enabled',
   nginxPath = '/usr/sbin/nginx',
   systemctlPath = '/usr/bin/systemctl',
+  trafficLogPath = null,
+  enableTrafficLimitGuard = false,
   mkdirFn = mkdir,
   readFileFn = readFile,
   lstatFn = lstat,
@@ -166,7 +178,10 @@ export function createNginxManager({
   }
 
   function expectedStage(spec) {
-    const config = renderDomainConfig(spec);
+    const config = renderDomainConfig(spec, {
+      defaultTrafficLogPath: trafficLogPath,
+      defaultEnableTrafficLimitGuard: enableTrafficLimitGuard,
+    });
     return {
       config,
       configName: configNameForDomain(spec.primaryDomain),
@@ -887,6 +902,15 @@ export function createNginxManager({
     return run;
   }
 
+  function withConfigLock(task) {
+    if (typeof task !== 'function') {
+      throw new TypeError('withConfigLock requires a function');
+    }
+    const run = activationChain.catch(() => {}).then(() => task());
+    activationChain = run;
+    return run;
+  }
+
   return {
     previewDomain: (spec) => Object.freeze(expectedStage(spec)),
     stageDomain,
@@ -900,6 +924,7 @@ export function createNginxManager({
     inspectDomainDeactivationRollback,
     rollbackDomainDeactivation,
     reloadConfiguration,
+    withConfigLock,
   };
 }
 

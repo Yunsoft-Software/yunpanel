@@ -487,3 +487,17 @@ export {
   createLinuxSiteConsumptionAdapter,
   siteConsumptionInspectorInternals,
 } from './site-consumption-inspector.js';
+export {
+  createWebsiteTrafficLedger,
+  WebsiteTrafficLedgerError,
+  websiteTrafficLedgerInternals,
+} from './website-traffic-ledger.js';
+export {
+  createWebsiteTrafficEnforcer,
+  discoverAppliedTrafficVhosts,
+  WebsiteTrafficEnforcerError,
+} from './website-traffic-enforcer.js';
+export {
+  inspectNativeDiskQuotaSupport,
+  diskQuotaCapabilityInternals,
+} from './disk-quota-capability.js';

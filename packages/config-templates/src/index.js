@@ -294,3 +294,11 @@ export {
   previewWafPolicy,
   wafPolicyTemplatePolicy,
 } from './waf-policy.js';
+
+export {
+  NginxTrafficTemplateError,
+  YUNPANEL_TRAFFIC_CONF_PATH,
+  YUNPANEL_TRAFFIC_LOG_FORMAT,
+  YUNPANEL_TRAFFIC_LOG_PATH,
+  renderNginxTrafficAccountingConfig,
+} from './nginx-traffic.js';
