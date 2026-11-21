@@ -5,7 +5,7 @@ import { sessionGeneration, setSession } from '../session-client.js';
 import { Badge, Button, EmptyState, ErrorNotice, LinkButton, Modal, PageHeading, Section } from './PanelKit.jsx';
 import { HostingProfileDialog } from './HostingAccountsPanel.jsx';
 import { createHostingAccountClient, hostingAccountMessage } from './hosting-account-client.js';
-import { buildLicenseSettingsPath, isLicenseLoaded, isPremiumRequired } from './license-client.js';
+import { buildLicenseSettingsPath, resolveLicenseGateState } from './license-client.js';
 import { buildResellerAccountQuotaMetrics } from './quota-model.js';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
@@ -22,8 +22,9 @@ function AccountsWorkspace({ kind }) {
   const [dialog, setDialog] = useState(null), [notice, setNotice] = useState(null);
   const label = kind === 'reseller' ? 'Bayi' : 'Müşteri';
   const requiredCapability = kind === 'reseller' ? 'resellerAccounts' : 'perSiteIsolatedUsers';
-  const licenseLoaded = isLicenseLoaded(license);
-  const premiumRequired = isPremiumRequired(license, requiredCapability);
+  const gateState = resolveLicenseGateState(license, requiredCapability);
+  const premiumRequired = gateState === 'premium_required';
+  const licensePendingOrError = gateState === 'loading' || gateState === 'error';
   const licensePath = buildLicenseSettingsPath({
     returnTo: kind === 'reseller' ? '/resellers?action=create' : '/customers?action=create',
     feature: kind,
@@ -45,20 +46,37 @@ function AccountsWorkspace({ kind }) {
     return () => { active = false; };
   }, [kind, offset, revision]);
   useEffect(() => {
-    if (searchParams.get('action') !== 'create' || !licenseLoaded) return;
-    if (!premiumRequired) {
+    if (searchParams.get('action') !== 'create') return;
+    if (gateState === 'loading' || gateState === 'error') return;
+    if (gateState === 'allowed') {
       setDialog({ type: 'create' });
     }
     const next = new URLSearchParams(searchParams);
     next.delete('action');
     setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams, licenseLoaded, premiumRequired]);
+  }, [searchParams, setSearchParams, gateState]);
   const refresh = () => setRevision(value => value + 1);
   const close = () => { setDialog(null); refresh(); };
   const saved = message => { clearHostingAccountDraft?.(kind); setNotice(message); close(); };
   return <>
     <PageHeading title={kind === 'reseller' ? 'Bayiler' : 'Müşteriler'} description={kind === 'reseller' ? 'Bayilerinizin müşterilerini, site sınırlarını ve panel erişimini yönetin.' : 'Müşteri hesaplarını ve onlara ait web sitelerini yönetin.'}
-      actions={<><Button icon="refresh" disabled={loading || Boolean(dialog)} onClick={refresh}>Yenile</Button><Button variant="primary" icon="plus" disabled={loading || Boolean(dialog)} onClick={() => setDialog({ type: premiumRequired ? 'premium_gate' : 'create' })}><span>{label} ekle</span>{premiumRequired && <Badge state="unknown">Premium</Badge>}</Button></>} />
+      actions={<><Button icon="refresh" disabled={loading || Boolean(dialog)} onClick={refresh}>Yenile</Button><Button variant="primary" icon="plus" disabled={loading || Boolean(dialog) || licensePendingOrError} onClick={() => { if (gateState === 'allowed') setDialog({ type: 'create' }); else if (gateState === 'premium_required') setDialog({ type: 'premium_gate' }); }}><span>{label} ekle</span>{premiumRequired && <Badge state="unknown">Premium</Badge>}</Button></>} />
+    {gateState === 'loading' && (
+      <p className="ws-notice" role="status" data-license-gate-state="loading">Lisans durumu doğrulanıyor…</p>
+    )}
+    {gateState === 'error' && (
+      <div className="ws-notice ws-notice-warn" role="alert" data-license-gate-state="error">
+        <div>
+          <strong>Lisans durumu okunamadı</strong>
+          <p>
+            {kind === 'reseller'
+              ? 'Lisans durumu okunamadı. Yeni bayi oluşturma işlemi lisans doğrulanana kadar beklemede.'
+              : 'Lisans durumu okunamadı. Yeni müşteri oluşturma işlemi lisans doğrulanana kadar beklemede.'}
+          </p>
+        </div>
+        <Button icon="refresh" onClick={() => license?.refresh?.()}>Lisans durumunu yeniden dene</Button>
+      </div>
+    )}
     {premiumRequired && (
       <div className="ws-notice ws-notice-warn" role="status" data-premium-notice={kind}>
         <div>
@@ -98,7 +116,7 @@ function AccountsWorkspace({ kind }) {
             <td><div className="ws-actions"><Button disabled={Boolean(dialog)} onClick={() => setDialog({ type: 'profile', account })}>Hesabı yönet</Button>
               {kind === 'customer' && <><Link className="ws-button" to={`/websites?customer=${encodeURIComponent(account.id)}`}>Web siteleri</Link>{account.active && <Link className="ws-button" to={`/websites/new?customer=${encodeURIComponent(account.id)}`}>Site ekle</Link>}</>}</div></td>
           </tr>;
-        })}</tbody></table></div> : <EmptyState title={`Henüz ${label.toLocaleLowerCase('tr')} yok`} detail={premiumRequired ? `Yeni ${label.toLocaleLowerCase('tr')} hesabı açmak için önce YunPanel Premium lisansını etkinleştirin.` : 'Yeni hesabı oluşturduktan sonra site ekleyebilirsiniz.'} icon="user" />)}
+        })}</tbody></table></div> : <EmptyState title={`Henüz ${label.toLocaleLowerCase('tr')} yok`} detail={gateState === 'loading' ? 'Lisans durumu doğrulanıyor…' : gateState === 'error' ? 'Yeni hesap oluşturmak için önce lisans durumunu yeniden deneyin.' : premiumRequired ? `Yeni ${label.toLocaleLowerCase('tr')} hesabı açmak için önce YunPanel Premium lisansını etkinleştirin.` : 'Yeni hesabı oluşturduktan sonra site ekleyebilirsiniz.'} icon="user" />)}
       <footer className="ws-pagination"><span>{page ? `${page.total} hesap` : 'Hesap sayısı bekleniyor'}</span><div className="ws-actions">
         <Button disabled={loading || Boolean(dialog) || offset === 0} onClick={() => setOffset(value => Math.max(0, value - LIMIT))}>Önceki</Button>
         <span>Sayfa {Math.floor(offset / LIMIT) + 1}</span><Button disabled={loading || Boolean(dialog) || !page || offset + LIMIT >= page.total} onClick={() => setOffset(value => value + LIMIT)}>Sonraki</Button>

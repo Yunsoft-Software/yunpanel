@@ -7,7 +7,7 @@ import { Badge, Button, EmptyState, ErrorNotice, LinkButton, Modal, PageHeading,
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { HostingAccountsPanel, HostingProfileDialog } from './HostingAccountsPanel.jsx';
-import { buildLicenseSettingsPath, isLicenseLoaded, isPremiumRequired } from './license-client.js';
+import { buildLicenseSettingsPath, resolveLicenseGateState } from './license-client.js';
 import { createUserAdminClient, emptyUserPage, userAdminInput, userAdminMessage } from './user-admin-client.js';
 
 const LIMIT = 25;
@@ -30,8 +30,9 @@ export default function UsersPage() {
   const [notice, setNotice] = useState('');
   const [profileRevision, setProfileRevision] = useState(0);
   const client = useRef(null);
-  const licenseLoaded = isLicenseLoaded(license);
-  const isolatedUsersPremiumRequired = isPremiumRequired(license, 'perSiteIsolatedUsers');
+  const usersGateState = resolveLicenseGateState(license, 'perSiteIsolatedUsers');
+  const isolatedUsersPremiumRequired = usersGateState === 'premium_required';
+  const usersLicensePendingOrError = usersGateState === 'loading' || usersGateState === 'error';
   const usersLicensePath = buildLicenseSettingsPath({ returnTo: '/users?action=create', feature: 'site_user' });
   useEffect(() => {
     const instance = createUserAdminClient({ request: panelRequest, generation: sessionGeneration, onPage: setPage,
@@ -47,15 +48,16 @@ export default function UsersPage() {
   const totalPages = page.data ? Math.max(1, Math.ceil(page.data.total / LIMIT)) : number;
   useEffect(() => { if (page.status === 'ready' && number > totalPages) setNumber(totalPages); }, [number, page.status, totalPages]);
   useEffect(() => {
-    if (searchParams.get('action') !== 'create' || !licenseLoaded) return;
-    if (!isolatedUsersPremiumRequired) {
+    if (searchParams.get('action') !== 'create') return;
+    if (usersGateState === 'loading' || usersGateState === 'error') return;
+    if (usersGateState === 'allowed') {
       setNotice('');
       setDialog({ type: 'create' });
     }
     const next = new URLSearchParams(searchParams);
     next.delete('action');
     setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams, licenseLoaded, isolatedUsersPremiumRequired]);
+  }, [searchParams, setSearchParams, usersGateState]);
   function refresh() { return client.current?.load({ offset: (number - 1) * LIMIT, limit: LIMIT }); }
   function closeDialog() { setDialog(null); setProfileRevision((value) => value + 1); refresh(); }
   function hostingAccessLost() {
@@ -81,8 +83,20 @@ export default function UsersPage() {
     <nav className="ws-breadcrumb" aria-label="Sayfa yolu"><Link to="/settings">Ayarlar</Link><span>/ Kullanıcılar</span></nav>
     <PageHeading title="Kullanıcılar" description="Panel hesaplarını ve yönetim erişimini yönetin." actions={<>
       <Button icon="refresh" onClick={refresh} disabled={dialog !== null || premiumGateOpen || page.status === 'loading'}>Yenile</Button>
-      <Button icon="plus" variant="primary" disabled={locked} onClick={() => { setNotice(''); if (isolatedUsersPremiumRequired) setPremiumGateOpen(true); else setDialog({ type: 'create' }); }}><span>Kullanıcı ekle</span>{isolatedUsersPremiumRequired && <Badge state="unknown">Premium</Badge>}</Button>
+      <Button icon="plus" variant="primary" disabled={locked || usersLicensePendingOrError} onClick={() => { setNotice(''); if (usersGateState === 'allowed') setDialog({ type: 'create' }); else if (usersGateState === 'premium_required') setPremiumGateOpen(true); }}><span>Kullanıcı ekle</span>{isolatedUsersPremiumRequired && <Badge state="unknown">Premium</Badge>}</Button>
     </>} />
+    {usersGateState === 'loading' && (
+      <p className="ws-notice" role="status" data-license-gate-state="loading">Lisans durumu doğrulanıyor…</p>
+    )}
+    {usersGateState === 'error' && (
+      <div className="ws-notice ws-notice-warn" role="alert" data-license-gate-state="error">
+        <div>
+          <strong>Lisans durumu okunamadı</strong>
+          <p>Lisans durumu okunamadı. Yeni kullanıcı oluşturma işlemi lisans doğrulanana kadar beklemede.</p>
+        </div>
+        <Button icon="refresh" onClick={() => license?.refresh?.()}>Lisans durumunu yeniden dene</Button>
+      </div>
+    )}
     {isolatedUsersPremiumRequired && (
       <div className="ws-notice ws-notice-warn" role="status" data-premium-notice="users">
         <div>

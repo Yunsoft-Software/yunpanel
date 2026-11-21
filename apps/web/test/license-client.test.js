@@ -7,6 +7,7 @@ import {
   hasLicenseCapability,
   isLicenseLoaded,
   isPremiumRequired,
+  resolveLicenseGateState,
   sanitizeLicenseReturnTo,
 } from '../src/workspace/license-client.js';
 import { navigationItemRequiredCapability } from '../src/workspace/ui/ux-model.js';
@@ -73,6 +74,45 @@ test('isLicenseLoaded, hasLicenseCapability and isPremiumRequired distinguish lo
   assert.equal(isPremiumRequired(PREMIUM_READY, 'resellerAccounts'), false);
   assert.equal(isPremiumRequired(PREMIUM_READY, 'perSiteIsolatedUsers'), false);
   assert.equal(hasLicenseCapability(PREMIUM_READY, ''), null);
+});
+
+test('resolveLicenseGateState fails closed across loading, error, stale, malformed, Free, and Premium states', () => {
+  // Loading / pending states hold Premium-gated creation until verified
+  for (const loadingState of [
+    null,
+    undefined,
+    {},
+    { status: 'loading', data: null, error: null },
+    { status: 'idle', data: null, error: null },
+    { status: 'refreshing', data: null, error: null },
+  ]) {
+    assert.equal(resolveLicenseGateState(loadingState, 'resellerAccounts'), 'loading');
+    assert.equal(resolveLicenseGateState(loadingState, 'perSiteIsolatedUsers'), 'loading');
+  }
+
+  // Error / stale / unrecognized / malformed ready payloads return 'error' so users see retry instead of unlocked forms
+  for (const errorState of [
+    { status: 'error', data: null, error: new Error('503') },
+    { status: 'stale', data: PREMIUM_READY.data, error: new Error('network') },
+    { status: 'unknown_status', data: null, error: null },
+    { status: 'ready', data: null, error: null },
+    { status: 'ready', data: {}, error: null },
+    { status: 'ready', data: { capabilities: {} }, error: null },
+    { status: 'ready', data: { capabilities: { resellerAccounts: 'true' } }, error: null },
+  ]) {
+    assert.equal(resolveLicenseGateState(errorState, 'resellerAccounts'), 'error');
+  }
+
+  // Missing or invalid capability name fails closed to 'error'
+  assert.equal(resolveLicenseGateState(PREMIUM_READY, ''), 'error');
+  assert.equal(resolveLicenseGateState(PREMIUM_READY, null), 'error');
+
+  // Ready Free vs Ready Premium
+  assert.equal(resolveLicenseGateState(FREE_READY, 'resellerAccounts'), 'premium_required');
+  assert.equal(resolveLicenseGateState(FREE_READY, 'perSiteIsolatedUsers'), 'premium_required');
+  assert.equal(resolveLicenseGateState(FREE_READY, 'singlePanelUserUnlimitedSites'), 'allowed');
+  assert.equal(resolveLicenseGateState(PREMIUM_READY, 'resellerAccounts'), 'allowed');
+  assert.equal(resolveLicenseGateState(PREMIUM_READY, 'perSiteIsolatedUsers'), 'allowed');
 });
 
 test('sanitizeLicenseReturnTo accepts only allowlisted internal routes and non-secret query parameters', () => {

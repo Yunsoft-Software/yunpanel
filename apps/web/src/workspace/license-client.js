@@ -199,6 +199,27 @@ export function isPremiumRequired(licenseState, capability) {
   return hasLicenseCapability(licenseState, capability) === false;
 }
 
+export function resolveLicenseGateState(licenseState, capability) {
+  if (typeof capability !== 'string' || !capability) {
+    return 'error';
+  }
+  if (!licenseState || typeof licenseState !== 'object') {
+    return 'loading';
+  }
+  const { status } = licenseState;
+  if (status === undefined || status === null || status === 'loading' || status === 'idle' || status === 'refreshing') {
+    return 'loading';
+  }
+  if (status === 'ready') {
+    const capabilities = licenseState.data?.capabilities;
+    if (!capabilities || typeof capabilities !== 'object' || typeof capabilities[capability] !== 'boolean') {
+      return 'error';
+    }
+    return capabilities[capability] === true ? 'allowed' : 'premium_required';
+  }
+  return 'error';
+}
+
 export function sanitizeLicenseReturnTo(value) {
   if (typeof value !== 'string' || !value || value.length > 256) return null;
   if (/[\u0000-\u001f\u007f\\\s#]/.test(value)) return null;

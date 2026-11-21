@@ -5,7 +5,7 @@ import { Badge, Button, EmptyState, ErrorNotice, LinkButton, Modal, Section } fr
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
 import { WorkspaceContext } from './WorkspaceContext.jsx';
 import { createHostingAccountClient, hostingAccountMessage } from './hosting-account-client.js';
-import { buildLicenseSettingsPath, isPremiumRequired } from './license-client.js';
+import { buildLicenseSettingsPath, resolveLicenseGateState } from './license-client.js';
 
 const LIMIT = 25;
 const limitText = (value) => value === null ? 'Sınırsız' : String(value);
@@ -33,7 +33,8 @@ export function HostingAccountsPanel({ refreshKey, locked, onOpen, onAccessLost 
   const [kind, setKind] = useState('reseller'); const [offset, setOffset] = useState(0);
   const [retry, setRetry] = useState(0); const [page, setPage] = useState({ status: 'loading' });
   const requiredCapability = kind === 'reseller' ? 'resellerAccounts' : 'perSiteIsolatedUsers';
-  const premiumRequired = isPremiumRequired(workspace?.license, requiredCapability);
+  const panelGateState = resolveLicenseGateState(workspace?.license, requiredCapability);
+  const premiumRequired = panelGateState === 'premium_required';
   const licensePath = buildLicenseSettingsPath({ returnTo: '/users', feature: 'hosting_profile' });
   useEffect(() => {
     let cancelled = false;
@@ -53,6 +54,18 @@ export function HostingAccountsPanel({ refreshKey, locked, onOpen, onAccessLost 
         <Button aria-pressed={kind === 'reseller'} disabled={locked} onClick={() => changeKind('reseller')}>Bayiler</Button>
         <Button aria-pressed={kind === 'customer'} disabled={locked} onClick={() => changeKind('customer')}>Müşteriler</Button>
       </div>
+      {panelGateState === 'loading' && (
+        <p className="ws-notice" role="status" data-license-gate-state="hosting-profiles-loading">Lisans durumu doğrulanıyor…</p>
+      )}
+      {panelGateState === 'error' && (
+        <div className="ws-notice ws-notice-warn" role="alert" data-license-gate-state="hosting-profiles-error">
+          <div>
+            <strong>Lisans durumu okunamadı</strong>
+            <p>Mevcut profiller görüntülenebilir; yeni profil bağlama ve limit güncellemeleri lisans doğrulanana kadar beklemede.</p>
+          </div>
+          <Button icon="refresh" onClick={() => workspace?.license?.refresh?.()}>Lisans durumunu yeniden dene</Button>
+        </div>
+      )}
       {premiumRequired && (
         <div className="ws-notice ws-notice-warn" role="status" data-premium-notice="hosting-profiles">
           <div>
@@ -158,9 +171,28 @@ export function HostingProfileDialog({ user = null, accountId, onClose, onSaved,
     if (dirty && !reload && !discard) setDiscard(true); else onClose();
   }
   function update(key, value) { setForm((current) => ({ ...current, [key]: value })); setError(null); }
+  const canSubmit = ready && eligible && (removing ? confirmation === account.username
+    : account ? account.kind === 'reseller' && dirty : form.kind !== 'customer' || form.resellerId !== '');
+  const activeKind = account?.kind ?? form.kind;
+  const requiredMutationCapability = removing || statusTarget === false
+    ? null
+    : activeKind === 'reseller'
+      ? 'resellerAccounts'
+      : 'perSiteIsolatedUsers';
+  const needsLicenseCheck = Boolean(
+    ready
+    && eligible
+    && requiredMutationCapability
+    && ((!account) || (account.kind === 'reseller' && !removing && statusTarget === null) || statusTarget === true),
+  );
+  const mutationGateState = needsLicenseCheck
+    ? resolveLicenseGateState(workspace?.license, requiredMutationCapability)
+    : 'allowed';
+  const mutationPremiumBlocked = mutationGateState === 'premium_required';
+  const mutationLicenseBlocked = mutationGateState !== 'allowed';
   async function submit(event) {
     event.preventDefault();
-    if (pending.current || !ready || !eligible || reload || (removing && confirmation !== account.username)) return;
+    if (pending.current || !ready || !eligible || reload || mutationLicenseBlocked || (removing && confirmation !== account.username)) return;
     pending.current = true; setBusy(true); setError(null);
     const generation = sessionGeneration();
     try {
@@ -173,7 +205,7 @@ export function HostingProfileDialog({ user = null, accountId, onClose, onSaved,
     finally { pending.current = false; if (mounted.current) setBusy(false); }
   }
   async function changeStatus() {
-    if (pending.current || !ready || !account || reload || typeof statusTarget !== 'boolean'
+    if (pending.current || !ready || !account || reload || mutationLicenseBlocked || typeof statusTarget !== 'boolean'
       || statusTarget === account.active) return;
     pending.current = true; setBusy(true); setError(null);
     const generation = sessionGeneration();
@@ -193,21 +225,6 @@ export function HostingProfileDialog({ user = null, accountId, onClose, onSaved,
     } catch (failure) { if (mounted.current && failure.name !== 'AbortError') setError(failure); }
     finally { pending.current = false; if (mounted.current) setBusy(false); }
   }
-  const canSubmit = ready && eligible && (removing ? confirmation === account.username
-    : account ? account.kind === 'reseller' && dirty : form.kind !== 'customer' || form.resellerId !== '');
-  const activeKind = account?.kind ?? form.kind;
-  const requiredMutationCapability = removing || statusTarget === false
-    ? null
-    : activeKind === 'reseller'
-      ? 'resellerAccounts'
-      : 'perSiteIsolatedUsers';
-  const mutationPremiumBlocked = Boolean(
-    ready
-    && eligible
-    && requiredMutationCapability
-    && ((!account) || (account.kind === 'reseller' && !removing && statusTarget === null) || statusTarget === true)
-    && isPremiumRequired(workspace?.license, requiredMutationCapability),
-  );
   return <Modal title="Bayi / müşteri profili" onClose={close} busy={busy}>
     {discard ? <><p>Kaydedilmemiş değişiklikler bırakılacak. Pencereyi kapatmak istiyor musunuz?</p><footer className="ws-modal-footer">
       <Button onClick={() => setDiscard(false)}>Düzenlemeye dön</Button><Button variant="danger" onClick={onClose}>Değişiklikleri bırak</Button>
@@ -216,6 +233,18 @@ export function HostingProfileDialog({ user = null, accountId, onClose, onSaved,
       <p className="ws-muted">Bu ekran Owner için profil ve limit yönetimidir. Yeni giriş hesabı, site yetkisi, paket veya abonelik oluşturmaz.</p>
       {loaded.status === 'loading' && <p role="status">Güncel profil doğrulanıyor…</p>}
       <ErrorNotice error={loaded.status === 'error' ? hostingAccountMessage(loaded.error) : error ? hostingAccountMessage(error) : null} />
+      {mutationGateState === 'loading' && (
+        <p className="ws-notice" role="status" data-license-gate-state="hosting-profile-loading">Lisans durumu doğrulanıyor…</p>
+      )}
+      {mutationGateState === 'error' && (
+        <div className="ws-notice ws-notice-warn" role="alert" data-license-gate-state="hosting-profile-error">
+          <div>
+            <strong>Lisans durumu okunamadı</strong>
+            <p>Lisans durumu okunamadı. Bu profil işlemi lisans doğrulanana kadar beklemede.</p>
+          </div>
+          <Button icon="refresh" onClick={() => workspace?.license?.refresh?.()}>Lisans durumunu yeniden dene</Button>
+        </div>
+      )}
       {(mutationPremiumBlocked || error?.code === 'premium_license_required') && (
         <div className="ws-notice ws-notice-warn" role="status" data-premium-notice="hosting-profile-dialog">
           <div>
@@ -262,10 +291,10 @@ export function HostingProfileDialog({ user = null, accountId, onClose, onSaved,
         {statusTarget !== null && <Button disabled={busy || reload} onClick={() => { setStatusTarget(null); setError(null); }}>Profile dön</Button>}
         {removing && <Button disabled={busy || reload} onClick={() => { setRemoving(false); setConfirmation(''); setError(null); }}>Profile dön</Button>}
         <Button disabled={busy} onClick={close}>{reload ? 'Kapat ve listeyi yenile' : 'Kapat'}</Button>
-        {statusTarget !== null && <Button type="button" variant={statusTarget ? 'primary' : 'danger'} disabled={busy || reload || mutationPremiumBlocked} onClick={changeStatus}>
+        {statusTarget !== null && <Button type="button" variant={statusTarget ? 'primary' : 'danger'} disabled={busy || reload || mutationLicenseBlocked} onClick={changeStatus}>
           {busy ? 'Uygulanıyor…' : statusTarget ? 'Girişi etkinleştir' : 'Hesabı askıya al'}
         </Button>}
-        {statusTarget === null && ready && eligible && (!account || account.kind === 'reseller' || removing) && <Button type="submit" variant={removing ? 'danger' : 'primary'} disabled={busy || reload || !canSubmit || mutationPremiumBlocked}>{busy ? 'Kaydediliyor…' : removing ? 'Profili kaldır' : account ? 'Sınırları kaydet' : 'Profili bağla'}</Button>}
+        {statusTarget === null && ready && eligible && (!account || account.kind === 'reseller' || removing) && <Button type="submit" variant={removing ? 'danger' : 'primary'} disabled={busy || reload || !canSubmit || mutationLicenseBlocked}>{busy ? 'Kaydediliyor…' : removing ? 'Profili kaldır' : account ? 'Sınırları kaydet' : 'Profili bağla'}</Button>}
       </footer>
     </form>}
   </Modal>;
