@@ -2026,9 +2026,9 @@
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
 
-### T949 · Doğrulama: test — Owner resolves proxy rule by domainId via real auth/CSRF, updates domain with prox
+### T949 · Trafik ve kota sonrası rota, site kurtarma ve şema regresyonları
 - **Bağımlı:** —
-- **Dosyalar:** —
+- **Dosyalar:** `packages/protocol/src/index.js`, `apps/api/src/hosting-site-create-service.js`, `apps/api/src/hosting-account-schema.js`
 - **Kaynak:** QA · 2026-11-22 00:35
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 

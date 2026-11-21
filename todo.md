@@ -7,7 +7,9 @@
 - [ ] Dış Restic/rclone yedeğinden izinli boş Ubuntu 24.04 VM’de panel hesabı/yetkisi, WordPress HTTP, gerçek SQL ve IMAP geri gelir. Kaynak makinenin kapalı olduğu varsayımıyla anahtar erişimi ve ölçülen kurtarma süresi kaydedilir.
 - [ ] Tek veritabanlı PHP ve postalı WordPress pilotlarında izinli Plesk dışa aktarımı, dosya/SQL/posta bütünlüğü, aynı girdinin tekrar işlenmesi, DNS öncesi test ve son eşitleme doğrulanır. Prova sırasında hedefte yeni yazılmış içerik ve postalar korunarak geri dönülür.
 - [ ] Sieve Vacation ve Rspamd Multimap gerçek Linux bileşenlerinde normal, hatalı ve kardeş posta kutusu senaryolarıyla doğrulanır. TLS, teslimat ve DKIM kontrolleri yapılır.
-- [ ] İkinci ağdaki PowerDNS, doğrulanmış bölge kopyasıyla birincil erişilebilirken ve yokken yetkili yanıt verir. Seçilen WAF normal login, yükleme ve API akışlarını korur. Ayar geri dönüşü sınanır.
+- [ ] İkinci ağdaki PowerDNS, doğrulanmış bölge kopyasıyla birincil erişilebilirken ve yokken yetkili yanıt verir.
+- [x] .28 üzerinde CrowdSec AppSec gözlem trafiği, izole kural engellemesi ve ayar geri dönüşü doğrulandı. [Kabul kaydı](docs/gorevler/crowdsec-waf-20261121.md)
+- [x] .28 üzerinde aylık HTTP trafik ölçümü, müşteri veritabanı sınırı, panel dosya yazma kotası ve isteğe bağlı HTTP trafik engellemesi doğrulandı. Mevcut Nginx yapılandırmalarının kapsamı ve yeniden uygulama adımı kayıtlı. [Kabul kaydı](docs/gorevler/trafik-kota-20261122.md)
 - [ ] Pilot kalıbı doğrulandıktan sonra WordPress staging’den seçici aktarımda üretim sipariş ve üyelik verisi korunur. Diğer çalışma ortamları kendi gerçek kabulünde izlenir.
 
 ## Önceki kabul matrisi
