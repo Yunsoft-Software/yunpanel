@@ -1,0 +1,11 @@
+# `.28` CrowdSec ve WAF kabulü
+
+21 Kasım 2026. Doğrulanan panel paketi `0.3.0-2026112103`, kaynak `a6d3ca77`. Başlangıç kanıtı [alıcı gözü kabulünde](buyer-review-20261121.md). CrowdSec servisi devre dışıydı ve panelin engelleme listesi HTTP 400 dönüyordu.
+
+- Paket arşivinin GPG imzası doğrulandı. CrowdSec Security Engine `1.8.2` tek yeni sistem paketi olarak kuruldu. Yerel API yalnız `127.0.0.1:8080`, AppSec yalnız `127.0.0.1:7422` adresini dinliyor. CAPI kaydı yapılmadı. Chrome’da panelin engelleme listesi gerçek veriyi HTTP 200 ile okudu.
+- Resmî Nginx bouncer `1.2.2` ve Ubuntu 24.04 Lua modülleri özel dizine yerleştirildi. Paket kurulum provası, global Lua modülü kurulumunun Rspamd ve PowerDNS tarafından kullanılan iki sistem kütüphanesini değiştireceğini gösterdi. Özel dizin bağımlılığıyla `nginx -t` geçti. Nginx, Rspamd, PowerDNS ve SSH etkin kaldı. nftables kural özeti eşleşti.
+- Aynı Nginx hizmetindeki geçici loopback vhostta CrowdSec’in zararsız test kuralı gözlem modunda `200`, kural eşleşme sayacı ve engelleme modunda `403` üretti. Kural kapatılınca `200` döndü. Normal giriş, form ve API istekleri `200` döndü. Geçici vhost ve geçici engelleme politikası kaldırıldı. İlk koşuda gözlem uyarısı beklediğimiz kayıt kanalında oluşmadı. Son koşuda AppSec’in kendi kural eşleşme sayacı ölçüldü.
+- `webrich.news` ağacındaki kayıtlı altı aktif HTTPS yayın gözlem moduna alındı. Kanonik Nginx sunucu adı listesi `/etc/nginx/conf.d/90-yunpanel-crowdsec-observe.conf` içinde. İlk altı kontrolün tümü `200`, AppSec istek sayacı `0` → `6`. Yönetim paneli ve listede bulunmayan vhostlar WAF incelemesine girmez. Nginx bouncer bu kurulumda AppSec uygular. Ağ düzeyi engelleme için ayrı nftables bouncer etkinleştirilmedi.
+- Özel çalışma zamanı SHA-256 `2a4fe45941400ee74ef518da5bc887ec94518d2f6565d72498dce86e7d1be333`. Yerel doğrulama manifesti `.local/p0-20261121/dot28-crowdsec-waf/manifest.json`. Canlı tarayıcı ve gözlem kayıtları `.local/crowdsec-waf-20261121/` içinde, uygulanan operasyon ve canary kanıtları `.28` üzerinde ayrılmış özel çalışma dizininde.
+
+İzlemeyi geri almak için yalnız yönetilen `90-yunpanel-crowdsec-observe.conf` yükleme dizininden çıkarılır, `nginx -t` geçtikten sonra Nginx yeniden yüklenir. CrowdSec motoru çalışmaya devam eder. Aktif yayınlarda engelleme modu ayrı kapsamda değerlendirilir.
