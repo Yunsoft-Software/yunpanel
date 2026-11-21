@@ -1,21 +1,32 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { panelRequest } from '../api.js';
 import { sessionGeneration, setSession } from '../session-client.js';
-import { Badge, Button, EmptyState, ErrorNotice, Modal, PageHeading, Section } from './PanelKit.jsx';
+import { Badge, Button, EmptyState, ErrorNotice, LinkButton, Modal, PageHeading, Section } from './PanelKit.jsx';
 import { HostingProfileDialog } from './HostingAccountsPanel.jsx';
 import { createHostingAccountClient, hostingAccountMessage } from './hosting-account-client.js';
+import { buildLicenseSettingsPath, isLicenseLoaded, isPremiumRequired } from './license-client.js';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
+import { useWorkspace } from './WorkspaceContext.jsx';
 
 const LIMIT = 25;
 export default function OwnerHostingAccountsPage({ kind }) {
   return <AccountsWorkspace key={kind} kind={kind} />;
 }
 function AccountsWorkspace({ kind }) {
+  const { license, hostingAccountDrafts, saveHostingAccountDraft, clearHostingAccountDraft } = useWorkspace();
+  const [searchParams, setSearchParams] = useSearchParams();
   const client = useRef(null), [page, setPage] = useState(null), [error, setError] = useState(null);
   const [loading, setLoading] = useState(true), [offset, setOffset] = useState(0), [revision, setRevision] = useState(0);
   const [dialog, setDialog] = useState(null), [notice, setNotice] = useState(null);
   const label = kind === 'reseller' ? 'Bayi' : 'Müşteri';
+  const requiredCapability = kind === 'reseller' ? 'resellerAccounts' : 'perSiteIsolatedUsers';
+  const licenseLoaded = isLicenseLoaded(license);
+  const premiumRequired = isPremiumRequired(license, requiredCapability);
+  const licensePath = buildLicenseSettingsPath({
+    returnTo: kind === 'reseller' ? '/resellers?action=create' : '/customers?action=create',
+    feature: kind,
+  });
   function accessLost() { setDialog(null); setSession(null); window.dispatchEvent(new Event('yunpanel:session-expired')); }
   useEffect(() => {
     const instance = createHostingAccountClient({ request: panelRequest, generation: sessionGeneration, onAccessLost: accessLost });
@@ -32,12 +43,39 @@ function AccountsWorkspace({ kind }) {
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [kind, offset, revision]);
+  useEffect(() => {
+    if (searchParams.get('action') !== 'create' || !licenseLoaded) return;
+    if (!premiumRequired) {
+      setDialog({ type: 'create' });
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete('action');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, licenseLoaded, premiumRequired]);
   const refresh = () => setRevision(value => value + 1);
   const close = () => { setDialog(null); refresh(); };
-  const saved = message => { setNotice(message); close(); };
+  const saved = message => { clearHostingAccountDraft?.(kind); setNotice(message); close(); };
   return <>
     <PageHeading title={kind === 'reseller' ? 'Bayiler' : 'Müşteriler'} description={kind === 'reseller' ? 'Bayilerinizin müşterilerini, site sınırlarını ve panel erişimini yönetin.' : 'Müşteri hesaplarını ve onlara ait web sitelerini yönetin.'}
-      actions={<><Button icon="refresh" disabled={loading || Boolean(dialog)} onClick={refresh}>Yenile</Button><Button variant="primary" icon="plus" disabled={loading || Boolean(dialog)} onClick={() => setDialog({ type: 'create' })}>{label} ekle</Button></>} />
+      actions={<><Button icon="refresh" disabled={loading || Boolean(dialog)} onClick={refresh}>Yenile</Button><Button variant="primary" icon="plus" disabled={loading || Boolean(dialog)} onClick={() => setDialog({ type: premiumRequired ? 'premium_gate' : 'create' })}><span>{label} ekle</span>{premiumRequired && <Badge state="unknown">Premium</Badge>}</Button></>} />
+    {premiumRequired && (
+      <div className="ws-notice ws-notice-warn" role="status" data-premium-notice={kind}>
+        <div>
+          <strong>
+            {kind === 'reseller'
+              ? 'Bayi hesabı oluşturmak ve yönetmek için YunPanel Premium gerekiyor'
+              : 'Müşteri hesabı oluşturmak ve yönetmek için YunPanel Premium gerekiyor'}
+          </strong>
+          <p>
+            Ücretsiz sürümde mevcut siteleriniz ve kayıtlı hesaplarınız çalışmaya devam eder.
+            {kind === 'reseller'
+              ? ' Yeni bayi eklemek veya bayi sınırlarını yönetmek için Premium lisansınızı etkinleştirin.'
+              : ' Yeni müşteri hesabı oluşturmak veya müşteri erişimi vermek için Premium lisansınızı etkinleştirin.'}
+          </p>
+        </div>
+        <LinkButton variant="primary" to={licensePath}>Lisans yönetimine git</LinkButton>
+      </div>
+    )}
     {notice && <p className="ws-notice" role="status">{notice}</p>}
     <Section title={`${label} hesapları`}>
       <div className="ws-section-body"><ErrorNotice error={error} />{loading && <p role="status">Hesaplar yükleniyor…</p>}</div>
@@ -48,19 +86,42 @@ function AccountsWorkspace({ kind }) {
           {kind === 'reseller' && <td>{account.usage.customers}{account.limits.maxCustomers !== null ? ` / ${account.limits.maxCustomers}` : ''}</td>}
           <td><div className="ws-actions"><Button disabled={Boolean(dialog)} onClick={() => setDialog({ type: 'profile', account })}>Hesabı yönet</Button>
             {kind === 'customer' && <><Link className="ws-button" to={`/websites?customer=${encodeURIComponent(account.id)}`}>Web siteleri</Link>{account.active && <Link className="ws-button" to={`/websites/new?customer=${encodeURIComponent(account.id)}`}>Site ekle</Link>}</>}</div></td>
-        </tr>)}</tbody></table></div> : <EmptyState title={`Henüz ${label.toLocaleLowerCase('tr')} yok`} detail="Yeni hesabı oluşturduktan sonra site ekleyebilirsiniz." icon="user" />)}
+        </tr>)}</tbody></table></div> : <EmptyState title={`Henüz ${label.toLocaleLowerCase('tr')} yok`} detail={premiumRequired ? `Yeni ${label.toLocaleLowerCase('tr')} hesabı açmak için önce YunPanel Premium lisansını etkinleştirin.` : 'Yeni hesabı oluşturduktan sonra site ekleyebilirsiniz.'} icon="user" />)}
       <footer className="ws-pagination"><span>{page ? `${page.total} hesap` : 'Hesap sayısı bekleniyor'}</span><div className="ws-actions">
         <Button disabled={loading || Boolean(dialog) || offset === 0} onClick={() => setOffset(value => Math.max(0, value - LIMIT))}>Önceki</Button>
         <span>Sayfa {Math.floor(offset / LIMIT) + 1}</span><Button disabled={loading || Boolean(dialog) || !page || offset + LIMIT >= page.total} onClick={() => setOffset(value => value + LIMIT)}>Sonraki</Button>
       </div></footer>
     </Section>
-    {dialog?.type === 'create' && <AccountCreateDialog kind={kind} client={client} onClose={close} onSaved={saved} />}
+    {dialog?.type === 'premium_gate' && (
+      <Modal title={`${label} eklemek için YunPanel Premium gerekiyor`} onClose={() => setDialog(null)}>
+        <div className="ws-form" data-premium-gate-dialog={kind}>
+          <p>
+            {kind === 'reseller'
+              ? 'Yeni bayi hesabı oluşturmak ve bayi sınırlarını yönetmek için aktif bir YunPanel Premium lisansı gerekir.'
+              : 'Yeni müşteri hesabı oluşturmak ve ayrı panel girişi tanımlamak için aktif bir YunPanel Premium lisansı gerekir.'}
+          </p>
+          <p className="ws-muted">Ücretsiz sürümde mevcut siteleriniz, kayıtlı hesaplarınız ve sunucu yönetim araçlarınız normal şekilde çalışmaya devam eder.</p>
+          <footer className="ws-modal-footer">
+            <Button onClick={() => setDialog(null)}>Vazgeç</Button>
+            <LinkButton variant="primary" to={licensePath}>Lisans yönetimine git</LinkButton>
+          </footer>
+        </div>
+      </Modal>
+    )}
+    {dialog?.type === 'create' && <AccountCreateDialog kind={kind} client={client} initialDraft={hostingAccountDrafts?.[kind] ?? null} licensePath={licensePath} onSaveDraft={draft => saveHostingAccountDraft?.(kind, draft)} onClose={close} onSaved={saved} />}
     {dialog?.type === 'profile' && <HostingProfileDialog accountId={dialog.account.id} onClose={close} onSaved={saved} onAccessLost={accessLost} />}
   </>;
 }
 
-function AccountCreateDialog({ kind, client, onClose, onSaved }) {
-  const [form, setForm] = useState({ kind, username: '', password: '', resellerId: '', maxCustomers: '10', maxWebsites: '25' });
+function AccountCreateDialog({ kind, client, initialDraft = null, licensePath, onSaveDraft, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    kind,
+    username: '',
+    password: '',
+    resellerId: typeof initialDraft?.resellerId === 'string' ? initialDraft.resellerId : '',
+    maxCustomers: typeof initialDraft?.maxCustomers === 'string' ? initialDraft.maxCustomers : '10',
+    maxWebsites: typeof initialDraft?.maxWebsites === 'string' ? initialDraft.maxWebsites : '25',
+  });
   const [parents, setParents] = useState([]), [busy, setBusy] = useState(false), [error, setError] = useState(null);
   const mounted = useRef(true), pending = useRef(false);
   useUnsavedChanges(Boolean(form.username || form.password));
@@ -78,11 +139,28 @@ function AccountCreateDialog({ kind, client, onClose, onSaved }) {
     try {
       const account = await client.current.createLogin(form);
       if (mounted.current) { setForm(previous => ({ ...previous, password: '' })); onSaved(`${account.username} hesabı oluşturuldu.`); }
-    } catch (failure) { if (mounted.current && failure.name !== 'AbortError') setError(failure); }
+    } catch (failure) {
+      if (mounted.current && failure.name !== 'AbortError') {
+        if (failure?.code === 'premium_license_required') {
+          onSaveDraft?.(form);
+          setForm(previous => ({ ...previous, password: '' }));
+        }
+        setError(failure);
+      }
+    }
     finally { pending.current = false; if (mounted.current) setBusy(false); }
   }
   return <Modal title={kind === 'reseller' ? 'Bayi ekle' : 'Müşteri ekle'} busy={busy} onClose={onClose}>
     <form className="ws-form" onSubmit={submit}><ErrorNotice error={error ? hostingAccountMessage(error) : null} />
+      {error?.code === 'premium_license_required' && (
+        <div className="ws-notice ws-notice-warn" role="status">
+          <div>
+            <strong>YunPanel Premium lisansı gerekiyor</strong>
+            <p>Lisansınızı etkinleştirdikten sonra bu ekrana geri dönebilirsiniz.</p>
+          </div>
+          <LinkButton variant="primary" to={licensePath}>Lisans yönetimine git</LinkButton>
+        </div>
+      )}
       {error?.reconcile && <p role="alert">Sonuç alınamadı. Yeni hesap açmadan önce pencereyi kapatıp listeyi yenileyin.</p>}
       <fieldset disabled={busy || Boolean(error?.reconcile)}>
         <label>Kullanıcı adı<input required value={form.username} onChange={event => change('username', event.target.value)} minLength={3} maxLength={128} autoComplete="off" autoCapitalize="none" spellCheck={false} /></label>

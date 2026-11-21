@@ -294,3 +294,13 @@ test('lost creation reply blocks a second write until a fresh complete profile l
   assert.equal(posts, 1); await f.client.list({ kind: 'customer' });
   await assert.rejects(f.client.createLogin(input), error => error.reconcile === true); assert.equal(posts, 2);
 });
+
+test('403 premium_license_required keeps the Owner session alive and formats a clear Turkish message', async (t) => {
+  const f = fixture(t, async () => { throw error(403, 'premium_license_required'); });
+  await assert.rejects(
+    f.client.createLogin({ kind: 'reseller', username: 'bayi', password: 'long-enough-password', maxCustomers: '5', maxWebsites: '10' }),
+    (failure) => failure.code === 'premium_license_required' && !failure.reconcile,
+  );
+  assert.equal(f.lost(), 0, '403 premium_license_required must NOT log out the Owner session');
+  assert.match(hostingAccountMessage(error(403, 'premium_license_required')), /YunPanel Premium/);
+});

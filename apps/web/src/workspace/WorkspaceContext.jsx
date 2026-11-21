@@ -18,6 +18,7 @@ export function WorkspaceProvider({ children }) {
   const [notice, setNotice] = useState(null);
   const [telemetryIntervalMs, setTelemetryIntervalMs] = useState(5000);
   const [licenseState, setLicenseState] = useState({ status: 'loading', data: null, error: null });
+  const [hostingAccountDrafts, setHostingAccountDrafts] = useState({});
   const demand = workspaceResources(pathname, { observingJob: jobOpen, activeJob: Object.values(tracked).some(jobActive) });
   const domains = useCollection('/domains', { enabled: demand.domains && can('domains.read') });
   const websites = useCollection('/websites', { enabled: demand.websites && can('websites.read') });
@@ -28,19 +29,49 @@ export function WorkspaceProvider({ children }) {
   const requests = useRef(null);
   const submitting = useRef(new Set());
   const [sslJobRefresh] = useState(createSslJobRefresh);
+  const applyLicenseData = useCallback((nextData) => {
+    if (nextData && typeof nextData === 'object') {
+      setLicenseState({ status: 'ready', data: nextData, error: null });
+    }
+  }, []);
   const refreshLicenseState = useCallback(() => {
     const signal = requests.current?.signal;
-    panelRequest('/license', { signal })
+    return panelRequest('/license', { signal })
       .then((res) => {
+        const next = res?.data ?? res ?? null;
         if (!signal?.aborted) {
-          setLicenseState({ status: 'ready', data: res?.data ?? res ?? null, error: null });
+          setLicenseState({ status: 'ready', data: next, error: null });
         }
+        return next;
       })
       .catch((err) => {
         if (!signal?.aborted && err?.name !== 'AbortError') {
           setLicenseState((prev) => ({ status: prev.data ? 'stale' : 'error', data: prev.data, error: err }));
         }
+        return null;
       });
+  }, []);
+  // In-memory only non-secret task draft retention across SPA navigation; never stores credentials or writes Web Storage.
+  const saveHostingAccountDraft = useCallback((kind, draft) => {
+    if (!['reseller', 'customer'].includes(kind) || !draft || typeof draft !== 'object') return;
+    const safeDraft = kind === 'reseller'
+      ? {
+        maxCustomers: typeof draft.maxCustomers === 'string' ? draft.maxCustomers.slice(0, 16) : '10',
+        maxWebsites: typeof draft.maxWebsites === 'string' ? draft.maxWebsites.slice(0, 16) : '25',
+      }
+      : {
+        resellerId: typeof draft.resellerId === 'string' ? draft.resellerId.slice(0, 128) : '',
+      };
+    setHostingAccountDrafts((current) => ({ ...current, [kind]: safeDraft }));
+  }, []);
+  const clearHostingAccountDraft = useCallback((kind) => {
+    if (!['reseller', 'customer'].includes(kind)) return;
+    setHostingAccountDrafts((current) => {
+      if (!Object.hasOwn(current, kind)) return current;
+      const next = { ...current };
+      delete next[kind];
+      return next;
+    });
   }, []);
   useEffect(() => {
     const controller = new AbortController();
@@ -80,8 +111,8 @@ export function WorkspaceProvider({ children }) {
     } finally { submitting.current.delete(path); }
   }, [canManage, observe, jobs.refresh]);
   const resourceBusy = (type, id) => Object.values({ ...Object.fromEntries(jobs.items.map((job) => [job.id, job])), ...tracked }).some((job) => job.resourceType === type && job.resourceId === id && jobActive(job));
-  const license = { ...licenseState, refresh: refreshLicenseState };
-  return <WorkspaceContext.Provider value={{ domains, websites, applications, certificates, servers, jobs, license, telemetryIntervalMs, setTelemetryIntervalMs, runJob, resourceBusy, refreshAll, observe, updateJob, observedJob: tracked[observedId] ?? null, jobOpen, closeJob: () => setJobOpen(false), notice, setNotice, can, canManage, isOwner, isSiteManager, isReseller, isCustomer, hostingProfile, readOnly }}>{children}</WorkspaceContext.Provider>;
+  const license = { ...licenseState, refresh: refreshLicenseState, apply: applyLicenseData };
+  return <WorkspaceContext.Provider value={{ domains, websites, applications, certificates, servers, jobs, license, hostingAccountDrafts, saveHostingAccountDraft, clearHostingAccountDraft, telemetryIntervalMs, setTelemetryIntervalMs, runJob, resourceBusy, refreshAll, observe, updateJob, observedJob: tracked[observedId] ?? null, jobOpen, closeJob: () => setJobOpen(false), notice, setNotice, can, canManage, isOwner, isSiteManager, isReseller, isCustomer, hostingProfile, readOnly }}>{children}</WorkspaceContext.Provider>;
 }
 export function useWorkspace() {
   const value = useContext(WorkspaceContext);

@@ -4,10 +4,11 @@ const integer = (value, minimum = 0) => Number.isSafeInteger(value) && value >= 
 const object = (value) => value && typeof value === 'object' && !Array.isArray(value);
 function problem(code) { const error = new Error(code); error.code = code; return error; }
 function obsolete() { const error = problem('session_superseded'); error.name = 'AbortError'; return error; }
-const denied = (error) => [401, 403].includes(error.status);
+const denied = (error) => [401, 403].includes(error?.status) && error?.code !== 'premium_license_required';
 
 export function userAdminMessage(error) {
   const messages = {
+    premium_license_required: 'Ek panel kullanıcısı oluşturmak veya yönetmek için aktif bir YunPanel Premium lisansı gerekiyor.',
     last_owner: 'Son aktif Owner silinemez, kapatılamaz veya Read Only rolüne düşürülemez.',
     user_revision_conflict: 'Bu hesap başka bir işlemde değişti. Formu kapatıp güncel kaydı yeniden açın; değişiklikleriniz gönderilmedi.',
     username_taken: 'Bu kullanıcı adı başka bir hesapta kullanılıyor.',

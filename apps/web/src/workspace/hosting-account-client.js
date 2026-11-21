@@ -34,6 +34,7 @@ export function hostingAccountMessage(error) {
     hosting_request_busy: 'Bir profil işlemi zaten devam ediyor.',
     hosting_reconciliation_required: 'Önce pencereyi kapatıp güncel profili yeniden açın; işlem otomatik tekrarlanmaz.',
     hosting_accounts_unavailable: 'Hesap API’si kullanılamıyor. API ve arayüz sürümlerini kontrol edin.',
+    premium_license_required: 'Bu işlem için aktif bir YunPanel Premium lisansı gerekiyor. Lisans yönetimi ekranından Premium lisansınızı etkinleştirebilirsiniz.',
     forbidden: 'Bu işlem için Owner yetkisi gerekiyor.',
     unauthorized: 'Oturum kapandı. Yeniden giriş yapın.',
     csrf_invalid: 'Oturum doğrulanamadı. Yeniden giriş yapın.',
@@ -167,7 +168,7 @@ export function createHostingAccountClient({ request, generation, onAccessLost }
   const live = () => !disposed && generation() === stamp;
   const cancelReads = () => { for (const controller of readers.values()) controller.abort(); readers.clear(); };
   const lost = (error) => {
-    if (live() && [401, 403].includes(error?.status)) {
+    if (live() && [401, 403].includes(error?.status) && error?.code !== 'premium_license_required') {
       disposed = true; cancelReads(); writer?.abort(); onAccessLost();
     }
   };

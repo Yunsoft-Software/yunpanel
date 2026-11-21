@@ -8,6 +8,7 @@ import { usePanelSession } from '../panel-session.jsx';
 import { sessionVersion, sessionTransitionPending } from '../session-client.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
+import { buildLicenseSettingsPath, isPremiumRequired } from './license-client.js';
 import { Button, CollectionNotice, ConfirmDialog, EmptyState, ErrorNotice, FileRootBadge, KeyValues, LinkButton, PageHeading, Section } from './PanelKit.jsx';
 import {
   applyFrameworkPresetToForm,
@@ -34,7 +35,7 @@ export default function NewWebsitePage() {
 }
 function WebsiteForm({ parentId }) {
   const [params] = useSearchParams();
-  const { domains, websites, servers, applications, refreshAll } = useWorkspace();
+  const { domains, websites, servers, applications, license, refreshAll } = useWorkspace();
   const [form, setForm] = useState({
     mode: parentId || params.get('mode') === 'subdomain' ? 'subdomain' : 'domain',
     parentDomainId: parentId,
@@ -136,6 +137,15 @@ function WebsiteForm({ parentId }) {
   const baseLocked = busy || finishedAttempt || domains.status !== 'ready' || servers.status !== 'ready';
   const bindingDataPending = (existingType || sharedMode) && (applications.status !== 'ready' || websites.status !== 'ready');
   const locked = baseLocked || Boolean(bindingDataPending);
+  const isolatedUsersPremiumRequired = isPremiumRequired(license, 'perSiteIsolatedUsers');
+  const resellerPremiumRequired = isPremiumRequired(license, 'resellerAccounts');
+  const selectedCustomer = customers.find((account) => account.id === form.customerId) ?? null;
+  const siteOwnerPremiumRequired = (form.ownerMode === 'new_admin' && isolatedUsersPremiumRequired)
+    || (form.ownerMode === 'customer' && (isolatedUsersPremiumRequired || Boolean(selectedCustomer?.resellerId && resellerPremiumRequired)));
+  const newWebsiteReturnTo = form.ownerMode === 'customer' && form.customerId
+    ? `/websites/new?customer=${encodeURIComponent(form.customerId)}`
+    : '/websites/new';
+  const siteOwnerLicensePath = buildLicenseSettingsPath({ returnTo: newWebsiteReturnTo, feature: 'site_owner' });
   function update(key, value) { setDirty(true); setForm((current) => ({
     ...current,
     [key]: value,
@@ -150,6 +160,7 @@ function WebsiteForm({ parentId }) {
     event.preventDefault();
     const current = scope.current;
     if (locked || pending.current || !current?.isCurrent()) return;
+    if (siteOwnerPremiumRequired) return;
     if (step < 3) { setStep(value => value + 1); return; }
     pending.current = true; setError(null);
     try {
@@ -232,11 +243,25 @@ function WebsiteForm({ parentId }) {
         {form.mode === 'subdomain' && <div className="yp-subdomain-branch" style={{ marginTop: 12 }}><div className="yp-subdomain-branch-main"><span className="yp-tree-connector" aria-hidden="true">└─</span><strong>Ortak Domain İçi Dosya Kökü:</strong><FileRootBadge path={resolveSubdomainSharedFileRoot(parent?.primaryDomain, form.prefix)} isSubdomain parentDomain={parent?.primaryDomain ?? 'example.com'} /></div><small className="ws-muted">Alt alan adı dosyaları ana domain dizini altında açılır; kendi başına PHP/Node.js/Statik uygulama, Veritabanı ve Docker proxy bağlayabilir.</small></div>}
         <div className="ws-form-grid">
           <label>Site sahibi<select aria-label="Site sahibi" value={form.ownerMode} onChange={event => { update('ownerMode', event.target.value); if (event.target.value !== 'new_admin') update('adminPassword', ''); if (event.target.value === 'customer' && sharedMode) update('sourceMode', 'new_php'); }}>
-            <option value="owner">Yönetim hesabım</option><option value="customer">Mevcut müşteri</option>{form.mode === 'domain' && <option value="new_admin">Yeni site giriş hesabı</option>}
+            <option value="owner">Yönetim hesabım</option>
+            <option value="customer">{isolatedUsersPremiumRequired ? 'Mevcut müşteri — Premium' : 'Mevcut müşteri'}</option>
+            {form.mode === 'domain' && <option value="new_admin">{isolatedUsersPremiumRequired ? 'Yeni site giriş hesabı — Premium' : 'Yeni site giriş hesabı'}</option>}
           </select></label>
-          {form.ownerMode === 'customer' && <label>Müşteri<select required value={form.customerId} onChange={event => update('customerId', event.target.value)}><option value="">Müşteri seçin</option>{customers.map(account => <option key={account.id} value={account.id}>{account.username}</option>)}</select><ErrorNotice error={customerError} /></label>}
+          {form.ownerMode === 'customer' && !siteOwnerPremiumRequired && <label>Müşteri<select required value={form.customerId} onChange={event => update('customerId', event.target.value)}><option value="">Müşteri seçin</option>{customers.map(account => <option key={account.id} value={account.id}>{account.username}</option>)}</select><ErrorNotice error={customerError} /></label>}
         </div>
-        {form.mode === 'domain' && form.ownerMode === 'new_admin' && <div className="ws-form-divider" style={{ marginTop: 24 }}>
+        {siteOwnerPremiumRequired && (
+          <div className="ws-notice ws-notice-warn" role="status" data-premium-notice="new-website-owner">
+            <div>
+              <strong>{form.ownerMode === 'customer' ? 'Müşteriye site atamak için YunPanel Premium gerekiyor' : 'Ayrı site giriş hesabı oluşturmak için YunPanel Premium gerekiyor'}</strong>
+              <p>Ücretsiz sürümde “Yönetim hesabım” seçeneğiyle sınırsız web sitesi oluşturabilirsiniz. Ayrı müşteri veya site yöneticisi hesabı tanımlamak için Premium lisansınızı etkinleştirin.</p>
+            </div>
+            <div className="ws-actions">
+              <Button onClick={() => { update('ownerMode', 'owner'); update('adminPassword', ''); }}>Yönetim hesabımla devam et</Button>
+              <LinkButton variant="primary" to={siteOwnerLicensePath}>Lisans yönetimine git</LinkButton>
+            </div>
+          </div>
+        )}
+        {form.mode === 'domain' && form.ownerMode === 'new_admin' && !siteOwnerPremiumRequired && <div className="ws-form-divider" style={{ marginTop: 24 }}>
           <h3>Yeni site giriş hesabı</h3>
           <p className="ws-muted">Bu kullanıcı yalnız bu sitenin panel araçlarına erişebilir. WordPress yönetici hesabı kurulum sırasında ayrıca belirlenir.</p>
           <LoginCredentialsFields email={form.adminEmail} password={form.adminPassword}
@@ -291,7 +316,7 @@ function WebsiteForm({ parentId }) {
         {form.mode === 'domain' && <div className="ws-form-divider" style={{ marginTop: 24 }}><h3>Posta</h3><label className="ws-check" style={{ marginTop: 16 }}><input type="checkbox" checked={form.mailMode === 'local'} onChange={(event) => update('mailMode', event.target.checked ? 'local' : 'none')} /><span><strong>E-posta ve Webmail etkinleştir</strong><small><code>webmail.{form.primaryDomain.trim() || 'domain.com'}</code> için DNS A kaydı, SSL sertifikası ve webmail arayüzü otomatik olarak hazırlanır.</small></span></label></div>}
         </>}
         <SiteCreateProgress state={submission} />
-        <footer className="ws-form-footer" style={{ marginTop: 24 }}><LinkButton to="/websites">Vazgeç</LinkButton>{step > 1 && <Button disabled={busy} onClick={() => setStep(value => value - 1)}>Geri</Button>}<Button type="submit" variant="primary" icon="plus" disabled={locked || !serverId || (step >= 2 && existingType && !form.applicationId) || (step >= 2 && sharedMode && !form.websiteId)}>{busy ? 'Site kuruluyor…' : step < 3 ? 'Devam et' : sharedMode ? 'Alan adını bağla' : 'Siteyi oluştur'}</Button></footer>
+        <footer className="ws-form-footer" style={{ marginTop: 24 }}><LinkButton to="/websites">Vazgeç</LinkButton>{step > 1 && <Button disabled={busy} onClick={() => setStep(value => value - 1)}>Geri</Button>}<Button type="submit" variant="primary" icon="plus" disabled={locked || !serverId || siteOwnerPremiumRequired || (step >= 2 && existingType && !form.applicationId) || (step >= 2 && sharedMode && !form.websiteId)}>{busy ? 'Site kuruluyor…' : step < 3 ? 'Devam et' : sharedMode ? 'Alan adını bağla' : 'Siteyi oluştur'}</Button></footer>
 
       </fieldset></form>
     </Section>}

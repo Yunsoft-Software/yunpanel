@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { panelRequest } from '../api.js';
 import { sessionGeneration, setSession } from '../session-client.js';
-import { Badge, Button, EmptyState, ErrorNotice, Modal, PageHeading, Section } from './PanelKit.jsx';
+import { Badge, Button, EmptyState, ErrorNotice, LinkButton, Modal, PageHeading, Section } from './PanelKit.jsx';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { HostingAccountsPanel, HostingProfileDialog } from './HostingAccountsPanel.jsx';
+import { buildLicenseSettingsPath, isLicenseLoaded, isPremiumRequired } from './license-client.js';
 import { createUserAdminClient, emptyUserPage, userAdminInput, userAdminMessage } from './user-admin-client.js';
 
 const LIMIT = 25;
@@ -19,16 +20,22 @@ const initialForm = (user) => ({
 const mustReload = (error) => error?.reconcile || ['user_revision_conflict', 'user_not_found', 'invalid_revision'].includes(error?.code);
 
 export default function UsersPage() {
+  const { license } = useWorkspace();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [page, setPage] = useState(emptyUserPage);
   const [number, setNumber] = useState(1);
   const [dialog, setDialog] = useState(null);
+  const [premiumGateOpen, setPremiumGateOpen] = useState(false);
   const [notice, setNotice] = useState('');
   const [profileRevision, setProfileRevision] = useState(0);
   const client = useRef(null);
+  const licenseLoaded = isLicenseLoaded(license);
+  const isolatedUsersPremiumRequired = isPremiumRequired(license, 'perSiteIsolatedUsers');
+  const usersLicensePath = buildLicenseSettingsPath({ returnTo: '/users?action=create', feature: 'site_user' });
   useEffect(() => {
     const instance = createUserAdminClient({ request: panelRequest, generation: sessionGeneration, onPage: setPage,
       onAccessLost() {
-        setDialog(null); setNotice(''); setSession(null);
+        setDialog(null); setPremiumGateOpen(false); setNotice(''); setSession(null);
         window.dispatchEvent(new Event('yunpanel:session-expired'));
       },
     });
@@ -38,10 +45,20 @@ export default function UsersPage() {
   useEffect(() => { client.current?.load({ offset: (number - 1) * LIMIT, limit: LIMIT }); }, [number]);
   const totalPages = page.data ? Math.max(1, Math.ceil(page.data.total / LIMIT)) : number;
   useEffect(() => { if (page.status === 'ready' && number > totalPages) setNumber(totalPages); }, [number, page.status, totalPages]);
+  useEffect(() => {
+    if (searchParams.get('action') !== 'create' || !licenseLoaded) return;
+    if (!isolatedUsersPremiumRequired) {
+      setNotice('');
+      setDialog({ type: 'create' });
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete('action');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, licenseLoaded, isolatedUsersPremiumRequired]);
   function refresh() { return client.current?.load({ offset: (number - 1) * LIMIT, limit: LIMIT }); }
   function closeDialog() { setDialog(null); setProfileRevision((value) => value + 1); refresh(); }
   function hostingAccessLost() {
-    setDialog(null); setNotice(''); setSession(null);
+    setDialog(null); setPremiumGateOpen(false); setNotice(''); setSession(null);
     window.dispatchEvent(new Event('yunpanel:session-expired'));
   }
   async function save(method, user, body) {
@@ -58,13 +75,22 @@ export default function UsersPage() {
   }
   const ready = page.status === 'ready' && page.data?.offset === (number - 1) * LIMIT;
   const visible = ready ? page.data : null;
-  const locked = dialog !== null || !ready;
+  const locked = dialog !== null || premiumGateOpen || !ready;
   return <>
     <nav className="ws-breadcrumb" aria-label="Sayfa yolu"><Link to="/settings">Ayarlar</Link><span>/ Kullanıcılar</span></nav>
     <PageHeading title="Kullanıcılar" description="Panel hesaplarını ve yönetim erişimini yönetin." actions={<>
-      <Button icon="refresh" onClick={refresh} disabled={dialog !== null || page.status === 'loading'}>Yenile</Button>
-      <Button icon="plus" variant="primary" disabled={locked} onClick={() => { setNotice(''); setDialog({ type: 'create' }); }}>Kullanıcı ekle</Button>
+      <Button icon="refresh" onClick={refresh} disabled={dialog !== null || premiumGateOpen || page.status === 'loading'}>Yenile</Button>
+      <Button icon="plus" variant="primary" disabled={locked} onClick={() => { setNotice(''); if (isolatedUsersPremiumRequired) setPremiumGateOpen(true); else setDialog({ type: 'create' }); }}><span>Kullanıcı ekle</span>{isolatedUsersPremiumRequired && <Badge state="unknown">Premium</Badge>}</Button>
     </>} />
+    {isolatedUsersPremiumRequired && (
+      <div className="ws-notice ws-notice-warn" role="status" data-premium-notice="users">
+        <div>
+          <strong>Ek panel kullanıcısı eklemek için YunPanel Premium gerekiyor</strong>
+          <p>Ücretsiz sürümde mevcut kullanıcılar görüntülenebilir ve yönetim hesabınızla sınırsız site kurmaya devam edebilirsiniz. Ayrı müşteri veya site yöneticisi hesapları oluşturmak için Premium lisansınızı etkinleştirin.</p>
+        </div>
+        <LinkButton variant="primary" to={usersLicensePath}>Lisans yönetimine git</LinkButton>
+      </div>
+    )}
     {notice && <div className="ws-notice" role="status">{notice}</div>}
     <Section title="Hesaplar" description="Panel kullanıcı hesapları, roller ve iki adımlı doğrulama durumları.">
       {(page.status === 'loading' || (page.status === 'ready' && !ready)) && <div className="ws-loading" role="status"><span className="ws-spinner" />Hesaplar doğrulanıyor…</div>}
@@ -87,15 +113,27 @@ export default function UsersPage() {
         <Button disabled={locked || !visible || number >= totalPages} onClick={() => setNumber((value) => value + 1)}>Sonraki</Button>
       </div></footer>
     </Section>
-    <HostingAccountsPanel refreshKey={profileRevision} locked={dialog !== null} onAccessLost={hostingAccessLost}
+    <HostingAccountsPanel refreshKey={profileRevision} locked={dialog !== null || premiumGateOpen} onAccessLost={hostingAccessLost}
       onOpen={(accountId) => { setNotice(''); setDialog({ type: 'hosting', accountId }); }} />
+    {premiumGateOpen && (
+      <Modal title="Kullanıcı eklemek için YunPanel Premium gerekiyor" onClose={() => setPremiumGateOpen(false)}>
+        <div className="ws-form" data-premium-gate-dialog="users">
+          <p>Yeni müşteri, site yöneticisi veya ek panel hesabı oluşturmak için aktif bir YunPanel Premium lisansı gerekir.</p>
+          <p className="ws-muted">Ücretsiz sürümde mevcut hesaplar görüntülenmeye ve kendi siteleriniz çalışmaya devam eder.</p>
+          <footer className="ws-modal-footer">
+            <Button onClick={() => setPremiumGateOpen(false)}>Vazgeç</Button>
+            <LinkButton variant="primary" to={usersLicensePath}>Lisans yönetimine git</LinkButton>
+          </footer>
+        </div>
+      </Modal>
+    )}
     {dialog?.type === 'hosting' ? <HostingProfileDialog key={dialog.user?.id ?? dialog.accountId} user={dialog.user} accountId={dialog.accountId}
       onClose={closeDialog} onSaved={(message) => { setNotice(message); closeDialog(); }} onAccessLost={hostingAccessLost} />
-      : dialog && <UserDialog key={`${dialog.type}:${dialog.user?.id ?? 'new'}`} mode={dialog.type} user={dialog.user} onClose={closeDialog} onSave={save} />}
+      : dialog && <UserDialog key={`${dialog.type}:${dialog.user?.id ?? 'new'}`} mode={dialog.type} user={dialog.user} licensePath={usersLicensePath} onClose={closeDialog} onSave={save} />}
   </>;
 }
 
-function UserDialog({ mode, user, onClose, onSave }) {
+function UserDialog({ mode, user, licensePath, onClose, onSave }) {
   const { websites } = useWorkspace();
   const [form, setForm] = useState(() => initialForm(user));
   const [confirmation, setConfirmation] = useState('');
@@ -134,6 +172,15 @@ function UserDialog({ mode, user, onClose, onSave }) {
       <Button onClick={() => setDiscard(false)}>Düzenlemeye dön</Button><Button variant="danger" onClick={onClose}>Değişiklikleri bırak</Button>
     </footer></> : <form className="ws-form" onSubmit={submit}>
       <ErrorNotice error={error ? userAdminMessage(error) : null} />
+      {error?.code === 'premium_license_required' && licensePath && (
+        <div className="ws-notice ws-notice-warn" role="status">
+          <div>
+            <strong>YunPanel Premium lisansı gerekiyor</strong>
+            <p>Lisansınızı etkinleştirdikten sonra bu ekrana geri dönebilirsiniz.</p>
+          </div>
+          <LinkButton variant="primary" to={licensePath}>Lisans yönetimine git</LinkButton>
+        </div>
+      )}
       {reload && <p role="alert">İşlemi yeniden göndermeyin. Formu kapatıp listeyi kontrol edin; gerekiyorsa güncel kaydı yeniden açın.</p>}
       <fieldset disabled={busy || reload}>
         {deleting ? <>

@@ -34,6 +34,13 @@ export function navigationGroups(canManage, isOwner = true, isReseller = false, 
   return [{ id: 'panel', label, title: label, items }];
 }
 
+export function navigationItemRequiredCapability(to, isOwner = false) {
+  if (!isOwner) return null;
+  if (to === '/customers') return 'perSiteIsolatedUsers';
+  if (to === '/resellers') return 'resellerAccounts';
+  return null;
+}
+
 // Only working surfaces belong in this directory. No placeholder backup/statistics catalog.
 export const TOOLS_SETTINGS_GROUPS = Object.freeze([
   { id: 'server', label: 'Sunucu ve hizmetler', items: [

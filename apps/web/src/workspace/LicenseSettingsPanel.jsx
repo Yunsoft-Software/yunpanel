@@ -1,4 +1,5 @@
 import { useContext, useEffect, useState } from 'react';
+import { useInRouterContext, useSearchParams } from 'react-router';
 import { formatDate } from './site-model.js';
 import {
   Badge,
@@ -6,18 +7,21 @@ import {
   ConfirmDialog,
   ErrorNotice,
   KeyValues,
+  LinkButton,
   Section,
 } from './PanelKit.jsx';
 import { WorkspaceContext } from './WorkspaceContext.jsx';
 import {
   activateLicense,
   deactivateLicense,
+  describeLicenseReturnTarget,
   formatBillingPeriodLabel,
   formatLicenseError,
   formatLicenseStatusLabel,
   getLicenseStatus,
   refreshLicense,
   resolveLicenseBadgeState,
+  sanitizeLicenseReturnTo,
 } from './license-client.js';
 
 const CAPABILITY_ROWS = Object.freeze([
@@ -135,9 +139,31 @@ export function LicenseSummaryView({
   );
 }
 
-export default function LicenseSettingsPanel({
+function LicenseSettingsPanelWithRouter(props) {
+  const [params] = useSearchParams();
+  return (
+    <LicenseSettingsPanelInner
+      {...props}
+      returnTo={props.returnTo ?? params.get('returnTo')}
+      feature={props.feature ?? params.get('feature')}
+      inRouter
+    />
+  );
+}
+
+export default function LicenseSettingsPanel(props) {
+  const inRouter = useInRouterContext();
+  return inRouter
+    ? <LicenseSettingsPanelWithRouter {...props} />
+    : <LicenseSettingsPanelInner {...props} inRouter={false} />;
+}
+
+function LicenseSettingsPanelInner({
   initialLicense = null,
   client = null,
+  returnTo = null,
+  feature = null,
+  inRouter = false,
 }) {
   const workspace = useContext(WorkspaceContext);
   const isOwner = workspace ? Boolean(workspace.isOwner && workspace.canManage) : true;
@@ -159,11 +185,16 @@ export default function LicenseSettingsPanel({
   const [successMessage, setSuccessMessage] = useState(null);
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
 
+  const safeReturnTo = sanitizeLicenseReturnTo(returnTo);
+  const returnMeta = safeReturnTo ? describeLicenseReturnTarget(safeReturnTo, feature) : null;
+  const premiumActive = Boolean(license?.valid && license?.tier === 'premium');
+
   async function load(signal) {
     setLoading(true);
     try {
       const fresh = await api.getLicenseStatus({ signal });
       setLicense(fresh);
+      workspace?.license?.apply?.(fresh);
       setError(null);
     } catch (failure) {
       if (failure?.name !== 'AbortError') {
@@ -196,6 +227,7 @@ export default function LicenseSettingsPanel({
         domain: isLoopbackPanel ? domain : '',
       });
       setLicense(updated);
+      workspace?.license?.apply?.(updated);
       setLicenseKey('');
       setToken('');
       setSuccessMessage('YunPanel Premium lisansı doğrulandı ve etkinleştirildi.');
@@ -217,6 +249,7 @@ export default function LicenseSettingsPanel({
         domain: isLoopbackPanel ? (domain || license?.domain || '') : '',
       });
       setLicense(updated);
+      workspace?.license?.apply?.(updated);
       setSuccessMessage(
         updated.valid
           ? 'Lisans durumu doğrulandı ve güncellendi.'
@@ -238,6 +271,7 @@ export default function LicenseSettingsPanel({
     try {
       const updated = await api.deactivateLicense({ notifyRemote: true });
       setLicense(updated);
+      workspace?.license?.apply?.(updated);
       setConfirmDeactivate(false);
       setSuccessMessage('Lisans bu kurulumdan kaldırıldı. Panel ücretsiz sürümde çalışmaya devam ediyor.');
       workspace?.license?.refresh?.();
@@ -248,8 +282,44 @@ export default function LicenseSettingsPanel({
     }
   }
 
+  const returnAction = safeReturnTo && returnMeta
+    ? (inRouter
+      ? (
+        <LinkButton
+          variant={premiumActive ? 'primary' : 'secondary'}
+          icon="arrow"
+          to={safeReturnTo}
+        >
+          {returnMeta.buttonLabel}
+        </LinkButton>
+      )
+      : (
+        <a className={`ws-button ${premiumActive ? 'ws-button-primary' : ''}`} href={safeReturnTo}>
+          {returnMeta.buttonLabel}
+        </a>
+      ))
+    : null;
+
   return (
     <>
+      {safeReturnTo && returnMeta && (
+        <div
+          className={`ws-notice ${premiumActive ? '' : 'ws-notice-warn'}`}
+          role="status"
+          data-license-return-banner={premiumActive ? 'ready' : 'pending'}
+        >
+          <div>
+            <strong>{premiumActive ? returnMeta.readyTitle : returnMeta.pendingTitle}</strong>
+            <p>
+              {premiumActive
+                ? 'Premium lisansınız aktif. Kaldığınız yerden hemen devam edebilirsiniz.'
+                : 'Aşağıdan YunPanel Premium lisansınızı etkinleştirdikten sonra tek tıkla önceki işinize dönebilirsiniz.'}
+            </p>
+          </div>
+          {returnAction}
+        </div>
+      )}
+
       <Section
         title="Lisans durumu"
         description="Aylık ve yıllık YunPanel lisans doğrulaması yerel imza kontrolüyle çevrimdışı çalışır."

@@ -117,3 +117,13 @@ test('successful delete has explicit confirmation and safe messages do not echo 
   assert.deepEqual(await f.client.mutate({ method: 'DELETE', id: user.id, body: { revision: 1 } }), { deleted: true, sessionRevoked: false });
   assert.equal(userAdminMessage(failure(500, 'unexpected')).includes('private server'), false);
 });
+
+test('403 premium_license_required keeps the Owner session alive and returns a clear Turkish notice', async (t) => {
+  const f = fixture(t, async () => { throw failure(403, 'premium_license_required'); });
+  await assert.rejects(
+    f.client.mutate({ method: 'POST', body: { username: 'siteadmin', password: 'long-enough-password', role: 'site_manager', active: true } }),
+    { code: 'premium_license_required' },
+  );
+  assert.equal(f.lost(), 0, '403 premium_license_required must NOT revoke the Owner session');
+  assert.match(userAdminMessage(failure(403, 'premium_license_required')), /YunPanel Premium/);
+});

@@ -4,7 +4,8 @@ import { WorkspaceProvider, useWorkspace } from './WorkspaceContext.jsx';
 import { UnsavedChangesProvider } from './UnsavedChanges.jsx';
 import { Button, Icon, LinkButton } from './PanelKit.jsx';
 import { knownCount } from './resource-model.js';
-import { navigationGroups, navigationItemActive, PREFERENCE_KEY, readPreferences, writePreferences, websiteCount } from './ui/ux-model.js';
+import { isPremiumRequired } from './license-client.js';
+import { navigationGroups, navigationItemActive, navigationItemRequiredCapability, PREFERENCE_KEY, readPreferences, writePreferences, websiteCount } from './ui/ux-model.js';
 import Preferences, { apply as applyThemePreferences, readStored as readStoredTheme } from './ui/Preferences.jsx';
 import CommandPalette from './ui/CommandPalette.jsx';
 import JobDrawer from './JobDrawer.jsx';
@@ -17,7 +18,7 @@ export default function WorkspaceLayout() {
   return <WorkspaceProvider><UnsavedChangesProvider><Shell /></UnsavedChangesProvider></WorkspaceProvider>;
 }
 function Shell() {
-  const { domains, websites, certificates, servers, jobs, notice, setNotice, canManage, isOwner, isReseller, isCustomer } = useWorkspace();
+  const { domains, websites, certificates, servers, jobs, license, notice, setNotice, canManage, isOwner, isReseller, isCustomer } = useWorkspace();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -166,7 +167,7 @@ function Shell() {
     {narrow && menuOpen && <button type="button" tabIndex={-1} className="ws-nav-backdrop" aria-label="Menüyü kapat" onClick={() => setMenuOpen(false)} />}
     <aside ref={menu} id="workspace-navigation" className={`ws-sidebar ${menuOpen ? 'is-open' : ''} ${!narrow && sidebarCollapsed ? 'is-collapsed' : ''}`} inert={narrow && !menuOpen} aria-label="Ana menü" role={narrow && menuOpen ? 'dialog' : undefined} aria-modal={narrow && menuOpen ? true : undefined}>
       <div className="ws-brand"><span className="ws-brand-mark" aria-hidden="true">Y</span><div><strong>YunPanel</strong><small>{isOwner ? 'SUNUCU YÖNETİMİ' : isReseller ? 'BAYİ PANELİ' : isCustomer ? 'MÜŞTERİ PANELİ' : 'SİTE YÖNETİMİ'}</small></div><Button className="ws-nav-close" icon="close" aria-label="Menüyü kapat" title="Yan menüyü daralt / kapat" onClick={closeSidebar} /></div>
-      <nav aria-label="Panel bölümleri">{groups.map((group) => <div className="ws-nav-group" key={group.id}><p className="ws-nav-label" id={`ws-nav-${group.id}`}>{group.label}</p><div className="ws-nav" role="group" aria-labelledby={`ws-nav-${group.id}`}>{group.items.map(([to, label, icon]) => <Fragment key={to}><Link to={to} className={navigationItemActive(to, location.pathname) ? 'active' : undefined} aria-current={navigationItemActive(to, location.pathname) ? (to === location.pathname ? 'page' : 'location') : undefined}><Icon name={icon} /><span>{label}</span>{to === '/jobs' && jobCount > 0 && <span className="ws-nav-count">{jobCount}</span>}</Link>{to === '/websites' && canManage && isOwner && <Link key="/docker" to="/docker" className={navigationItemActive('/docker', location.pathname) ? 'active' : undefined} aria-current={navigationItemActive('/docker', location.pathname) ? (location.pathname === '/docker' ? 'page' : 'location') : undefined}><Icon name="box" /><span>Uygulama Marketi</span></Link>}</Fragment>)}</div></div>)}</nav>
+      <nav aria-label="Panel bölümleri">{groups.map((group) => <div className="ws-nav-group" key={group.id}><p className="ws-nav-label" id={`ws-nav-${group.id}`}>{group.label}</p><div className="ws-nav" role="group" aria-labelledby={`ws-nav-${group.id}`}>{group.items.map(([to, label, icon]) => { const requiredCapability = navigationItemRequiredCapability(to, isOwner); const premiumBadge = Boolean(requiredCapability && isPremiumRequired(license, requiredCapability)); return <Fragment key={to}><Link to={to} className={navigationItemActive(to, location.pathname) ? 'active' : undefined} aria-current={navigationItemActive(to, location.pathname) ? (to === location.pathname ? 'page' : 'location') : undefined}><Icon name={icon} /><span>{label}</span>{premiumBadge && <span className="ws-nav-count" data-premium-badge="true">Premium</span>}{to === '/jobs' && jobCount > 0 && <span className="ws-nav-count">{jobCount}</span>}</Link>{to === '/websites' && canManage && isOwner && <Link key="/docker" to="/docker" className={navigationItemActive('/docker', location.pathname) ? 'active' : undefined} aria-current={navigationItemActive('/docker', location.pathname) ? (location.pathname === '/docker' ? 'page' : 'location') : undefined}><Icon name="box" /><span>Uygulama Marketi</span></Link>}</Fragment>; })}</div></div>)}</nav>
       <details className="ws-appearance"><summary>Görünüm tercihleri</summary><Preferences /></details>
       <div className="ws-sidebar-footer"><strong>{isOwner ? (canManage ? 'Sunucu yönetimi' : 'Salt okunur görünüm') : isReseller ? 'Bayi yönetimi' : isCustomer ? 'Müşteri paneli' : 'Site yönetimi'}</strong><span>{isOwner ? (canManage ? 'Yerel sunucu çalışma alanı' : 'Yalnız izin verilen kaynaklar') : isReseller ? 'Müşterileriniz ve izinli site araçları' : isCustomer ? 'Web siteleriniz ve barındırma araçları' : 'Yetkili olduğunuz web siteleri'}</span></div>
     </aside>
