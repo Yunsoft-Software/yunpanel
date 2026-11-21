@@ -7,6 +7,7 @@ import { useUnsavedChanges } from './UnsavedChanges.jsx';
 import { createHostingAccountClient, hostingAccountMessage } from './hosting-account-client.js';
 import { buildResellerAccountQuotaMetrics } from './quota-model.js';
 import { buildResellerNextActions } from './next-actions-model.js';
+import CustomerQuotaDialog from './CustomerQuotaDialog.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import './ui/console-lists.css';
 
@@ -186,15 +187,18 @@ export default function ResellerCustomersPage() {
             </td>
             <td data-label="Disk">
               <span>{metrics.disk.measured ? metrics.disk.summaryText : metrics.disk.usageText}</span>
-              {!metrics.disk.measured && <span className="ws-field-hint" style={{ display: 'block' }}>{metrics.disk.hasLimit ? `Kayıtlı sınır: ${metrics.disk.limitText}` : 'Sınır: Sınırsız'}</span>}
+              {!metrics.disk.measured && <span className="ws-field-hint" style={{ display: 'block' }}>{metrics.disk.hasLimit ? (metrics.disk.enforced ? `Uygulanan sınır: ${metrics.disk.limitText}` : `Kayıtlı sınır: ${metrics.disk.limitText}`) : 'Sınır: Sınırsız'}</span>}
+              {metrics.disk.enforced && <span className="ws-field-hint" style={{ display: 'block' }}>Panel yazma kotası etkin</span>}
             </td>
             <td data-label="Trafik">
               <span>{metrics.traffic.measured ? metrics.traffic.summaryText : metrics.traffic.usageText}</span>
-              {!metrics.traffic.measured && <span className="ws-field-hint" style={{ display: 'block' }}>{metrics.traffic.hasLimit ? `Kayıtlı sınır: ${metrics.traffic.limitText}` : 'Sınır: Sınırsız'}</span>}
+              {!metrics.traffic.measured && <span className="ws-field-hint" style={{ display: 'block' }}>{metrics.traffic.hasLimit ? (metrics.traffic.enforced ? `Uygulanan sınır: ${metrics.traffic.limitText}` : `Kayıtlı sınır: ${metrics.traffic.limitText}`) : 'Sınır: Sınırsız'}</span>}
+              {metrics.traffic.enforced && <span className="ws-field-hint" style={{ display: 'block' }}>HTTP trafik sınırı etkin</span>}
             </td>
             <td data-label="Veritabanı">
               <span>{metrics.databases.measured ? metrics.databases.summaryText : metrics.databases.usageText}</span>
-              {!metrics.databases.measured && <span className="ws-field-hint" style={{ display: 'block' }}>{metrics.databases.hasLimit ? `Kayıtlı sınır: ${metrics.databases.limitText}` : 'Sınır: Sınırsız'}</span>}
+              {!metrics.databases.measured && <span className="ws-field-hint" style={{ display: 'block' }}>{metrics.databases.hasLimit ? (metrics.databases.enforced ? `Uygulanan sınır: ${metrics.databases.limitText}` : `Kayıtlı sınır: ${metrics.databases.limitText}`) : 'Sınır: Sınırsız'}</span>}
+              {metrics.databases.isFull && <span className="ws-field-hint" style={{ color: 'var(--ws-warning)', display: 'block' }}>Kota doldu</span>}
             </td>
             <td data-label="İşlemler" className="ws-reseller-actions-cell"><div className="ws-actions ws-reseller-row-actions">
               <Button
@@ -516,126 +520,6 @@ function AllocateSiteDialog({ account, reseller, servers, onClose, onSaved }) {
             </div>
           )}
         </div>
-      )}
-    </Modal>
-  );
-}
-
-function CustomerQuotaDialog({ account, reseller, client, onClose, onSaved }) {
-  const [form, setForm] = useState(() => ({
-    maxWebsites: account.quotas?.maxWebsites !== null && account.quotas?.maxWebsites !== undefined ? String(account.quotas.maxWebsites) : '',
-    maxDiskMb: account.quotas?.maxDiskMb !== null && account.quotas?.maxDiskMb !== undefined ? String(account.quotas.maxDiskMb) : '',
-    maxTrafficMb: account.quotas?.maxTrafficMb !== null && account.quotas?.maxTrafficMb !== undefined ? String(account.quotas.maxTrafficMb) : '',
-    maxDatabases: account.quotas?.maxDatabases !== null && account.quotas?.maxDatabases !== undefined ? String(account.quotas.maxDatabases) : '',
-  }));
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
-  const [discard, setDiscard] = useState(false);
-  const pending = useRef(false);
-  const mounted = useRef(true);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
-
-  const initialWebsites = account.quotas?.maxWebsites !== null && account.quotas?.maxWebsites !== undefined ? String(account.quotas.maxWebsites) : '';
-  const initialDisk = account.quotas?.maxDiskMb !== null && account.quotas?.maxDiskMb !== undefined ? String(account.quotas.maxDiskMb) : '';
-  const initialTraffic = account.quotas?.maxTrafficMb !== null && account.quotas?.maxTrafficMb !== undefined ? String(account.quotas.maxTrafficMb) : '';
-  const initialDatabases = account.quotas?.maxDatabases !== null && account.quotas?.maxDatabases !== undefined ? String(account.quotas.maxDatabases) : '';
-
-  const dirty = form.maxWebsites !== initialWebsites || form.maxDiskMb !== initialDisk || form.maxTrafficMb !== initialTraffic || form.maxDatabases !== initialDatabases;
-  useUnsavedChanges(dirty || busy);
-
-  function close() {
-    if (pending.current) return;
-    if (dirty && !discard) setDiscard(true);
-    else onClose();
-  }
-  function update(key, value) {
-    setForm((current) => ({ ...current, [key]: value }));
-    setError(null);
-  }
-  async function submit(event) {
-    event.preventDefault();
-    if (pending.current) return;
-    pending.current = true;
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await client.current.mutate({ action: 'quotas', account, form });
-      if (mounted.current) onSaved(`${result.account.username} müşterisinin kaynak kotaları güncellendi.`);
-    } catch (failure) {
-      if (mounted.current && failure.name !== 'AbortError') setError(failure);
-    } finally {
-      pending.current = false;
-      if (mounted.current) setBusy(false);
-    }
-  }
-
-  return (
-    <Modal title={`${account.username} · Kaynak Kotalarını Yönet`} onClose={close} busy={busy}>
-      {discard ? (
-        <>
-          <p>Kaydedilmemiş kota bilgileri bırakılacak. Pencereyi kapatmak istiyor musunuz?</p>
-          <footer className="ws-modal-footer">
-            <Button onClick={() => setDiscard(false)}>Düzenlemeye dön</Button>
-            <Button variant="danger" onClick={onClose}>Değişiklikleri bırak</Button>
-          </footer>
-        </>
-      ) : (
-        <form className="ws-form" onSubmit={submit}>
-          <ErrorNotice error={error ? (hostingAccountMessage(error) || error.message) : null} />
-          <fieldset disabled={busy}>
-            <p><strong>{account.username}</strong> müşterisine ayrılacak barındırma kaynak kotalarını belirleyin. Sınırsız yapmak için alanı boş bırakın.</p>
-            <p className="ws-muted">Web Sitesi Kotası yeni site tahsisinde (bekleyen tahsisler dahil) otomatik olarak uygulanır. Disk alanı, aylık trafik ve veritabanı alanları yalnız kayıtlı sınır olarak saklanır; henüz otomatik ölçülmüyor ve uygulanmıyor.</p>
-            {reseller?.limits?.maxWebsites !== null && reseller?.limits?.maxWebsites !== undefined && (
-              <p className="ws-muted">Maksimum bayi site limitiniz: {reseller.limits.maxWebsites} web sitesi.</p>
-            )}
-            <label>
-              Web Sitesi Kotası (Adet)
-              <input
-                type="number"
-                min="0"
-                value={form.maxWebsites}
-                onChange={(event) => update('maxWebsites', event.target.value)}
-                placeholder="Sınırsız için boş bırakın"
-              />
-            </label>
-            <label>
-              Disk Kotası (MB)
-              <input
-                type="number"
-                min="0"
-                value={form.maxDiskMb}
-                onChange={(event) => update('maxDiskMb', event.target.value)}
-                placeholder="Örn: 1024 (1 GB)"
-              />
-            </label>
-            <label>
-              Aylık Trafik Kotası (MB)
-              <input
-                type="number"
-                min="0"
-                value={form.maxTrafficMb}
-                onChange={(event) => update('maxTrafficMb', event.target.value)}
-                placeholder="Örn: 10240 (10 GB)"
-              />
-            </label>
-            <label>
-              Veritabanı Kotası (Adet)
-              <input
-                type="number"
-                min="0"
-                value={form.maxDatabases}
-                onChange={(event) => update('maxDatabases', event.target.value)}
-                placeholder="Örn: 2"
-              />
-            </label>
-          </fieldset>
-          <footer className="ws-modal-footer">
-            <Button disabled={busy} onClick={close}>Vazgeç</Button>
-            <Button type="submit" variant="primary" disabled={busy || !dirty}>
-              {busy ? 'Kaydediliyor…' : 'Kotaları Kaydet'}
-            </Button>
-          </footer>
-        </form>
       )}
     </Modal>
   );

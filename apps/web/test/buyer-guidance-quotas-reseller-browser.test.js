@@ -333,6 +333,73 @@ test('Real Playwright Chromium E2E: Owner, Reseller and Customer first-screen gu
 
     await ownerPage.goto(`${publicOrigin}/dashboard`, { waitUntil: 'networkidle' });
     await ownerPage.locator('[data-next-actions="dashboard"]').waitFor({ timeout: 10_000 });
+
+    // Owner /customers: shared CustomerQuotaDialog opt-in disk/traffic enforcement + immediate rollback (real SQLite + real API)
+    await ownerPage.goto(`${publicOrigin}/customers`, { waitUntil: 'networkidle' });
+    const ownerCustTwoRow = ownerPage.locator('tr', { has: ownerPage.getByRole('rowheader', { name: 'musteriiki' }) });
+    await ownerCustTwoRow.waitFor({ timeout: 10_000 });
+    await ownerCustTwoRow.getByRole('button', { name: 'Kota tahsis et' }).click();
+    const ownerQuotaDialog = ownerPage.getByRole('dialog');
+    await ownerQuotaDialog.waitFor({ timeout: 5_000 });
+    const diskToggle = ownerQuotaDialog.getByRole('checkbox', { name: /Disk yazma kotasını uygula/ });
+    const trafficToggle = ownerQuotaDialog.getByRole('checkbox', { name: /Aylık trafik sınırını uygula/ });
+    assert.equal(await diskToggle.isDisabled(), true, 'Disk enforcement toggle must be disabled when maxDiskMb is empty');
+    assert.equal(await diskToggle.isChecked(), false);
+    assert.equal(await trafficToggle.isDisabled(), true, 'Traffic enforcement toggle must be disabled when maxTrafficMb is empty');
+    assert.equal(await trafficToggle.isChecked(), false);
+
+    await ownerQuotaDialog.getByLabel(/Disk Kotası/).fill('500');
+    await ownerQuotaDialog.getByLabel(/Aylık Trafik Kotası/).fill('2048');
+    assert.equal(await diskToggle.isDisabled(), false);
+    assert.equal(await trafficToggle.isDisabled(), false);
+    await diskToggle.check();
+    await trafficToggle.check();
+    const [enableResp] = await Promise.all([
+      ownerPage.waitForResponse((r) => r.url().includes('/quotas') && r.request().method() === 'PATCH', { timeout: 10_000 }),
+      ownerQuotaDialog.getByRole('button', { name: 'Kotaları Kaydet' }).click(),
+    ]);
+    assert.equal(enableResp.status(), 200);
+    const enableJson = await enableResp.json();
+    assert.deepEqual(enableJson?.data?.account?.quotaEnforcement, {
+      websites: true,
+      databases: true,
+      disk: true,
+      traffic: true,
+    });
+    await ownerPage.getByText('musteriiki müşterisinin kaynak kotaları güncellendi.').waitFor({ timeout: 10_000 });
+    const enabledRowText = await ownerCustTwoRow.textContent();
+    assert.match(enabledRowText, /Panel yazma kotası etkin/);
+    assert.match(enabledRowText, /HTTP trafik sınırı etkin/);
+
+    // Reopen dialog and toggle BOTH checkboxes OFF without touching numbers -> dirty enables save -> immediate rollback!
+    await ownerCustTwoRow.getByRole('button', { name: 'Kota tahsis et' }).click();
+    await ownerQuotaDialog.waitFor({ timeout: 5_000 });
+    assert.equal(await diskToggle.isChecked(), true);
+    assert.equal(await trafficToggle.isChecked(), true);
+    const saveBtn = ownerQuotaDialog.getByRole('button', { name: 'Kotaları Kaydet' });
+    assert.equal(await saveBtn.isDisabled(), true, 'Save must be disabled when nothing changed');
+    await diskToggle.uncheck();
+    await trafficToggle.uncheck();
+    assert.equal(await saveBtn.isDisabled(), false, 'Unchecking enforcement toggles must mark dialog dirty');
+    const [rollbackResp] = await Promise.all([
+      ownerPage.waitForResponse((r) => r.url().includes('/quotas') && r.request().method() === 'PATCH', { timeout: 10_000 }),
+      saveBtn.click(),
+    ]);
+    assert.equal(rollbackResp.status(), 200);
+    const rollbackJson = await rollbackResp.json();
+    assert.deepEqual(rollbackJson?.data?.account?.quotaEnforcement, {
+      websites: true,
+      databases: true,
+      disk: false,
+      traffic: false,
+    });
+    await ownerPage.locator('tr', { has: ownerPage.getByRole('rowheader', { name: 'musteriiki' }) }).waitFor({ timeout: 10_000 });
+    await ownerPage.waitForFunction(() => {
+      const rows = Array.from(document.querySelectorAll('tr'));
+      const row = rows.find((r) => r.textContent?.includes('musteriiki'));
+      return row && !row.textContent.includes('Panel yazma kotası etkin') && !row.textContent.includes('HTTP trafik sınırı etkin');
+    }, { timeout: 10_000 });
+
     assert.deepEqual(ownerErrors, []);
     await ownerCtx.close();
 
@@ -358,10 +425,14 @@ test('Real Playwright Chromium E2E: Owner, Reseller and Customer first-screen gu
     const quotaDialog = resellerPage.getByRole('dialog');
     await quotaDialog.waitFor({ timeout: 5_000 });
     const quotaDialogText = await quotaDialog.textContent();
-    assert.match(quotaDialogText, /Web Sitesi Kotası yeni site tahsisinde \(bekleyen tahsisler dahil\) otomatik olarak uygulanır/);
-    assert.match(quotaDialogText, /henüz otomatik ölçülmüyor ve uygulanmıyor/);
+    assert.match(quotaDialogText, /Web Sitesi Kotası yeni site tahsisinde \(bekleyen tahsisler dahil\), Veritabanı Kotası ise yeni veritabanı oluşturma, bağlama ve WordPress kurulumlarında uygulanır/);
+    assert.match(quotaDialogText, /Disk yazma kotası ve aylık trafik sınırı isteğe bağlıdır/);
+    const resellerDiskToggle = quotaDialog.getByRole('checkbox', { name: /Disk yazma kotasını uygula/ });
+    assert.equal(await resellerDiskToggle.isDisabled(), true);
     await quotaDialog.getByLabel(/Web Sitesi Kotası/).fill('1');
     await quotaDialog.getByLabel(/Disk Kotası/).fill('500');
+    assert.equal(await resellerDiskToggle.isDisabled(), false);
+    assert.equal(await resellerDiskToggle.isChecked(), false);
     await quotaDialog.getByLabel(/Veritabanı Kotası/).fill('2');
     const [quotaResp] = await Promise.all([
       resellerPage.waitForResponse((r) => r.url().includes('/quotas') && r.request().method() === 'PATCH', { timeout: 10_000 }),
@@ -370,13 +441,13 @@ test('Real Playwright Chromium E2E: Owner, Reseller and Customer first-screen gu
     assert.equal(quotaResp.status(), 200);
     await resellerPage.getByText('musteribir müşterisinin kaynak kotaları güncellendi.').waitFor({ timeout: 10_000 });
 
-    // Table shows enforced 1 / 1 (Kota doldu) + honest Ölçülmüyor + Kayıtlı sınır for disk/DB
+    // Table shows enforced 1 / 1 (Kota doldu) + honest Ölçülmüyor + Kayıtlı sınır for unenforced disk + Uygulanan sınır for databases
     const updatedRowText = await custOneRow.textContent();
     assert.match(updatedRowText, /1 \/ 1/);
     assert.match(updatedRowText, /Kota Doldu/i);
     assert.match(updatedRowText, /Ölçülmüyor/);
     assert.match(updatedRowText, /Kayıtlı sınır: 500 MB/);
-    assert.match(updatedRowText, /Kayıtlı sınır: 2/);
+    assert.match(updatedRowText, /Uygulanan sınır: 2/);
     assert.equal(await custOneRow.getByRole('button', { name: 'Site tahsis et' }).isDisabled(), true);
 
     // Next-actions strip surfaces quota-full customer callout
@@ -479,11 +550,14 @@ test('Real Playwright Chromium E2E: Owner, Reseller and Customer first-screen gu
     assert.doesNotMatch(quotaHeaderAndBody, /Son ölçüm:/);
     assert.match(quotaHeaderAndBody, /Bayi yönetimli müşteri/);
 
-    // Enforced vs unmeasured groups are strictly separated; unproven DB/disk/traffic are NEVER labeled enforced
+    // Enforced vs unmeasured groups are strictly separated; enforced websites+databases vs opt-in-off disk+traffic
     const websitesMetricText = await custPage.locator('[data-quota-group="enforced"] [data-quota-metric="websites"]').textContent();
     assert.match(websitesMetricText, /1 \/ 1/);
     assert.match(websitesMetricText, /Kota doldu/);
     assert.match(websitesMetricText, /Yeni site tahsisinde uygulanır/);
+    const databasesMetricText = await custPage.locator('[data-quota-group="enforced"] [data-quota-metric="databases"]').textContent();
+    assert.match(databasesMetricText, /Tanımlı sınır: 2/);
+    assert.match(databasesMetricText, /Yeni veritabanı oluşturma, bağlama ve WordPress kurulumlarında uygulanır/);
 
     const unmeasuredGroupText = await custPage.locator('[data-quota-group="unmeasured"]').textContent();
     assert.doesNotMatch(unmeasuredGroupText, /Aktif sınır|uygulanır/);
@@ -492,8 +566,6 @@ test('Real Playwright Chromium E2E: Owner, Reseller and Customer first-screen gu
     assert.match(await custPage.locator('[data-quota-group="unmeasured"] [data-quota-metric="diskMb"]').textContent(), /henüz otomatik ölçülmüyor ve uygulanmıyor/);
     assert.match(await custPage.locator('[data-quota-group="unmeasured"] [data-quota-metric="trafficMb"]').textContent(), /Ölçülmüyor/);
     assert.match(await custPage.locator('[data-quota-group="unmeasured"] [data-quota-metric="trafficMb"]').textContent(), /Sınır: Sınırsız/);
-    assert.match(await custPage.locator('[data-quota-group="unmeasured"] [data-quota-metric="databases"]').textContent(), /Ölçülmüyor/);
-    assert.match(await custPage.locator('[data-quota-group="unmeasured"] [data-quota-metric="databases"]').textContent(), /Tanımlı sınır: 2/);
 
     // Site-level breakdown lists own site and NEVER foreign site
     const breakdown = custPage.locator('[data-customer-site-breakdown="true"]');

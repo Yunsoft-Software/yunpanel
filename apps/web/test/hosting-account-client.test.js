@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createHostingAccountClient, readHostingAccount, readHostingPage, hostingLimitsInput, hostingRegistrationInput, hostingCustomerCreateInput, hostingCustomerLoginInput, hostingAccountMessage } from '../src/workspace/hosting-account-client.js';
+import { createHostingAccountClient, readHostingAccount, readHostingPage, hostingLimitsInput, hostingRegistrationInput, hostingCustomerCreateInput, hostingCustomerLoginInput, hostingCustomerQuotasInput, hostingCustomerQuotaEnforcementInput, hostingAccountMessage } from '../src/workspace/hosting-account-client.js';
 const reseller = { id: 'bayi', username: 'bayi', kind: 'reseller', resellerId: null, active: true, revision: 1, userRevision: 2, createdAt: 1000, updatedAt: 1000, stage: 'profile_only', limits: { maxCustomers: 2, maxWebsites: null }, usage: { customers: 1, websites: 3 }, usageScope: 'registered_and_reserved_ownership' };
 const customer = { id: 'customer', username: 'customer', kind: 'customer', resellerId: 'bayi', active: true, revision: 1, userRevision: 2, createdAt: 1000, updatedAt: 1000, stage: 'profile_only' };
 const user = { id: 'customer', role: 'site_manager', revision: 1, websiteIds: [] };
@@ -303,4 +303,107 @@ test('403 premium_license_required keeps the Owner session alive and formats a c
   );
   assert.equal(f.lost(), 0, '403 premium_license_required must NOT log out the Owner session');
   assert.match(hostingAccountMessage(error(403, 'premium_license_required')), /YunPanel Premium/);
+});
+
+test('hostingCustomerQuotaEnforcementInput and readHostingAccount validate quotaEnforcement, decimal MB usage, and optional measurement metadata', () => {
+  assert.deepEqual(hostingCustomerQuotaEnforcementInput({}), { disk: false, traffic: false });
+  assert.deepEqual(hostingCustomerQuotaEnforcementInput({ enforceDisk: true, enforceTraffic: false }), { disk: true, traffic: false });
+  assert.deepEqual(hostingCustomerQuotaEnforcementInput({ quotaEnforcement: { disk: false, traffic: true } }), { disk: false, traffic: true });
+  assert.deepEqual(
+    hostingCustomerQuotasInput({ maxWebsites: '2', maxDiskMb: '512', maxTrafficMb: '2048', maxDatabases: '3', enforceDisk: true }),
+    { maxWebsites: 2, maxDiskMb: 512, maxTrafficMb: 2048, maxDatabases: 3 },
+  );
+
+  const enrichedCustomer = {
+    ...customer,
+    quotas: { maxWebsites: 3, maxDiskMb: 512, maxTrafficMb: 2048, maxDatabases: 2 },
+    quotaEnforcement: { websites: true, databases: true, disk: true, traffic: false, secret: 'drop' },
+    usage: { websites: 1, diskMb: 12.75, trafficMb: 0.5, databases: 1, measuredAt: '2026-11-21T12:00:00.000Z', trafficPeriod: '2026-11', token: 'drop' },
+  };
+  const parsed = readHostingAccount(enrichedCustomer);
+  assert.deepEqual(parsed.quotaEnforcement, { websites: true, databases: true, disk: true, traffic: false });
+  assert.deepEqual(parsed.usage, {
+    websites: 1,
+    diskMb: 12.75,
+    trafficMb: 0.5,
+    databases: 1,
+    measuredAt: '2026-11-21T12:00:00.000Z',
+    trafficPeriod: '2026-11',
+  });
+  assert.doesNotMatch(JSON.stringify(parsed), /secret|token|drop/);
+
+  for (const bad of [
+    { quotaEnforcement: { websites: true, databases: true, disk: 1, traffic: false } },
+    { quotaEnforcement: { websites: true, databases: true, disk: true } },
+    { usage: { websites: 1, diskMb: -0.5, trafficMb: 0, databases: 0 } },
+    { usage: { websites: 1, diskMb: 0, trafficMb: Number.NaN, databases: 0 } },
+    { usage: { websites: 1, diskMb: 0, trafficMb: 0, databases: 1.5 } },
+    { usage: { websites: 1, diskMb: 0, trafficMb: 0, databases: 0, measuredAt: {} } },
+    { usage: { websites: 1, diskMb: 0, trafficMb: 0, databases: 0, trafficPeriod: 202611 } },
+  ]) {
+    assert.throws(() => readHostingAccount({ ...customer, ...bad }), { code: 'hosting_result_invalid' });
+  }
+});
+
+test('quotas mutation sends quotaEnforcement when provided, validates returned flags, and supports enforcement rollback', async (t) => {
+  const baseCustomer = {
+    ...customer,
+    quotas: { maxWebsites: 2, maxDiskMb: 500, maxTrafficMb: 1000, maxDatabases: 1 },
+    quotaEnforcement: { websites: true, databases: true, disk: false, traffic: false },
+  };
+  const enabledCustomer = {
+    ...baseCustomer,
+    revision: 2,
+    quotaEnforcement: { websites: true, databases: true, disk: true, traffic: true },
+  };
+  const f = fixture(t, async () => ({ account: enabledCustomer, accessGranted: false }));
+  const res = await f.client.mutate({
+    action: 'quotas',
+    account: baseCustomer,
+    form: { maxWebsites: '2', maxDiskMb: '500', maxTrafficMb: '1000', maxDatabases: '1', enforceDisk: true, enforceTraffic: true },
+  });
+  assert.equal(f.calls[0][0], '/users/hosting/accounts/customer/quotas');
+  assert.deepEqual(f.calls[0][1].body, {
+    revision: 1,
+    quotas: { maxWebsites: 2, maxDiskMb: 500, maxTrafficMb: 1000, maxDatabases: 1 },
+    quotaEnforcement: { disk: true, traffic: true },
+  });
+  assert.deepEqual(res.account.quotaEnforcement, { websites: true, databases: true, disk: true, traffic: true });
+
+  // Rollback back to false
+  const rolledBack = {
+    ...enabledCustomer,
+    revision: 3,
+    quotaEnforcement: { websites: true, databases: true, disk: false, traffic: false },
+  };
+  const rb = fixture(t, async () => ({ account: rolledBack, accessGranted: false }));
+  const rbRes = await rb.client.mutate({
+    action: 'quotas',
+    account: enabledCustomer,
+    form: { maxWebsites: '2', maxDiskMb: '500', maxTrafficMb: '1000', maxDatabases: '1', enforceDisk: false, enforceTraffic: false },
+  });
+  assert.deepEqual(rb.calls[0][1].body.quotaEnforcement, { disk: false, traffic: false });
+  assert.deepEqual(rbRes.account.quotaEnforcement, { websites: true, databases: true, disk: false, traffic: false });
+
+  // Server returning mismatched quotaEnforcement must fail closed with reconcile=true
+  const mismatch = fixture(t, async () => ({
+    account: { ...baseCustomer, revision: 2, quotaEnforcement: { websites: true, databases: true, disk: false, traffic: false } },
+    accessGranted: false,
+  }));
+  await assert.rejects(
+    mismatch.client.mutate({
+      action: 'quotas',
+      account: baseCustomer,
+      form: { maxWebsites: '2', maxDiskMb: '500', maxTrafficMb: '1000', maxDatabases: '1', enforceDisk: true, enforceTraffic: false },
+    }),
+    (failure) => failure.code === 'hosting_result_invalid' && failure.reconcile === true,
+  );
+});
+
+test('hostingAccountMessage translates new database, disk, and traffic quota error codes cleanly in Turkish', () => {
+  assert.match(hostingAccountMessage({ code: 'customer_database_quota_exceeded' }), /veritabanı kotası doldu/i);
+  assert.match(hostingAccountMessage({ code: 'customer_disk_quota_exceeded' }), /disk yazma kotası doldu/i);
+  assert.match(hostingAccountMessage({ code: 'customer_disk_quota_unverified' }), /disk kullanımı doğrulanamadığı/i);
+  assert.match(hostingAccountMessage({ code: 'customer_disk_quota_unmeasurable' }), /disk kullanımı ölçülemediği/i);
+  assert.match(hostingAccountMessage({ code: 'customer_traffic_quota_exceeded' }), /aylık trafik kotası/i);
 });

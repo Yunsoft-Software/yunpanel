@@ -196,6 +196,100 @@ test('buildCustomerQuotaSnapshot uses ONLY authoritative backend usage (includin
   assert.equal(directManaged.databases.enforced, false);
 });
 
+test('buildCustomerQuotaSnapshot and buildResellerAccountQuotaMetrics reflect quotaEnforcement toggles and real measured disk/traffic/database usage honestly', () => {
+  // Stage 2 default: websites + databases enforced, disk + traffic opt-in off
+  const defaultEnforced = buildCustomerQuotaSnapshot({
+    hostingProfile: {
+      kind: 'customer',
+      resellerId: 'reseller-1',
+      quotas: { maxWebsites: 3, maxDiskMb: 500, maxTrafficMb: 10240, maxDatabases: 2 },
+      quotaEnforcement: { websites: true, databases: true, disk: false, traffic: false },
+    },
+    account: {
+      id: 'cust-s2',
+      kind: 'customer',
+      resellerId: 'reseller-1',
+      quotas: { maxWebsites: 3, maxDiskMb: 500, maxTrafficMb: 10240, maxDatabases: 2 },
+      quotaEnforcement: { websites: true, databases: true, disk: false, traffic: false },
+      usage: { websites: 1, diskMb: null, trafficMb: null, databases: 1 },
+      websiteIds: ['site-1'],
+    },
+  });
+  assert.deepEqual(defaultEnforced.enforced.map((m) => m.key), ['websites', 'databases']);
+  assert.deepEqual(defaultEnforced.unmeasured.map((m) => m.key), ['diskMb', 'trafficMb']);
+  assert.equal(defaultEnforced.databases.enforced, true);
+  assert.equal(defaultEnforced.databases.summaryText, '1 / 2');
+  assert.match(defaultEnforced.databases.detailText, /Yeni veritabanı oluşturma, bağlama ve WordPress kurulumlarında uygulanır/);
+  assert.equal(defaultEnforced.disk.enforced, false);
+  assert.equal(defaultEnforced.traffic.enforced, false);
+
+  // Opt-in disk + traffic enforcement ON with real decimal usage + dedicated measuredAt
+  const allEnforced = buildCustomerQuotaSnapshot({
+    account: {
+      id: 'cust-s2-full',
+      kind: 'customer',
+      resellerId: null,
+      updatedAt: 1700000000000,
+      quotas: { maxWebsites: 4, maxDiskMb: 500, maxTrafficMb: 2048, maxDatabases: 3 },
+      quotaEnforcement: { websites: true, databases: true, disk: true, traffic: true },
+      usage: {
+        websites: 2,
+        diskMb: 125.25,
+        trafficMb: 1800.5,
+        databases: 3,
+        measuredAt: '2026-11-21T14:30:00.000Z',
+        trafficPeriod: '2026-11',
+      },
+      websiteIds: ['site-1', 'site-2'],
+    },
+  });
+  assert.deepEqual(allEnforced.enforced.map((m) => m.key), ['websites', 'databases', 'diskMb', 'trafficMb']);
+  assert.deepEqual(allEnforced.unmeasured, []);
+  assert.equal(allEnforced.disk.enforced, true);
+  assert.equal(allEnforced.disk.summaryText, '125.25 MB / 500 MB');
+  assert.equal(allEnforced.disk.remaining, 374.75);
+  assert.match(allEnforced.disk.detailText, /Yalnızca panel dosya yazma yollarında uygulanır; terminal ve PHP yazmaları işletim sistemi kotası değildir/);
+  assert.equal(allEnforced.traffic.enforced, true);
+  assert.equal(allEnforced.traffic.status, 'near_limit');
+  assert.equal(allEnforced.traffic.summaryText, '1800.5 MB / 2048 MB');
+  assert.match(allEnforced.traffic.detailText, /Aylık eşikte yönetilen site HTTP isteklerini sınırlar; ay başında otomatik açılır/);
+  assert.equal(allEnforced.databases.isFull, true);
+  assert.match(allEnforced.measurementLabel, /^Son ölçüm: /);
+
+  // Pending profile-only fallback still reads quotaEnforcement from hostingProfile and NEVER fabricates usage
+  const profileOnly = buildCustomerQuotaSnapshot({
+    hostingProfile: {
+      kind: 'customer',
+      resellerId: null,
+      updatedAt: '2026-11-21T12:00:00.000Z',
+      quotas: { maxWebsites: 2, maxDiskMb: 500, maxTrafficMb: 1000, maxDatabases: 2 },
+      quotaEnforcement: { websites: true, databases: true, disk: true, traffic: false },
+    },
+    account: null,
+  });
+  assert.deepEqual(profileOnly.enforced.map((m) => m.key), ['websites', 'databases', 'diskMb']);
+  assert.deepEqual(profileOnly.unmeasured.map((m) => m.key), ['trafficMb']);
+  assert.equal(profileOnly.disk.status, 'pending');
+  assert.equal(profileOnly.disk.measured, false);
+  assert.equal(profileOnly.measurementLabel, 'Henüz ölçülmedi');
+
+  // Reseller/Owner customer table metrics reflect opt-in toggles & decimal usage
+  const customerRowMetrics = buildResellerAccountQuotaMetrics({
+    id: 'cust-row',
+    kind: 'customer',
+    quotas: { maxWebsites: 3, maxDiskMb: 500, maxTrafficMb: 1024, maxDatabases: 2 },
+    quotaEnforcement: { websites: true, databases: true, disk: true, traffic: false },
+    usage: { websites: 1, diskMb: 64.5, trafficMb: 120.25, databases: 1 },
+    websiteIds: ['site-1'],
+  });
+  assert.equal(customerRowMetrics.databases.enforced, true);
+  assert.equal(customerRowMetrics.disk.enforced, true);
+  assert.equal(customerRowMetrics.disk.summaryText, '64.5 MB / 500 MB');
+  assert.equal(customerRowMetrics.traffic.enforced, false);
+  assert.equal(customerRowMetrics.traffic.summaryText, '120.25 MB / 1024 MB');
+  assert.doesNotMatch(customerRowMetrics.traffic.detailText, /uygulanır/);
+});
+
 test('buildResellerAccountQuotaMetrics and buildCustomerSiteQuotaBreakdown format reseller/customer records cleanly', () => {
   const resellerMetrics = buildResellerAccountQuotaMetrics({
     kind: 'reseller',

@@ -1,13 +1,19 @@
 import { formatDate, siteHref } from './site-model.js';
 
+const WEBSITES_ENFORCEMENT_NOTE = 'Yeni site tahsisinde uygulanır';
+const DATABASES_ENFORCEMENT_NOTE = 'Yeni veritabanı oluşturma, bağlama ve WordPress kurulumlarında uygulanır';
+const DISK_ENFORCEMENT_NOTE = 'Yalnızca panel dosya yazma yollarında uygulanır; terminal ve PHP yazmaları işletim sistemi kotası değildir';
+const TRAFFIC_ENFORCEMENT_NOTE = 'Aylık eşikte yönetilen site HTTP isteklerini sınırlar; ay başında otomatik açılır';
+
 function isFiniteNonNegative(value) {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 
 export function formatQuotaAmount(value, unit = 'count') {
   if (!isFiniteNonNegative(value)) return null;
-  if (unit === 'mb') return `${value} MB`;
-  return String(value);
+  const normalized = Number.isInteger(value) ? value : Math.round(value * 100) / 100;
+  if (unit === 'mb') return `${normalized} MB`;
+  return String(normalized);
 }
 
 /**
@@ -67,7 +73,9 @@ export function describeQuotaMetric({
         limitText,
         summaryText: hasLimit ? `Ölçüm bekleniyor · Sınır: ${limitText}` : 'Ölçüm bekleniyor · Sınır: Sınırsız',
         detailText: hasLimit
-          ? `Tanımlı sınır: ${limitText} · Sunucu kota kullanımı doğrulanıyor`
+          ? (enforcementNote
+            ? `Tanımlı sınır: ${limitText} · ${enforcementNote}`
+            : `Tanımlı sınır: ${limitText} · Sunucu kota kullanımı doğrulanıyor`)
           : 'Sınır: Sınırsız · Sunucu kota kullanımı doğrulanıyor',
       });
     }
@@ -121,7 +129,7 @@ export function describeQuotaMetric({
     });
   }
 
-  const remaining = Math.max(0, limit - usage);
+  const remaining = Math.max(0, Math.round((limit - usage) * 100) / 100);
   const isFull = usage >= limit;
   const isNear = !isFull && limit > 0 && (usage / limit) >= 0.8;
   const status = isFull ? 'full' : isNear ? 'near_limit' : 'ok';
@@ -182,6 +190,7 @@ export function describeCustomerManagementContext(hostingProfile) {
 export function buildCustomerQuotaSnapshot({ hostingProfile = null, account = null } = {}) {
   const usage = account?.usage ?? hostingProfile?.usage ?? null;
   const quotas = account?.quotas ?? hostingProfile?.quotas ?? null;
+  const quotaEnforcement = account?.quotaEnforcement ?? hostingProfile?.quotaEnforcement ?? null;
   const effectiveProfile = account ?? hostingProfile ?? null;
 
   const authoritativeWebsites = isFiniteNonNegative(usage?.websites) ? usage.websites : null;
@@ -201,23 +210,7 @@ export function buildCustomerQuotaSnapshot({ hostingProfile = null, account = nu
     enforced: true,
     reservedCount: reservedWebsites,
     includesReservations: reservedWebsites > 0,
-    enforcementNote: 'Yeni site tahsisinde uygulanır',
-  });
-  const diskMetric = describeQuotaMetric({
-    key: 'diskMb',
-    label: 'Disk Alanı',
-    usage: usage?.diskMb ?? null,
-    limit: quotas?.maxDiskMb ?? null,
-    unit: 'mb',
-    enforced: false,
-  });
-  const trafficMetric = describeQuotaMetric({
-    key: 'trafficMb',
-    label: 'Aylık Trafik',
-    usage: usage?.trafficMb ?? null,
-    limit: quotas?.maxTrafficMb ?? null,
-    unit: 'mb',
-    enforced: false,
+    enforcementNote: WEBSITES_ENFORCEMENT_NOTE,
   });
   const databasesMetric = describeQuotaMetric({
     key: 'databases',
@@ -225,11 +218,31 @@ export function buildCustomerQuotaSnapshot({ hostingProfile = null, account = nu
     usage: usage?.databases ?? null,
     limit: quotas?.maxDatabases ?? null,
     unit: 'count',
-    enforced: false,
+    enforced: quotaEnforcement ? Boolean(quotaEnforcement.databases) : false,
+    enforcementNote: DATABASES_ENFORCEMENT_NOTE,
+  });
+  const diskMetric = describeQuotaMetric({
+    key: 'diskMb',
+    label: 'Disk Alanı',
+    usage: usage?.diskMb ?? null,
+    limit: quotas?.maxDiskMb ?? null,
+    unit: 'mb',
+    enforced: Boolean(quotaEnforcement?.disk),
+    enforcementNote: DISK_ENFORCEMENT_NOTE,
+  });
+  const trafficMetric = describeQuotaMetric({
+    key: 'trafficMb',
+    label: 'Aylık Trafik',
+    usage: usage?.trafficMb ?? null,
+    limit: quotas?.maxTrafficMb ?? null,
+    unit: 'mb',
+    enforced: Boolean(quotaEnforcement?.traffic),
+    enforcementNote: TRAFFIC_ENFORCEMENT_NOTE,
   });
 
-  const enforced = Object.freeze([websitesMetric]);
-  const unmeasured = Object.freeze([diskMetric, trafficMetric, databasesMetric]);
+  const orderedMetrics = [websitesMetric, databasesMetric, diskMetric, trafficMetric];
+  const enforced = Object.freeze(orderedMetrics.filter((metric) => metric.enforced));
+  const unmeasured = Object.freeze(orderedMetrics.filter((metric) => !metric.enforced));
 
   return Object.freeze({
     enforced,
@@ -239,6 +252,12 @@ export function buildCustomerQuotaSnapshot({ hostingProfile = null, account = nu
     disk: diskMetric,
     traffic: trafficMetric,
     databases: databasesMetric,
+    quotaEnforcement: quotaEnforcement ? Object.freeze({
+      websites: Boolean(quotaEnforcement.websites),
+      databases: Boolean(quotaEnforcement.databases),
+      disk: Boolean(quotaEnforcement.disk),
+      traffic: Boolean(quotaEnforcement.traffic),
+    }) : null,
     reservedWebsites,
     usageAuthoritative: authoritativeWebsites !== null,
     isWebsiteQuotaFull: websitesMetric.isFull,
@@ -278,6 +297,7 @@ export function buildResellerAccountQuotaMetrics(account) {
     });
   }
 
+  const quotaEnforcement = account?.quotaEnforcement ?? null;
   const authoritativeWebsites = isFiniteNonNegative(account.usage?.websites) ? account.usage.websites : null;
   const attachedWebsiteCount = Array.isArray(account.websiteIds) ? account.websiteIds.length : null;
   const reservedWebsites = authoritativeWebsites !== null
@@ -295,23 +315,7 @@ export function buildResellerAccountQuotaMetrics(account) {
     enforced: true,
     reservedCount: reservedWebsites,
     includesReservations: reservedWebsites > 0,
-    enforcementNote: 'Yeni site tahsisinde uygulanır',
-  });
-  const disk = describeQuotaMetric({
-    key: 'diskMb',
-    label: 'Disk',
-    usage: account.usage?.diskMb ?? null,
-    limit: account.quotas?.maxDiskMb ?? null,
-    unit: 'mb',
-    enforced: false,
-  });
-  const traffic = describeQuotaMetric({
-    key: 'trafficMb',
-    label: 'Trafik',
-    usage: account.usage?.trafficMb ?? null,
-    limit: account.quotas?.maxTrafficMb ?? null,
-    unit: 'mb',
-    enforced: false,
+    enforcementNote: WEBSITES_ENFORCEMENT_NOTE,
   });
   const databases = describeQuotaMetric({
     key: 'databases',
@@ -319,7 +323,26 @@ export function buildResellerAccountQuotaMetrics(account) {
     usage: account.usage?.databases ?? null,
     limit: account.quotas?.maxDatabases ?? null,
     unit: 'count',
-    enforced: false,
+    enforced: quotaEnforcement ? Boolean(quotaEnforcement.databases) : false,
+    enforcementNote: DATABASES_ENFORCEMENT_NOTE,
+  });
+  const disk = describeQuotaMetric({
+    key: 'diskMb',
+    label: 'Disk',
+    usage: account.usage?.diskMb ?? null,
+    limit: account.quotas?.maxDiskMb ?? null,
+    unit: 'mb',
+    enforced: Boolean(quotaEnforcement?.disk),
+    enforcementNote: DISK_ENFORCEMENT_NOTE,
+  });
+  const traffic = describeQuotaMetric({
+    key: 'trafficMb',
+    label: 'Trafik',
+    usage: account.usage?.trafficMb ?? null,
+    limit: account.quotas?.maxTrafficMb ?? null,
+    unit: 'mb',
+    enforced: Boolean(quotaEnforcement?.traffic),
+    enforcementNote: TRAFFIC_ENFORCEMENT_NOTE,
   });
 
   return Object.freeze({
@@ -328,6 +351,12 @@ export function buildResellerAccountQuotaMetrics(account) {
     disk,
     traffic,
     databases,
+    quotaEnforcement: quotaEnforcement ? Object.freeze({
+      websites: Boolean(quotaEnforcement.websites),
+      databases: Boolean(quotaEnforcement.databases),
+      disk: Boolean(quotaEnforcement.disk),
+      traffic: Boolean(quotaEnforcement.traffic),
+    }) : null,
     reservedWebsites,
     measurementLabel: formatQuotaMeasurementTime(account.usage),
   });

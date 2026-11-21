@@ -4,6 +4,7 @@ import { panelRequest } from '../api.js';
 import { sessionGeneration, setSession } from '../session-client.js';
 import { Badge, Button, EmptyState, ErrorNotice, LinkButton, Modal, PageHeading, Section } from './PanelKit.jsx';
 import { HostingProfileDialog } from './HostingAccountsPanel.jsx';
+import CustomerQuotaDialog from './CustomerQuotaDialog.jsx';
 import { createHostingAccountClient, hostingAccountMessage } from './hosting-account-client.js';
 import { buildLicenseSettingsPath, resolveLicenseGateState } from './license-client.js';
 import { buildResellerAccountQuotaMetrics } from './quota-model.js';
@@ -108,12 +109,15 @@ function AccountsWorkspace({ kind }) {
               {metrics.websites.reservedCount > 0 && <span className="ws-field-hint" style={{ display: 'block' }}>{metrics.websites.reservedCount} bekleyen tahsis dahil</span>}
               {metrics.websites.reservedCount === 0 && metrics.websites.includesReservations && <span className="ws-field-hint" style={{ display: 'block' }}>Bekleyen tahsisler dahil</span>}
               {metrics.websites.isFull && <span className="ws-field-hint" style={{ color: 'var(--ws-warning)', display: 'block' }}>Kota doldu</span>}
+              {kind === 'customer' && metrics.disk?.enforced && <span className="ws-field-hint" style={{ display: 'block' }}>Panel yazma kotası etkin{metrics.disk.hasLimit ? ` · ${metrics.disk.limitText}` : ''}</span>}
+              {kind === 'customer' && metrics.traffic?.enforced && <span className="ws-field-hint" style={{ display: 'block' }}>HTTP trafik sınırı etkin{metrics.traffic.hasLimit ? ` · ${metrics.traffic.limitText}` : ''}</span>}
             </td>
             {kind === 'reseller' && <td>
               <span>{metrics.customers.measured ? metrics.customers.summaryText : metrics.customers.usageText}</span>
               {metrics.customers.isFull && <span className="ws-field-hint" style={{ color: 'var(--ws-warning)', display: 'block' }}>Kota doldu</span>}
             </td>}
             <td><div className="ws-actions"><Button disabled={Boolean(dialog)} onClick={() => setDialog({ type: 'profile', account })}>Hesabı yönet</Button>
+              {kind === 'customer' && <Button disabled={Boolean(dialog)} onClick={() => setDialog({ type: 'quotas', account })}>Kota tahsis et</Button>}
               {kind === 'customer' && <><Link className="ws-button" to={`/websites?customer=${encodeURIComponent(account.id)}`}>Web siteleri</Link>{account.active && <Link className="ws-button" to={`/websites/new?customer=${encodeURIComponent(account.id)}`}>Site ekle</Link>}</>}</div></td>
           </tr>;
         })}</tbody></table></div> : <EmptyState title={`Henüz ${label.toLocaleLowerCase('tr')} yok`} detail={gateState === 'loading' ? 'Lisans durumu doğrulanıyor…' : gateState === 'error' ? 'Yeni hesap oluşturmak için önce lisans durumunu yeniden deneyin.' : premiumRequired ? `Yeni ${label.toLocaleLowerCase('tr')} hesabı açmak için önce YunPanel Premium lisansını etkinleştirin.` : 'Yeni hesabı oluşturduktan sonra site ekleyebilirsiniz.'} icon="user" />)}
@@ -140,6 +144,7 @@ function AccountsWorkspace({ kind }) {
     )}
     {dialog?.type === 'create' && <AccountCreateDialog kind={kind} client={client} initialDraft={hostingAccountDrafts?.[kind] ?? null} licensePath={licensePath} onSaveDraft={draft => saveHostingAccountDraft?.(kind, draft)} onClose={close} onSaved={saved} />}
     {dialog?.type === 'profile' && <HostingProfileDialog accountId={dialog.account.id} onClose={close} onSaved={saved} onAccessLost={accessLost} />}
+    {dialog?.type === 'quotas' && <CustomerQuotaDialog key={`quotas:${dialog.account.id}`} account={dialog.account} client={client} onClose={close} onSaved={saved} />}
   </>;
 }
 

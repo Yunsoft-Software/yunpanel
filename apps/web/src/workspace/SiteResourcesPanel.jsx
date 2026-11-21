@@ -54,11 +54,82 @@ function formatMetricLimit(value, unit) {
   return value.toLocaleString('tr-TR');
 }
 
-function formatMeasuredDisplay(key, item) {
+const TRAFFIC_SCOPE_LABELS = Object.freeze({
+  nginx_outbound_body_bytes: 'Nginx çıkış gövdesi baytı',
+  nginx_legacy_applied_access_log: 'Mevcut vhost erişim günlüğü (statik dosyalar hariç)',
+});
+
+export function formatTrafficMeta(item) {
+  if (!item || item.unknown || item.measured === null || item.measured === undefined) return null;
+  const parts = [];
+  if (item.period) parts.push(item.period);
+  if (item.scope && TRAFFIC_SCOPE_LABELS[item.scope]) {
+    parts.push(TRAFFIC_SCOPE_LABELS[item.scope]);
+  }
+  if (item.completeness === 'partial_rotation_gap') {
+    parts.push('Günlük döngüsü nedeniyle kısmi ölçüm');
+  }
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
+export function formatTrafficMeterStart(item) {
+  if (!item || item.unknown || item.measured === null || item.measured === undefined || !item.meterStartedAt) {
+    return null;
+  }
+  const formatted = formatConsumptionTimestamp(item.meterStartedAt);
+  return formatted && formatted !== 'Henüz ölçülmedi' ? `Sayaç başlangıcı: ${formatted}` : null;
+}
+
+export function formatEnforcedScopeNote(key, item) {
+  if (!item || item.enforcedLimit === null || item.enforcedLimit === undefined) return null;
+  if (key === 'databases') return 'Hesap geneli veritabanı sınırı';
+  if (key === 'diskSpaceMb') {
+    return item.enforcementMode === 'native_quota_available'
+      ? 'İşletim sistemi disk kotası'
+      : 'Yalnızca panel dosya yazmaları (işletim sistemi kotası değil)';
+  }
+  if (key === 'trafficMb') return 'Aylık HTTP sınırı (ay başında açılır)';
+  return null;
+}
+
+export function formatTrafficGuardWarning(key, item) {
+  if (key !== 'trafficMb' || !item || item.enforcedLimit === null || item.enforcedLimit === undefined) return null;
+  if (item.trafficGuardReady === false) {
+    return 'HTTP 429 koruması için site Nginx yapılandırmasını yeniden uygulayın';
+  }
+  return null;
+}
+
+export function formatDiskSharedRootNote(key, item) {
+  if (key !== 'diskSpaceMb' || item?.reasonCode !== 'shared_root_overlap') return null;
+  return 'Paylaşımlı veya iç içe site köklerinde disk yazma kotası kontrolsüz yazmaya izin vermez; panel yazmaları güvenli hata (503) ile durdurulur.';
+}
+
+export function resolveConsumptionBadge(key, item, unmeasuredLabel = 'Ölçülemedi') {
+  const isBlockedTraffic = key === 'trafficMb' && item?.blocked === true;
+  if (isBlockedTraffic) {
+    return { state: 'error', label: 'Sınırlandı' };
+  }
+  if (item?.status === 'exceeded') {
+    return {
+      state: item.enforcedLimit !== null ? 'error' : 'warning',
+      label: item.enforcedLimit !== null ? 'Aşıldı' : 'Limit üstü',
+    };
+  }
+  if (item?.status === 'warning') {
+    return { state: 'warning', label: 'Uyarı' };
+  }
+  if (item?.status === 'ok') {
+    return { state: 'healthy', label: 'Normal' };
+  }
+  return { state: 'neutral', label: unmeasuredLabel };
+}
+
+export function formatMeasuredDisplay(key, item) {
   if (!item || item.unknown || item.measured === null || item.measured === undefined) {
     return null;
   }
-  if (key === 'diskSpaceMb') {
+  if (key === 'diskSpaceMb' || key === 'trafficMb') {
     if (typeof item.bytes === 'number' && Number.isFinite(item.bytes)) {
       if (item.bytes === 0) return '0 B';
       const mbText = `${item.measured.toLocaleString('tr-TR', { maximumFractionDigits: 2 })} MB`;
@@ -120,7 +191,9 @@ function SiteConsumptionWorkspace({ domain, website }) {
 
   const metrics = consumption?.metrics ?? {};
   const metricValues = Object.values(metrics);
+  const trafficBlocked = metrics.trafficMb?.blocked === true;
   const enforcedExceeded = metricValues.filter((item) => item?.exceeded && item.enforcedLimit !== null);
+  const otherEnforcedExceeded = enforcedExceeded.filter((item) => !(trafficBlocked && item.metric === 'trafficMb'));
   const definedOnlyExceeded = metricValues.filter((item) => item?.exceeded && item.enforcedLimit === null && item.definedLimit !== null);
   const warnings = consumption?.warningMetrics ?? [];
   const topMeasuredText = consumption?.measuredAt
@@ -136,29 +209,17 @@ function SiteConsumptionWorkspace({ domain, website }) {
     const unmeasuredLabel = isUnavailableSource ? 'Ölçülemiyor' : 'Ölçülemedi';
     const definedText = formatMetricLimit(item.definedLimit, item.unit) ?? 'Sınırsız';
     const enforcedText = formatMetricLimit(item.enforcedLimit, item.unit) ?? 'Uygulanmıyor';
+    const enforcedScopeNote = formatEnforcedScopeNote(key, item);
+    const trafficGuardWarning = formatTrafficGuardWarning(key, item);
     const rowTimestamp = !isUnmeasured && item.measuredAt ? formatConsumptionTimestamp(item.measuredAt) : 'Henüz ölçülmedi';
+    const { state: badgeState, label: badgeText } = resolveConsumptionBadge(key, item, unmeasuredLabel);
 
-    const badgeState = item.status === 'exceeded'
-      ? (item.enforcedLimit !== null ? 'error' : 'warning')
-      : item.status === 'warning'
-        ? 'warning'
-        : item.status === 'ok'
-          ? 'healthy'
-          : 'neutral';
-    const badgeText = item.status === 'exceeded'
-      ? (item.enforcedLimit !== null ? 'Aşıldı' : 'Limit üstü')
-      : item.status === 'warning'
-        ? 'Uyarı'
-        : item.status === 'ok'
-          ? 'Normal'
-          : unmeasuredLabel;
-
-    const trafficMeta = key === 'trafficMb' && !isUnmeasured && (item.period || item.scope)
-      ? [item.period, item.scope].filter(Boolean).join(' · ')
-      : null;
+    const trafficMeta = key === 'trafficMb' ? formatTrafficMeta(item) : null;
+    const trafficMeterStart = key === 'trafficMb' ? formatTrafficMeterStart(item) : null;
     const diskScopeMeta = key === 'diskSpaceMb' && !isUnmeasured && item.scope === 'active_release_root'
       ? 'Aktif sürüm içerik kökü'
       : null;
+    const diskSharedRootNote = formatDiskSharedRootNote(key, item);
 
     return (
       <tr key={key} role="row" data-consumption-metric={key}>
@@ -171,8 +232,14 @@ function SiteConsumptionWorkspace({ domain, website }) {
           {diskScopeMeta && (
             <small className="ws-muted" style={{ display: 'block', marginTop: '0.2rem' }}>{diskScopeMeta}</small>
           )}
+          {diskSharedRootNote && (
+            <small className="ws-muted" style={{ display: 'block', marginTop: '0.2rem' }}>{diskSharedRootNote}</small>
+          )}
           {trafficMeta && (
             <small className="ws-muted" style={{ display: 'block', marginTop: '0.2rem' }}>{trafficMeta}</small>
+          )}
+          {trafficMeterStart && (
+            <small className="ws-muted" style={{ display: 'block', marginTop: '0.15rem' }}>{trafficMeterStart}</small>
           )}
         </td>
         <td role="cell" data-label="Tanımlı Limit" style={{ padding: '0.55rem' }}>
@@ -181,7 +248,15 @@ function SiteConsumptionWorkspace({ domain, website }) {
             <small className="ws-muted" style={{ display: 'block', marginTop: '0.15rem' }}>Hesap kotası</small>
           )}
         </td>
-        <td role="cell" data-label="Uygulanan Limit" style={{ padding: '0.55rem' }}>{enforcedText}</td>
+        <td role="cell" data-label="Uygulanan Limit" style={{ padding: '0.55rem' }}>
+          <div>{enforcedText}</div>
+          {enforcedScopeNote && (
+            <small className="ws-muted" style={{ display: 'block', marginTop: '0.15rem' }}>{enforcedScopeNote}</small>
+          )}
+          {trafficGuardWarning && (
+            <small className="ws-muted" style={{ color: 'var(--ws-warning)', display: 'block', marginTop: '0.15rem' }}>{trafficGuardWarning}</small>
+          )}
+        </td>
         <td role="cell" data-label="Ölçüm Zamanı" style={{ padding: '0.55rem' }}>{rowTimestamp}</td>
         <td role="cell" data-label="Durum" style={{ padding: '0.55rem' }}>
           <Badge state={badgeState}>{badgeText}</Badge>
@@ -205,17 +280,22 @@ function SiteConsumptionWorkspace({ domain, website }) {
             </div>
           </div>
         )}
-        {enforcedExceeded.length > 0 && (
+        {trafficBlocked && (
+          <div className="ws-notice ws-notice-danger" role="alert" data-traffic-blocked-banner="true" style={{ marginBottom: '1rem' }}>
+            <strong>Aylık Trafik Sınırlandı:</strong> Bu site aylık trafik kotasına ulaştığı için yeni HTTP istekleri sınırlandırılmıştır. Ay başında otomatik olarak açılır veya müşteri kota ayarlarından trafik sınırı kapatılarak hemen kaldırılabilir.
+          </div>
+        )}
+        {otherEnforcedExceeded.length > 0 && (
           <div className="ws-notice ws-notice-danger" role="alert" style={{ marginBottom: '1rem' }}>
             <strong>Kota Limiti Aşıldı:</strong> Bu siteye ait uygulanan bir kaynak sınırı aşılmıştır.
           </div>
         )}
-        {enforcedExceeded.length === 0 && definedOnlyExceeded.length > 0 && (
+        {!trafficBlocked && enforcedExceeded.length === 0 && definedOnlyExceeded.length > 0 && (
           <div className="ws-notice" role="status" style={{ marginBottom: '1rem' }}>
             <strong>Tanımlı Limit Aşıldı:</strong> Kayıtlı hesap veya site sınırı aşılmıştır; bu kaynak için otomatik site durdurma veya erişim engellemesi uygulanmaz.
           </div>
         )}
-        {enforcedExceeded.length === 0 && definedOnlyExceeded.length === 0 && warnings.length > 0 && (
+        {!trafficBlocked && enforcedExceeded.length === 0 && definedOnlyExceeded.length === 0 && warnings.length > 0 && (
           <div className="ws-notice ws-notice-warning" role="status" style={{ marginBottom: '1rem' }}>
             <strong>Kaynak Uyarısı:</strong> Bazı kaynaklar tanımlı sınırın %85’ine ulaşmıştır.
           </div>
@@ -246,7 +326,7 @@ function SiteConsumptionWorkspace({ domain, website }) {
           </div>
         )}
         <p className="ws-muted" style={{ marginTop: '0.75rem', fontSize: '0.85rem' }}>
-          Ölçülemeyen kaynaklar sıfır gösterilmez. Otomatik kota engellemesi şu an yalnızca bayi müşteri ve site sayıları ile müşteri yeni site tahsislerinde uygulanır; disk, veritabanı ve aylık trafik limitleri bilgilendirme amaçlıdır.
+          Ölçülemeyen kaynaklar sıfır gösterilmez. Web sitesi ve veritabanı kotaları hesap genelinde otomatik uygulanır. İsteğe bağlı disk yazma kotası yalnızca ölçülebilir ve tekil site köklerinde panel dosya yazma yollarında geçerlidir; paylaşımlı veya iç içe köklerde yazmalar kontrolsüz bırakılmaz ve güvenli hata (503) ile durdurulur; terminal, PHP ve harici yazmalar işletim sistemi kotası değildir. İsteğe bağlı aylık trafik sınırı yalnızca yönetilen sitenin yeni HTTP isteklerini sınırlar ve ay başında otomatik olarak açılır.
         </p>
       </div>
     </Section>

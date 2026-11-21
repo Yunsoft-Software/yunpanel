@@ -170,8 +170,10 @@ export default function WebsitesPage() {
               <strong>Kota Sınırı:</strong> Web sitesi kotanız ({customerQuota.websites.summaryText}) sınırına ulaşmıştır. {customerQuota.managementContext.detail}
             </div>
           )}
-          <div data-quota-group="enforced" style={{ marginBottom: '0.85rem' }}>
-            <p className="ws-muted" style={{ marginBottom: '0.45rem', fontSize: '0.85rem' }}>Uygulanan kota</p>
+          <div data-quota-group="enforced" style={{ marginBottom: customerQuota.unmeasured.length > 0 ? '0.85rem' : 0 }}>
+            <p className="ws-muted" style={{ marginBottom: '0.45rem', fontSize: '0.85rem' }}>
+              {customerQuota.enforced.length > 1 ? 'Uygulanan kotalar' : 'Uygulanan kota'}
+            </p>
             <div className="ws-quota-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: '1rem', alignItems: 'stretch' }}>
               {customerQuota.enforced.map((metric) => (
                 <div
@@ -193,29 +195,35 @@ export default function WebsitesPage() {
               ))}
             </div>
           </div>
-          <div data-quota-group="unmeasured">
-            <p className="ws-muted" style={{ marginBottom: '0.45rem', fontSize: '0.85rem' }}>Kayıtlı kaynak sınırları · Otomatik ölçülmüyor ve uygulanmıyor</p>
-            <div className="ws-quota-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: '1rem', alignItems: 'stretch' }}>
-              {customerQuota.unmeasured.map((metric) => (
-                <div
-                  key={metric.key}
-                  data-quota-metric={metric.key}
-                  data-quota-status={metric.status}
-                  data-quota-enforced="false"
-                  style={{ padding: '0.85rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: 'var(--ws-radius-small, 9px)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.4rem' }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
-                    <span className="ws-muted" style={{ fontSize: '0.85rem' }}>{metric.label}</span>
-                    <Badge state={metric.badgeState}>{metric.badgeLabel}</Badge>
+          {customerQuota.unmeasured.length > 0 && (
+            <div data-quota-group="unmeasured">
+              <p className="ws-muted" style={{ marginBottom: '0.45rem', fontSize: '0.85rem' }}>
+                {customerQuota.unmeasured.some((metric) => metric.measured)
+                  ? 'Kayıtlı kaynak sınırları · Otomatik uygulanmıyor'
+                  : 'Kayıtlı kaynak sınırları · Otomatik ölçülmüyor ve uygulanmıyor'}
+              </p>
+              <div className="ws-quota-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 190px), 1fr))', gap: '1rem', alignItems: 'stretch' }}>
+                {customerQuota.unmeasured.map((metric) => (
+                  <div
+                    key={metric.key}
+                    data-quota-metric={metric.key}
+                    data-quota-status={metric.status}
+                    data-quota-enforced="false"
+                    style={{ padding: '0.85rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: 'var(--ws-radius-small, 9px)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.4rem' }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+                      <span className="ws-muted" style={{ fontSize: '0.85rem' }}>{metric.label}</span>
+                      <Badge state={metric.badgeState}>{metric.badgeLabel}</Badge>
+                    </div>
+                    <div style={{ fontSize: '1.15rem', fontWeight: 600 }}>
+                      {metric.measured ? metric.summaryText : metric.usageText}
+                    </div>
+                    <small className="ws-muted">{metric.detailText}</small>
                   </div>
-                  <div style={{ fontSize: '1.15rem', fontWeight: 600 }}>
-                    {metric.measured ? metric.summaryText : metric.usageText}
-                  </div>
-                  <small className="ws-muted">{metric.detailText}</small>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
           {customerSiteBreakdown.length > 0 && (
             <div data-customer-site-breakdown="true" style={{ marginTop: '1rem' }}>
               <p className="ws-muted" style={{ marginBottom: '0.5rem' }}>Site bazında kaynak dağılımı</p>

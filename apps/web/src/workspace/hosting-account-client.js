@@ -4,6 +4,7 @@ const USERNAME = /^[a-z0-9][a-z0-9._@+-]{2,127}$/;
 const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const identifier = (value) => typeof value === 'string' && ID.test(value);
 const integer = (value, min = 0) => Number.isSafeInteger(value) && value >= min;
+const nonNegativeNumber = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0;
 const problem = (code) => Object.assign(new Error(code), { code });
 const obsolete = () => Object.assign(problem('session_superseded'), { name: 'AbortError' });
 
@@ -18,6 +19,11 @@ export function hostingAccountMessage(error) {
     reseller_limit_reached: 'Bayinin adet sınırı doldu. Yeni kayıt eklenmedi.',
     reseller_scope_forbidden: 'Seçilen bayinin etkin olduğunu kontrol edin; bu ilişki kurulamadı.',
     customer_quota_exceeded: 'Müşteri web sitesi kotası doldu. Yeni site tahsis edilemez.',
+    customer_database_quota_exceeded: 'Müşteri veritabanı kotası doldu. Yeni veritabanı oluşturulamaz veya bağlanamaz.',
+    customer_disk_quota_exceeded: 'Müşteri disk yazma kotası doldu. Yeni dosya yükleme veya kaydetme işlemi engellendi.',
+    customer_disk_quota_unverified: 'Müşteri disk kullanımı doğrulanamadığı için dosya yazma işlemi güvenlik gereği durduruldu.',
+    customer_disk_quota_unmeasurable: 'Müşteri disk kullanımı ölçülemediği için dosya yazma işlemi durduruldu.',
+    customer_traffic_quota_exceeded: 'Müşteri aylık trafik kotası dolduğu için yeni HTTP istekleri sınırlandı.',
     hosting_account_inactive: 'Hesap askıya alınmış veya kilitli durumda. Kaynak işlemleri yapılamaz.',
     invalid_customer_quotas: 'Geçerli kota değerleri girin veya Sınırsız seçin. Değerler negatif olamaz.',
     hosting_account_not_found: 'Profil artık bulunmuyor. Listeyi yenileyin.',
@@ -71,16 +77,42 @@ export function readHostingAccount(value) {
       maxDatabases: value.quotas.maxDatabases,
     };
   }
-  if (kind === 'customer' && value.usage !== undefined) {
-    if (!object(value.usage) || !integer(value.usage.websites) || !['diskMb', 'trafficMb', 'databases'].every((key) => value.usage[key] === null || integer(value.usage[key]))) {
+  if (kind === 'customer' && value.quotaEnforcement !== undefined) {
+    if (!object(value.quotaEnforcement) || !['websites', 'databases', 'disk', 'traffic'].every((key) => typeof value.quotaEnforcement[key] === 'boolean')) {
       throw problem('hosting_result_invalid');
     }
-    result.usage = {
+    result.quotaEnforcement = {
+      websites: value.quotaEnforcement.websites,
+      databases: value.quotaEnforcement.databases,
+      disk: value.quotaEnforcement.disk,
+      traffic: value.quotaEnforcement.traffic,
+    };
+  }
+  if (kind === 'customer' && value.usage !== undefined) {
+    if (!object(value.usage)
+      || !integer(value.usage.websites)
+      || !['diskMb', 'trafficMb', 'databases'].every((key) => value.usage[key] === null || (key === 'databases' ? integer(value.usage[key]) : nonNegativeNumber(value.usage[key])))) {
+      throw problem('hosting_result_invalid');
+    }
+    const usageResult = {
       websites: value.usage.websites,
       diskMb: value.usage.diskMb,
       trafficMb: value.usage.trafficMb,
       databases: value.usage.databases,
     };
+    if (Object.hasOwn(value.usage, 'measuredAt') && value.usage.measuredAt !== undefined) {
+      if (value.usage.measuredAt !== null && typeof value.usage.measuredAt !== 'string' && !integer(value.usage.measuredAt)) {
+        throw problem('hosting_result_invalid');
+      }
+      usageResult.measuredAt = value.usage.measuredAt;
+    }
+    if (Object.hasOwn(value.usage, 'trafficPeriod') && value.usage.trafficPeriod !== undefined) {
+      if (value.usage.trafficPeriod !== null && typeof value.usage.trafficPeriod !== 'string') {
+        throw problem('hosting_result_invalid');
+      }
+      usageResult.trafficPeriod = value.usage.trafficPeriod;
+    }
+    result.usage = usageResult;
   }
   if (kind === 'customer' && value.websiteIds !== undefined) {
     if (!Array.isArray(value.websiteIds) || value.websiteIds.some(id => !identifier(id)) || new Set(value.websiteIds).size !== value.websiteIds.length) throw problem('hosting_result_invalid');
@@ -154,6 +186,15 @@ export function hostingCustomerQuotasInput(form) {
     quotas[key] = Number(value.trim());
   }
   return quotas;
+}
+
+export function hostingCustomerQuotaEnforcementInput(form) {
+  const disk = form?.enforceDisk !== undefined ? form.enforceDisk : form?.quotaEnforcement?.disk;
+  const traffic = form?.enforceTraffic !== undefined ? form.enforceTraffic : form?.quotaEnforcement?.traffic;
+  return {
+    disk: Boolean(disk),
+    traffic: Boolean(traffic),
+  };
 }
 
 /** Instance belongs to one mounted Owner or persisted-reseller component.
@@ -265,6 +306,9 @@ export function createHostingAccountClient({ request, generation, onAccessLost }
         } else if (action === 'quotas' && account.kind === 'customer') {
           method = 'PATCH'; path = `${ROOT}/${encodeURIComponent(target)}/quotas`;
           body = { revision: account.revision, quotas: hostingCustomerQuotasInput(form) };
+          if (form && (form.enforceDisk !== undefined || form.enforceTraffic !== undefined || form.quotaEnforcement !== undefined)) {
+            body.quotaEnforcement = hostingCustomerQuotaEnforcementInput(form);
+          }
         } else if (action === 'status' && typeof form?.active === 'boolean' && form.active !== account.active) {
           method = 'PATCH'; path = `${ROOT}/${encodeURIComponent(target)}/status`;
           body = { revision: account.revision, active: form.active };
@@ -295,7 +339,12 @@ export function createHostingAccountClient({ request, generation, onAccessLost }
           || (action === 'register' && expectedKind === 'reseller' && (next.limits.maxCustomers !== body.limits.maxCustomers || next.limits.maxWebsites !== body.limits.maxWebsites))
           || (action === 'limits' && (next.revision < account.revision || next.limits.maxCustomers !== body.limits.maxCustomers || next.limits.maxWebsites !== body.limits.maxWebsites))
           || (action === 'quotas' && (next.revision <= account.revision
-            || ['maxWebsites', 'maxDiskMb', 'maxTrafficMb', 'maxDatabases'].some((key) => next.quotas?.[key] !== body.quotas[key])))
+            || ['maxWebsites', 'maxDiskMb', 'maxTrafficMb', 'maxDatabases'].some((key) => next.quotas?.[key] !== body.quotas[key])
+            || (body.quotaEnforcement !== undefined && (
+              !next.quotaEnforcement
+              || next.quotaEnforcement.disk !== body.quotaEnforcement.disk
+              || next.quotaEnforcement.traffic !== body.quotaEnforcement.traffic
+            ))))
           || (action === 'status' && (next.active !== body.active || next.revision <= account.revision))
           || (action === 'login' && (next.revision <= account.revision || next.userRevision <= account.userRevision
             || (body.username !== undefined && next.username !== body.username)))) throw problem('hosting_result_invalid');
