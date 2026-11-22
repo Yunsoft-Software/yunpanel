@@ -21,8 +21,24 @@ export default async function setup() {
   if(login.status()!==200)throw new Error('Real Owner login failed: '+login.status());
   await api.storageState({path:AUTH_PATH});fs.chmodSync(AUTH_PATH,0o600);
   const responses={};
-  for(const resource of ['servers','websites','domains','applications','certificates','ai/providers']){
+  for(const resource of ['servers','websites','domains','applications','certificates']){
     const response=await api.get('/api/panel/'+resource);if(response.status()!==200)throw new Error('Real inventory prerequisite failed: '+resource+' '+response.status());responses[resource]=await response.json();
+  }
+  const providers=await api.get('/api/panel/ai/providers');
+  const aiProviderInventory={status:providers.status()};
+  if(providers.status()===200){
+    responses['ai/providers']=await providers.json();
+  }else{
+    const {error}=providers.status()===403?await providers.json():{};
+    if(error?.code!=='premium_license_required'||error.capability!=='aiOperations'){
+      throw new Error('Real inventory prerequisite failed: ai/providers '+providers.status());
+    }
+    const license=await api.get('/api/panel/license');
+    const entitlement=license.status()===200?(await license.json()).data:null;
+    if(entitlement?.tier!=='free'||entitlement.capabilities?.aiOperations!==false){
+      throw new Error('AI provider denial does not match the actual Free license');
+    }
+    aiProviderInventory.errorCode=error.code;
   }
   if(fs.existsSync(path.join(RUN_DIR,'manifest.json'))){
     const saved=JSON.parse(fs.readFileSync(path.join(RUN_DIR,'manifest.json'),'utf8'));
@@ -34,7 +50,8 @@ export default async function setup() {
   const domain=responses.domains.data.find(v=>v.websiteId===php?.id);
   if(!php||!domain)throw new Error('A real, explicitly bound PHP Website is required to audit existing PHP screens');
   const publicProjection=list=>list.map(v=>({id:v.id,name:v.name,primaryDomain:v.primaryDomain,type:v.type,runtimeType:v.runtimeType,websiteId:v.websiteId,applicationId:v.applicationId,revision:v.revision}));
-  saveManifest({runId:suffix,origin:ORIGIN,target:'157.180.11.28',sourceCommit:process.env.YUNPANEL_AUDIT_SOURCE_HEAD||'e997bdf9053cea895eba1e7ae947a3ec4fddf059',evidenceLane:process.env.YUNPANEL_AUDIT_LANE||'read',createdAt:new Date().toISOString(),serverId:responses.servers.data[0].id,existingPhpWebsiteId:php.id,existingPhpDomainId:domain.id,existingPhpDomain:domain.primaryDomain,originalActiveProviderId:responses['ai/providers'].activeProviderId,
+  saveManifest({runId:suffix,origin:ORIGIN,target:'157.180.11.28',sourceCommit:process.env.YUNPANEL_AUDIT_SOURCE_HEAD||'e997bdf9053cea895eba1e7ae947a3ec4fddf059',evidenceLane:process.env.YUNPANEL_AUDIT_LANE||'read',createdAt:new Date().toISOString(),serverId:responses.servers.data[0].id,existingPhpWebsiteId:php.id,existingPhpDomainId:domain.id,existingPhpDomain:domain.primaryDomain,aiProviderInventory,
+    ...(responses['ai/providers']?{originalActiveProviderId:responses['ai/providers'].activeProviderId}:{}),
     baseline:Object.fromEntries(Object.entries(responses).map(([k,v])=>[k,publicProjection(v.data)])),
     fixture:{hostname:'ypaudit-'+suffix+'.157.180.11.28.sslip.io',databaseName:'ypaudit_'+suffix.replaceAll('-','_'),createdWebsiteIds:[],createdDomainIds:[],createdDatabaseNames:[],createdProviderIds:[],createdUserIds:[],operations:[]}});
   // Existing key is loaded only by the provider test, never into a public report or a browser trace.
