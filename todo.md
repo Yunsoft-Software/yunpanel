@@ -10,7 +10,7 @@
 - [ ] İkinci ağdaki PowerDNS, doğrulanmış bölge kopyasıyla birincil erişilebilirken ve yokken yetkili yanıt verir.
 - [x] .28 üzerinde CrowdSec AppSec gözlem trafiği, izole kural engellemesi ve ayar geri dönüşü doğrulandı. [Kabul kaydı](docs/gorevler/crowdsec-waf-20261121.md)
 - [x] .28 üzerinde aylık HTTP trafik ölçümü, müşteri veritabanı sınırı, panel dosya yazma kotası ve isteğe bağlı HTTP trafik engellemesi doğrulandı. Mevcut Nginx yapılandırmalarının kapsamı ve yeniden uygulama adımı kayıtlı. [Kabul kaydı](docs/gorevler/trafik-kota-20261122.md)
-- [ ] Pilot kalıbı doğrulandıktan sonra WordPress staging’den seçici aktarımda üretim sipariş ve üyelik verisi korunur. Diğer çalışma ortamları kendi gerçek kabulünde izlenir.
+- [ ] WordPress staging’den seçili tema ve eklenti dosyalarının panelde önizleme, kuyruk ve geri alma akışı gerçek Debian 12 PHP-FPM, MariaDB ve Chromium’da doğrulandı. Farklı tablo önekleri, canlı WordPress yazısı ve korunan dosyalar denetlendi. `.28` yayın kabulü bekleniyor. [Kabul kaydı](docs/gorevler/linux-hosting-pilot.md#22-kasım--wordpress-staging-dosyalarının-panelden-aktarımı)
 
 ## Önceki kabul matrisi
 

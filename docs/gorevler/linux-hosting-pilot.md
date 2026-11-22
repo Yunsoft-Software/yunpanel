@@ -24,6 +24,20 @@ Panelden uygulama için bu bileşenin kalıcı iş kuyruğuna ve iki sitenin kim
 
 `f54f6f13` için yerel `python3 orkestra/orchestrator.py verify` geçti. Debian 12 tam koşusunda görev denetimi, lint ve derleme geçti. Docker Compose ve Chromium hazırlandı. Testler ayrı kullanıcı, kısa geçici dizin ve izole ttyd soket diziniyle çalıştırıldı. Toplam 9.070 sonuçtan 9.068’i geçti ve iki ortam koşullu test atlandı. Gerçek MariaDB ve Postfix kontrollerini içeren ayrı root koşusu 11/11 geçti. İlk başarısız ortam koşularının ve son tam koşunun çıktıları `.local/contabo-cross-restore/debian-20261122-full/` altında saklandı.
 
+### 22 Kasım — WordPress staging dosyalarının panelden aktarımı
+
+`dc95f1a7` ile staging sitesinden tema, eklenti ve zorunlu eklenti dosyaları panelde önizlenip onaylanabiliyor. Hedefte dosyaların üst klasörleri bulunmalıdır. Hedefe erişim ve iki site kimliği kuyrukta ve işlem sırasında doğrulanır. Onaylanan dosya özetleri değişirse işlem durdurulur. Veritabanı, medya ve yapılandırma dosyaları korunur.
+
+Debian 12 üzerinde iki ayrı WordPress 7.1.5, PHP kullanıcısı ve MariaDB veritabanıyla Chromium kabulü geçti. Panelden önizleme ve onay, iş makbuzu, aynı isteğin tekrarında aynı iş, eski önizleme reddi ve HTTP 503 sonrası otomatik geri alma doğrulandı. Sağlık hatası sırasında WordPress tarafından yazılan yeni yazı, hedefin yapılandırması ve yüklemeleri korundu. Kurulu panel ve MariaDB servisleri çalışmaya devam etti. Test ortamı kaldırıldı. Kanıt `.local/contabo-cross-restore/wp-queue-20261122/native-dc95f1a7.log`.
+
+Kesilen bir dosya aktarımında kök kurtarma komutu `job-recovery.mjs recover-php-tool` işlem kaydına göre yalnızca dokunulan dosyaları geri alır. Kalıcı kayıt oluşmadan kesildiği doğrulanan iş sıfır dosya değişikliğiyle başarısız kapanır. Hedef dizini veya dosya değişikliği doğrulanamıyorsa kayıt incelemeye açık kalır. Saklanan dosyalar `/var/lib/yunpanel/recovery/wordpress-selective` altında site kullanıcılarının erişimine kapalıdır. Temizlik, ilgili işlem ve sonraki yazılar incelendikten sonra yapılır.
+
+Bağımsız inceleme sonrası `428f0fda` çakışmalı geri almayı kalıcı kurtarma durumunda tutuyor. Gerçek yerel yürütücü ve dosya sistemiyle birlikte 9/9 kurtarma sonucu geçti. Aynı revizyonun Chromium provasında iki gerçek Nginx ve PHP-FPM havuzu kullanıldı. OPcache önceden ısıtıldı ve iki saniyelik zaman damgası denetimi etkin kaldı. Aktarımın çalıştığı ve HTTP 503 sonrası canlı sitenin eski eklenti yanıtına döndüğü doğrulandı. Eşzamanlı WordPress yazısı duruyordu. Kanıt `.local/contabo-cross-restore/wp-queue-20261122/native-428f0fda-fpm.log`.
+
+Yerel tam doğrulamada 9.054 test geçti, 22 ortam koşullu test atlandı ve hata çıkmadı. Lint ve derleme geçti. İlk tam koşuda mevcut PHP kurtarma hatasının sınıflandırmasında görülen gerileme `428f0fda` ile giderildi. İlk ve son koşu çıktıları `.local/contabo-cross-restore/wp-queue-20261122/` altında saklandı.
+
+Yetkili gerçek Plesk dışa aktarımı bekleniyor. Yerel örnek veriyle önizleme ve yerel WordPress aktarım provası, gerçek PHP ve postalı WordPress Plesk kaynağının taşınması ile son IMAP eşitlemesini kapsamıyor.
+
 ## 20 Kasım ikinci çalışma ve durma noktası
 
 - **Posta motorları.** T942 `80b09c3e` gerçek Ubuntu'da başarılı apply, bozuk Rspamd yapılandırması sonrası otomatik geri dönüş ve açık rollback senaryolarından geçti. Fiziksel içerik, sahiplik ve izinler karşılaştırıldı. Dovecot başlangıç include ayarı, geçici SMTP/IMAP fixture'ında ilk soket engelini giderdi. Yerel Postfix STARTTLS ve IMAPS ile dört ileti teslim edildi. Tek Türkçe otomatik yanıt geldi. Tekrar, boş SMTP göndereni ve kardeş posta kutusu yanıt üretmedi. Rspamd gerçek PowerDNS ile olumlu DMARC'a `-1` uyguladı, başarısız DMARC'a uygulamadı. Gerçek RSA DKIM imzası onaylandı ve gövde değişince reddedildi.
