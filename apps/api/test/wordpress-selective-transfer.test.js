@@ -567,3 +567,58 @@ test('builds deterministic selective transfer plan with staging-flag reversal, b
     { code: 'wordpress_selective_target_invalid' },
   );
 });
+
+test('allows distinct per-site YunPanel table prefixes for file-only plans while preserving prefix_mismatch rejection for SQL plans', async (t) => {
+  const fixture = await createRealWordPressFixture(t);
+  const themeRoot = path.join(fixture.stagingDir, 'wp-content/themes/storefront-child');
+  await mkdir(path.join(themeRoot, '.env.local'));
+  await writeFile(path.join(themeRoot, '.env.local', 'settings.json'), '{}');
+  await writeFile(path.join(themeRoot, 'site.key'), 'test-only');
+  const scanned = await scanSelectiveWordPressFiles(fixture.stagingDir, ['themes', 'plugins']);
+  const fileEntries = [...scanned.transferable, ...scanned.protected, ...scanned.excluded];
+  const stagingYunPanel = { ...STAGING_SITE, tablePrefix: 'yp111111111111_' };
+  const productionYunPanel = { ...PRODUCTION_SITE, tablePrefix: 'yp222222222222_' };
+
+  const fileOnlyPlan = planWordPressSelectiveTransfer({
+    stagingSite: stagingYunPanel,
+    productionSite: productionYunPanel,
+    stagingTables: [],
+    productionTables: [],
+    fileEntries,
+    fileScopes: ['themes', 'plugins'],
+  });
+  assert.equal(fileOnlyPlan.stagingSite.tablePrefix, 'yp111111111111_');
+  assert.equal(fileOnlyPlan.productionSite.tablePrefix, 'yp222222222222_');
+  assert.deepEqual(fileOnlyPlan.tables.transferable, []);
+  assert.deepEqual(fileOnlyPlan.postTransferRestoration.options, {});
+  assert.deepEqual(fileOnlyPlan.postTransferRestoration.wpConfig, { set: {}, delete: [] });
+  assert.equal(scanned.protected.find(({ path: filePath }) => filePath.endsWith('/site.key')).reason, 'sensitive_secret_file');
+  assert.ok(scanned.protected.some(({ path: filePath }) => filePath.endsWith('/.env.local')));
+  assert.ok(!fileEntries.some(({ path: filePath }) => filePath.endsWith('/.env.local/settings.json')));
+  assert.ok(fileOnlyPlan.files.transferable.some((entry) => entry.path === 'wp-content/themes/storefront-child/style.css'));
+  assert.match(fileOnlyPlan.planSha256, /^[a-f0-9]{64}$/);
+
+  // Changing target table prefix alters planSha256 cleanly.
+  const otherPrefixPlan = planWordPressSelectiveTransfer({
+    stagingSite: stagingYunPanel,
+    productionSite: { ...PRODUCTION_SITE, tablePrefix: 'yp333333333333_' },
+    stagingTables: [],
+    productionTables: [],
+    fileEntries,
+    fileScopes: ['themes', 'plugins'],
+  });
+  assert.notEqual(fileOnlyPlan.planSha256, otherPrefixPlan.planSha256);
+
+  // Any SQL/database table transfer across distinct prefixes still fails closed with prefix_mismatch (409).
+  assert.throws(
+    () => planWordPressSelectiveTransfer({
+      stagingSite: stagingYunPanel,
+      productionSite: productionYunPanel,
+      stagingTables: ['yp111111111111_options'],
+      productionTables: ['yp222222222222_options'],
+      fileEntries,
+      fileScopes: ['themes'],
+    }),
+    (error) => error instanceof WordPressSelectiveTransferError && error.code === 'wordpress_selective_prefix_mismatch' && error.status === 409,
+  );
+});

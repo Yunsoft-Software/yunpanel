@@ -403,6 +403,14 @@ function isAlwaysProtectedFilePath(relativePath) {
   return ALWAYS_PROTECTED_FILENAME_SET.has(base);
 }
 
+export function isSensitiveSecretFilePath(relativePath) {
+  if (typeof relativePath !== 'string' || !relativePath) return false;
+  return relativePath.toLowerCase().split('/').some((name) => (
+    name === '.env' || name.startsWith('.env.') || name.endsWith('.pem') || name.endsWith('.key')
+    || name === 'id_rsa' || name === 'id_ed25519'
+  ));
+}
+
 function isUploadsPath(relativePath) {
   const lower = relativePath.toLowerCase();
   return lower === UPLOADS_PREFIX || lower.startsWith(`${UPLOADS_PREFIX}/`);
@@ -457,6 +465,9 @@ function normalizeScopeOptions(rawScopes) {
       }
       if (isAlwaysProtectedFilePath(cleaned)) {
         fail('protected_path_blocked', `Protected configuration path "${cleaned}" cannot be included in custom scope`, 409);
+      }
+      if (isSensitiveSecretFilePath(cleaned)) {
+        fail('protected_path_blocked', `Sensitive secret path "${cleaned}" cannot be included in custom scope`, 409);
       }
       if (isUploadsPath(cleaned) && !includeUploads) {
         fail('protected_path_blocked', 'wp-content/uploads is protected by default; set includeUploads: true to transfer uploads', 409);
@@ -558,6 +569,16 @@ export function filterSelectiveFileEntries(entries, scopeOptions = ['themes', 'p
       protectedEntries.push(Object.freeze({
         ...normalizedEntry,
         reason: 'production_runtime_config',
+      }));
+      continue;
+    }
+
+    if (isSensitiveSecretFilePath(entryPath)) {
+      protectedEntries.push(Object.freeze({
+        path: entryPath,
+        type,
+        ...(bytes !== null ? { bytes } : {}),
+        reason: 'sensitive_secret_file',
       }));
       continue;
     }
@@ -672,15 +693,15 @@ export async function scanSelectiveWordPressFiles(rootDir, scopeOptions = ['them
         if (!relFromRoot || relFromRoot.startsWith('..') || path.isAbsolute(relFromRoot)) {
           fail('symlink_rejected', `Directory "${relative}" escapes the WordPress root`, 409);
         }
-        const skipUploadsTree = isUploadsPath(relative) && !scopeConfig.includeUploads;
-        if (!skipUploadsTree) {
+        const protectedTree = isSensitiveSecretFilePath(relative) || (isUploadsPath(relative) && !scopeConfig.includeUploads);
+        if (!protectedTree) {
           if (countedEntries >= MAX_ENTRIES) {
             fail('files_limit', `Scanned WordPress tree exceeds limit of ${MAX_ENTRIES} entries`, 413);
           }
           countedEntries += 1;
         }
         entries.push({ path: relative, type: 'directory' });
-        if (!skipUploadsTree) {
+        if (!protectedTree) {
           await walk(childPath, relative);
         }
         continue;
@@ -698,6 +719,7 @@ export async function scanSelectiveWordPressFiles(rootDir, scopeOptions = ['them
       }
 
       const willTransfer = !isAlwaysProtectedFilePath(relative)
+        && !isSensitiveSecretFilePath(relative)
         && ((isUploadsPath(relative) && scopeConfig.includeUploads)
           || (!isUploadsPath(relative) && matchSelectiveScope(relative, scopeConfig) !== null));
 
@@ -805,7 +827,11 @@ export function planWordPressSelectiveTransfer({
   if (staging.websiteId === production.websiteId || staging.domain === production.domain || staging.url === production.url) {
     fail('target_invalid', 'Staging and production sites must be distinct websites and domains', 409);
   }
-  if (staging.tablePrefix !== production.tablePrefix) {
+  const hasDatabaseScope = (Array.isArray(stagingTables) && stagingTables.length > 0)
+    || (Array.isArray(productionTables) && productionTables.length > 0)
+    || (Array.isArray(livePostTypes) && livePostTypes.length > 0)
+    || (isPlainObject(tableOptions) && Object.keys(tableOptions).length > 0);
+  if (hasDatabaseScope && staging.tablePrefix !== production.tablePrefix) {
     fail(
       'prefix_mismatch',
       `Cross-prefix selective transfer is blocked (${staging.tablePrefix} !== ${production.tablePrefix})`,
@@ -828,6 +854,7 @@ export function planWordPressSelectiveTransfer({
 
   const backup = normalizeBackupReference(preTransferBackup);
   const normalizedHealthPath = normalizeHealthPath(healthCheckPath);
+  const restoresDatabase = tables.transferable.length > 0;
 
   const postTransferRestoration = Object.freeze({
     urlSearchReplace: Object.freeze({
@@ -836,16 +863,16 @@ export function planWordPressSelectiveTransfer({
       tables: tables.transferable,
       skipColumns: Object.freeze(['guid']),
     }),
-    options: Object.freeze({
+    options: Object.freeze(restoresDatabase ? {
       siteurl: production.url,
       home: production.url,
       blog_public: '1',
-    }),
+    } : {}),
     wpConfig: Object.freeze({
-      set: Object.freeze({
+      set: Object.freeze(restoresDatabase ? {
         WP_ENVIRONMENT_TYPE: 'production',
-      }),
-      delete: Object.freeze(['DISABLE_WP_CRON']),
+      } : {}),
+      delete: Object.freeze(restoresDatabase ? ['DISABLE_WP_CRON'] : []),
     }),
   });
 
