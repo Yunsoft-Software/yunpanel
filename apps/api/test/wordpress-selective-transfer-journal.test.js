@@ -7,6 +7,7 @@ import test from 'node:test';
 import { createDurableJobRegistry } from '../src/durable-job-registry.js';
 import { resolveJobRecoveryPaths } from '../src/job-recovery-runtime.js';
 import { createJobRegistry } from '../src/job-registry.js';
+import { createLocalJobExecutor } from '../src/local-job-executor.js';
 import { runRunningPhpToolRecoveryFromStores } from '../src/job-running-php-tool-recovery-runtime.js';
 import { createServerRegistry } from '../src/server-registry.js';
 import { createWebsitePhpToolOperationReceiptStore } from '../src/website-php-tool-operation-receipt.js';
@@ -115,14 +116,13 @@ test('an unbound job, protected path and replaced target remain unavailable for 
   assert.equal(await readFile(fx.files[1], 'utf8'), replacement);
 });
 
-async function runningJobFixture(t) {
+async function runningJobFixture(t, { claim = true } = {}) {
   const fx = await fixture(t);
   const jobs = createDurableJobRegistry({ filePath: fx.paths.jobStore, registryFactory: createJobRegistry });
   await jobs.init();
   const queued = await jobs.enqueue({ serverId: fx.serverId, type: 'website.php.action', operation: 'website.php.action',
     payload: fx.payload, resourceType: 'application', resourceId: sourceApp, idempotencyKey: 'selective-recovery-queue' });
-  const claimed = await jobs.claimNext(fx.serverId);
-  assert.equal(claimed.job.id, queued.id);
+  if (claim) assert.equal((await jobs.claimNext(fx.serverId)).job.id, queued.id);
 
   const websites = { version: 6, websites: [
     { id: sourceWebsite, name: 'source.test', runtimeType: 'php', serverId: fx.serverId, applicationId: sourceApp, revision: 1, unixUser: fx.payload.unixUser },
@@ -136,8 +136,27 @@ async function runningJobFixture(t) {
     journalFactory: () => createWordPressSelectiveTransferJournal({ root: fx.root }),
     receiptStoreFactory: () => createWebsitePhpToolOperationReceiptStore({ root: path.join(fx.cwd, 'receipts') }),
     serviceStatus: async () => ({ apiActive: false, agentActive: false }) });
-  return { ...fx, jobs, jobId: queued.id, payload: claimed.job.payload, domain, recover };
+  return { ...fx, jobs, jobId: queued.id, payload: queued.payload, domain, recover };
 }
+
+test('a WordPress file conflict keeps the real local job in durable recovery', linux, async (t) => {
+  const fx = await runningJobFixture(t, { claim: false });
+  const executor = createLocalJobExecutor({ serverId: fx.serverId, jobRegistry: fx.jobs,
+    executeOperation: async (_operation, payload, { jobId }) => {
+      const batch = await fx.journal.prepare({ serverId: fx.serverId, jobId, payload, target: fx.target, relativePaths: [names[1]] });
+      assert.equal((await apply(batch, 1, sha256(original))).status, 'applied');
+      await writeFile(fx.files[1], concurrent);
+      assert.equal((await batch.rollback()).status, 'conflict');
+      throw Object.assign(new Error('WordPress file requires inspection'), { code: 'wordpress_selective_transfer_rollback_conflict' });
+    },
+    reconcileCompletedJob: async () => assert.fail('A partial rollback must not be completed'),
+  });
+  await assert.rejects(executor.runOnce(), { code: 'local_host_recovery_required', jobId: fx.jobId });
+  assert.equal((await fx.jobs.getJob(fx.jobId)).status, 'running');
+  await assert.rejects(fx.jobs.claimNext(fx.serverId), { code: 'durable_job_reconciliation_required' });
+  await assert.rejects(fx.recover(), { code: 'job_wordpress_selective_rollback_unresolved' });
+  assert.equal(await readFile(fx.files[1], 'utf8'), concurrent);
+});
 
 test('PHP recovery uses durable queue evidence and the currently bound WordPress document root', linux, async (t) => {
   const fx = await runningJobFixture(t);

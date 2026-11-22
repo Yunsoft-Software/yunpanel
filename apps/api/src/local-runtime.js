@@ -9,9 +9,10 @@ const EXECUTOR_FAULT_CODES = new Set([
   'local_claim_unconfirmed',
   'local_claim_invalid',
   'local_completion_unconfirmed',
+  'local_host_recovery_required',
   'local_reconciliation_failed',
 ]);
-const EXECUTOR_FAULT_PHASES = new Set(['claim', 'execute', 'complete', 'reconcile']);
+const EXECUTOR_FAULT_PHASES = new Set(['claim', 'execute', 'complete', 'reconcile', 'recovery']);
 const JOB_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SNAPSHOT_FIELDS = new Set(['inventory', 'services']);
 const TERMINAL_JOB_STATUSES = new Set(['succeeded', 'failed']);

@@ -1,3 +1,4 @@
+import { OPERATIONS } from '@yunpanel/protocol';
 import { claimFailureDiagnostic, safeClaimFailureFields } from './local-claim-failure-diagnostic.js';
 import { safeLocalOperationError as safeExecutionError } from './local-execution-error.js';
 
@@ -5,6 +6,7 @@ const FAULTS = Object.freeze({
   claim: ['local_claim_unconfirmed', 'Local job claim could not be confirmed. Inspect stored job state before recovery.'],
   execute: ['local_claim_invalid', 'Local job identity is inconsistent. Host execution was not started.'],
   complete: ['local_completion_unconfirmed', 'Host execution ended but its saved result could not be confirmed. Do not repeat the host operation.'],
+  recovery: ['local_host_recovery_required', 'The WordPress file transfer requires recovery inspection before job execution can resume.'],
   reconcile: ['local_reconciliation_failed', 'The job result is saved but resource reconciliation is incomplete. Inspect state before recovery.'],
 });
 
@@ -151,6 +153,7 @@ export function createLocalJobExecutor({
     // A host error is the ONLY reason to record a failed operation. Storage and
     // reconciliation failures must never be recast as a host failure.
     let completion;
+    let recoveryRequired = false;
     try {
       const result = await executeOperation(
         claim.envelope.operation,
@@ -179,6 +182,8 @@ export function createLocalJobExecutor({
       }
       completion = { serverId, jobId, status: 'succeeded', result };
     } catch (error) {
+      recoveryRequired = claim.envelope.operation === OPERATIONS.WEBSITE_PHP_ACTION && reconciliationPayload.actionId === 'wp.toolkit'
+        && reconciliationPayload.options?.action === 'selective_transfer' && error?.code === 'wordpress_selective_transfer_rollback_conflict';
       completion = { serverId, jobId, status: 'failed', error: safeExecutionError(error) };
     }
 
@@ -189,6 +194,10 @@ export function createLocalJobExecutor({
           throw new Error('Inconsistent durable reconciliation acknowledgement');
         }
       } catch { throw halt('complete', jobId); }
+    }
+    if (recoveryRequired) {
+      jobRegistry.abortLiveReconciliation?.({ serverId, jobId });
+      throw halt('recovery', jobId);
     }
 
     let terminal;

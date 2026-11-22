@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { WebsitePhpToolsServiceError } from './website-php-tools-service.js';
 import { filterSelectiveFileEntries, wordpressSelectiveTransferPolicy } from './wordpress-selective-transfer.js';
 import { createWordPressSelectiveTransferJournal } from './wordpress-selective-transfer-journal.js';
@@ -161,6 +162,8 @@ export function createWordPressSelectiveTransferService({ context, config, run, 
           const result = await transaction.apply({ relativePath: entry.path, expectedTargetSha256: entry.expectedTargetSha256, content: bytes });
           if (result.status !== 'applied') throw fail('wordpress_selective_transfer_interrupted', 'Dosya değişti. Aktarım geri alınıyor.');
         }
+        // Allow a full timestamp check interval with the managed PHP OPcache defaults.
+        await delay(3000);
         const health = await healthInspector.inspect({ primaryDomain: target.domain, healthPath: '/', timeoutSeconds: 30 });
         if (health?.satisfied !== true) throw fail('wordpress_selective_transfer_interrupted', 'Hedef site sağlık kontrolü geçmedi.');
         const applied = await inventory(files, target, payload.options.fileScopes);

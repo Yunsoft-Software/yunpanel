@@ -47,12 +47,14 @@ export async function recoverRunningPhpTool({
   if (!job || job.id !== jobId || job.serverId !== serverId || job.status !== 'running'
     || job.operation !== OPERATIONS.WEBSITE_PHP_ACTION || job.resourceType !== 'application'
     || !context || context.id !== jobId || context.serverId !== serverId || context.status !== 'running'
-    || context.operation !== job.operation || context.resourceType !== job.resourceType || context.resourceId !== job.resourceId
-    || context.payload?.applicationId !== job.resourceId) {
+    || context.operation !== job.operation || context.resourceType !== job.resourceType || context.resourceId !== job.resourceId) {
     throw new JobRunningPhpToolRecoveryError('job_php_tool_recovery_evidence_mismatch', 'PHP tool recovery evidence does not match durable job context');
   }
 
-  const selective = context.payload.actionId === 'wp.toolkit' && context.payload.options?.action === 'selective_transfer';
+  const selective = context.payload?.actionId === 'wp.toolkit' && context.payload.options?.action === 'selective_transfer';
+  if (selective && context.payload.applicationId !== job.resourceId) {
+    throw new JobRunningPhpToolRecoveryError('job_php_tool_recovery_evidence_mismatch', 'WordPress action does not match the queued Application');
+  }
   if (!receipt) {
     const recovered = selective && typeof rollbackInterruptedSelectiveTransfer === 'function'
       ? await rollbackInterruptedSelectiveTransfer({ serverId, jobId, payload: context.payload }) : null;
