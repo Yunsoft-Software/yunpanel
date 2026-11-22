@@ -102,7 +102,7 @@ async function restartWaitReceipt(deadline){
 }
 
 
-test('@mutation source one browser confirmation survives one actual root API restart and completes post-start work in the same owned journal',async({page})=>{
+if(process.env.YUNPANEL_T883_RESTART_OPERATOR_SHA256)test('@mutation source one browser confirmation survives one actual root API restart and completes post-start work in the same owned journal',async({page})=>{
  test.setTimeout(300000);const operatorSha256=process.env.YUNPANEL_T883_RESTART_OPERATOR_SHA256;expect(operatorSha256,'HOLD: an actual reviewed root restart operator is required').toMatch(/^[a-f0-9]{64}$/);const fixtureKey=process.env.YUNPANEL_T883_RESTART_FIXTURE_KEY;expect(fixtureKey,'HOLD: ROOT must prearm one exact fresh restart fixture key').toMatch(/^t883-15-restart-[a-z0-9]+(?:-[a-z0-9]+)*$/);expect(fixtureKey.length).toBeLessThanOrEqual(44);expect(fs.existsSync(path.join(RUN_DIR,'owned-fixtures',fixtureKey+'.json')),'HOLD: restart proof requires a new ledger in this fresh run').toBe(false);
  expect(fs.existsSync(path.join(RUN_DIR,'api-restart-request.json'))).toBe(false);expect(fs.existsSync(path.join(RUN_DIR,'root-native-api-restart-receipt.json'))).toBe(false);
  const testSourceCommit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();expect(testSourceCommit).toMatch(/^[a-f0-9]{40}$/);const testFileSha256=createHash('sha256').update(fs.readFileSync(new URL(import.meta.url))).digest('hex');const deployment=await restartDeployment();

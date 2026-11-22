@@ -10,12 +10,15 @@ import {createMailboxRemoval} from '../../apps/web/src/workspace/mailbox-removal
 
 test.describe.configure({mode:'serial'});
 
+const managedRepairEnabled=process.env.YUNPANEL_AUDIT_MANAGED_REPAIR==='1';
+const targetPhpVersion=process.env.YUNPANEL_AUDIT_PHP_TARGET_VERSION;
+
 // These acceptance gates are retained, never counted as passing or skipped tests.
 export const openAcceptances=[
 
  {id:'13.04',oldCommit:'ba33f4a8^',title:'recovers only the owned static Domain left by the earlier incomplete Website removal plan',assertions:['an orphan Domain belonging to an interrupted removal is recovered using its exact journal and checksum'],reason:'The old case used one fixed October journal. Current normal provisioning and automatic removal do not provide a supported way to manufacture that orphan without corrupting server state.',requiredChannel:'An actual owned interrupted Domain journal, or a separately approved process interruption test'},
  {id:'13.07.version-switch',oldCommit:'ba33f4a8^',title:'PHP version and settings change the actual FPM runtime and persist in the site record',assertions:['a different available PHP major/minor is selected and actual FPM HTTP agrees'],reason:'The authorized native host has only PHP 8.3 installed. Same-version FPM settings are tested separately; installing another server-wide runtime is outside this test scope.',requiredChannel:'A second installed supported PHP runtime'},
- ...(process.env.YUNPANEL_AUDIT_MANAGED_REPAIR==='1'?[]:[{id:'13.02',oldCommit:'ba33f4a8^',title:'managed phpMyAdmin repair stages actual templates and verifies the native gateway',assertions:['repair job succeeded and configuration applied, HTTP/FPM/gateway sockets healthy, transaction receipt'],reason:'Managed repair changes a shared server service. It is executable only in a separately exclusive server window after effect review.',requiredChannel:'Explicit managed repair flag and server-global plus all test-slot locks'}]),
+ ...(managedRepairEnabled?[]:[{id:'13.02',oldCommit:'ba33f4a8^',title:'managed phpMyAdmin repair stages actual templates and verifies the native gateway',assertions:['repair job succeeded and configuration applied, HTTP/FPM/gateway sockets healthy, transaction receipt'],reason:'Managed repair changes a shared server service. It is executable only in a separately exclusive server window after effect review.',requiredChannel:'Explicit managed repair flag and server-global plus all test-slot locks'}]),
 ];
 let primary,owner,state,stateFile,secretsFile,uploadedStatic,primaryKey,staticKey;
 let phase2Uncertain=false;const phase2Jobs=new Map();
@@ -269,7 +272,7 @@ test('@mutation source three-step form creates an uploaded static site without G
  await ready(page,uploadedStatic.route('files'));await expect(main(page)).toContainText('index.html');await expect(page.getByRole('navigation',{name:'Site araçları'}).getByRole('link',{name:/Git/})).toHaveCount(0);record('static.upload.actual-html',{verified:true,websiteId:target.websiteId,noGitRequired:true});
 });
 
-test('@mutation @managed-repair source managed phpMyAdmin repair stages actual templates and verifies the native gateway', async ({ liveApi }) => {
+if(managedRepairEnabled)test('@mutation @managed-repair source managed phpMyAdmin repair stages actual templates and verifies the native gateway', async ({ liveApi }) => {
  test.setTimeout(180000);expect(process.env.YUNPANEL_AUDIT_MANAGED_REPAIR,'Managed repair requires the separately approved exclusive server window').toBe('1');const m = owned();
  const queued = check(await apiCall(liveApi.api, liveApi.csrf, 'POST', '/api/panel/servers/' + m.serverId + '/services/phpmyadmin/install', { confirmation: 'install:phpmyadmin' }), 'phpmyadmin.repair.queue', 202);
  const job = await waitJob(liveApi.api, queued.id, 150000);
@@ -399,9 +402,9 @@ test('@mutation source SQL import uploads a real SQL file through phpMyAdmin, ve
  }
 });
 
-test('@mutation source PHP settings switch to a different installed FPM version and restore the original runtime',async({liveApi})=>{
+if(targetPhpVersion)test('@mutation source PHP settings switch to a different installed FPM version and restore the original runtime',async({liveApi})=>{
  test.setTimeout(120000);const m=owned(),root='/api/panel/websites/'+m.fixture.websiteId+'/php-tools/config';
- const before=check(await phase2Read(liveApi.api,liveApi.csrf,'GET',root),'php.config.read'),target=process.env.YUNPANEL_AUDIT_PHP_TARGET_VERSION;
+ const before=check(await phase2Read(liveApi.api,liveApi.csrf,'GET',root),'php.config.read'),target=targetPhpVersion;
  const prerequisite=typeof target==='string'&&/^\d+\.\d+$/.test(target)&&target!==before.phpVersion&&Array.isArray(before.availablePhpVersions)&&before.availablePhpVersions.includes(target);
  record('php.version-switch.prerequisite',{state:prerequisite?'READY':'HOLD',currentVersion:before.phpVersion,targetVersion:typeof target==='string'&&/^\d+\.\d+$/.test(target)?target:null,availableVersions:before.availablePhpVersions});
  expect(prerequisite,'HOLD: a different explicitly selected installed PHP runtime is required').toBe(true);

@@ -17,7 +17,7 @@ const USER = /^yunapp-[a-z0-9]{8,32}$/;
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const codeOf = body => /^[a-z0-9_]{1,100}$/i.test(body?.error?.code ?? '') ? body.error.code : 'unknown';
 function transportHint(error) {
-  const message = String(error?.message ?? '');
+  const message = [error?.code, error?.message].join(' ');
   for (const [pattern, hint] of [[/ECONNRESET/i, 'ECONNRESET'], [/socket hang up/i, 'socket_hang_up'],
     [/ETIMEDOUT|Timeout \d+ms exceeded/i, 'request_timeout'], [/Request context disposed/i, 'context_disposed'],
     [/ECONNREFUSED/i, 'ECONNREFUSED'], [/ENOTFOUND/i, 'ENOTFOUND'], [/ERR_SOCKET_CLOSED/i, 'ERR_SOCKET_CLOSED']]) {
@@ -55,16 +55,18 @@ function requestHost(ip, hostname, pathname, options = {}) {
   assert.ok(['http', 'https'].includes(scheme));
   assert.ok(Object.keys(headers).every(k => !/^(host|cookie|authorization)$/i.test(k)), 'HTTP probe cannot carry panel credentials or replace its host');
   const data = body == null ? null : Buffer.isBuffer(body) ? body : Buffer.from(String(body));
+  const freshConnection = process.env.YUNPANEL_AUDIT_CONNECTION_CLOSE === '1';
   return new Promise((resolve, reject) => {
     const req = (scheme === 'https' ? https : http).request({ hostname: ip, servername: hostname, port: scheme === 'https' ? 443 : 80,
-      path: pathname, method, headers: { ...headers, Host: hostname, ...(data ? { 'Content-Length': data.length } : {}) }, timeout: timeoutMs }, res => {
+      path: pathname, method, ...(freshConnection ? { agent: false } : {}),
+      headers: { ...headers, ...(freshConnection ? { Connection: 'close' } : {}), Host: hostname, ...(data ? { 'Content-Length': data.length } : {}) }, timeout: timeoutMs }, res => {
       const buffers = []; let size = 0;
       res.on('data', chunk => { size += chunk.length; if (size > maxBytes) req.destroy(new Error('HTTP probe response too large')); else buffers.push(chunk); });
       res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(buffers).toString('utf8'), headers: res.headers }));
-      res.on('error', () => reject(new Error('Owned HTTP response failed')));
+      res.on('error', error => reject(new Error(`Owned HTTP response failed [${transportHint(error)}]`)));
     });
-    req.on('timeout', () => req.destroy(new Error('Owned HTTP probe timed out')));
-    req.on('error', () => reject(new Error('Owned HTTP probe transport failed')));
+    req.on('timeout', () => req.destroy(new Error('Owned HTTP probe ETIMEDOUT')));
+    req.on('error', error => reject(new Error(`Owned HTTP probe transport failed [${transportHint(error)}; reusedSocket=${req.reusedSocket}]`)));
     req.end(data);
   });
 }
