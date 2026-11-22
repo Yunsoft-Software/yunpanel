@@ -14,6 +14,10 @@ Sieve, mevcut yönlendirmeyle zincirde çalıştı. Kopyalı yönlendirme yerel 
 
 İlk canlı adım ayrı yedek hedefinde uzak depo ve kapalı kaynakla kurtarma provasıdır. Ardından yetkili Plesk dışa aktarımıyla PHP ve postalı WordPress pilotu, ayrı ağdan DNS ve WAF kabulü gelir.
 
+22 Kasım’da iki Contabo hedefinde yedekten kurtarma, posta ve ikinci DNS doğrulandı. Yerel dosyalar, test çıktıları ve taşıma örnekleri yeniden tarandı. PHP ve WordPress pilotları için kaynağı ve izni doğrulanabilen gerçek Plesk dışa aktarımı bulunamadı. Yerel WordPress/MariaDB provası ve gerçek YunPanel yedeği geri yüklemesi ilgili kabul kayıtlarında duruyor. Plesk pilotunun açık ölçütleri [kabul listesinde](../../todo.md#linux-hosting-pilotu-ve-plesk-geçişi) izleniyor.
+
+`686e1d34` ile WordPress dosya planı farklı site tablo önekleriyle çalışıyor. SQL aktarımındaki önek eşitliği korunuyor. Gizli dosya yolları taramada içerik okumadan dışlanıyor. Dosya planı veritabanı seçeneklerini veya `wp-config.php` değişikliklerini planlamıyor. Gerçek dosya sistemi ve SQLite kullanan 7/7 planlayıcı testi ile macOS `npm run check` 9.052 başarılı, 6 atlama ve sıfır hata verdi. Panel önizlemesi ayrı worktree’de kaldı. WordPress ayar okumaları bu prototip testinde adaptör üzerinden yapılıyor. Uygulama yolu için kesinti sonrası kalıcı geri alma ve eşzamanlı yazıların korunması gerekiyor.
+
 ## 20 Kasım ikinci çalışma ve durma noktası
 
 - **Posta motorları.** T942 `80b09c3e` gerçek Ubuntu'da başarılı apply, bozuk Rspamd yapılandırması sonrası otomatik geri dönüş ve açık rollback senaryolarından geçti. Fiziksel içerik, sahiplik ve izinler karşılaştırıldı. Dovecot başlangıç include ayarı, geçici SMTP/IMAP fixture'ında ilk soket engelini giderdi. Yerel Postfix STARTTLS ve IMAPS ile dört ileti teslim edildi. Tek Türkçe otomatik yanıt geldi. Tekrar, boş SMTP göndereni ve kardeş posta kutusu yanıt üretmedi. Rspamd gerçek PowerDNS ile olumlu DMARC'a `-1` uyguladı, başarısız DMARC'a uygulamadı. Gerçek RSA DKIM imzası onaylandı ve gövde değişince reddedildi.
