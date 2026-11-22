@@ -36,6 +36,10 @@ Bağımsız inceleme sonrası `428f0fda` çakışmalı geri almayı kalıcı kur
 
 Yerel tam doğrulamada 9.054 test geçti, 22 ortam koşullu test atlandı ve hata çıkmadı. Lint ve derleme geçti. İlk tam koşuda mevcut PHP kurtarma hatasının sınıflandırmasında görülen gerileme `428f0fda` ile giderildi. İlk ve son koşu çıktıları `.local/contabo-cross-restore/wp-queue-20261122/` altında saklandı.
 
+Debian 12 tam koşusunda `428f0fda` için 9.079 test geçti, iki ortam koşullu sonuç ayrı koşuya bırakıldı ve hata çıkmadı. Ayrı MariaDB/Postfix koşusu 11/11 geçti. Paketle aynı üretim web derlemesi 1.958/1.958 testten geçti. Paket çalışması sürerken silinen geçici günlükler açık süreçten kurtarıldı. Son paket indirilip SHA-256 ve gömülü derleme bilgisi bağımsız olarak tekrar okundu.
+
+Doğrulanmış aday `0.3.0-2026112203` amd64, SHA-256 `b2b843b799616f18c42f2b6cabfe0b84ffcf39b59e8f45552735d4e7886d7254`. Paket kaynağı `428f0fdaacfb563985595f40eab194aa424bc199`. Aday ve test çıktıları `.local/contabo-cross-restore/wp-queue-20261122/2203/` altında. `.28` `2202` ile HTTP 200 veriyor. `2203` kurulumu ve canlı WordPress aktarım kabulü ayrı onay bekliyor.
+
 Yetkili gerçek Plesk dışa aktarımı bekleniyor. Yerel örnek veriyle önizleme ve yerel WordPress aktarım provası, gerçek PHP ve postalı WordPress Plesk kaynağının taşınması ile son IMAP eşitlemesini kapsamıyor.
 
 ## 20 Kasım ikinci çalışma ve durma noktası
