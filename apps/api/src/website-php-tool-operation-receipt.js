@@ -26,12 +26,15 @@ function normalized(value) {
     throw new WebsitePhpToolOperationReceiptError('website_php_tool_receipt_invalid', 'PHP tool receipt is invalid');
   }
   const p = value.payload, r = value.result;
+  const selective = p?.actionId === 'wp.toolkit' && p.options?.action === 'selective_transfer';
   if (!p || typeof p !== 'object' || Array.isArray(p)
     || !UUID.test(p.websiteId ?? '') || !UUID.test(p.applicationId ?? '') || !USER.test(p.unixUser ?? '')
     || !Number.isSafeInteger(p.expectedWebsiteRevision) || p.expectedWebsiteRevision < 1
     || !UUID.test(p.actorSessionId ?? '') || !UUID.test(p.actorUserId ?? '')
     || !['owner', 'site_manager', 'reseller', 'customer'].includes(p.actorRole)
     || !ACTIONS.has(p.actionId) || !SHA.test(p.previewDigest ?? '')
+    || (selective && (!UUID.test(p.targetApplicationId ?? '') || p.targetApplicationId === p.applicationId
+      || !Number.isSafeInteger(p.targetWebsiteRevision) || p.targetWebsiteRevision < 1))
     || p.confirmation !== (p.actionId === 'php.fpm.update' ? `php-config:${p.websiteId}:${p.config?.phpVersion}:${p.previewDigest}` : `php-tool:${p.websiteId}:${p.actionId}:${p.previewDigest}`)
     || !r || typeof r !== 'object' || Array.isArray(r)
     || r.version !== 1 || r.websiteId !== p.websiteId || r.applicationId !== p.applicationId
@@ -58,6 +61,7 @@ function normalized(value) {
       confirmation: p.confirmation,
       ...(p.actionId === 'php.fpm.update' ? { config: Object.freeze({ ...p.config }) } : {}),
       ...(p.actionId === 'wp.toolkit' ? { options: structuredClone(p.options), secretRef: p.secretRef } : {}),
+      ...(selective ? { targetApplicationId: p.targetApplicationId, targetWebsiteRevision: p.targetWebsiteRevision } : {}),
     }),
     result: Object.freeze({
       version: 1,

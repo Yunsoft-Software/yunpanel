@@ -4,10 +4,13 @@ import { panelRequest } from '../api.js';
 import { sessionVersion, sessionTransitionPending } from '../session-client.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, LinkButton, Modal, Section } from './PanelKit.jsx';
-import { siteHref } from './site-model.js';
+import { formatBytes, siteHref } from './site-model.js';
 
 const labels = { install: 'WordPress kur', remove: 'WordPress’i kaldır', password: 'Yönetici parolasını değiştir', 'core.update': 'WordPress’i güncelle',
   clone: 'WordPress klonla', staging: 'Staging oluştur', 'plugin.install': 'Eklenti kur', 'theme.install': 'Tema kur' };
+const selectiveFileScopes = [
+  ['mu-plugins', 'Zorunlu eklentiler'], ['plugins', 'Eklentiler'], ['themes', 'Temalar'],
+];
 const unwrap = result => result?.data ?? result;
 const terminal = job => ['succeeded', 'failed', 'cancelled'].includes(job?.status);
 const wait = delay => new Promise(resolve => setTimeout(resolve, delay));
@@ -20,12 +23,22 @@ export default function SiteWordPressPanel({ domainId, scope }) {
   const [dialog, setDialog] = useState(null), [packageName, setPackageName] = useState(''), [password, setPassword] = useState('');
   const [username, setUsername] = useState(''), [removal, setRemoval] = useState(null);
   const [clone, setClone] = useState({ targetWebsiteId: '', scheme: 'https', action: 'staging' });
+  const [selectiveTarget, setSelectiveTarget] = useState(''), [selectedScopes, setSelectedScopes] = useState([]);
+  const [selectivePreview, setSelectivePreview] = useState(null), [selectivePreviewing, setSelectivePreviewing] = useState(false);
   const [install, setInstall] = useState({ title: '', adminUser: 'admin', adminEmail: '', locale: 'tr_TR', scheme: 'https', databaseBindingId: 'new', databaseName: `wp_${scope.websiteId.replaceAll('-', '').slice(0, 12)}` });
   const live = useRef(false), generation = useRef(sessionVersion()), requestRef = useRef(search.get('wordpressRequest'));
+  const previewRequest = useRef(null), mutationPending = useRef(false), reviewedRequest = useRef(null);
   const isCurrent = () => live.current && generation.current === sessionVersion() && !sessionTransitionPending();
   const root = `/websites/${encodeURIComponent(scope.websiteId)}/wordpress`;
+  function clearSelectivePreview() {
+    previewRequest.current?.abort();
+    previewRequest.current = null;
+    setSelectivePreview(null);
+    setSelectivePreviewing(false);
+  }
   async function load() {
     if (!isCurrent()) return;
+    clearSelectivePreview();
     setLoading(true);
     try {
       const data = unwrap(await panelRequest(root));
@@ -44,7 +57,7 @@ export default function SiteWordPressPanel({ domainId, scope }) {
   useEffect(() => {
     live.current = true; generation.current = sessionVersion(); void load();
     if (requestRef.current) void readRequest(requestRef.current).catch(failure => { if (isCurrent()) setError(failure); });
-    return () => { live.current = false; };
+    return () => { live.current = false; previewRequest.current?.abort(); };
   }, [scope.websiteId]);
   useEffect(() => {
     if (!job || terminal(job) || !requestRef.current) return;
@@ -52,7 +65,14 @@ export default function SiteWordPressPanel({ domainId, scope }) {
     return () => clearInterval(timer);
   }, [job?.id, job?.status]);
 
-  const disabled = !canManage || busy || (job && !terminal(job));
+  const disabled = !canManage || busy || selectivePreviewing || (job && !terminal(job));
+  const targetPhpSites = (websites.items ?? []).filter(site => site.id !== scope.websiteId && site.runtimeType === 'php' && site.serverId === scope.serverId);
+  const targetSite = targetPhpSites.find(site => site.id === selectiveTarget);
+  const readySelectivePreview = status?.selectiveTransferAvailable === true && selectivePreview && targetSite
+    && selectivePreview.options.targetWebsiteId === targetSite.id && selectivePreview.targetRevision === targetSite.revision
+    && selectivePreview.data.websiteRevision === status.websiteRevision ? selectivePreview : null;
+  const canConfirmSelective = readySelectivePreview && (!requestRef.current || job
+    || (reviewedRequest.current?.id === requestRef.current && reviewedRequest.current.digest === readySelectivePreview.data.previewDigest));
   async function prepareDatabase() {
     setPhase('Veritabanı ve kullanıcı hazırlanıyor');
     const selected = install.databaseBindingId === 'new' ? null : status.databases?.find(database => database.id === install.databaseBindingId);
@@ -88,17 +108,20 @@ export default function SiteWordPressPanel({ domainId, scope }) {
     if (databaseJob.status !== 'succeeded') throw new Error('Hedef veritabanı hazırlanamadı; aynı işlem kaydını kontrol edin.');
     return response.binding.id;
   }
-  async function perform(options, secret = null, typedConfirmation = null) {
-    if (disabled || !isCurrent()) return;
+  async function perform(options, secret = null, typedConfirmation = null, approvedPreview = null) {
+    if (disabled || mutationPending.current || !isCurrent()
+      || (options.action === 'selective_transfer' && (!canConfirmSelective || approvedPreview !== readySelectivePreview.data))) return;
+    mutationPending.current = true;
     setBusy(true); setError(null);
     try {
       let desired = options;
       if (options.action === 'install') desired = { ...options, databaseBindingId: await prepareDatabase() };
       if (['clone', 'staging'].includes(options.action)) desired = { ...options, databaseBindingId: await prepareCloneDatabase(options.targetWebsiteId) };
       setPhase('İşlem kontrol ediliyor');
-      const preview = unwrap(await panelRequest(`${root}/preview`, { method: 'POST', body: { options: desired } }));
+      const preview = approvedPreview ?? unwrap(await panelRequest(`${root}/preview`, { method: 'POST', body: { options: desired } }));
       if (!isCurrent()) return;
       const requestId = requestRef.current && !job ? requestRef.current : crypto.randomUUID(); requestRef.current = requestId;
+      if (approvedPreview) reviewedRequest.current = { id: requestId, digest: preview.previewDigest };
       const params = new URLSearchParams(search); params.set('wordpressRequest', requestId); setSearch(params, { replace: true });
       setPhase('WordPress işlemi başlatılıyor');
       const response = unwrap(await panelRequest(`${root}/actions`, { method: 'POST', body: { requestId, options: desired,
@@ -106,19 +129,65 @@ export default function SiteWordPressPanel({ domainId, scope }) {
         confirmation: typedConfirmation ?? preview.confirmation, ...(secret != null ? { password: secret } : {}) } }));
       if (!isCurrent()) return;
       setJob(response.job); updateJob(response.job); setPassword(''); setDialog(null); setRemoval(null); setPhase('');
+      if (approvedPreview) clearSelectivePreview();
     } catch (failure) {
       if (!isCurrent()) return;
       setError(failure);
       if (requestRef.current) {
-        try { const recovered = await readRequest(requestRef.current); if (recovered) { setPassword(''); setDialog(null); } }
-        catch { /* Keep the request reference visible for an explicit result check. */ }
+        try {
+          const recovered = await readRequest(requestRef.current);
+          if (recovered) { setPassword(''); setDialog(null); if (approvedPreview) clearSelectivePreview(); }
+        } catch (recoveryFailure) {
+          // A stale preview rejected before enqueue can be replaced after confirming no job exists.
+          if (approvedPreview && isCurrent() && failure.code === 'wordpress_preview_stale' && recoveryFailure.code === 'wordpress_request_not_found') {
+            requestRef.current = null; reviewedRequest.current = null;
+            const params = new URLSearchParams(search); params.delete('wordpressRequest'); setSearch(params, { replace: true });
+            void load();
+          }
+        }
       }
-    } finally { if (isCurrent()) { setBusy(false); setPhase(''); } }
+    } finally {
+      mutationPending.current = false;
+      if (isCurrent()) { setBusy(false); setPhase(''); }
+    }
   }
   async function prepareRemoval() {
     setError(null);
     try { const preview = unwrap(await panelRequest(`${root}/preview`, { method: 'POST', body: { options: { action: 'remove' } } })); if (isCurrent()) setRemoval(preview); }
     catch (failure) { if (isCurrent()) setError(failure); }
+  }
+  async function previewSelectiveTransfer(event) {
+    event.preventDefault();
+    if (disabled || loading || !isCurrent() || previewRequest.current || mutationPending.current
+      || status?.selectiveTransferAvailable !== true || !targetSite || !selectedScopes.length) return;
+    const controller = new AbortController();
+    previewRequest.current = controller;
+    setSelectivePreview(null); setSelectivePreviewing(true); setError(null);
+    const options = { action: 'selective_transfer', targetWebsiteId: targetSite.id,
+      fileScopes: selectiveFileScopes.map(([key]) => key).filter(key => selectedScopes.includes(key)) };
+    try {
+      const data = unwrap(await panelRequest(`${root}/preview`, { method: 'POST', body: { options }, signal: controller.signal }));
+      if (!isCurrent() || previewRequest.current !== controller) return;
+      const summary = data?.selectiveTransfer?.summary;
+      if (typeof data?.selectiveTransfer?.targetDomain !== 'string' || !summary
+        || ['transferableFileCount', 'transferableBytes', 'createFileCount', 'overwriteFileCount'].some(key => !Number.isSafeInteger(summary[key]) || summary[key] < 0)
+        || !/^[a-f0-9]{64}$/.test(data.previewDigest) || typeof data.confirmation !== 'string') {
+        throw new Error('Dosya aktarımı önizlemesi doğrulanamadı.');
+      }
+      if (data.websiteRevision !== status.websiteRevision) {
+        setError(new Error('Kaynak site değişti. Bilgiler yenilendikten sonra yeniden önizleyin.'));
+        void load();
+        return;
+      }
+      setSelectivePreview({ options, data, targetRevision: targetSite.revision });
+    } catch (failure) {
+      if (isCurrent() && previewRequest.current === controller) setError(failure);
+    } finally {
+      if (previewRequest.current === controller) {
+        previewRequest.current = null;
+        if (isCurrent()) setSelectivePreviewing(false);
+      }
+    }
   }
   const installed = status?.installed === true;
   const updateInstall = (key, value) => setInstall(previous => ({ ...previous, [key]: value }));
@@ -160,10 +229,33 @@ export default function SiteWordPressPanel({ domainId, scope }) {
       </form>
     </Section>}
     {job && <Section title="Son WordPress işlemi"><div className="ws-section-body" role="status"><Badge state={job.status} />
-      <p>{job.status === 'succeeded' ? 'WordPress işlemi doğrulandı. Güncel bilgiler yeniden alınıyor.' : job.status === 'failed' ? 'İşlem tamamlanamadı. Önceki site yedeği korunuyor.' : job.status === 'cancelled' ? 'İşlem iptal edildi.' : 'Site yedeği alınıyor ve işlem sunucuda yürütülüyor.'}</p>
+      <p>{job.status === 'succeeded' ? 'WordPress işlemi doğrulandı.' : job.status === 'failed' ? 'WordPress işlemi tamamlanamadı.' : job.status === 'cancelled' ? 'İşlem iptal edildi.' : 'WordPress işlemi sunucuda yürütülüyor.'}</p>
       <ErrorNotice error={job.error} />
       <Button disabled={busy} onClick={() => void readRequest(requestRef.current).catch(setError)}>Sonucu kontrol et</Button>
     </div></Section>}
+    {status?.selectiveTransferAvailable === true && <Section title="Seçici dosya aktarımı"
+      description="Temaları ve eklentileri başka bir WordPress sitesine aktarın. Dosyaların üst klasörleri hedef sitede bulunmalı.">
+      <form className="ws-section-body ws-form" onSubmit={previewSelectiveTransfer}>
+        <label>Hedef WordPress sitesi<select required value={selectiveTarget} disabled={disabled || loading || !targetPhpSites.length}
+          onChange={event => { clearSelectivePreview(); setSelectiveTarget(event.target.value); }}>
+          <option value="">{targetPhpSites.length ? 'Site seçin' : 'Başka uygun PHP sitesi bulunamadı'}</option>
+          {targetPhpSites.map(site => <option value={site.id} key={site.id}>{site.name}</option>)}
+        </select></label>
+        <fieldset className="ws-form-grid" disabled={disabled || loading}>
+          <legend>Aktarılacak dosyalar</legend>
+          {selectiveFileScopes.map(([key, label]) => <label className="ws-check" key={key}>
+            <input type="checkbox" checked={selectedScopes.includes(key)} onChange={event => {
+              const checked = event.target.checked;
+              clearSelectivePreview();
+              setSelectedScopes(previous => checked ? [...previous, key] : previous.filter(value => value !== key));
+            }} /><span>{label}</span>
+          </label>)}
+        </fieldset>
+        <div className="ws-actions"><Button type="submit" disabled={disabled || loading || !targetSite || !selectedScopes.length}>
+          {selectivePreviewing ? 'Önizleme hazırlanıyor…' : 'Aktarımı önizle'}
+        </Button></div>
+      </form>
+    </Section>}
     {installed && <>
       <PackageTable title="Eklentiler" kind="plugin" items={status.plugins ?? []} disabled={disabled} onInstall={() => { setPackageName(''); setDialog('plugin.install'); }} onAction={options => void perform(options)} />
       <PackageTable title="Temalar" kind="theme" items={status.themes ?? []} disabled={disabled} onInstall={() => { setPackageName(''); setDialog('theme.install'); }} onAction={options => void perform(options)} />
@@ -186,7 +278,28 @@ export default function SiteWordPressPanel({ domainId, scope }) {
     </Modal>}
     {removal && <ConfirmDialog title="WordPress’i kaldır" message={removal.impact} confirmation={removal.confirmation} confirmLabel="Yedekle ve WordPress’i kaldır"
       busy={busy} error={error} onCancel={() => setRemoval(null)} onConfirm={() => void perform({ action: 'remove' }, null, removal.confirmation)} />}
+    {readySelectivePreview && <SelectiveTransferReview preview={readySelectivePreview.data.selectiveTransfer} busy={busy} error={error}
+      disabled={disabled || loading || !canConfirmSelective} onCancel={clearSelectivePreview}
+      onConfirm={() => void perform(readySelectivePreview.options, null, null, readySelectivePreview.data)} />}
   </>;
+}
+
+function SelectiveTransferReview({ preview, disabled, busy, error, onCancel, onConfirm }) {
+  const { summary } = preview;
+  const changesFiles = summary.transferableFileCount > 0;
+  return <Modal title="Dosya aktarımını onayla" busy={busy} onClose={onCancel}>
+    <KeyValues items={[
+      ['Hedef site', preview.targetDomain],
+      ['Aktarılacak dosyalar', `${summary.transferableFileCount} dosya · ${formatBytes(summary.transferableBytes)}`],
+      ['Yeni dosyalar', summary.createFileCount], ['Güncellenecek dosyalar', summary.overwriteFileCount],
+    ]} />
+    {!changesFiles && <p>Aktarılacak dosya bulunamadı.</p>}
+    <ErrorNotice error={error} />
+    <footer className="ws-modal-footer">
+      <Button disabled={busy} onClick={onCancel}>Vazgeç</Button>
+      <Button variant="primary" disabled={disabled || !changesFiles} onClick={onConfirm}>{busy ? 'İşleniyor…' : 'Dosyaları aktar'}</Button>
+    </footer>
+  </Modal>;
 }
 
 function PackageTable({ title, kind, items, disabled, onInstall, onAction }) {

@@ -3,13 +3,16 @@ import { realpath } from 'node:fs/promises';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { WebsitePhpToolsServiceError } from './website-php-tools-service.js';
 import { createWordPressCloneService } from './wordpress-clone-service.js';
+import {
+  createWordPressSelectiveTransferService, normalizeWordPressSelectiveTransferOptions, withWordPressTransferLocks,
+} from './wordpress-selective-transfer-service.js';
 import { jobPublicView } from './job-registry.js';
 import { createWebsiteHttpHealthInspector } from '@yunpanel/host-runtime/website-http-health-inspector';
 import { phpSiteBootstrapManagerInternals } from '@yunpanel/host-runtime/php-site-bootstrap-manager';
 import { createPhpSiteContainerManager } from '@yunpanel/host-runtime/php-site-container-manager';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
-const ACTIONS = new Set(['install', 'clone', 'staging', 'remove', 'password', 'core.update', 'plugin.install', 'plugin.update', 'plugin.activate', 'plugin.deactivate', 'plugin.remove', 'theme.install', 'theme.update', 'theme.activate', 'theme.remove']);
+const ACTIONS = new Set(['install', 'clone', 'staging', 'selective_transfer', 'remove', 'password', 'core.update', 'plugin.install', 'plugin.update', 'plugin.activate', 'plugin.deactivate', 'plugin.remove', 'theme.install', 'theme.update', 'theme.activate', 'theme.remove']);
 const PACKAGE = /^[a-z0-9][a-z0-9-]{0,99}$/;
 const USER = /^[A-Za-z0-9][A-Za-z0-9_.@-]{0,59}$/;
 const CORE_FILES = new Set(['index.php', 'license.txt', 'readme.html', 'wp-activate.php', 'wp-blog-header.php', 'wp-comments-post.php', 'wp-config-sample.php', 'wp-config.php', 'wp-cron.php', 'wp-links-opml.php', 'wp-load.php', 'wp-login.php', 'wp-mail.php', 'wp-settings.php', 'wp-signup.php', 'wp-trackback.php', 'xmlrpc.php', 'wp-admin', 'wp-includes', 'wp-content']);
@@ -39,6 +42,7 @@ function configurationCode(source) {
 export function normalizeWordPressActionOptions(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input) || !ACTIONS.has(input.action)) throw fail('wordpress_action_invalid', 'WordPress işlemi geçersiz', 400);
   const action = input.action;
+  if (action === 'selective_transfer') return normalizeWordPressSelectiveTransferOptions(input);
   const fields = action === 'install' ? ['action', 'databaseBindingId', 'title', 'adminUser', 'adminEmail', 'locale', 'scheme']
     : ['clone', 'staging'].includes(action) ? ['action', 'targetWebsiteId', 'databaseBindingId', 'scheme'] : action === 'password' ? ['action', 'username'] : action.startsWith('plugin.') || action.startsWith('theme.') ? ['action', 'package'] : ['action'];
   if (Object.keys(input).length !== fields.length || Object.keys(input).some(key => !fields.includes(key))) throw fail('wordpress_action_invalid', 'WordPress işlem alanları geçersiz', 400);
@@ -58,6 +62,7 @@ export function createWordPressToolkitService({ tools, jobRegistry, authorizeAct
   databaseBindingRegistry, databaseCredentialRegistry, secretStore, databaseManager = null,
   resticRepositoryRegistry, websiteBackupService, websiteRestoreService,
   healthInspector = createWebsiteHttpHealthInspector(),
+  wordpressTransferJournal,
   realpathFn = realpath,
 } = {}) {
   if (![tools?.resolveWebsitePhpContext, tools?.runWpCli, jobRegistry?.enqueue, authorizeActor, siteMutationLock?.withSiteLock, siteFileManager?.execute, domainRegistry?.listDomains].every(value => typeof value === 'function')) throw new TypeError('WordPress Toolkit native dependencies are required');
@@ -102,7 +107,8 @@ export function createWordPressToolkitService({ tools, jobRegistry, authorizeAct
     if (!credential || credential.username !== values.DB_USER) throw fail('wordpress_database_user_mismatch', 'WordPress bağlantısı site veritabanı kullanıcısıyla eşleşmiyor');
     const prefix = text.match(/\$table_prefix\s*=\s*(['"])([A-Za-z0-9_]{1,40})\1\s*;/)?.[2];
     if (!prefix) throw fail('wordpress_table_prefix_invalid', 'WordPress tablo kapsamı doğrulanamadı');
-    return { present: true, binding, credential, prefix, entries: listing.entries, configSha256: file.sha256 ?? digest(text) };
+    const environmentType = text.match(/define\s*\(\s*['"]WP_ENVIRONMENT_TYPE['"]\s*,\s*(['"])([a-z]+)\1\s*\)/)?.[2] ?? null;
+    return { present: true, binding, credential, prefix, environmentType, entries: listing.entries, configSha256: file.sha256 ?? digest(text) };
   }
   async function run(websiteId, command, args, input = null, failureCode = null) {
     const current = await context(websiteId);
@@ -136,7 +142,8 @@ export function createWordPressToolkitService({ tools, jobRegistry, authorizeAct
     const bindings = await databaseBindingRegistry.listBindings({ serverId: current.website.serverId, websiteId });
     return { ...state, websiteId, websiteRevision: current.website.revision, primaryDomain: current.primaryDomain, loginUrl,
       suggestedScheme: current.domain.httpsMode === 'managed' && current.domain.certificateId ? 'https' : 'http',
-      cloneAvailable: typeof databaseManager?.inspectDatabaseTables === 'function', administrators, databases: bindings.map(binding => ({ id: binding.id, name: binding.databaseName })),
+      cloneAvailable: typeof databaseManager?.inspectDatabaseTables === 'function', selectiveTransferAvailable: state.installed === true && saved.environmentType === 'staging' && selective.available,
+      administrators, databases: bindings.map(binding => ({ id: binding.id, name: binding.databaseName })),
       loginPath: '/wp-login.php', inspectedAt: new Date().toISOString() };
   }
   const phpContainer = typeof websiteProvisioningRegistry?.getLatestForWebsite === 'function'
@@ -173,7 +180,9 @@ export function createWordPressToolkitService({ tools, jobRegistry, authorizeAct
   }
   const clones = createWordPressCloneService({ context, config, run, actor, inspectTargetBootstrap, siteFileManager: files,
     databaseBindingRegistry, databaseCredentialRegistry, databaseManager, healthInspector, siteMutationLock, jobRegistry });
-  async function preview(websiteId, input, owner = null) {
+  const selective = createWordPressSelectiveTransferService({ context, config, run, actor, siteFileManager,
+    jobRegistry, healthInspector, journal: wordpressTransferJournal });
+  async function inspectPreview(websiteId, input, owner) {
     const options = normalizeWordPressActionOptions(input);
     const current = await context(websiteId), saved = await config(current);
     if (options.action === 'install') {
@@ -184,6 +193,10 @@ export function createWordPressToolkitService({ tools, jobRegistry, authorizeAct
       if (!await databaseCredentialRegistry.getForBinding(binding.id)) throw fail('wordpress_database_user_missing', 'Önce site veritabanı kullanıcısını hazırlayın');
     } else if (!saved.present) throw fail('wordpress_not_configured', 'Bu sitede yönetilecek WordPress kurulumu bulunamadı');
     const clone = ['clone', 'staging'].includes(options.action) ? await clones.preview(websiteId, options, owner) : null;
+    const selectivePlan = options.action === 'selective_transfer' ? await selective.preview(websiteId, options, owner) : null;
+    const selectiveTransfer = selectivePlan ? { targetApplicationId: selectivePlan.target.applicationId,
+      targetWebsiteRevision: selectivePlan.target.websiteRevision, targetDomain: selectivePlan.target.domain,
+      summary: selectivePlan.summary, planDigest: selectivePlan.digest } : null;
     const replacementDigests = {};
     if (options.action === 'install') {
       for (const entry of saved.entries.filter(item => CORE_FILES.has(item.name))) {
@@ -196,10 +209,16 @@ export function createWordPressToolkitService({ tools, jobRegistry, authorizeAct
       domainId: current.domain.id, primaryDomain: current.primaryDomain, domainRevision: current.domain.desiredRevision ?? 1,
       certificateId: current.domain.certificateId ?? null,
       websiteRevision: current.website.revision, options, configPresent: saved.present, configSha256: saved.configSha256 ?? null,
-      fileNames: saved.entries.map(item => item.name).sort(), replacementDigests, ...(clone ? { clone } : {}), databaseBindingId: saved.binding?.id ?? options.databaseBindingId ?? null };
+      fileNames: saved.entries.map(item => item.name).sort(), replacementDigests, ...(clone ? { clone } : {}),
+      ...(selectiveTransfer ? { selectiveTransfer } : {}), databaseBindingId: saved.binding?.id ?? options.databaseBindingId ?? null };
     const previewDigest = digest(core);
-    return { ...core, previewDigest, confirmation: options.action === 'remove' ? `WordPress ${current.primaryDomain}` : `wordpress:${websiteId}:${previewDigest}`,
-      impact: clone ? `WordPress ${clone.targetDomain} sitesinin boş klasörüne ve ayrı veritabanına kopyalanır. Kaynak dosyaları değiştirilmez. Staging seçimi arama motoru indekslemesini ve WP cron çalışmasını kapatır; özel erişim koruması ayrıca yapılandırılır.` : options.action === 'install' ? 'WordPress dosyaları ve ana sayfa oluşturulur. Mevcut ana sayfa işlem öncesi doğrulanmış yedeğe alınır.' : options.action === 'remove' ? 'WordPress dosyaları ve bu kuruluma ait tablolar kaldırılır. Önce doğrulanmış bir site yedeği alınır.' : 'İşlem öncesinde site yedeklenir; sonuç aynı ekranda doğrulanır.' };
+    return { selectivePlan, publicPreview: { ...core, previewDigest,
+      confirmation: options.action === 'remove' ? `WordPress ${current.primaryDomain}` : `wordpress:${websiteId}:${previewDigest}`,
+      impact: selectiveTransfer ? `Seçili dosyalar ${selectiveTransfer.targetDomain} sitesine aktarılır. Veritabanı ve medya dosyaları korunur.`
+        : clone ? `WordPress ${clone.targetDomain} sitesinin boş klasörüne ve ayrı veritabanına kopyalanır. Kaynak dosyaları değiştirilmez. Staging seçimi arama motoru indekslemesini ve WP cron çalışmasını kapatır; özel erişim koruması ayrıca yapılandırılır.` : options.action === 'install' ? 'WordPress dosyaları ve ana sayfa oluşturulur. Mevcut ana sayfa işlem öncesi doğrulanmış yedeğe alınır.' : options.action === 'remove' ? 'WordPress dosyaları ve bu kuruluma ait tablolar kaldırılır. Önce doğrulanmış bir site yedeği alınır.' : 'İşlem öncesinde site yedeklenir; sonuç aynı ekranda doğrulanır.' } };
+  }
+  async function preview(websiteId, input, owner = null) {
+    return (await inspectPreview(websiteId, input, owner)).publicPreview;
   }
   async function actor(input, websiteId) {
     const live = await authorizeActor(input, websiteId);
@@ -210,17 +229,25 @@ export function createWordPressToolkitService({ tools, jobRegistry, authorizeAct
     if (!input || typeof input !== 'object' || Array.isArray(input) || !UUID.test(input.requestId ?? '')
       || Object.keys(input).some(key => !['requestId', 'options', 'expectedWebsiteRevision', 'previewDigest', 'confirmation', 'password'].includes(key))) throw fail('wordpress_request_invalid', 'İşlem bilgileri geçersiz', 400);
     await actor(owner, websiteId);
+    const options = normalizeWordPressActionOptions(input.options);
+    if (options.action === 'selective_transfer') await actor(owner, options.targetWebsiteId);
     const earlier = await jobRegistry.getJobForIdempotencyKey(`wordpress:${input.requestId}`);
     if (earlier) {
       const current = await context(websiteId);
       if (earlier.payload?.websiteId !== websiteId || earlier.resourceId !== current.application.id || earlier.serverId !== current.website.serverId
-        || earlier.payload.actionId !== 'wp.toolkit' || JSON.stringify(earlier.payload.options) !== JSON.stringify(normalizeWordPressActionOptions(input.options))) throw fail('wordpress_request_conflict', 'İşlem kimliği farklı bir isteğe ait');
+        || earlier.payload.actionId !== 'wp.toolkit' || JSON.stringify(earlier.payload.options) !== JSON.stringify(options)) throw fail('wordpress_request_conflict', 'İşlem kimliği farklı bir isteğe ait');
+      if (options.action === 'selective_transfer' && (earlier.payload.previewDigest !== input.previewDigest
+        || earlier.payload.expectedWebsiteRevision !== input.expectedWebsiteRevision
+        || input.confirmation !== `wordpress:${websiteId}:${earlier.payload.previewDigest}`)) {
+        throw fail('wordpress_request_conflict', 'İşlem kimliği farklı bir önizlemeye ait');
+      }
       return { job: jobPublicView(earlier) };
     }
     const desired = await preview(websiteId, input.options, owner);
     if (desired.websiteRevision !== input.expectedWebsiteRevision || desired.previewDigest !== input.previewDigest || desired.confirmation !== input.confirmation) throw fail('wordpress_preview_stale', 'Site değişti; işlemi yeniden kontrol edin');
     await actor(owner, websiteId);
-    return siteMutationLock.withSiteLock({ applicationId: desired.applicationId, websiteId }, async () => {
+    const target = desired.selectiveTransfer;
+    const enqueue = async () => {
       const locked = await preview(websiteId, input.options, owner);
       if (locked.previewDigest !== desired.previewDigest) throw fail('wordpress_preview_stale', 'Site değişti; işlemi yeniden kontrol edin');
       await actor(owner, websiteId);
@@ -229,11 +256,12 @@ export function createWordPressToolkitService({ tools, jobRegistry, authorizeAct
       const payload = { websiteId, applicationId: desired.applicationId, unixUser: desired.unixUser, expectedWebsiteRevision: desired.websiteRevision,
         actorSessionId: owner.sessionId, actorUserId: owner.userId, actorRole: owner.role,
         actionId: 'wp.toolkit', previewDigest: desired.previewDigest, confirmation: `php-tool:${websiteId}:wp.toolkit:${desired.previewDigest}`,
-        options: desired.options, secretRef };
+        options: desired.options, secretRef, ...(target ? { targetApplicationId: target.targetApplicationId, targetWebsiteRevision: target.targetWebsiteRevision } : {}) };
       const request = { serverId: desired.serverId, type: OPERATIONS.WEBSITE_PHP_ACTION, operation: OPERATIONS.WEBSITE_PHP_ACTION,
         resourceType: 'application', resourceId: desired.applicationId, payload, idempotencyKey: `wordpress:${input.requestId}` };
       const existing = typeof jobRegistry.findIdempotentJob === 'function' ? await jobRegistry.findIdempotentJob(request) : null;
       if (existing) return { job: jobPublicView(existing) };
+      if (target) await selective.assertIdle(desired.serverId, [websiteId, desired.applicationId, options.targetWebsiteId, target.targetApplicationId]);
       const jobs = await jobRegistry.listJobs({ serverId: desired.serverId, resourceType: 'application', resourceId: desired.applicationId });
       if (jobs.some(job => ['queued', 'running'].includes(job.status))) throw fail('wordpress_job_conflict', 'Bu sitede devam eden bir işlem var');
       if (needsSecret) {
@@ -253,7 +281,9 @@ export function createWordPressToolkitService({ tools, jobRegistry, authorizeAct
         // Preserve the encrypted reference for a retry of this exact request.
         throw error;
       }
-    });
+    };
+    return target ? withWordPressTransferLocks(siteMutationLock, desired.applicationId, target.targetApplicationId, enqueue)
+      : siteMutationLock.withSiteLock({ applicationId: desired.applicationId, websiteId }, enqueue);
   }
   async function repository(current) {
     const name = `website-${current.website.id}`;
@@ -268,10 +298,15 @@ export function createWordPressToolkitService({ tools, jobRegistry, authorizeAct
     if (current.website.serverId !== execution.serverId || current.application.id !== execution.resourceId || execution.resourceType !== 'application'
       || current.unixUser !== payload.unixUser || current.website.revision !== payload.expectedWebsiteRevision) throw fail('wordpress_execution_scope_invalid', 'WordPress işi siteyle eşleşmiyor');
     await actor(owner, payload.websiteId);
-    const desired = await preview(payload.websiteId, payload.options, owner);
+    const { publicPreview: desired, selectivePlan } = await inspectPreview(payload.websiteId, payload.options, owner);
     if (desired.previewDigest !== payload.previewDigest) throw fail('wordpress_preview_stale', 'Site değişti; işlem durduruldu');
-    if (desired.clone) {
-      await clones.execute(payload.websiteId, desired.options, owner, desired.clone, execution);
+    if (selectivePlan || desired.clone) {
+      if (selectivePlan) {
+        if (selectivePlan.target.applicationId !== payload.targetApplicationId || selectivePlan.target.websiteRevision !== payload.targetWebsiteRevision) {
+          throw fail('wordpress_execution_scope_invalid', 'WordPress aktarım hedefi değişti.');
+        }
+        await selective.execute({ plan: selectivePlan, payload, execution, owner });
+      } else await clones.execute(payload.websiteId, desired.options, owner, desired.clone, execution);
       return { version: 1, websiteId: payload.websiteId, applicationId: payload.applicationId, unixUser: payload.unixUser,
         actionId: 'wp.toolkit', websiteRevision: payload.expectedWebsiteRevision, previewDigest: payload.previewDigest, completed: true, sideEffects: true };
     }
@@ -389,6 +424,7 @@ export function createWordPressToolkitService({ tools, jobRegistry, authorizeAct
     const job = await jobRegistry.getJobForIdempotencyKey(`wordpress:${requestId}`);
     if (!job || job.payload?.websiteId !== websiteId || job.resourceId !== current.application.id || job.serverId !== current.website.serverId
       || job.operation !== OPERATIONS.WEBSITE_PHP_ACTION || job.payload.actionId !== 'wp.toolkit') throw fail('wordpress_request_not_found', 'WordPress işlemi bulunamadı', 404);
+    if (job.payload.options?.action === 'selective_transfer') await actor(owner, job.payload.options.targetWebsiteId);
     return jobPublicView(job);
   }
   return Object.freeze({ status, preview, queue, execute, releaseSecret, getRequest });

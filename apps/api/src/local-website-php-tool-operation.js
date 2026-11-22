@@ -1,4 +1,5 @@
 import { verifyWebsitePhpToolAction } from './website-php-tool-action.js';
+import { withWordPressTransferLocks } from './wordpress-selective-transfer-service.js';
 
 const JOB_ID = /^[A-Za-z0-9._:-]{8,128}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -145,6 +146,9 @@ export function createLocalWebsitePhpToolOperation({ websitePhpToolsService, aut
         'Site mutation lock is unavailable for PHP tool execution',
         503,
       );
+    }
+    if (payload?.actionId === 'wp.toolkit' && payload.options?.action === 'selective_transfer') {
+      return withWordPressTransferLocks(siteMutationLock, payload.applicationId, payload.targetApplicationId, () => executeUnlocked(payload, execution));
     }
     return siteMutationLock.withSiteLock({
       applicationId: payload?.applicationId ?? null,

@@ -54,6 +54,8 @@ const PHP_ACTION_IDS = new Set([
   'php.fpm.update',
   'wp.toolkit',
 ]);
+const WORDPRESS_FILE_SCOPES = ['mu-plugins', 'plugins', 'themes'];
+const WORDPRESS_SELECTIVE_FIELDS = ['action', 'targetWebsiteId', 'fileScopes'];
 const PHP_ACTION_USER = /^yunapp-[a-f0-9]{12}$/;
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const USER_ID = SESSION_ID;
@@ -183,10 +185,31 @@ function validateNodePassengerMigration(payload, errors) {
 }
 
 
+function validWordPressSelectiveTransfer(payload) {
+  const { options, targetApplicationId, targetWebsiteRevision } = payload;
+  const { targetWebsiteId, fileScopes } = options;
+  if (Object.keys(options).length !== WORDPRESS_SELECTIVE_FIELDS.length
+    || Object.keys(options).some(key => !WORDPRESS_SELECTIVE_FIELDS.includes(key))
+    || !Array.isArray(fileScopes) || fileScopes.length < 1 || fileScopes.length > WORDPRESS_FILE_SCOPES.length
+    || !Array.from(fileScopes).every((scope, index) => WORDPRESS_FILE_SCOPES.includes(scope) && (index === 0 || fileScopes[index - 1] < scope))
+    || !Number.isSafeInteger(targetWebsiteRevision) || targetWebsiteRevision < 1) return false;
+  try {
+    return assertUuid(targetWebsiteId, 'targetWebsiteId') === targetWebsiteId && targetWebsiteId !== payload.websiteId
+      && assertUuid(targetApplicationId, 'targetApplicationId') === targetApplicationId && targetApplicationId !== payload.applicationId;
+  } catch {
+    return false;
+  }
+}
+
 function validateWebsitePhpAction(payload, errors) {
   const fields = new Set(PHP_ACTION_FIELDS);
+  const selectiveTransfer = payload?.actionId === 'wp.toolkit' && payload?.options?.action === 'selective_transfer';
   if (payload?.actionId === 'php.fpm.update') fields.add('config');
   if (payload?.actionId === 'wp.toolkit') { fields.add('options'); fields.add('secretRef'); }
+  if (selectiveTransfer) {
+    fields.add('targetApplicationId');
+    fields.add('targetWebsiteRevision');
+  }
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)
     || Object.keys(payload).length !== fields.size
     || Object.keys(payload).some((field) => !fields.has(field))) {
@@ -227,9 +250,11 @@ function validateWebsitePhpAction(payload, errors) {
   }
   if (payload.actionId === 'wp.toolkit') {
     const options = payload.options;
-    const actions = ['install', 'clone', 'staging', 'remove', 'password', 'core.update', 'plugin.install', 'plugin.update', 'plugin.activate', 'plugin.deactivate', 'plugin.remove', 'theme.install', 'theme.update', 'theme.activate', 'theme.remove'];
+    const actions = ['install', 'clone', 'staging', 'selective_transfer', 'remove', 'password', 'core.update', 'plugin.install', 'plugin.update', 'plugin.activate', 'plugin.deactivate', 'plugin.remove', 'theme.install', 'theme.update', 'theme.activate', 'theme.remove'];
     if (!options || typeof options !== 'object' || Array.isArray(options) || !actions.includes(options.action)
-      || JSON.stringify(options).length > 2048 || Object.keys(options).some(key => !['action', 'databaseBindingId', 'title', 'adminUser', 'adminEmail', 'locale', 'scheme', 'username', 'package', 'targetWebsiteId'].includes(key))
+      || JSON.stringify(options).length > 2048
+      || (selectiveTransfer ? !validWordPressSelectiveTransfer(payload)
+        : Object.keys(options).some(key => !['action', 'databaseBindingId', 'title', 'adminUser', 'adminEmail', 'locale', 'scheme', 'username', 'package', 'targetWebsiteId'].includes(key)))
       || (['clone', 'staging'].includes(options.action) && (Object.keys(options).length !== 4 || !SESSION_ID.test(options.targetWebsiteId ?? '') || !SESSION_ID.test(options.databaseBindingId ?? '') || !['http', 'https'].includes(options.scheme)))
       || (['install', 'password'].includes(options.action) ? !SESSION_ID.test(payload.secretRef ?? '') : payload.secretRef !== null)) errors.push('WordPress Toolkit action is invalid');
   }

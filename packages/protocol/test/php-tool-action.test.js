@@ -50,3 +50,53 @@ for (const patch of [
     assert.equal(validation.ok, false);
   });
 }
+
+const selectivePayload = {
+  ...payload,
+  actionId: 'wp.toolkit',
+  confirmation: `php-tool:${payload.websiteId}:wp.toolkit:${payload.previewDigest}`,
+  targetApplicationId: 'aaaaaaaa-1111-4111-8111-111111111111',
+  targetWebsiteRevision: 2,
+  secretRef: null,
+  options: {
+    action: 'selective_transfer', targetWebsiteId: 'bbbbbbbb-1111-4111-8111-111111111111',
+    fileScopes: ['mu-plugins', 'plugins', 'themes'],
+  },
+};
+
+function checkSelectivePayload(value) {
+  return validateOperationEnvelope({
+    id: 'wordpress-transfer', operation: OPERATIONS.WEBSITE_PHP_ACTION,
+    protocolVersion: AGENT_PROTOCOL_VERSION, payload: value,
+  }).ok;
+}
+
+test('selective WordPress transfer accepts a canonical envelope and nonempty scope subsets', () => {
+  const envelope = createOperationEnvelope({
+    id: 'wordpress-transfer', operation: OPERATIONS.WEBSITE_PHP_ACTION, payload: selectivePayload,
+  });
+  assert.deepEqual(envelope.payload, selectivePayload);
+  assert.equal(checkSelectivePayload(envelope.payload), true);
+  assert.equal(checkSelectivePayload({ ...selectivePayload, options: { ...selectivePayload.options, fileScopes: ['plugins'] } }), true);
+});
+
+test('selective WordPress transfer rejects unapproved file scopes, identities and extra data', () => {
+  for (const fileScopes of [[], ['themes', 'plugins'], ['plugins', 'plugins'], ['uploads'], ['custom'], ['sql'], Array(1)]) {
+    assert.equal(checkSelectivePayload({ ...selectivePayload, options: { ...selectivePayload.options, fileScopes } }), false);
+  }
+  for (const options of [
+    { ...selectivePayload.options, includeUploads: false },
+    { ...selectivePayload.options, targetWebsiteId: payload.websiteId },
+    { ...selectivePayload.options, targetWebsiteId: selectivePayload.options.targetWebsiteId.toUpperCase() },
+  ]) assert.equal(checkSelectivePayload({ ...selectivePayload, options }), false);
+  for (const patch of [
+    { targetWebsiteRevision: 0 }, { targetWebsiteRevision: 1.5 }, { targetApplicationId: payload.applicationId },
+    { targetApplicationId: selectivePayload.targetApplicationId.toUpperCase() },
+    { selectivePlanSha256: 'b'.repeat(64) }, { secretRef: payload.actorSessionId },
+  ]) assert.equal(checkSelectivePayload({ ...selectivePayload, ...patch }), false);
+  const { targetWebsiteRevision, targetApplicationId, ...withoutTarget } = selectivePayload;
+  assert.equal(checkSelectivePayload({ ...withoutTarget, targetApplicationId }), false);
+  assert.equal(checkSelectivePayload({ ...withoutTarget, targetWebsiteRevision }), false);
+  assert.equal(checkSelectivePayload({ ...withoutTarget, options: { action: 'core.update' } }), true);
+  assert.equal(checkSelectivePayload({ ...selectivePayload, options: { action: 'core.update' } }), false);
+});

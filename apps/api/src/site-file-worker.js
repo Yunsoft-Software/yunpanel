@@ -5,6 +5,7 @@ import {
 } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { filterSelectiveFileEntries } from './wordpress-selective-transfer.js';
 
 const APPLICATION_ID = '[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 const RELEASE_ID = APPLICATION_ID;
@@ -19,7 +20,7 @@ const MAX_TRANSFER_BYTES = 16 * 1024 * 1024;
 const MAX_TEXT_BYTES = 4 * 1024 * 1024;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const OPERATIONS = new Set([
-  'list', 'manifest', 'download', 'read_text', 'upload', 'write_text',
+  'list', 'manifest', 'wordpress_manifest', 'wordpress_download', 'download', 'read_text', 'upload', 'write_text',
   'create_file', 'mkdir', 'rename', 'delete', 'batch_delete', 'permissions',
 ]);
 
@@ -142,6 +143,25 @@ function regularFile(entry, { maxBytes = MAX_TRANSFER_BYTES } = {}) {
   if (!Number.isSafeInteger(entry.info.size) || entry.info.size < 0 || entry.info.size > maxBytes) {
     fail('site_file_too_large', `File exceeds the ${maxBytes} byte limit`, 413);
   }
+}
+
+async function readPinnedFile(entry, dependencies) {
+  const handle = await dependencies.open(entry.absolute, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const actual = await handle.stat();
+    if (!actual.isFile() || actual.ino !== entry.info.ino || actual.dev !== entry.info.dev || actual.size !== entry.info.size
+      || await dependencies.realpath(`/proc/self/fd/${handle.fd}`) !== entry.absolute) fail('site_file_changed', 'File identity changed', 409);
+    const bounded = Buffer.alloc(actual.size + 1);
+    let length = 0;
+    while (length < bounded.length) {
+      const { bytesRead } = await handle.read(bounded, length, bounded.length - length, length);
+      if (!bytesRead) break;
+      length += bytesRead;
+    }
+    const after = await handle.stat();
+    if (length !== actual.size || after.mtimeMs !== actual.mtimeMs || after.ctimeMs !== actual.ctimeMs) fail('site_file_changed', 'File content changed', 409);
+    return bounded.subarray(0, length);
+  } finally { await handle.close(); }
 }
 
 function decodedContent(value, maxBytes = MAX_TRANSFER_BYTES) {
@@ -275,10 +295,13 @@ export async function executeSiteFileOperation(request, dependencies = {
   try {
     const root = await managedRoot(request.root, dependencies);
 
-    if (request.operation === 'manifest') {
+    if (request.operation === 'manifest' || request.operation === 'wordpress_manifest') {
       if (!exactRequest(request, ['operation', 'root', 'path', 'exclude']) || !Array.isArray(request.exclude)
         || request.exclude.length > 16) fail('site_file_request_invalid', 'Manifest request fields are invalid');
       const base = relativePath(request.path, { allowRoot: true });
+      const wordpress = request.operation === 'wordpress_manifest';
+      const scope = wordpress ? /(?:^|\/)wp-content\/(mu-plugins|plugins|themes)$/.exec(base)?.[1] : null;
+      if (wordpress && !scope) fail('site_file_path_invalid', 'WordPress file scope is invalid');
       const exclusions = new Set(request.exclude.map(value => relativePath(value)));
       const entries = []; let bytes = 0;
       async function scan(directory, depth) {
@@ -291,6 +314,7 @@ export async function executeSiteFileOperation(request, dependencies = {
         for (const name of names) {
           const relative = relativePath([directory, name].filter(Boolean).join('/'));
           if (exclusions.has(relative)) continue;
+          if (wordpress && !filterSelectiveFileEntries([`wp-content/${scope}/${relative}`], [scope]).transferable.length) continue;
           if (entries.length >= 20_000) fail('site_file_manifest_limit', 'Manifest exceeds the file count limit', 413);
           const entry = await walk(root, [base, relative].filter(Boolean).join('/'), dependencies);
           if (entry.info.isDirectory()) { entries.push({ path: relative, type: 'directory' }); await scan(relative, depth + 1); }
@@ -298,21 +322,8 @@ export async function executeSiteFileOperation(request, dependencies = {
             regularFile(entry);
             bytes += entry.info.size;
             if (bytes > 256 * 1024 * 1024) fail('site_file_manifest_limit', 'Manifest exceeds the byte limit', 413);
-            const handle = await dependencies.open(entry.absolute, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-            try {
-              const actual = await handle.stat();
-              if (!actual.isFile() || actual.ino !== entry.info.ino || actual.dev !== entry.info.dev || actual.size !== entry.info.size
-                || await dependencies.realpath(`/proc/self/fd/${handle.fd}`) !== entry.absolute) fail('site_file_changed', 'Manifest file identity changed', 409);
-              const bounded = Buffer.alloc(actual.size + 1); let length = 0;
-              while (length < bounded.length) {
-                const read = await handle.read(bounded, length, bounded.length - length, length);
-                if (!read.bytesRead) break;
-                length += read.bytesRead;
-              }
-              if (length !== entry.info.size) fail('site_file_changed', 'Manifest file content changed', 409);
-              const content = bounded.subarray(0, length);
-              entries.push({ path: relative, type: 'file', bytes: content.length, sha256: createHash('sha256').update(content).digest('hex') });
-            } finally { await handle.close(); }
+            const content = await readPinnedFile(entry, dependencies);
+            entries.push({ path: relative, type: 'file', bytes: content.length, sha256: createHash('sha256').update(content).digest('hex') });
           }
         }
       }
@@ -353,15 +364,19 @@ export async function executeSiteFileOperation(request, dependencies = {
       return Object.freeze({ file: metadata(await dependencies.stat(target.absolute), itemPath), created: true });
     }
 
-    if (request.operation === 'download' || request.operation === 'read_text') {
+    if (['download', 'wordpress_download', 'read_text'].includes(request.operation)) {
       if (!exactRequest(request, ['operation', 'root', 'path'])) fail('site_file_request_invalid', 'Read request fields are invalid');
       const itemPath = relativePath(request.path);
+      if (request.operation === 'wordpress_download') {
+        const scope = /(?:^|\/)(wp-content\/(mu-plugins|plugins|themes)\/.+)$/.exec(itemPath);
+        if (!scope || !filterSelectiveFileEntries([scope[1]], [scope[2]]).transferable.length) fail('site_file_path_invalid', 'WordPress file scope is invalid');
+      }
       const entry = await walk(root, itemPath, dependencies);
       const maxBytes = request.operation === 'read_text' ? MAX_TEXT_BYTES : MAX_TRANSFER_BYTES;
       regularFile(entry, { maxBytes });
-      const content = await dependencies.readFile(entry.absolute);
+      const content = request.operation === 'wordpress_download' ? await readPinnedFile(entry, dependencies) : await dependencies.readFile(entry.absolute);
       if (content.length > maxBytes) fail('site_file_too_large', `File exceeds the ${maxBytes} byte limit`, 413);
-      if (request.operation === 'download') return Object.freeze({ file: metadata(entry.info, itemPath), content: content.toString('base64') });
+      if (request.operation !== 'read_text') return Object.freeze({ file: metadata(entry.info, itemPath), content: content.toString('base64') });
       let text;
       try { text = new TextDecoder('utf-8', { fatal: true }).decode(content); }
       catch { fail('site_file_not_text', 'File is not valid UTF-8 text', 409); }

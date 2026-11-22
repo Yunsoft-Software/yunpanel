@@ -70,6 +70,8 @@ const messages = Object.freeze({
   wordpress_clone_verification_failed: 'Kopyanın son doğrulaması kesildi; kaynak ve kısmi hedef korunuyor.',
   wordpress_http_health_failed: 'WordPress işlemi sonrası site yanıt vermedi; önceki site yedeğinden geri alındı.',
   wordpress_rollback_failed: 'WordPress işlemi başarısız; yedekten geri alma inceleme gerektiriyor.',
+  wordpress_selective_transfer_interrupted: 'WordPress dosya aktarımı durduruldu. Önceki dosyalar korundu.',
+  wordpress_selective_transfer_rollback_conflict: 'WordPress dosyaları aktarım sırasında değişti. Saklanan kopyalar inceleme gerektiriyor.',
   wordpress_preview_stale: 'Site kurulum önizlemesinden sonra değişti; yeniden kontrol edin.',
   wordpress_install_existing_directory: 'Bu dizinde mevcut WordPress içeriği var; kurulum üzerine yazılmaz.',
   static_copy_forbidden: 'Kaynak veya hedef sitenin erişimi değişti.',
