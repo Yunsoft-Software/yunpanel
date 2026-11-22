@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { lstat, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { once } from 'node:events';
+import { createConnection, createServer } from 'node:net';
+import { setTimeout as delay } from 'node:timers/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
@@ -52,16 +55,32 @@ function socketStat(mode = 0o660) {
   };
 }
 
-function fixture({
+async function fixture(t, {
   initialConfig = null,
   failFirstConfigTest = false,
   identitySatisfied = true,
+  socketDelay = 0,
 } = {}) {
   const calls = [];
   const files = new Map();
   let socketExists = initialConfig !== null;
   let active = initialConfig !== null;
   let failConfigTest = failFirstConfigTest;
+  const socketRoot = await mkdtemp(path.join(os.tmpdir(), 'yp-fpm-'));
+  const actualSocket = path.join(socketRoot, 'fpm.sock');
+  const listener = createServer((client) => client.end());
+  let binding;
+  async function bind() {
+    if (socketDelay) await delay(socketDelay);
+    listener.listen(actualSocket);
+    await once(listener, 'listening');
+    await chmod(actualSocket, 0o660);
+  }
+  t.after(async () => {
+    await binding;
+    if (listener.listening) await new Promise((resolve) => listener.close(resolve));
+    await rm(socketRoot, { recursive: true, force: true });
+  });
 
   if (initialConfig !== null) files.set(configPath, { content: initialConfig, mode: 0o600 });
 
@@ -103,7 +122,15 @@ function fixture({
     }
     if (file === '/usr/bin/systemctl' && args[0] === 'reload') {
       socketExists = files.has(configPath);
+      if (socketExists && !binding) {
+        binding = bind();
+        if (!socketDelay) await binding;
+      }
       return { stdout: '' };
+    }
+    if (file === '/usr/bin/id' && ['-u', '-g'].includes(args[0])) {
+      const info = await lstat(actualSocket);
+      return { stdout: String(args[0] === '-u' ? info.uid : info.gid) };
     }
     if (file === '/usr/bin/apt-get') return { stdout: '' };
     throw new Error(`unexpected command: ${file} ${args.join(' ')}`);
@@ -139,6 +166,7 @@ function fixture({
     }
     if (target === socketPath) {
       if (!socketExists) throw enoent();
+      if (binding) return lstat(actualSocket);
       return socketStat();
     }
     throw enoent();
@@ -149,6 +177,7 @@ function fixture({
     identityManager,
     run,
     lstatFn,
+    connectFn: () => createConnection({ path: actualSocket }),
     mkdirFn: async (target, options) => { calls.push(['mkdir', target, options?.mode]); },
     readFileFn,
     writeFileFn,
@@ -171,8 +200,8 @@ function fixture({
   };
 }
 
-test('elFinder FPM apply creates only the canonical per-Website pool and verifies its socket', async () => {
-  const fx = fixture();
+test('elFinder FPM apply creates only the canonical per-Website pool and verifies its socket', async (t) => {
+  const fx = await fixture(t);
   const result = await fx.manager.apply(intent, { operationId });
 
   assert.equal(result.satisfied, true);
@@ -189,8 +218,16 @@ test('elFinder FPM apply creates only the canonical per-Website pool and verifie
   assert.equal(fx.calls.some((entry) => entry[0] === 'run' && entry[1] === '/usr/bin/useradd'), false);
 });
 
-test('elFinder FPM apply restores operation-before absence after configtest failure', async () => {
-  const fx = fixture({ failFirstConfigTest: true });
+test('elFinder FPM apply waits for the actual Unix socket opened after service reload', async (t) => {
+  const fx = await fixture(t, { socketDelay: 175 });
+  const result = await fx.manager.apply(intent, { operationId });
+  assert.equal(result.satisfied, true);
+  assert.equal(result.socketPath, socketPath);
+  assert.ok(fx.calls.some((entry) => entry[0] === 'run' && entry[1] === '/usr/bin/id'));
+});
+
+test('elFinder FPM apply restores operation-before absence after configtest failure', async (t) => {
+  const fx = await fixture(t, { failFirstConfigTest: true });
 
   await assert.rejects(
     fx.manager.apply(intent, { operationId }),
@@ -203,8 +240,8 @@ test('elFinder FPM apply restores operation-before absence after configtest fail
     && entry[1] === '/usr/sbin/php-fpm8.3'));
 });
 
-test('elFinder FPM refuses a foreign existing pool before durable mutation', async () => {
-  const fx = fixture({ initialConfig: '[foreign]\nuser = root\n' });
+test('elFinder FPM refuses a foreign existing pool before durable mutation', async (t) => {
+  const fx = await fixture(t, { initialConfig: '[foreign]\nuser = root\n' });
 
   await assert.rejects(
     fx.manager.apply(intent, { operationId }),
@@ -216,8 +253,8 @@ test('elFinder FPM refuses a foreign existing pool before durable mutation', asy
   assert.equal(fx.calls.some((entry) => entry[0] === 'write' && entry[1] === configPath), false);
 });
 
-test('elFinder FPM compensation removes only the pool created by the operation', async () => {
-  const fx = fixture();
+test('elFinder FPM compensation removes only the pool created by the operation', async (t) => {
+  const fx = await fixture(t);
   await fx.manager.apply(intent, { operationId });
 
   const result = await fx.manager.compensate(intent, { operationId });
@@ -230,8 +267,8 @@ test('elFinder FPM compensation removes only the pool created by the operation',
   assert.equal(fx.files.has(configPath), false);
 });
 
-test('elFinder FPM requires an already-provisioned exact Website identity and workspace', async () => {
-  const fx = fixture({ identitySatisfied: false });
+test('elFinder FPM requires an already-provisioned exact Website identity and workspace', async (t) => {
+  const fx = await fixture(t, { identitySatisfied: false });
 
   await assert.rejects(
     fx.manager.apply(intent, { operationId }),
@@ -243,8 +280,8 @@ test('elFinder FPM requires an already-provisioned exact Website identity and wo
   assert.equal(fx.calls.some((entry) => entry[0] === 'run' && entry[1] === '/usr/bin/apt-get'), false);
 });
 
-test('elFinder FPM rejects forged Website Unix identity before inspection', async () => {
-  const fx = fixture();
+test('elFinder FPM rejects forged Website Unix identity before inspection', async (t) => {
+  const fx = await fixture(t);
   await assert.rejects(
     fx.manager.inspect({ ...intent, unixUser: 'yunapp-ffffffffffff' }),
     (error) => error instanceof ElFinderFpmSiteManagerError
@@ -258,8 +295,8 @@ test('elFinder FPM rejects forged Website Unix identity before inspection', asyn
 // retirement/crash/inactive cases are not runtime evidence. Unsafe crash/service
 // fault, retained/foreign live pool channels remain explicit native OPEN gates.
 // Existing apply/configtest rollback/compensate compatibility tests above stay.
-test('retirement refuses an unjournalled pool before any mutation (legacy compatibility)', async () => {
-  const unknown = fixture({ initialConfig: 'operator configuration' });
+test('retirement refuses an unjournalled pool before any mutation (legacy compatibility)', async (t) => {
+  const unknown = await fixture(t, { initialConfig: 'operator configuration' });
   await assert.rejects(unknown.manager.retire(intent, { operationId }), error => error.code === 'elfinder_fpm_retirement_blocked');
   assert.equal(unknown.files.get(configPath).content, 'operator configuration');
   assert.deepEqual(unknown.calls, []);

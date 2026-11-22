@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import {
   DnsZoneRetirementError,
@@ -7,6 +11,10 @@ import {
 } from '../src/dns-zone-retirement.js';
 import { powerDnsZoneManagerInternals } from '@yunpanel/host-runtime/powerdns-zone-manager';
 import { websiteDnsZoneProvisioningInternals } from '../src/website-dns-zone-provisioning-handler.js';
+import { createDomainRegistry } from '../src/domain-registry.js';
+import { createDnsZoneOwnershipRegistry } from '../src/dns-zone-ownership-registry.js';
+import { createPowerDnsSecretRegistry } from '../src/powerdns-secret-registry.js';
+import { createWebsiteProvisioningRegistry } from '../src/website-provisioning-registry.js';
 
 const rootId = '12345678-1234-4234-8234-123456789012';
 const childId = '22345678-1234-4234-8234-123456789012';
@@ -700,6 +708,36 @@ test('authoritative inspection fails closed when credentials or provider state a
       (error) => error instanceof DnsZoneRetirementError && error.code === code && error.status === 503,
     );
   }
+});
+
+test('a missing PowerDNS key cannot override malformed ownership storage or another Domain receipt for the same zone', async (t) => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'yp-dns-retirement-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const domainRegistry = createDomainRegistry({ filePath: path.join(directory, 'domains.json') });
+  const storedDomain = await domainRegistry.createDomain({
+    serverId: localServerId,
+    primaryDomain: 'external.example.test',
+    targetType: 'static',
+    target: { root: '/var/lib/yunpanel/apps/example/current', spaFallback: false },
+  });
+  const ownershipPath = path.join(directory, 'ownership.json');
+  const ownershipRegistry = createDnsZoneOwnershipRegistry({ filePath: ownershipPath });
+  await ownershipRegistry.init();
+  const powerDnsSecretRegistry = createPowerDnsSecretRegistry({
+    filePath: path.join(directory, 'powerdns.json'), masterKey: randomBytes(32).toString('base64url'),
+  });
+  const provisioningRegistry = createWebsiteProvisioningRegistry({ filePath: path.join(directory, 'provisioning.json') });
+  const service = createDnsZoneRetirementService({
+    domainRegistry, ownershipRegistry, powerDnsSecretRegistry, provisioningRegistry, localServerId,
+  });
+  const scope = { serverId: localServerId, zoneName: storedDomain.primaryDomain };
+  await ownershipRegistry.recordCreated({ ...scope, webDomainId: rootId });
+  const unavailable = { code: 'dns_zone_retirement_secret_unavailable', status: 503 };
+  await assert.rejects(service.preview({ domainId: storedDomain.id }), unavailable);
+
+  await ownershipRegistry.removeForZone(scope);
+  await writeFile(ownershipPath, '{ invalid');
+  await assert.rejects(service.preview({ domainId: storedDomain.id }), unavailable);
 });
 
 test('retirement preview digest changes with exact live zone content without exposing record content', async () => {

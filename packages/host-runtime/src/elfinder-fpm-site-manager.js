@@ -346,6 +346,7 @@ export function createElFinderFpmSiteManager({
     env: options.env,
   }),
   lstatFn = lstat,
+  connectFn = createConnection,
   mkdirFn = mkdir,
   readFileFn = readFile,
   renameFn = rename,
@@ -353,7 +354,7 @@ export function createElFinderFpmSiteManager({
   writeFileFn = writeFile,
 } = {}) {
   if (!identityManager || typeof identityManager.inspect !== 'function'
-    || typeof run !== 'function' || typeof lstatFn !== 'function'
+    || typeof run !== 'function' || typeof lstatFn !== 'function' || typeof connectFn !== 'function'
     || typeof mkdirFn !== 'function' || typeof readFileFn !== 'function'
     || typeof renameFn !== 'function' || typeof rmFn !== 'function'
     || typeof writeFileFn !== 'function') {
@@ -642,7 +643,6 @@ export function createElFinderFpmSiteManager({
 
     const socketPath = spec.preview.socketPath;
     let socketInfo;
-    let delayed = false;
     let owner;
     const readyBy = performance.now() + (waitForReload ? 2_000 : 0);
     while (true) {
@@ -654,12 +654,15 @@ export function createElFinderFpmSiteManager({
         socketInfo = null;
       }
       if (socketInfo && (!waitForReload || !socketInfo.isSocket?.() || socketInfo.isSymbolicLink?.())) break;
-      if (socketInfo && modeOf(socketInfo) === 0o660) {
-        if (!delayed) break;
+      if (socketInfo && modeOf(socketInfo) === 0o660 && performance.now() < readyBy) {
         const deadline = { left: (limit = 1_000) => Math.max(1, Math.min(limit, Math.ceil(readyBy - performance.now()))) };
-        owner ??= await socketOwner(spec.runtime, deadline);
-        if (socketInfo.uid === owner.socketUid && socketInfo.gid === owner.socketGid
-          && await connectListener(socketPath, deadline)) break;
+        try {
+          owner ??= await socketOwner(spec.runtime, deadline);
+          if (socketInfo.uid === owner.socketUid && socketInfo.gid === owner.socketGid && performance.now() < readyBy
+            && await connectListener(socketPath, deadline)) break;
+        } catch (error) {
+          if (performance.now() < readyBy) throw error;
+        }
       }
       if (performance.now() >= readyBy) {
         return Object.freeze({
@@ -671,7 +674,6 @@ export function createElFinderFpmSiteManager({
           socketPath,
         });
       }
-      delayed = true;
       await delay(100);
     }
     if (!socketInfo?.isSocket?.() || socketInfo.isSymbolicLink?.() || modeOf(socketInfo) !== 0o660) {
@@ -1034,7 +1036,7 @@ export function createElFinderFpmSiteManager({
   async function connectListener(socketPath, deadline) {
     const timeout = deadline.left(1000);
     return new Promise((resolve, reject) => {
-      const socket = createConnection({ path: socketPath }); let settled = false;
+      const socket = connectFn({ path: socketPath }); let settled = false;
       const finish = (error, ready) => {
         if (settled) return; settled = true; socket.destroy();
         if (error) reject(error); else resolve(ready);
