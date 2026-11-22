@@ -7,6 +7,8 @@ import {
   createDnsParentDsInspector,
   DnsParentDsInspectorError,
 } from '@yunpanel/host-runtime/dns-parent-ds-inspector';
+import { createPowerDnsAuthoritativeManager } from '@yunpanel/host-runtime/powerdns-authoritative-manager';
+import { PowerDnsSecretRegistryError } from './powerdns-secret-registry.js';
 import { websiteDnsZoneProvisioningInternals } from './website-dns-zone-provisioning-handler.js';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -335,6 +337,7 @@ export function createDnsZoneRetirementService({
   jobRegistry = null,
   retentionPolicy: rawRetentionPolicy = null,
   zoneManager = createPowerDnsZoneManager(),
+  authoritativeManager = createPowerDnsAuthoritativeManager(),
   parentDsInspector = createDnsParentDsInspector(),
   localServerId,
 } = {}) {
@@ -349,6 +352,7 @@ export function createDnsZoneRetirementService({
     || !zoneManager || typeof zoneManager.getZone !== 'function'
     || typeof zoneManager.inspectSnapshotDeletion !== 'function'
     || typeof zoneManager.deleteSnapshot !== 'function'
+    || !authoritativeManager || typeof authoritativeManager.isUnconfigured !== 'function'
     || !parentDsInspector || typeof parentDsInspector.inspect !== 'function'
     || typeof localServerId !== 'string' || !localServerId) {
     throw new DnsZoneRetirementError(
@@ -359,10 +363,18 @@ export function createDnsZoneRetirementService({
   }
   const configuredRetentionPolicy = retentionPolicy(rawRetentionPolicy);
 
-  async function materializeSecret(serverId) {
+  async function materializeSecret(serverId, confirmNoZoneHistory = null) {
     let secret;
     try { secret = await powerDnsSecretRegistry.materializeForServer(serverId); }
-    catch {
+    catch (error) {
+      if (confirmNoZoneHistory && error instanceof PowerDnsSecretRegistryError && error.code === 'powerdns_secret_required') {
+        try {
+          if (await confirmNoZoneHistory() === true && await authoritativeManager.isUnconfigured() === true
+            && await powerDnsSecretRegistry.getForServer(serverId) === null) return null;
+        } catch {
+          // Ambiguous host or secret state must keep retirement impact unavailable.
+        }
+      }
       throw new DnsZoneRetirementError(
         'dns_zone_retirement_secret_unavailable',
         'PowerDNS credentials are unavailable',
@@ -414,10 +426,10 @@ export function createDnsZoneRetirementService({
         );
       }
     }
+    const zoneScope = { serverId: domain.serverId, zoneName: domain.primaryDomain };
     const panelReceipt = ownershipRegistry === null ? null : await ownershipRegistry.getForZone({
-      serverId: domain.serverId,
+      ...zoneScope,
       webDomainId: domain.id,
-      zoneName: domain.primaryDomain,
     });
     const ownershipOrigin = provisioningOwnership(domain, provisioningOperations, panelReceipt);
 
@@ -473,25 +485,33 @@ export function createDnsZoneRetirementService({
     let authoritativeZone = null;
     let parentDs = null;
     if ((domain.parentDomainId ?? null) === null || ownershipOrigin.status !== 'parent_zone_owned') {
-      const secret = await materializeSecret(domain.serverId);
-      try { authoritativeZone = await zoneManager.getZone(domain.primaryDomain, secret.apiKey); }
-      catch {
-        throw new DnsZoneRetirementError(
-          'dns_zone_retirement_inspection_failed',
-          'Authoritative PowerDNS zone could not be inspected',
-          503,
-        );
-      }
-      try { parentDs = await parentDsInspector.inspect({ domain: domain.primaryDomain }); }
-      catch (error) {
-        if (error instanceof DnsParentDsInspectorError) {
-          throw new DnsZoneRetirementError(error.code, error.message, error.status);
+      const confirmNoZoneHistory = ownershipOrigin.status === 'not_found'
+        && typeof ownershipRegistry?.hasNoZoneHistory === 'function'
+        && typeof provisioningRegistry?.hasNoDnsZoneHistory === 'function'
+        ? async () => await ownershipRegistry.hasNoZoneHistory(zoneScope) === true
+          && await provisioningRegistry.hasNoDnsZoneHistory(zoneScope) === true
+        : null;
+      const secret = await materializeSecret(domain.serverId, confirmNoZoneHistory);
+      if (secret !== null) {
+        try { authoritativeZone = await zoneManager.getZone(domain.primaryDomain, secret.apiKey); }
+        catch {
+          throw new DnsZoneRetirementError(
+            'dns_zone_retirement_inspection_failed',
+            'Authoritative PowerDNS zone could not be inspected',
+            503,
+          );
         }
-        throw new DnsZoneRetirementError(
-          'dns_zone_retirement_parent_ds_inspection_failed',
-          'Parent DS state could not be inspected',
-          503,
-        );
+        try { parentDs = await parentDsInspector.inspect({ domain: domain.primaryDomain }); }
+        catch (error) {
+          if (error instanceof DnsParentDsInspectorError) {
+            throw new DnsZoneRetirementError(error.code, error.message, error.status);
+          }
+          throw new DnsZoneRetirementError(
+            'dns_zone_retirement_parent_ds_inspection_failed',
+            'Parent DS state could not be inspected',
+            503,
+          );
+        }
       }
     }
 

@@ -4,6 +4,7 @@ import { constants } from 'node:fs';
 import { lstat, mkdir, open, readFile, readlink, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { createConnection } from 'node:net';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import {
   elFinderFpmPoolPath,
@@ -555,7 +556,7 @@ export function createElFinderFpmSiteManager({
     return result;
   }
 
-  async function inspect(rawIntent) {
+  async function inspect(rawIntent, { waitForReload = false } = {}) {
     const spec = normalizeIntent(rawIntent, defaultRuntimeOptions);
     const identity = await inspectIdentity(spec);
     if (!identity.satisfied) {
@@ -641,24 +642,39 @@ export function createElFinderFpmSiteManager({
 
     const socketPath = spec.preview.socketPath;
     let socketInfo;
-    try { socketInfo = await lstatFn(socketPath); }
-    catch (error) {
-      if (missingPath(error)) {
+    let delayed = false;
+    let owner;
+    const readyBy = performance.now() + (waitForReload ? 2_000 : 0);
+    while (true) {
+      try { socketInfo = await lstatFn(socketPath); }
+      catch (error) {
+        if (!missingPath(error)) throw new ElFinderFpmSiteManagerError(
+          'elfinder_fpm_socket_unavailable', 'elFinder FPM socket could not be inspected',
+        );
+        socketInfo = null;
+      }
+      if (socketInfo && (!waitForReload || !socketInfo.isSocket?.() || socketInfo.isSymbolicLink?.())) break;
+      if (socketInfo && modeOf(socketInfo) === 0o660) {
+        if (!delayed) break;
+        const deadline = { left: (limit = 1_000) => Math.max(1, Math.min(limit, Math.ceil(readyBy - performance.now()))) };
+        owner ??= await socketOwner(spec.runtime, deadline);
+        if (socketInfo.uid === owner.socketUid && socketInfo.gid === owner.socketGid
+          && await connectListener(socketPath, deadline)) break;
+      }
+      if (performance.now() >= readyBy) {
         return Object.freeze({
           satisfied: false,
-          reason: 'elfinder_fpm_socket_missing',
+          reason: socketInfo ? 'elfinder_fpm_socket_not_ready' : 'elfinder_fpm_socket_missing',
           adapter: 'elfinder-fpm',
           websiteId: spec.websiteId,
           applicationId: spec.applicationId,
           socketPath,
         });
       }
-      throw new ElFinderFpmSiteManagerError(
-        'elfinder_fpm_socket_unavailable',
-        'elFinder FPM socket could not be inspected',
-      );
+      delayed = true;
+      await delay(100);
     }
-    if (!socketInfo?.isSocket?.() || modeOf(socketInfo) !== 0o660) {
+    if (!socketInfo?.isSocket?.() || socketInfo.isSymbolicLink?.() || modeOf(socketInfo) !== 0o660) {
       throw new ElFinderFpmSiteManagerError(
         'elfinder_fpm_socket_drift',
         'elFinder FPM socket type or mode has drifted',
@@ -756,7 +772,8 @@ export function createElFinderFpmSiteManager({
     try {
       await configTest(spec.runtime);
       await activateService(spec.runtime);
-      const verified = await inspect(rawIntent);
+      // systemd can return from a graceful reload before FPM creates the new socket.
+      const verified = await inspect(rawIntent, { waitForReload: true });
       if (!verified.satisfied) {
         throw new ElFinderFpmSiteManagerError(
           'elfinder_fpm_apply_unverified',

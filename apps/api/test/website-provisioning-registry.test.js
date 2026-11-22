@@ -250,6 +250,8 @@ test('DNS zone ownership history lookup survives Website unbinding concerns and 
 
   const matching = await registry.listForDnsZone({ serverId, webDomainId, zoneName });
   assert.deepEqual(matching.map((operation) => operation.operationId), [operationId]);
+  assert.equal(await registry.hasNoDnsZoneHistory({ serverId, zoneName, webDomainId: 'different-id' }), false);
+  assert.equal(await registry.hasNoDnsZoneHistory({ serverId, zoneName: 'other.example.com' }), true);
 
   assert.deepEqual(
     await registry.listForDnsZone({ serverId, webDomainId, zoneName: 'other.example.com' }),

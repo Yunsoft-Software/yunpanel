@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
-import { chmod, lstat, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { gunzipSync } from 'node:zlib';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -9,6 +9,7 @@ const execFileAsync = promisify(execFile);
 const DPKG_QUERY = '/usr/bin/dpkg-query';
 const APT_GET = '/usr/bin/apt-get';
 const SYSTEMCTL = '/usr/bin/systemctl';
+const SS = '/usr/bin/ss';
 const PDNS_SERVER = '/usr/sbin/pdns_server';
 const PDNSUTIL = '/usr/bin/pdnsutil';
 const SQLITE3 = '/usr/bin/sqlite3';
@@ -119,13 +120,14 @@ export function createPowerDnsAuthoritativeManager({
   chmodFn = chmod,
   lstatFn = lstat,
   mkdirFn = mkdir,
+  readdirFn = readdir,
   readFileFn = readFile,
   renameFn = rename,
   writeFileFn = writeFile,
   now = () => Date.now(),
 } = {}) {
   if (typeof run !== 'function' || typeof fetchFn !== 'function' || typeof hashPassword !== 'function'
-    || typeof chmodFn !== 'function' || typeof lstatFn !== 'function' || typeof mkdirFn !== 'function'
+    || typeof chmodFn !== 'function' || typeof lstatFn !== 'function' || typeof mkdirFn !== 'function' || typeof readdirFn !== 'function'
     || typeof readFileFn !== 'function' || typeof renameFn !== 'function' || typeof writeFileFn !== 'function'
     || typeof now !== 'function') {
     throw new PowerDnsAuthoritativeManagerError('powerdns_dependencies_invalid', 'PowerDNS authoritative dependencies are unavailable');
@@ -260,6 +262,39 @@ export function createPowerDnsAuthoritativeManager({
     } catch {
       return Object.freeze({ owner: null, group: null, mode: null, satisfied: false });
     }
+  }
+
+  async function isUnconfigured() {
+    const { apiPort, databasePath, includeDirectory, serviceUnit } = powerDnsTemplatePolicy;
+    const directories = [includeDirectory, path.posix.dirname(databasePath), path.posix.dirname(RECEIPT_PATH)];
+    for (const directory of directories) {
+      try {
+        const info = await lstatFn(directory);
+        if (!info.isDirectory() || (await readdirFn(directory)).length !== 0) return false;
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+      }
+    }
+    const base = await readOptional(BASE_CONFIG);
+    const settings = (base ?? '').split(/\r?\n/).map((line) => line.trim());
+    if (settings.some((line) => (/^(?:launch|api|webserver)\s*\+?=/.test(line)
+      && !/^(?:launch\s*=\s*|(?:api|webserver)\s*=\s*no)$/.test(line))
+      || (/^include-dir\s*\+?=/.test(line) && !includeDirConfigured(line)))) return false;
+
+    const unit = await run(SYSTEMCTL, ['show', '--property=ActiveState,SubState,LoadState,MainPID', serviceUnit], { timeout: 5_000 });
+    const state = new Set(String(unit.stdout).trim().split('\n'));
+    if ((!state.has('LoadState=loaded') && !state.has('LoadState=not-found'))
+      || !state.has('ActiveState=inactive') || !state.has('SubState=dead') || !state.has('MainPID=0')) return false;
+    const listeners = await run(SS, ['-H', '-lntup', `sport = :53 or sport = :${apiPort}`], { timeout: 5_000 });
+    return String(listeners.stdout).trim().split('\n').every((line) => {
+      if (line === '') return true;
+      const [protocol, listenState, , , local, peer, process, ...rest] = line.trim().split(/\s+/);
+      return rest.length === 0 && ((protocol === 'tcp' && listenState === 'LISTEN')
+        || (protocol === 'udp' && listenState === 'UNCONN'))
+        && /^127\.0\.0\.(?:53|54)(?:%lo)?:53$/.test(local)
+        && /^(?:0\.0\.0\.0|\*):\*$/.test(peer)
+        && /^users:\(\("systemd-resolve",pid=[1-9]\d*,fd=\d+\)\)$/.test(process);
+    });
   }
 
   async function inspect(rawIntent) {
@@ -423,7 +458,7 @@ export function createPowerDnsAuthoritativeManager({
     return verified;
   }
 
-  return Object.freeze({ inspect, apply, activateRestored });
+  return Object.freeze({ inspect, isUnconfigured, apply, activateRestored });
 }
 
 export const powerDnsAuthoritativeManagerInternals = Object.freeze({

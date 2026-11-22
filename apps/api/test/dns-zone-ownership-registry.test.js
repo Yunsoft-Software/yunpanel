@@ -22,6 +22,7 @@ test('a receipt survives a restart in a private file and can be removed', async 
   const filePath = await tempFile(t);
   const first = createDnsZoneOwnershipRegistry({ filePath, logger: silent });
   await first.init();
+  assert.equal(await first.hasNoZoneHistory(scope), true);
   const receipt = await first.recordCreated(scope);
   assert.match(receipt.operationId, /^[0-9a-f-]{36}$/);
   assert.equal((await stat(filePath)).mode & 0o777, 0o600);
@@ -30,10 +31,14 @@ test('a receipt survives a restart in a private file and can be removed', async 
   await reopened.init();
   assert.deepEqual(await reopened.getForZone(scope), receipt);
   assert.equal(await reopened.getForZone({ ...scope, webDomainId: 'other' }), null);
+  assert.equal(await reopened.hasNoZoneHistory({ ...scope, webDomainId: 'other' }), false);
 
   await reopened.removeForZone(scope);
   assert.equal(await reopened.getForZone(scope), null);
   assert.deepEqual(JSON.parse(await readFile(filePath, 'utf8')).receipts, []);
+  assert.equal(await reopened.hasNoZoneHistory(scope), true);
+  await writeFile(filePath, '{ damaged after initialization');
+  assert.equal(await reopened.hasNoZoneHistory(scope), false);
 });
 
 test('creating the same zone again replaces its receipt', async () => {
@@ -52,12 +57,14 @@ test('an unreadable or partly invalid file is logged and never stops the API', a
   const broken = createDnsZoneOwnershipRegistry({ filePath, logger: { error: (...args) => logged.push(args) } });
   await broken.init();
   assert.equal(await broken.getForZone(scope), null);
+  assert.equal(await broken.hasNoZoneHistory(scope), false);
   assert.equal(logged.length, 1);
 
   await writeFile(filePath, JSON.stringify({ version: 1, receipts: [{ zoneName: 'bad' }, null] }));
   const partial = createDnsZoneOwnershipRegistry({ filePath, logger: silent });
   await partial.init();
   assert.equal(await partial.getForZone(scope), null);
+  assert.equal(await partial.hasNoZoneHistory(scope), false);
 });
 
 function retirement({ receipt, operations = [] }) {

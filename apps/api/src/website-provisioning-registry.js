@@ -383,12 +383,8 @@ export function createWebsiteProvisioningRegistry({
       }
     }
     return Object.freeze(state.operations
-      .filter((operation) => operation.steps.some((step) => (
-        step.kind === 'dns_zone'
-        && step.intent?.serverId === serverId
-        && step.intent?.webDomainId === webDomainId
-        && step.intent?.zoneName === zoneName
-      )))
+      .filter((operation) => operation.steps.some((step) => sameAuthoritativeZone(step, serverId, zoneName)
+        && step.intent.webDomainId === webDomainId))
       .sort((left, right) => {
         const byUpdatedAt = right.updatedAt.localeCompare(left.updatedAt);
         if (byUpdatedAt !== 0) return byUpdatedAt;
@@ -397,6 +393,17 @@ export function createWebsiteProvisioningRegistry({
         return right.operationId.localeCompare(left.operationId);
       })
       .map(publicOperation));
+  }
+
+  function sameAuthoritativeZone(step, serverId, zoneName) {
+    return step.kind === 'dns_zone' && step.intent?.serverId === serverId && step.intent?.zoneName === zoneName;
+  }
+
+  async function hasNoDnsZoneHistory({ serverId, zoneName }) {
+    await ensureInitialized();
+    return !state.operations.some((operation) => operation.steps.some((step) => (
+      sameAuthoritativeZone(step, serverId, zoneName)
+    )));
   }
 
   async function beginStep({ operationId, stepId } = {}) {
@@ -631,6 +638,7 @@ export function createWebsiteProvisioningRegistry({
     getLatestForWebsite: (...args) => withStoreRead(() => getLatestForWebsite(...args)),
     listForWebsite: (...args) => withStoreRead(() => listForWebsite(...args)),
     listForDnsZone: (...args) => withStoreRead(() => listForDnsZone(...args)),
+    hasNoDnsZoneHistory: (...args) => withStoreRead(() => hasNoDnsZoneHistory(...args)),
     beginStep: (...args) => withStoreMutation(() => beginStep(...args)),
     completeStep: (...args) => withStoreMutation(() => completeStep(...args)),
     blockStep: (...args) => withStoreMutation(() => blockStep(...args)),
