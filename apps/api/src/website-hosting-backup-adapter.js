@@ -14,7 +14,21 @@ const within=(value,root)=>value===root||value.startsWith(root+'/');
 export function createWebsiteHostingBackupAdapter({websiteRegistry,domainRegistry,applicationRegistry,certificateRegistry,
  runtimeBindingRegistry,dockerComposeProjectRegistry,provisioningRegistry=null,
  phpFpmSiteManager=createPhpFpmSiteManager(),serviceUmaskManager=createServiceUmaskManager(),
- nginxFactory=createNginxManager,codec=createWebsiteResourceBackupCodec(),configRoot='/etc/nginx/sites-enabled',stagingRoot='/var/lib/yunpanel/staging/website-hosting-restore'}={}){
+ nginxManager=null,nginxFactory=null,beforeDomainActivate=null,onDomainActivated=null,
+ codec=createWebsiteResourceBackupCodec(),configRoot=null,stagingRoot='/var/lib/yunpanel/staging/website-hosting-restore'}={}){
+ const resolvedConfigRoot=configRoot??nginxManager?.renderOptions?.sitesDir??'/etc/nginx/sites-enabled';
+ const defaultPreviewManager=nginxManager??(nginxFactory?null:createNginxManager({sitesDir:resolvedConfigRoot}));
+ const currentPreviewManager=()=>defaultPreviewManager??nginxFactory();
+ const createRestoreManager=stagingDir=>{
+  if(typeof nginxManager?.withStagingDir==='function')return nginxManager.withStagingDir(stagingDir);
+  if(nginxFactory)return nginxFactory({stagingDir});
+  return createNginxManager({
+   sitesDir:resolvedConfigRoot,
+   stagingDir,
+   trafficLogPath:nginxManager?.renderOptions?.trafficLogPath??null,
+   enableTrafficLimitGuard:nginxManager?.renderOptions?.enableTrafficLimitGuard===true,
+  });
+ };
  async function scope(backupSet,entry){
   const website=await websiteRegistry.getWebsite(backupSet.website.id),domain=await domainRegistry.getDomain(entry.domainId);
   const root=path.posix.join(backupSet.stagedRoot,'nginx'),config=path.posix.join(root,`${entry.domainId}.conf`),metadata=path.posix.join(root,`${entry.domainId}.json`);
@@ -23,21 +37,27 @@ export function createWebsiteHostingBackupAdapter({websiteRegistry,domainRegistr
    ||entry.stagedConfigPath!==config||entry.stagedMetadataPath!==metadata||!codec.configured)throw fail('website_hosting_backup_scope_invalid');
   return{website,domain,config,metadata,identity:{websiteId:website.id,resourceId:domain.id,kind:'hosting'}};
  }
- async function spec(context,domain=context.domain){
+ async function spec(context,domain=context.domain,previewManager=currentPreviewManager()){
   const target=await resolveWebsiteDomainTarget({domain,websiteRegistry,applicationRegistry,runtimeBindingRegistry,
    dockerComposeProjectRegistry,phpFpmSiteManager,serviceUmaskManager});
   const envelope=await materializeApplicationPassengerMigrationDomainEnvelope(domain,certificateRegistry);
   const operation=await provisioningRegistry?.getLatestForWebsite(context.website.id);
   const original=operation?.websiteId===context.website.id?operation.steps?.find(step=>step.kind==='nginx')?.intent:null;
-  return{...envelope,targetType:target.targetType,target:target.target,
+  const renderOptions=previewManager?.renderOptions??null;
+  const trafficLogPath=renderOptions?.trafficLogPath??null;
+  const enableTrafficLimitGuard=renderOptions?.enableTrafficLimitGuard===true;
+  return{...envelope,websiteId:context.website.id,targetType:target.targetType,target:target.target,
    nginxSettings:domainStageTargetJobRegistryInternals.resolvedNginxSettings(domain,target,domain.nginxSettings),
    ...(original?.mailDiscoverySocketPath?{mailDiscoverySocketPath:original.mailDiscoverySocketPath}:{}),
    ...(original?.acmeOnlyHostnames?.length?{acmeOnlyHostnames:original.acmeOnlyHostnames}:{}),
+   ...(trafficLogPath!=null?{trafficLogPath}:{}),
+   ...(enableTrafficLimitGuard?{enableTrafficLimitGuard:true}:{}),
   };
  }
  async function capture(backupSet,entry){
-  const context=await scope(backupSet,entry),value=await spec(context),rendered=nginxFactory().previewDomain(value);
-  const expectedPath=path.posix.join(configRoot,rendered.configName);
+  const previewManager=currentPreviewManager();
+  const context=await scope(backupSet,entry),value=await spec(context,context.domain,previewManager),rendered=previewManager.previewDomain(value);
+  const expectedPath=path.posix.join(resolvedConfigRoot,rendered.configName);
   if(entry.configPath!==expectedPath)throw fail('website_hosting_backup_config_scope_invalid');
   const metadata=await lstat(entry.configPath);
   if(!metadata.isFile()||metadata.isSymbolicLink()||metadata.uid!==process.getuid()||(metadata.mode&0o022))throw fail('website_hosting_backup_config_unsafe');
@@ -72,26 +92,55 @@ export function createWebsiteHostingBackupAdapter({websiteRegistry,domainRegistr
   for(const entry of entries){
    let context=await scope(backupSet,entry);const saved=codec.decode(context.identity,await protectedFile(context.metadata));
    if(saved.version!==1||saved.serverId!==context.website.serverId||saved.applicationId!==context.website.applicationId
-    ||saved.domainId!==context.domain.id||saved.certificateId!==context.domain.certificateId)throw fail('website_hosting_restore_snapshot_invalid');
+    ||saved.domainId!==context.domain.id||saved.certificateId!==context.domain.certificateId
+    ||!saved.spec||typeof saved.spec!=='object'||Array.isArray(saved.spec))throw fail('website_hosting_restore_snapshot_invalid');
+   if((saved.spec.websiteId!==undefined&&saved.spec.websiteId!==context.website.id)
+    ||(saved.spec.trafficWebsiteId!==undefined&&saved.spec.trafficWebsiteId!==context.website.id))throw fail('website_hosting_restore_snapshot_invalid');
    const current=await spec(context);
    if(JSON.stringify(saved.spec.target)!==JSON.stringify(current.target)||saved.spec.targetType!==current.targetType
     ||JSON.stringify(saved.spec.aliases)!==JSON.stringify(current.aliases)||saved.spec.primaryDomain!==current.primaryDomain
     ||JSON.stringify(saved.spec.tls)!==JSON.stringify(current.tls))throw fail('website_hosting_restore_runtime_changed');
-   const manager=nginxFactory({stagingDir:path.posix.join(stagingRoot,operationId,rollback?'rollback':'apply',context.domain.id)});
-   const rendered=manager.previewDomain(saved.spec),raw=await protectedFile(context.config);
+   const hasSavedTrafficPolicy=Object.hasOwn(saved.spec,'trafficLogPath')||Object.hasOwn(saved.spec,'enableTrafficLimitGuard');
+   if(hasSavedTrafficPolicy){
+    if(saved.spec.trafficLogPath!==undefined&&saved.spec.trafficLogPath!==null&&typeof saved.spec.trafficLogPath!=='string')throw fail('website_hosting_restore_snapshot_invalid');
+    if(saved.spec.enableTrafficLimitGuard!==undefined&&typeof saved.spec.enableTrafficLimitGuard!=='boolean')throw fail('website_hosting_restore_snapshot_invalid');
+    if((saved.spec.trafficLogPath!=null||saved.spec.enableTrafficLimitGuard===true)&&saved.spec.websiteId!==context.website.id)throw fail('website_hosting_restore_snapshot_invalid');
+    if((saved.spec.trafficLogPath??null)!==(current.trafficLogPath??null)
+     ||(saved.spec.enableTrafficLimitGuard===true)!==(current.enableTrafficLimitGuard===true))throw fail('website_hosting_restore_runtime_changed');
+   }
+   const verifySpec={...saved.spec,
+    trafficLogPath:saved.spec.trafficLogPath??null,
+    enableTrafficLimitGuard:saved.spec.enableTrafficLimitGuard===true,
+    ...(saved.spec.websiteId!==undefined?{websiteId:context.website.id}:{}),
+   };
+   const activateSpec={...saved.spec,
+    websiteId:context.website.id,
+    trafficLogPath:current.trafficLogPath??null,
+    enableTrafficLimitGuard:current.enableTrafficLimitGuard===true,
+   };
+   const manager=createRestoreManager(path.posix.join(stagingRoot,operationId,rollback?'rollback':'apply',context.domain.id));
+   const rendered=manager.previewDomain(verifySpec),raw=await protectedFile(context.config);
    if(rendered.checksum!==saved.checksum||digest(raw)!==saved.checksum||rendered.configName!==saved.configName
-    ||entry.configPath!==path.posix.join(configRoot,rendered.configName))throw fail('website_hosting_restore_config_invalid');
+    ||entry.configPath!==path.posix.join(resolvedConfigRoot,rendered.configName))throw fail('website_hosting_restore_config_invalid');
+   const expectedActive=manager.previewDomain(activateSpec);
+   if(expectedActive.configName!==saved.configName
+    ||entry.configPath!==path.posix.join(resolvedConfigRoot,expectedActive.configName))throw fail('website_hosting_restore_config_invalid');
+   try{
+    await domainRegistry.previewDomainUpdate({domainId:context.domain.id,changes:saved.catalog});
+   }catch(error){if(error.code!=='domain_update_no_changes')throw error;}
+   const staged=await manager.stageDomain(activateSpec);
+   if(staged.checksum!==expectedActive.checksum||staged.configName!==expectedActive.configName)throw fail('website_hosting_restore_config_invalid');
+   if(typeof beforeDomainActivate==='function')await beforeDomainActivate({primaryDomain:activateSpec.primaryDomain,websiteId:context.website.id});
+   const activated=await manager.activateDomain({primaryDomain:activateSpec.primaryDomain,checksum:staged.checksum});
+   const actual=await manager.inspectActiveDomain({primaryDomain:activateSpec.primaryDomain,checksum:staged.checksum});
+   if(activated.active!==true||actual.satisfied!==true)throw fail('website_hosting_restore_unverified');
    try{
     const preview=await domainRegistry.previewDomainUpdate({domainId:context.domain.id,changes:saved.catalog});
     await domainRegistry.updateDomain({domainId:context.domain.id,changes:saved.catalog,previewDigest:preview.previewDigest,skipLock:true});
    }catch(error){if(error.code!=='domain_update_no_changes')throw error;}
-   const staged=await manager.stageDomain(saved.spec);
-   if(staged.checksum!==saved.checksum||staged.configName!==saved.configName)throw fail('website_hosting_restore_config_invalid');
-   const activated=await manager.activateDomain({primaryDomain:saved.spec.primaryDomain,checksum:staged.checksum});
-   const actual=await manager.inspectActiveDomain({primaryDomain:saved.spec.primaryDomain,checksum:staged.checksum});
-   if(activated.active!==true||actual.satisfied!==true)throw fail('website_hosting_restore_unverified');
    await domainRegistry.markStaged(context.domain.id,{checksum:staged.checksum,configName:staged.configName});
    await domainRegistry.markApplied(context.domain.id,{checksum:staged.checksum});
+   if(typeof onDomainActivated==='function')await Promise.resolve(onDomainActivated({primaryDomain:activateSpec.primaryDomain,websiteId:context.website.id})).catch(()=>{});
    results.push({domainId:context.domain.id,restored:true,checksum:staged.checksum});
   }
   return results;

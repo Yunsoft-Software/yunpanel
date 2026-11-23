@@ -98,6 +98,7 @@ export function createWebsiteBackupSetProvider({
   dockerComposeProjectRegistry = null,
   localServerId = null,
   backupResourceRoot = DEFAULT_BACKUP_RESOURCE_ROOT,
+  nginxConfigRoot = '/etc/nginx/sites-enabled',
 } = {}) {
   if (!websiteRegistry || typeof websiteRegistry.getWebsite !== 'function') {
     throw new WebsiteBackupSetError('website_backup_set_dependencies_invalid', 'Website registry is required', 503);
@@ -339,7 +340,7 @@ export function createWebsiteBackupSetProvider({
     const nginx = linkedDomains.map((domain) => {
       const configName = domain.stagedConfigName ?? `yunpanel-${nginxConfigFileName(domain.primaryDomain)}`;
       if (!managedConfigNames.has(configName)) throw new WebsiteBackupSetError('backup_nginx_scope_invalid', 'Nginx configuration is outside this Website', 409);
-      const configPath = path.posix.join('/etc/nginx/sites-enabled', configName);
+      const configPath = path.posix.join(nginxConfigRoot, configName);
       const stagedConfigPath = path.posix.join(stagedRoot, 'nginx', `${domain.id}.conf`);
       const stagedMetadataPath = path.posix.join(stagedRoot, 'nginx', `${domain.id}.json`);
       return Object.freeze({

@@ -1206,7 +1206,10 @@ export function createApp(allOptions = {}) {
     const dnsBackupAdapter = options.dnsBackupAdapter ?? (powerDnsSecretRegistry && dnsRetirementImpact
       ? createWebsiteDnsBackupAdapter({ websiteRegistry, domainRegistry, powerDnsSecretRegistry, ownershipInspector: dnsRetirementImpact }) : null);
     const candidateHostingBackupAdapter = options.hostingBackupAdapter ?? createWebsiteHostingBackupAdapter({ websiteRegistry,domainRegistry,applicationRegistry,
-      certificateRegistry,runtimeBindingRegistry,dockerComposeProjectRegistry,provisioningRegistry:websiteProvisioningRuntime?.registry });
+      certificateRegistry,runtimeBindingRegistry,dockerComposeProjectRegistry,provisioningRegistry:websiteProvisioningRuntime?.registry,
+      nginxManager: options.nginxManager ?? null,
+      beforeDomainActivate: options.beforeDomainActivate ?? null,
+      onDomainActivated });
     const hostingBackupAdapter = options.hostingBackupAdapter ?? (candidateHostingBackupAdapter.configured ? candidateHostingBackupAdapter : null);
     const websiteBackupSetProvider = createWebsiteBackupSetProvider({
       websiteRegistry,
@@ -1217,6 +1220,7 @@ export function createApp(allOptions = {}) {
       applicationEnvironmentRegistry,
       dockerComposeProjectRegistry,
       localServerId,
+      ...(options.nginxManager?.renderOptions?.sitesDir ? { nginxConfigRoot: options.nginxManager.renderOptions.sitesDir } : {}),
     });
     const resolvedWebsiteBackupService = websiteBackupService ?? (
       resolvedResticRepositoryRegistry && resolvedResticManager ? createWebsiteBackupService({

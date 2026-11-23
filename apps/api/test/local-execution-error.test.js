@@ -122,3 +122,24 @@ test('returned objects cannot mutate the shared diagnostic catalog', () => {
   assert.notEqual(safeLocalOperationError({ code: 'ENOSPC' }).message, 'injected');
   assert.equal(localExecutorInternals.safeExecutionError, safeLocalOperationError);
 });
+
+test('website hosting backup and restore diagnostics preserve safe typed codes without leaking details', () => {
+  for (const code of [
+    'website_hosting_backup_scope_invalid',
+    'website_hosting_backup_config_scope_invalid',
+    'website_hosting_backup_config_unsafe',
+    'website_hosting_backup_active_config_changed',
+    'website_hosting_backup_file_unsafe',
+    'website_hosting_restore_selection_incomplete',
+    'website_hosting_restore_operation_invalid',
+    'website_hosting_restore_snapshot_invalid',
+    'website_hosting_restore_runtime_changed',
+    'website_hosting_restore_config_invalid',
+    'website_hosting_restore_unverified',
+  ]) {
+    const result = safeLocalOperationError({ code, message: 'SECRET=/etc/nginx/private.conf', stderr: 'PRIVATE' });
+    assert.equal(result.code, code);
+    assert.deepEqual(Object.keys(result).sort(), ['code', 'message']);
+    assert.equal(/SECRET|PRIVATE|\/etc\/nginx/.test(JSON.stringify(result)), false);
+  }
+});

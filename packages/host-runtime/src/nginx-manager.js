@@ -143,7 +143,11 @@ function normalizeReceiptState(value) {
   return fileState(value.content);
 }
 
-export function createNginxManager({
+export function createNginxManager(options = {}) {
+  return createNginxManagerInstance(options, { chain: Promise.resolve() });
+}
+
+function createNginxManagerInstance({
   stagingDir = '/var/lib/yunpanel/staging/nginx',
   sitesDir = '/etc/nginx/sites-enabled',
   nginxPath = '/usr/sbin/nginx',
@@ -158,10 +162,19 @@ export function createNginxManager({
   renameFn = rename,
   rmFn = rm,
   execFn = execFileSafe,
-} = {}) {
-  let activationChain = Promise.resolve();
+} = {}, lock = { chain: Promise.resolve() }) {
+  function runLocked(task) {
+    const run = lock.chain.catch(() => {}).then(task);
+    lock.chain = run;
+    return run;
+  }
   const rollbackDir = path.join(stagingDir, 'rollback');
   const deactivationDir = path.join(stagingDir, 'deactivation');
+  const renderOptions = Object.freeze({
+    sitesDir,
+    trafficLogPath,
+    enableTrafficLimitGuard: enableTrafficLimitGuard === true,
+  });
 
   async function validateNginxConfig() {
     const result = await execFn(nginxPath, ['-t']);
@@ -559,9 +572,7 @@ export function createNginxManager({
   }
 
   function activateDomain(input) {
-    const run = activationChain.catch(() => {}).then(() => activateNow(input));
-    activationChain = run;
-    return run;
+    return runLocked(() => activateNow(input));
   }
 
   async function inspectDomainCompensation({ primaryDomain, checksum, activationId = null } = {}) {
@@ -647,9 +658,7 @@ export function createNginxManager({
   }
 
   function compensateDomain(input) {
-    const run = activationChain.catch(() => {}).then(() => compensateNow(input));
-    activationChain = run;
-    return run;
+    return runLocked(() => compensateNow(input));
   }
 
   async function inspectDomainDeactivation({ primaryDomain, checksum } = {}) {
@@ -782,9 +791,7 @@ export function createNginxManager({
   }
 
   function deactivateDomain(input) {
-    const run = activationChain.catch(() => {}).then(() => deactivateNow(input));
-    activationChain = run;
-    return run;
+    return runLocked(() => deactivateNow(input));
   }
 
   async function inspectDomainDeactivationRollback({ primaryDomain, checksum } = {}) {
@@ -887,28 +894,46 @@ export function createNginxManager({
   }
 
   function rollbackDomainDeactivation(input) {
-    const run = activationChain.catch(() => {}).then(() => rollbackDeactivationNow(input));
-    activationChain = run;
-    return run;
+    return runLocked(() => rollbackDeactivationNow(input));
   }
 
   function reloadConfiguration() {
-    const run = activationChain.catch(() => {}).then(async () => {
+    return runLocked(async () => {
       await validateNginxConfig();
       await execFn(systemctlPath, ['reload', 'nginx']);
       return { service: 'nginx', status: 'succeeded', stage: 'reload' };
     });
-    activationChain = run;
-    return run;
   }
 
   function withConfigLock(task) {
     if (typeof task !== 'function') {
       throw new TypeError('withConfigLock requires a function');
     }
-    const run = activationChain.catch(() => {}).then(() => task());
-    activationChain = run;
-    return run;
+    return runLocked(() => task());
+  }
+
+  function withStagingDir(nextStagingDir) {
+    if (typeof nextStagingDir !== 'string' || !path.isAbsolute(nextStagingDir)
+      || /[\u0000\r\n]/.test(nextStagingDir) || nextStagingDir.split('/').includes('..')
+      || path.posix.normalize(nextStagingDir) === '/') {
+      throw new NginxManagerError('invalid_staging_dir', 'Nginx staging directory must be a safe absolute path');
+    }
+    return createNginxManagerInstance({
+      stagingDir: nextStagingDir,
+      sitesDir,
+      nginxPath,
+      systemctlPath,
+      trafficLogPath,
+      enableTrafficLimitGuard,
+      mkdirFn,
+      readFileFn,
+      lstatFn,
+      realpathFn,
+      writeFileFn,
+      renameFn,
+      rmFn,
+      execFn,
+    }, lock);
   }
 
   return {
@@ -925,6 +950,8 @@ export function createNginxManager({
     rollbackDomainDeactivation,
     reloadConfiguration,
     withConfigLock,
+    renderOptions,
+    withStagingDir,
   };
 }
 

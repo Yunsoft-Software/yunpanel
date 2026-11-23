@@ -58,3 +58,57 @@ test('actual compensation command failure preserves the exact pending candidate 
     error => error.code === 'nginx_compensation_rollback_failed');
   assert.equal(await readFile(state.activePath, 'utf8'), candidate);
 });
+
+test('withStagingDir inherits authoritative traffic renderOptions, shares config lock and rejects unsafe paths', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'nginx-mgr-scoped-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const sitesDir = path.join(root, 'sites');
+  const baseStage = path.join(root, 'stage-a');
+  const childStage = path.join(root, 'stage-b');
+  await mkdir(sitesDir, { recursive: true });
+  const manager = createNginxManager({
+    stagingDir: baseStage,
+    sitesDir,
+    trafficLogPath: '/var/log/nginx/yunpanel-site-traffic.log',
+    enableTrafficLimitGuard: true,
+    execFn: async () => '',
+  });
+  assert.deepEqual(manager.renderOptions, {
+    sitesDir,
+    trafficLogPath: '/var/log/nginx/yunpanel-site-traffic.log',
+    enableTrafficLimitGuard: true,
+  });
+  assert.throws(() => manager.withStagingDir('relative/path'), error => error.code === 'invalid_staging_dir');
+  assert.throws(() => manager.withStagingDir('/tmp/../etc'), error => error.code === 'invalid_staging_dir');
+  assert.throws(() => manager.withStagingDir('/'), error => error.code === 'invalid_staging_dir');
+  assert.throws(() => manager.withStagingDir('///'), error => error.code === 'invalid_staging_dir');
+  const child = manager.withStagingDir(childStage);
+  assert.deepEqual(child.renderOptions, manager.renderOptions);
+  const websiteId = '19f03f9f-13bb-5771-9d56-dd837211e2a8';
+  const spec = {
+    websiteId,
+    primaryDomain: 'scoped.example.test',
+    aliases: [],
+    targetType: 'static',
+    target: { root: '/var/www/scoped/current', spaFallback: true },
+    tls: null,
+    httpsRedirect: false,
+    canonicalRedirect: false,
+    nginxSettings: {},
+  };
+  assert.equal(child.previewDomain(spec).checksum, manager.previewDomain(spec).checksum);
+  const events = [];
+  let releaseLock;
+  const gate = new Promise(resolve => { releaseLock = resolve; });
+  const held = manager.withConfigLock(async () => {
+    events.push('parent-start');
+    await gate;
+    events.push('parent-end');
+  });
+  const queued = child.withConfigLock(async () => { events.push('child-ran'); });
+  await new Promise(resolve => setTimeout(resolve, 15));
+  assert.deepEqual(events, ['parent-start']);
+  releaseLock();
+  await Promise.all([held, queued]);
+  assert.deepEqual(events, ['parent-start', 'parent-end', 'child-ran']);
+});
