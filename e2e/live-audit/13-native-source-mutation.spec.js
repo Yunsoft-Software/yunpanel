@@ -805,26 +805,34 @@ test('@mutation source WordPress refuses CLI success when a plugin breaks actual
  } finally {await remove(liveApi,m,pluginPath);}
 });
 
-test('@mutation source WordPress core update changes 7.1.3 to 7.1.4 through the current worker and preserves SQL content and administrator login', async ({liveApi,browser})=>{
- test.setTimeout(240000);const m=owned(),root='/api/panel/websites/'+m.fixture.websiteId+'/wordpress',options={action:'core.update'};
+const compareSemver=(a,b)=>{
+ const parse=v=>{expect(typeof v==='string'&&/^\d+\.\d+(?:\.\d+)?$/.test(v),'WordPress core version must be numeric semver').toBe(true);const parts=v.split('.').map(Number);return [parts[0],parts[1],parts[2]??0];};
+ const left=parse(a),right=parse(b);
+ for(let i=0;i<3;i++)if(left[i]!==right[i])return left[i]-right[i];
+ return 0;
+};
+
+test('@mutation source WordPress core update upgrades official 7.1.4 to the verified newer release through the current worker and preserves SQL content and administrator login', async ({liveApi,browser})=>{
+ test.setTimeout(240000);const m=owned(),root='/api/panel/websites/'+m.fixture.websiteId+'/wordpress',options={action:'core.update'},olderVersion='7.1.4';
  expect(m.fixture.binding?.id,'The fresh owned installation must use its actual dedicated DB').toBeTruthy();
  const tool=async(label,args,command='core')=>{const r=await phase2Post(liveApi,'/api/panel/websites/'+m.fixture.websiteId+'/wp-cli/run',{command,args,timeout:120000},label,200,value=>expect(typeof value.success==='boolean'&&Number.isSafeInteger(value.exitCode)&&typeof value.stdout==='string').toBe(true));expect(r.success).toBe(true);expect(r.exitCode).toBe(0);return r;};
  const sql=async phase=>{const r=await tool('wordpress.core.sql-'+phase,['query','SELECT value FROM yp_native_proof WHERE id=1','--skip-column-names','--skip-plugins','--skip-themes','--skip-packages'],'db');expect(Boolean(r.stdout.trim())).toBe(true);return createHash('sha256').update(r.stdout.trim()).digest('hex');};
  const sqlBefore=await sql('before');
- const latest=check(await phase2Read(liveApi.api,liveApi.csrf,'GET',root),'wordpress.core.preparation-before');expect(latest.installed).toBe(true);expect(latest.coreVersion).toBe('7.1.4');
- await tool('wordpress.core.older-owned-preparation',['download','--version=7.1.3','--force','--skip-content','--locale=tr_TR']);
- await tool('wordpress.core.older-checksums',['verify-checksums','--version=7.1.3','--locale=tr_TR','--skip-plugins','--skip-themes','--skip-packages']);
- const before=check(await phase2Read(liveApi.api,liveApi.csrf,'GET',root),'wordpress.core.before');expect(before.installed).toBe(true);expect(before.coreVersion).toBe('7.1.3');expect(await sql('prepared')).toBe(sqlBefore);
+ const latest=check(await phase2Read(liveApi.api,liveApi.csrf,'GET',root),'wordpress.core.preparation-before');expect(latest.installed).toBe(true);
+ const targetVersion=latest.coreVersion;expect(compareSemver(targetVersion,olderVersion),'The current WordPress installation must be strictly newer than official '+olderVersion).toBeGreaterThan(0);
+ await tool('wordpress.core.older-owned-preparation',['download','--version='+olderVersion,'--force','--skip-content','--locale=tr_TR']);
+ await tool('wordpress.core.older-checksums',['verify-checksums','--version='+olderVersion,'--locale=tr_TR','--skip-plugins','--skip-themes','--skip-packages']);
+ const before=check(await phase2Read(liveApi.api,liveApi.csrf,'GET',root),'wordpress.core.before');expect(before.installed).toBe(true);expect(before.coreVersion).toBe(olderVersion);expect(await sql('prepared')).toBe(sqlBefore);
  const preparedReply=await primary.http('/');expect(preparedReply.status,'The first actual older installation HTTP reply must work').toBe(200);
  await browserLogin(browser,before,'t886_admin',secrets().wpAdminPassword,'before-core-upgrade');
  const preview=await phase2Post(liveApi,root+'/preview',{options},'wordpress.core.preview');const intent=phase2JobIntent(preview,'wp.toolkit',options);
  const queued=await phase2Post(liveApi,root+'/actions',{options,requestId:randomUUID(),expectedWebsiteRevision:preview.websiteRevision,previewDigest:preview.previewDigest,confirmation:preview.confirmation},'wordpress.core.queue',202);
  const job=await phase2Job(liveApi,queued.job,intent,180000);record('wordpress.core.native',{status:job.status,code:job.error?.code});expect(job.status).toBe('succeeded');
- const after=check(await phase2Read(liveApi.api,liveApi.csrf,'GET',root),'wordpress.core.after');expect(after.installed).toBe(true);expect(after.coreVersion).toBe('7.1.4');expect(after.coreVersion).not.toBe(before.coreVersion);expect(await sql('after')).toBe(sqlBefore);
+ const after=check(await phase2Read(liveApi.api,liveApi.csrf,'GET',root),'wordpress.core.after');expect(after.installed).toBe(true);expect(after.coreVersion).toBe(targetVersion);expect(compareSemver(after.coreVersion,before.coreVersion)).toBeGreaterThan(0);expect(after.coreVersion).not.toBe(before.coreVersion);expect(await sql('after')).toBe(sqlBefore);
  const actual=await primary.http('/');expect(actual.status,'The first upgraded installation HTTP reply must work').toBe(200);
- await tool('wordpress.core.actual-checksums',['verify-checksums','--version=7.1.4','--locale=tr_TR','--skip-plugins','--skip-themes','--skip-packages']);
+ await tool('wordpress.core.actual-checksums',['verify-checksums','--version='+targetVersion,'--locale=tr_TR','--skip-plugins','--skip-themes','--skip-packages']);
  await browserLogin(browser,after,'t886_admin',secrets().wpAdminPassword,'after-core-upgrade');
- record('wordpress.core.result',{verified:true,beforeVersion:before.coreVersion,afterVersion:after.coreVersion,versionChanged:true,sqlSha256:sqlBefore,freshAdminVerified:true});
+ record('wordpress.core.result',{verified:true,beforeVersion:before.coreVersion,afterVersion:after.coreVersion,targetVersion,versionChanged:true,sqlSha256:sqlBefore,freshAdminVerified:true});
 });
 
 test('@mutation source WordPress removal removes actual core files and prefix tables, preserves other content, then restores the owned installation', async ({ liveApi }) => {
