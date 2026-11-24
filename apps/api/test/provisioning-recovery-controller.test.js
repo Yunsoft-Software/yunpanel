@@ -1658,9 +1658,11 @@ test('Klavye navigasyonu, modal odak yakalama (focus trap), Escape iptali ve oda
   assert.match(panelKitSource, /event\.shiftKey && document\.activeElement === first/);
   assert.match(panelKitSource, /!event\.shiftKey && document\.activeElement === last/);
 
-  // Escape key cancels modal
+  // Escape key and native dialog cancel route through requestClose with busy, top-layer, and unsaved-change guards
+  assert.match(panelKitSource, /if \(!isTopModalLayer\(modalId, ref\.current\)\) return;/);
   assert.match(panelKitSource, /event\.key === 'Escape'/);
-  assert.match(panelKitSource, /onCancel=\{\(event\)\s*=>\s*\{\s*event\.preventDefault\(\);\s*if\s*\(!busy\)\s*onCloseRef\.current\(\);\s*\}\}/);
+  assert.match(panelKitSource, /const requestClose = \(\) => \{\s*if \(busy \|\| !visible\) return;\s*if \(!isTopModalLayer\(modalId, ref\.current\)\) return;[\s\S]*?setDiscardPromptOpen\(true\);[\s\S]*?if \(!busy\) onCloseRef\.current\?\.\(\);\s*\};/);
+  assert.match(panelKitSource, /onCancel=\{\(event\)\s*=>\s*\{\s*event\.preventDefault\(\);\s*if\s*\(!busy\)\s*requestClose\(\);\s*\}\}/);
 
   // Focus restoration to previous active element with preventScroll: true
   assert.match(panelKitSource, /previous\.focus\(\{\s*preventScroll:\s*true\s*\}\)/);
