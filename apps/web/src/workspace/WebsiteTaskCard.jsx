@@ -33,7 +33,7 @@ export default function WebsiteTaskCard({ row, tasks, certificates, filtering, o
         <h3 id={`${id}-title`}>
           <Link to={siteHref(domain.id)}>{domain.primaryDomain}</Link>
         </h3>
-        <p>{isSubdomain ? 'Alt alan adı' : 'Ana alan adı'} · {tasks.runtimeLabel}</p>
+        <p>{isSubdomain ? 'Alt alan adı' : 'Ana alan adı'} · {tasks.runtimeLabel}{!isSubdomain && childCount > 0 ? ` · ${childCount} alt alan adı` : ''}</p>
         {contextOnly && <small>Filtrelenen alt alan adının üst kaydı</small>}
       </div>
       <div className="ws-website-task-status" aria-label="Kayıt ve sertifika durumu">
@@ -41,9 +41,9 @@ export default function WebsiteTaskCard({ row, tasks, certificates, filtering, o
         <Badge state={ssl.state}>{ssl.label}</Badge>
         {isSuspended && <LinkButton to={`${siteHref(domain.id, 'settings')}?quickResume=1`} variant="primary" icon="check" aria-label={`${domain.primaryDomain} yayınını etkinleştir`}>Yayını Etkinleştir</LinkButton>}
         {nextStep && <LinkButton to={nextStep.to} variant="primary" icon={nextStep.icon} aria-label={`${domain.primaryDomain} · ${nextStep.label}`}>{nextStep.label}</LinkButton>}
-        {!isSubdomain && childCount > 0 && <Button disabled={filtering} icon="chevron" aria-expanded={expanded} aria-label={`${domain.primaryDomain} alt alan adlarını ${expanded ? 'daralt' : 'genişlet'}`} onClick={() => onToggle(domain.id)}>{childCount} alt alan adı · {expanded ? 'Daralt' : 'Göster'}</Button>}
         {url && <a href={url} target="_blank" rel="noopener noreferrer" className="ws-button" aria-label={`${domain.primaryDomain} sitesini yeni sekmede aç`}><Icon name="external" />Siteyi aç</a>}
         <LinkButton to={siteHref(domain.id)} icon="arrow" aria-label={`${domain.primaryDomain} site genel bakışını aç`}>Yönet</LinkButton>
+        {!isSubdomain && childCount > 0 && <Button className="ws-accordion-toggle ws-accordion-icon-btn ws-website-subdomains-toggle" disabled={filtering} aria-expanded={expanded} aria-label={`${domain.primaryDomain} · ${childCount} alt alan adını ${expanded ? 'daralt' : 'göster'}`} title={`${childCount} alt alan adını ${expanded ? 'daralt' : 'göster'}`} onClick={() => onToggle(domain.id)}><span className="ws-accordion-chevron" aria-hidden="true"><Icon name="chevron" size={18} /></span></Button>}
       </div>
     </header>
     {warning && <p className="ws-website-task-warning"><Icon name="alert" />Üst alan adı bağlantısını kontrol edin.</p>}
@@ -54,7 +54,7 @@ export default function WebsiteTaskCard({ row, tasks, certificates, filtering, o
       </div>
       <div className="ws-actions">
         {!isSubdomain && tasks.createSubdomainHref && <LinkButton to={tasks.createSubdomainHref} icon="plus" aria-label={`${domain.primaryDomain} altında alan adı ekle`}>Alt alan adı ekle</LinkButton>}
-        <Button className="ws-website-task-toggle" icon="chevron" aria-expanded={toolsOpen} aria-controls={`${id}-tools`} onClick={() => setToolsOpen(!toolsOpen)}>{toolsOpen ? 'Araçları daralt' : 'Tüm araçlar'}</Button>
+        <Button className="ws-website-task-toggle ws-accordion-toggle ws-accordion-icon-btn" aria-expanded={toolsOpen} aria-controls={`${id}-tools`} aria-label={`${domain.primaryDomain} · ${toolsOpen ? 'Araçları daralt' : 'Tüm araçları göster'}`} title={toolsOpen ? 'Araçları daralt' : 'Tüm araçları göster'} onClick={() => setToolsOpen(!toolsOpen)}><span className="ws-accordion-chevron" aria-hidden="true"><Icon name="chevron" size={18} /></span></Button>
       </div>
     </nav>
     <div id={`${id}-tools`} className="yp-plesk-drawer" hidden={!toolsOpen}>

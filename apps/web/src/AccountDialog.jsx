@@ -1,26 +1,42 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { authRequest } from './session-client.js';
 import { endAuthenticatedSession, getRecoveryEmail, setRecoveryEmail } from './auth-protocol.js';
 import { authMessage } from './auth-message.js';
 import MfaSettings from './MfaSettings.jsx';
+import {
+  ConfirmDialog,
+  isPointOutsideRect,
+  isTopModalLayer,
+  registerModalLayer,
+  useFormDirtyTracker,
+} from './workspace/PanelKit.jsx';
 
 export default function AccountDialog({ session, onClose, onSession, onSignedOut }) {
   const dialog = useRef(null);
+  const mfaSectionRef = useRef(null);
   const pending = useRef(null);
+  const pointerDownOutsideRef = useRef(false);
+  const lastFocusedInsideRef = useRef(null);
+  const wasDiscardPromptOpenRef = useRef(false);
+  const modalId = useId();
   const [sessions, setSessions] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [mfaBusy, setMfaBusy] = useState(false);
   const [sensitive, setSensitive] = useState(false);
+  const [discardPromptOpen, setDiscardPromptOpen] = useState(false);
   const [passwords, setPasswords] = useState({ currentPassword: '', newPassword: '', confirmation: '' });
   const [recoveryEmail, setRecoveryEmailState] = useState(session.user?.email ?? '');
+  const [initialRecoveryEmail, setInitialRecoveryEmail] = useState(session.user?.email ?? '');
   const [recoveryNotice, setRecoveryNotice] = useState('');
   const isOwner = session.user?.role === 'owner';
   const locked = busy || mfaBusy || sensitive;
+  const mfaDirtyTracker = useFormDirtyTracker(mfaSectionRef, true, session.id);
 
   useEffect(() => {
     const el = dialog.current;
     const previous = document.activeElement;
+    const unregister = registerModalLayer(modalId);
     if (el && !el.open) {
       if (typeof el.showModal === 'function') {
         try { el.showModal(); } catch {}
@@ -34,6 +50,7 @@ export default function AccountDialog({ session, onClose, onSession, onSignedOut
       try { initial.focus(); } catch {}
     }
     return () => {
+      unregister();
       pending.current?.abort();
       if (el && el.open) {
         if (typeof el.close === 'function') {
@@ -43,10 +60,25 @@ export default function AccountDialog({ session, onClose, onSession, onSignedOut
         }
       }
       if (previous && typeof previous.focus === 'function') {
-        try { previous.focus({ preventScroll: true }); } catch {}
+        if (previous.isConnected !== false) {
+          try { previous.focus({ preventScroll: true }); } catch {}
+        }
       }
     };
-  }, []);
+  }, [modalId]);
+
+  useEffect(() => {
+    const el = dialog.current;
+    if (wasDiscardPromptOpenRef.current && !discardPromptOpen && el) {
+      const target = (lastFocusedInsideRef.current && el.contains(lastFocusedInsideRef.current) && !lastFocusedInsideRef.current.disabled)
+        ? lastFocusedInsideRef.current
+        : el.querySelector('input:not(:disabled), select:not(:disabled), textarea:not(:disabled), button:not(:disabled)');
+      if (target && typeof target.focus === 'function') {
+        try { target.focus({ preventScroll: true }); } catch {}
+      }
+    }
+    wasDiscardPromptOpenRef.current = discardPromptOpen;
+  }, [discardPromptOpen]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -59,15 +91,49 @@ export default function AccountDialog({ session, onClose, onSession, onSignedOut
     const controller = new AbortController();
     getRecoveryEmail(controller.signal)
       .then((data) => {
-        if (data?.email) setRecoveryEmailState(data.email);
+        if (data?.email) {
+          setRecoveryEmailState(data.email);
+          setInitialRecoveryEmail(data.email);
+        }
       })
       .catch(() => {});
     return () => controller.abort();
   }, [session.id, isOwner]);
 
+  function isDirty() {
+    const passwordDirty = Boolean(passwords.currentPassword || passwords.newPassword || passwords.confirmation);
+    const recoveryDirty = isOwner && recoveryEmail !== initialRecoveryEmail;
+    return passwordDirty || recoveryDirty || mfaDirtyTracker.isDirty();
+  }
+
   function close(event) {
-    if (locked) { event?.preventDefault(); return; }
+    event?.preventDefault?.();
+    if (locked) return;
+    if (!isTopModalLayer(modalId, dialog.current)) return;
+    if (isDirty()) {
+      setDiscardPromptOpen(true);
+      return;
+    }
     onClose();
+  }
+
+  function handlePointerDown(event) {
+    const el = dialog.current;
+    if (event.button !== 0 || event.target !== el) {
+      pointerDownOutsideRef.current = false;
+      return;
+    }
+    pointerDownOutsideRef.current = isPointOutsideRect(el, event.clientX, event.clientY);
+  }
+
+  function handleClick(event) {
+    const startedOutside = pointerDownOutsideRef.current;
+    pointerDownOutsideRef.current = false;
+    const el = dialog.current;
+    if (!startedOutside || event.target !== el) return;
+    if (!isPointOutsideRect(el, event.clientX, event.clientY)) return;
+    event.stopPropagation();
+    close();
   }
 
   async function execute(operation) {
@@ -93,7 +159,9 @@ export default function AccountDialog({ session, onClose, onSession, onSignedOut
     setRecoveryNotice('');
     execute(async (signal) => {
       const result = await setRecoveryEmail(recoveryEmail, signal);
-      setRecoveryEmailState(result?.email ?? '');
+      const nextEmail = result?.email ?? '';
+      setRecoveryEmailState(nextEmail);
+      setInitialRecoveryEmail(nextEmail);
       setRecoveryNotice(result?.email ? 'Kurtarma e-postası başarıyla güncellendi.' : 'Kurtarma e-postası kaldırıldı.');
       if (onSession) {
         onSession({
@@ -119,12 +187,15 @@ export default function AccountDialog({ session, onClose, onSession, onSignedOut
   }
 
   const handleKeyDown = (event) => {
+    if (!isTopModalLayer(modalId, dialog.current)) return;
     if (event.key === 'Escape') {
       if (locked) {
         event.preventDefault();
+        event.stopPropagation();
         return;
       }
       event.preventDefault();
+      event.stopPropagation();
       close();
       return;
     }
@@ -156,34 +227,46 @@ export default function AccountDialog({ session, onClose, onSession, onSignedOut
     }
   };
 
-  return <dialog ref={dialog} className="auth-dialog" aria-modal="true" aria-labelledby="account-heading" onKeyDown={handleKeyDown} onCancel={close} onClose={close}>
-    <header><h2 id="account-heading">Hesabım</h2><button type="button" disabled={locked} onClick={close}>Kapat</button></header>
-    {error && <p className="auth-error" role="alert">{error}</p>}
-    {sensitive && <p className="auth-notice" role="status">Pencereyi kapatmadan önce kurtarma kodlarını aşağıdan kaydedip onaylayın.</p>}
-    <form onSubmit={changePassword}>
-      <h3>Parolayı değiştir</h3><p className="auth-muted">Değişiklikten sonra tüm oturumlarınız kapatılır.</p>
-      <fieldset disabled={locked}>
-        {[['currentPassword', 'Mevcut parola'], ['newPassword', 'Yeni parola'], ['confirmation', 'Yeni parola tekrarı']].map(([key, label]) => <label key={key}>{label}<input type="password" required minLength={key === 'currentPassword' ? undefined : 12} maxLength={1024} autoComplete={key === 'currentPassword' ? 'current-password' : 'new-password'} value={passwords[key]} onChange={(event) => setPasswords((current) => ({ ...current, [key]: event.target.value }))} /></label>)}
-        <button type="submit" className="auth-primary">{busy ? 'İşleniyor…' : 'Parolayı değiştir'}</button>
-      </fieldset>
-    </form>
-    {isOwner && <form onSubmit={saveRecoveryEmail}>
-      <h3>Kurtarma E-postası</h3>
-      <p className="auth-muted">Owner parola sıfırlama bağlantıları bu adrese gönderilir. Bu adres ACME veya site e-postalarından bağımsızdır.</p>
-      {recoveryNotice && <p className="auth-notice" role="status">{recoveryNotice}</p>}
-      <fieldset disabled={locked}>
-        <label>E-posta adresi
-          <input
-            type="email"
-            value={recoveryEmail}
-            onChange={(event) => setRecoveryEmailState(event.target.value)}
-            placeholder="owner@example.com"
-          />
-        </label>
-        <button type="submit" className="auth-primary">{busy ? 'İşleniyor…' : 'Kurtarma E-postasını Kaydet'}</button>
-      </fieldset>
-    </form>}
-    <fieldset disabled={busy} className="mfa-container"><MfaSettings onSession={onSession} onSignedOut={onSignedOut} onBusy={setMfaBusy} onSensitive={setSensitive} /></fieldset>
-    <section className="auth-sessions"><h3>Aktif oturumlar</h3>{sessions === null ? <p role="status">{error ? 'Oturumlar alınamadı.' : 'Yükleniyor…'}</p> : sessions.map((target) => <div key={target.id}><span>{target.current ? 'Bu oturum' : 'Diğer oturum'}<small>{new Date(target.createdAt).toLocaleString()}</small></span><button type="button" disabled={locked} onClick={() => revoke(target)}>Sonlandır</button></div>)}</section>
-  </dialog>;
+  return <>
+    <dialog ref={dialog} className="auth-dialog" aria-modal="true" aria-labelledby="account-heading" onFocus={(event) => { if (event.target !== dialog.current && dialog.current?.contains(event.target)) lastFocusedInsideRef.current = event.target; }} onPointerDown={handlePointerDown} onPointerCancel={() => { pointerDownOutsideRef.current = false; }} onClick={handleClick} onKeyDown={handleKeyDown} onCancel={close}>
+      <header><h2 id="account-heading">Hesabım</h2><button type="button" disabled={locked} onClick={close}>Kapat</button></header>
+      {error && <p className="auth-error" role="alert">{error}</p>}
+      {sensitive && <p className="auth-notice" role="status">Pencereyi kapatmadan önce kurtarma kodlarını aşağıdan kaydedip onaylayın.</p>}
+      <form onSubmit={changePassword}>
+        <h3>Parolayı değiştir</h3><p className="auth-muted">Değişiklikten sonra tüm oturumlarınız kapatılır.</p>
+        <fieldset disabled={locked}>
+          {[['currentPassword', 'Mevcut parola'], ['newPassword', 'Yeni parola'], ['confirmation', 'Yeni parola tekrarı']].map(([key, label]) => <label key={key}>{label}<input type="password" required minLength={key === 'currentPassword' ? undefined : 12} maxLength={1024} autoComplete={key === 'currentPassword' ? 'current-password' : 'new-password'} value={passwords[key]} onChange={(event) => setPasswords((current) => ({ ...current, [key]: event.target.value }))} /></label>)}
+          <button type="submit" className="auth-primary">{busy ? 'İşleniyor…' : 'Parolayı değiştir'}</button>
+        </fieldset>
+      </form>
+      {isOwner && <form onSubmit={saveRecoveryEmail}>
+        <h3>Kurtarma E-postası</h3>
+        <p className="auth-muted">Owner parola sıfırlama bağlantıları bu adrese gönderilir. Bu adres ACME veya site e-postalarından bağımsızdır.</p>
+        {recoveryNotice && <p className="auth-notice" role="status">{recoveryNotice}</p>}
+        <fieldset disabled={locked}>
+          <label>E-posta adresi
+            <input
+              type="email"
+              value={recoveryEmail}
+              onChange={(event) => setRecoveryEmailState(event.target.value)}
+              placeholder="owner@example.com"
+            />
+          </label>
+          <button type="submit" className="auth-primary">{busy ? 'İşleniyor…' : 'Kurtarma E-postasını Kaydet'}</button>
+        </fieldset>
+      </form>}
+      <fieldset ref={mfaSectionRef} disabled={busy} className="mfa-container"><MfaSettings onSession={onSession} onSignedOut={onSignedOut} onBusy={setMfaBusy} onSensitive={setSensitive} /></fieldset>
+      <section className="auth-sessions"><h3>Aktif oturumlar</h3>{sessions === null ? <p role="status">{error ? 'Oturumlar alınamadı.' : 'Yükleniyor…'}</p> : sessions.map((target) => <div key={target.id}><span>{target.current ? 'Bu oturum' : 'Diğer oturum'}<small>{new Date(target.createdAt).toLocaleString()}</small></span><button type="button" disabled={locked} onClick={() => revoke(target)}>Sonlandır</button></div>)}</section>
+    </dialog>
+    {discardPromptOpen && (
+      <ConfirmDialog
+        title="Kaydedilmemiş değişiklikler var"
+        message="Pencereyi kapatırsanız henüz kaydetmediğiniz değişiklikler kaybolur."
+        cancelLabel="Düzenlemeye dön"
+        confirmLabel="Değişiklikleri bırak"
+        onCancel={() => setDiscardPromptOpen(false)}
+        onConfirm={() => { setDiscardPromptOpen(false); onClose(); }}
+      />
+    )}
+  </>;
 }

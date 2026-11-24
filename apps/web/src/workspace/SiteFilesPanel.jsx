@@ -11,7 +11,7 @@ const MESSAGES = {
   not_found: ['Site dosya alanı doğrulanamadı', 'Site kaydı kaldırılmış veya erişiminiz değişmiş olabilir. Başka bir sitenin dosyaları otomatik açılmaz.'],
   unbound: ['Site bağlantısı gerekli', 'Alan adının dosya alanına bağlantısı henüz kurulmamış. Site bağlantısını yöneticinizle kontrol edin.'],
   inconsistent: ['Site bağlantısı tutarsız', 'Alan adı ve dosya alanının sunucu ilişkisi doğrulanamadı. Dosya erişimi güvenlik için başlatılmadı.'],
-  unsupported: ['Bu çalışma türünde dosya erişimi hazır değil', 'Dosya Yöneticisi kaldırılmadı. Bu çalışma türü için dosya alanı entegrasyonu henüz desteklenmiyor.'],
+  unsupported: ['Bu çalışma türünde dosya erişimi hazır değil', 'Bu çalışma türü için dosya alanı entegrasyonu henüz desteklenmiyor.'],
 };
 
 export default function SiteFilesPanel({ domainId, legacyRepair = null }) {
@@ -37,7 +37,7 @@ function SiteFilesContent({ access, domains, websites, canManage, refreshAll, le
       {access.state === 'unavailable' ? <>
         <CollectionNotice resource={domains} label="Alan adı" />
         <CollectionNotice resource={websites} label="Site dosya alanı" />
-        <p role="status">{busy ? 'Site dosya alanı yükleniyor…' : 'Güncel site bilgisi doğrulanamadı. Dosya Yöneticisi burada kalır; bilgileri yenileyip yeniden deneyin.'}</p>
+        <p role="status">{busy ? 'Site dosya alanı yükleniyor…' : 'Güncel site bilgisi doğrulanamadı. Bilgileri yenileyip yeniden deneyin.'}</p>
       </> : <EmptyState icon="folder" title={message?.[0] ?? 'Dosya erişimi doğrulanamadı'} detail={message?.[1]} />}
     </div>
   </Section>;

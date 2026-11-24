@@ -80,14 +80,192 @@ export function KeyValues({ items }) {
   })}</dl>;
 }
 const ModalVisibilityContext = createContext(true);
+const ModalCloseContext = createContext(null);
 export function ModalScope({ active, children }) { return <ModalVisibilityContext.Provider value={active === true}>{children}</ModalVisibilityContext.Provider>; }
-export function Modal({ title, children, onClose, busy = false, wide = false }) {
+export function useModalClose() { return useContext(ModalCloseContext); }
+export function ModalCloseButton({ children = 'Vazgeç', disabled = false, onClick, ...props }) {
+  const requestClose = useModalClose();
+  return <Button disabled={disabled} onClick={requestClose ?? onClick} {...props}>{children}</Button>;
+}
+
+const modalLayerStack = [];
+export function registerModalLayer(id) {
+  const existing = modalLayerStack.indexOf(id);
+  if (existing !== -1) modalLayerStack.splice(existing, 1);
+  modalLayerStack.push(id);
+  return () => {
+    const idx = modalLayerStack.indexOf(id);
+    if (idx !== -1) modalLayerStack.splice(idx, 1);
+  };
+}
+export function isTopModalLayer(id, dialog = null) {
+  if (modalLayerStack.length > 0) {
+    if (modalLayerStack[modalLayerStack.length - 1] !== id) return false;
+  }
+  if (dialog && typeof document !== 'undefined') {
+    const openDialogs = Array.from(document.querySelectorAll('dialog[open]')).filter((el) => !el.hidden);
+    if (openDialogs.length > 1 && openDialogs[openDialogs.length - 1] !== dialog && modalLayerStack.length === 0) {
+      return false;
+    }
+  }
+  return true;
+}
+export function hasOpenModalLayer() {
+  return modalLayerStack.length > 0;
+}
+export function isPointOutsideRect(el, clientX, clientY) {
+  if (!el || typeof el.getBoundingClientRect !== 'function') return false;
+  const rect = el.getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) return false;
+  return clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom;
+}
+
+const EDITABLE_CONTROL_SELECTOR = 'form input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]):not([readonly]):not([disabled]), form textarea:not([readonly]):not([disabled]), form select:not([disabled]), [data-modal-track-dirty="true"]';
+
+function readControlValue(control) {
+  if (!control) return '';
+  if (control.type === 'checkbox' || control.type === 'radio') return Boolean(control.checked);
+  if (control.tagName === 'SELECT' && control.multiple) {
+    return Array.from(control.selectedOptions ?? [], (opt) => opt.value).join('\u0000');
+  }
+  if (control.type === 'file') {
+    return Array.from(control.files ?? [], (file) => `${file.name}:${file.size}:${file.lastModified}`).join('\u0000');
+  }
+  return String(control.value ?? '');
+}
+
+export function useFormDirtyTracker(containerRef, active, resetKey = 0) {
+  const baselineRef = useRef(new Map());
+  const touchedRef = useRef(new Set());
+
+  useEffect(() => {
+    baselineRef.current = new Map();
+    touchedRef.current = new Set();
+    const root = containerRef.current;
+    if (!active || !root) return undefined;
+
+    const snapshotAll = () => {
+      const controls = root.querySelectorAll(EDITABLE_CONTROL_SELECTOR);
+      for (const control of controls) {
+        if (!baselineRef.current.has(control)) {
+          baselineRef.current.set(control, readControlValue(control));
+        }
+      }
+    };
+    snapshotAll();
+
+    const handleBeforeInteraction = (event) => {
+      const target = event.target;
+      if (!target || typeof target.matches !== 'function' || !target.matches(EDITABLE_CONTROL_SELECTOR)) return;
+      if (target.type === 'radio') {
+        if (!baselineRef.current.has(target)) {
+          baselineRef.current.set(target, readControlValue(target));
+        }
+        return;
+      }
+      if (!touchedRef.current.has(target)) {
+        baselineRef.current.set(target, readControlValue(target));
+      }
+    };
+    const handleMutation = (event) => {
+      const target = event.target;
+      if (!target || typeof target.matches !== 'function' || !target.matches(EDITABLE_CONTROL_SELECTOR)) return;
+      if (!baselineRef.current.has(target)) {
+        baselineRef.current.set(target, readControlValue(target));
+      }
+      touchedRef.current.add(target);
+      if (target.type === 'radio' && target.name) {
+        const siblings = root.querySelectorAll('input[type="radio"]');
+        for (const sibling of siblings) {
+          if (sibling.name === target.name) {
+            if (!baselineRef.current.has(sibling)) {
+              baselineRef.current.set(sibling, readControlValue(sibling));
+            }
+            touchedRef.current.add(sibling);
+          }
+        }
+      }
+    };
+
+    root.addEventListener('focusin', handleBeforeInteraction, true);
+    root.addEventListener('pointerdown', handleBeforeInteraction, true);
+    root.addEventListener('keydown', handleBeforeInteraction, true);
+    root.addEventListener('beforeinput', handleBeforeInteraction, true);
+    root.addEventListener('input', handleMutation, true);
+    root.addEventListener('change', handleMutation, true);
+
+    const observer = typeof MutationObserver === 'function'
+      ? new MutationObserver(() => snapshotAll())
+      : null;
+    observer?.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled'] });
+
+    return () => {
+      observer?.disconnect();
+      root.removeEventListener('focusin', handleBeforeInteraction, true);
+      root.removeEventListener('pointerdown', handleBeforeInteraction, true);
+      root.removeEventListener('keydown', handleBeforeInteraction, true);
+      root.removeEventListener('beforeinput', handleBeforeInteraction, true);
+      root.removeEventListener('input', handleMutation, true);
+      root.removeEventListener('change', handleMutation, true);
+    };
+  }, [containerRef, active, resetKey]);
+
+  const isDirty = () => {
+    const root = containerRef.current;
+    if (!root) return false;
+    for (const control of touchedRef.current) {
+      if (!root.contains(control) || control.disabled) continue;
+      if (!baselineRef.current.has(control)) continue;
+      if (readControlValue(control) !== baselineRef.current.get(control)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  return { isDirty };
+}
+
+export function Modal({
+  title,
+  children,
+  onClose,
+  busy = false,
+  wide = false,
+  dirty = undefined,
+  unsavedGuard = 'auto',
+  dirtyResetKey = 0,
+}) {
   const visible = useContext(ModalVisibilityContext);
-  const ref = useRef(null); const titleId = useId();
+  const ref = useRef(null); const titleId = useId(); const modalId = useId();
   const onCloseRef = useRef(onClose); onCloseRef.current = onClose;
+  const pointerDownOutsideRef = useRef(false);
+  const lastFocusedInsideRef = useRef(null);
+  const wasDiscardPromptOpenRef = useRef(false);
+  const [discardPromptOpen, setDiscardPromptOpen] = useState(false);
+  const tracker = useFormDirtyTracker(ref, visible && unsavedGuard !== false && typeof dirty !== 'boolean', dirtyResetKey);
+
+  useEffect(() => {
+    if (!visible) setDiscardPromptOpen(false);
+  }, [visible]);
+
+  useEffect(() => {
+    const dialog = ref.current;
+    if (wasDiscardPromptOpenRef.current && !discardPromptOpen && visible && dialog) {
+      const target = (lastFocusedInsideRef.current && dialog.contains(lastFocusedInsideRef.current) && !lastFocusedInsideRef.current.disabled)
+        ? lastFocusedInsideRef.current
+        : dialog.querySelector('input:not(:disabled), select:not(:disabled), textarea:not(:disabled), button:not(:disabled)');
+      if (target && typeof target.focus === 'function') {
+        try { target.focus({ preventScroll: true }); } catch {}
+      }
+    }
+    wasDiscardPromptOpenRef.current = discardPromptOpen;
+  }, [discardPromptOpen, visible]);
+
   useEffect(() => {
     const dialog = ref.current; const previous = document.activeElement;
     if (!visible) return;
+    const unregister = registerModalLayer(modalId);
     if (dialog && !dialog.open) {
       if (typeof dialog.showModal === 'function') {
         try { dialog.showModal(); } catch {}
@@ -102,6 +280,7 @@ export function Modal({ title, children, onClose, busy = false, wide = false }) 
       try { initial.focus(); } catch {}
     }
     return () => {
+      unregister();
       if (dialog && dialog.open) {
         if (typeof dialog.close === 'function') {
           try { dialog.close(); } catch {}
@@ -110,14 +289,49 @@ export function Modal({ title, children, onClose, busy = false, wide = false }) 
         }
       }
       if (previous && typeof previous.focus === 'function') {
-        try { previous.focus({ preventScroll: true }); } catch {}
+        if (previous.isConnected !== false) {
+          try { previous.focus({ preventScroll: true }); } catch {}
+        }
       }
     };
-  }, [visible]);
+  }, [visible, modalId]);
+
+  const requestClose = () => {
+    if (busy || !visible) return;
+    if (!isTopModalLayer(modalId, ref.current)) return;
+    const hasUnsaved = unsavedGuard !== false && (typeof dirty === 'boolean' ? dirty : tracker.isDirty());
+    if (hasUnsaved) {
+      setDiscardPromptOpen(true);
+      return;
+    }
+    if (!busy) onCloseRef.current?.();
+  };
+
+  const handlePointerDown = (event) => {
+    const dialog = ref.current;
+    if (event.button !== 0 || event.target !== dialog) {
+      pointerDownOutsideRef.current = false;
+      return;
+    }
+    pointerDownOutsideRef.current = isPointOutsideRect(dialog, event.clientX, event.clientY);
+  };
+
+  const handleClick = (event) => {
+    const startedOutside = pointerDownOutsideRef.current;
+    pointerDownOutsideRef.current = false;
+    const dialog = ref.current;
+    if (!startedOutside || event.target !== dialog) return;
+    if (!isPointOutsideRect(dialog, event.clientX, event.clientY)) return;
+    event.stopPropagation();
+    requestClose();
+  };
+
   const handleKeyDown = (event) => {
+    if (!isTopModalLayer(modalId, ref.current)) return;
     if (event.key === 'Escape') {
       event.preventDefault();
-      if (!busy) onCloseRef.current?.();
+      event.stopPropagation();
+      if (!busy) requestClose();
       return;
     }
     if (event.key === 'Tab') {
@@ -147,17 +361,48 @@ export function Modal({ title, children, onClose, busy = false, wide = false }) 
       }
     }
   };
-  return <dialog ref={ref} hidden={!visible} className={`ws-modal ${wide ? 'ws-modal-wide' : ''}`} aria-modal="true" aria-labelledby={titleId} onKeyDown={handleKeyDown} onCancel={(event) => { event.preventDefault(); if (!busy) onCloseRef.current(); }}><header><h2 id={titleId}>{title}</h2><Button aria-label="Pencereyi kapat" disabled={busy} onClick={onClose} icon="close" /></header><div className="ws-modal-body">{children}</div></dialog>;
+  return <>
+    <dialog
+      ref={ref}
+      hidden={!visible}
+      className={`ws-modal ${wide ? 'ws-modal-wide' : ''}`}
+      aria-modal="true"
+      aria-labelledby={titleId}
+      onFocus={(event) => {
+        if (event.target !== ref.current && ref.current?.contains(event.target)) {
+          lastFocusedInsideRef.current = event.target;
+        }
+      }}
+      onPointerDown={handlePointerDown}
+      onPointerCancel={() => { pointerDownOutsideRef.current = false; }}
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
+      onCancel={(event) => { event.preventDefault(); if (!busy) requestClose(); }}
+    >
+      <header><h2 id={titleId}>{title}</h2><Button aria-label="Pencereyi kapat" disabled={busy} onClick={requestClose} icon="close" /></header>
+      <div className="ws-modal-body"><ModalCloseContext.Provider value={requestClose}>{children}</ModalCloseContext.Provider></div>
+    </dialog>
+    {discardPromptOpen && (
+      <ConfirmDialog
+        title="Kaydedilmemiş değişiklikler var"
+        message="Pencereyi kapatırsanız henüz kaydetmediğiniz değişiklikler kaybolur."
+        cancelLabel="Düzenlemeye dön"
+        confirmLabel="Değişiklikleri bırak"
+        onCancel={() => setDiscardPromptOpen(false)}
+        onConfirm={() => { setDiscardPromptOpen(false); onCloseRef.current?.(); }}
+      />
+    )}
+  </>;
 }
-export function ConfirmDialog({ title, message, onCancel, onConfirm, busy = false, disabled = false, confirmation, error, confirmLabel = 'Onayla' }) {
-  return <Modal title={title} onClose={onCancel} busy={busy}><ConfirmationForm message={message} onCancel={onCancel} onConfirm={onConfirm}
-    busy={busy} disabled={disabled} confirmation={confirmation} error={error} confirmLabel={confirmLabel} /></Modal>;
+export function ConfirmDialog({ title, message, onCancel, onConfirm, busy = false, disabled = false, confirmation, error, confirmLabel = 'Onayla', cancelLabel = 'Vazgeç' }) {
+  return <Modal title={title} onClose={onCancel} busy={busy} unsavedGuard={false}><ConfirmationForm message={message} onCancel={onCancel} onConfirm={onConfirm}
+    busy={busy} disabled={disabled} confirmation={confirmation} error={error} confirmLabel={confirmLabel} cancelLabel={cancelLabel} /></Modal>;
 }
-export function ConfirmationForm({ message, onCancel, onConfirm, busy = false, disabled = false, confirmation, error, confirmLabel = 'Onayla', variant = 'danger' }) {
+export function ConfirmationForm({ message, onCancel, onConfirm, busy = false, disabled = false, confirmation, error, confirmLabel = 'Onayla', cancelLabel = 'Vazgeç', variant = 'danger' }) {
   const [value, setValue] = useState('');
   return <><p className="ws-muted">{message}</p><ErrorNotice error={error} /><form onSubmit={(event) => { event.preventDefault(); if (!busy && !disabled && (!confirmation || value === confirmation)) onConfirm(); }}>
     {confirmation && <label>Onaylamak için <strong>{confirmation}</strong> yazın<input autoFocus value={value} onChange={(event) => setValue(event.target.value)} autoComplete="off" spellCheck={false} required /></label>}
-    <footer className="ws-modal-footer"><Button disabled={busy} onClick={onCancel}>Vazgeç</Button><Button variant={variant} type="submit" disabled={busy || disabled || (confirmation && value !== confirmation)}>{busy ? 'İşleniyor…' : confirmLabel}</Button></footer>
+    <footer className="ws-modal-footer"><Button disabled={busy} onClick={onCancel}>{cancelLabel}</Button><Button variant={variant} type="submit" disabled={busy || disabled || (confirmation && value !== confirmation)}>{busy ? 'İşleniyor…' : confirmLabel}</Button></footer>
   </form></>;
 }
 export {

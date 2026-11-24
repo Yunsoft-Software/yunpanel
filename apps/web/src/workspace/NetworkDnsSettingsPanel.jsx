@@ -19,7 +19,7 @@ import {
   dnsIdentitySettings,
   publicReachabilityPresentation,
 } from './network-dns-model.js';
-import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, Modal, Section } from './PanelKit.jsx';
+import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, Modal, ModalCloseButton, Section } from './PanelKit.jsx';
 import './network-dns.css';
 
 const WARNING_PRESENTATIONS = Object.freeze({
@@ -91,10 +91,12 @@ function WarningList({ warnings }) {
 }
 
 function IdentityDialog({ current, onClose, onApplied }) {
-  const [draft, setDraft] = useState(() => dnsIdentityDraft(current));
+  const [initialDraft] = useState(() => dnsIdentityDraft(current));
+  const [draft, setDraft] = useState(initialDraft);
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(initialDraft);
   function update(field, value) { setDraft((state) => ({ ...state, [field]: value })); }
   function updateNs(role, field, value) { setDraft((state) => ({ ...state, [role]: { ...state[role], [field]: value } })); }
   function updateSoa(field, value) { setDraft((state) => ({ ...state, soa: { ...state.soa, [field]: value } })); }
@@ -122,7 +124,7 @@ function IdentityDialog({ current, onClose, onApplied }) {
     ].filter(Boolean).join(' · ');
     return <ConfirmDialog title="DNS kimliğini güncelle" message={`Ad sunucusu ve SOA kimliği değişecek: ${impact}.`} confirmation={preview.confirmation} busy={busy} error={error} onCancel={() => { setPreview(null); setError(null); }} onConfirm={apply} confirmLabel="DNS kimliğini güncelle" />;
   }
-  return <Modal title="Yetkili DNS kimliği" onClose={onClose} busy={busy} wide>
+  return <Modal title="Yetkili DNS kimliği" onClose={onClose} busy={busy} dirty={dirty} wide>
     <form className="ws-form" onSubmit={createPreview}>
       <ErrorNotice error={error} />
       <fieldset disabled={busy}>
@@ -151,7 +153,7 @@ function IdentityDialog({ current, onClose, onApplied }) {
         <h3 className="network-dns-subheading">Bölge varsayılanları</h3>
         <ChoiceButtons label="Yeni bölgeler için varsayılan DNSSEC" value={draft.dnssecDefault} options={[{ value: false, label: 'Kapalı' }, { value: true, label: 'Açık' }]} onChange={(value) => update('dnssecDefault', value)} />
         <label>İkincil DNS aktarım hedefleri<textarea rows={4} value={draft.secondaryDns} onChange={(event) => update('secondaryDns', event.target.value)} placeholder="Her satıra bir IPv4/IPv6 adresi" spellCheck={false} /></label>
-        <footer className="ws-modal-footer"><Button disabled={busy} onClick={onClose}>Vazgeç</Button><Button variant="primary" disabled={busy} type="submit">{busy ? 'Kontrol ediliyor…' : 'Değişikliği önizle'}</Button></footer>
+        <footer className="ws-modal-footer"><ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton><Button variant="primary" disabled={busy} type="submit">{busy ? 'Kontrol ediliyor…' : 'Değişikliği önizle'}</Button></footer>
       </fieldset>
     </form>
   </Modal>;

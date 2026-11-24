@@ -28,7 +28,7 @@ import {
   resolveDnsZoneScope,
   dnsZoneContextKey,
 } from './dns-model.js';
-import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, LinkButton, Modal, Section } from './PanelKit.jsx';
+import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, LinkButton, Modal, ModalCloseButton, Section } from './PanelKit.jsx';
 import SecondaryDnsStatusPanel from './SecondaryDnsStatusPanel.jsx';
 import { formatDate, siteHref } from './site-model.js';
 import './dns-panel.css';
@@ -119,14 +119,19 @@ function valueHint(type) {
 }
 
 function DnsRecordDialog({ zone, rrset, defaultOwner = '', onClose, onSaved }) {
-  const [draft, setDraft] = useState(() => {
+  const [initialDraft] = useState(() => {
     const initial = dnsRecordDraft(rrset, zone.zoneName);
     if (!rrset && defaultOwner) initial.owner = defaultOwner;
     return initial;
   });
+  const [draft, setDraft] = useState(initialDraft);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const editing = Boolean(rrset);
+  const dirty = draft.owner !== initialDraft.owner
+    || String(draft.ttl) !== String(initialDraft.ttl)
+    || draft.type !== initialDraft.type
+    || draft.values !== initialDraft.values;
   function update(field, value) { setDraft((current) => ({ ...current, [field]: value })); }
   async function submit(event) {
     event.preventDefault();
@@ -140,7 +145,7 @@ function DnsRecordDialog({ zone, rrset, defaultOwner = '', onClose, onSaved }) {
       if (failure.name !== 'AbortError') setError(failure.message);
     } finally { setBusy(false); }
   }
-  return <Modal title={editing ? 'Özel DNS kaydını düzenle' : 'Özel DNS kaydı ekle'} onClose={onClose} busy={busy} wide>
+  return <Modal title={editing ? 'Özel DNS kaydını düzenle' : 'Özel DNS kaydı ekle'} onClose={onClose} busy={busy} dirty={dirty} wide>
     <form className="ws-form dns-record-form" onSubmit={submit}>
       <ErrorNotice error={error} />
       <fieldset disabled={busy}>
@@ -150,7 +155,7 @@ function DnsRecordDialog({ zone, rrset, defaultOwner = '', onClose, onSaved }) {
         </div>
         <div className="dns-type-field"><span>Kayıt türü</span><div className="dns-type-grid" role="group" aria-label="DNS kayıt türü">{DNS_RECORD_TYPES.map((type) => <button key={type} type="button" disabled={editing || busy} aria-pressed={draft.type === type} className={draft.type === type ? 'active' : ''} onClick={() => update('type', type)}>{type}</button>)}</div></div>
         <label>Değerler<textarea rows={draft.type === 'TXT' ? 7 : 5} value={draft.values} onChange={(event) => update('values', event.target.value)} required spellCheck={false} /><span className="dns-field-hint">{valueHint(draft.type)}</span></label>
-        <footer className="ws-modal-footer"><Button disabled={busy} onClick={onClose}>Vazgeç</Button><Button variant="primary" type="submit" disabled={busy}>{busy ? 'Kaydediliyor…' : editing ? 'Kaydı güncelle' : 'Kaydı ekle'}</Button></footer>
+        <footer className="ws-modal-footer"><ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton><Button variant="primary" type="submit" disabled={busy}>{busy ? 'Kaydediliyor…' : editing ? 'Kaydı güncelle' : 'Kaydı ekle'}</Button></footer>
       </fieldset>
     </form>
   </Modal>;

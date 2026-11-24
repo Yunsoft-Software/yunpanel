@@ -18,7 +18,7 @@ import {
   setMailboxQuota,
 } from './mail-client.js';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
-import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, Modal, Section } from './PanelKit.jsx';
+import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, Modal, ModalCloseButton, Section } from './PanelKit.jsx';
 import { dmarcPolicy, mailDnsRequirementStatus } from './mail-dns-requirements.js';
 
 function destinationList(value) {
@@ -49,7 +49,7 @@ function MailboxCreateModal({ domain, onClose, onChanged }) {
     } catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { pending.current = false; setBusy(false); }
   }
-  return <Modal title="E-posta hesabı oluştur" onClose={onClose} busy={busy}><form className="ws-form" onSubmit={submit}><ErrorNotice error={error} /><fieldset disabled={busy}><label>Adres<div className="ws-inline-input"><input aria-label="Adres" disabled={change.pending} value={localPart} required autoCapitalize="none" spellCheck={false} onChange={(event) => setLocalPart(event.target.value)} /><span>@{domain.domainName}</span></div></label><label>İlk parola<input disabled={change.pending} type="password" value={password} required autoComplete="new-password" onChange={(event) => setPassword(event.target.value)} /></label><p className="ws-muted">Hesap oluşturulur ve posta hizmetine uygulanır. Sonuç bu pencerede doğrulanır.</p><footer className="ws-modal-footer"><Button disabled={busy} onClick={onClose}>Vazgeç</Button><Button type="submit" variant="primary" disabled={busy || !localPart || !password}>{busy ? 'Oluşturuluyor…' : 'E-posta hesabı oluştur'}</Button></footer></fieldset></form></Modal>;
+  return <Modal title="E-posta hesabı oluştur" onClose={onClose} busy={busy}><form className="ws-form" onSubmit={submit}><ErrorNotice error={error} /><fieldset disabled={busy}><label>Adres<div className="ws-inline-input"><input aria-label="Adres" disabled={change.pending} value={localPart} required autoCapitalize="none" spellCheck={false} onChange={(event) => setLocalPart(event.target.value)} /><span>@{domain.domainName}</span></div></label><label>İlk parola<input disabled={change.pending} type="password" value={password} required autoComplete="new-password" onChange={(event) => setPassword(event.target.value)} /></label><p className="ws-muted">Hesap oluşturulur ve posta hizmetine uygulanır. Sonuç bu pencerede doğrulanır.</p><footer className="ws-modal-footer"><ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton><Button type="submit" variant="primary" disabled={busy || !localPart || !password}>{busy ? 'Oluşturuluyor…' : 'E-posta hesabı oluştur'}</Button></footer></fieldset></form></Modal>;
 }
 
 function PasswordModal({ mailbox, onClose, onChanged }) {
@@ -61,7 +61,7 @@ function PasswordModal({ mailbox, onClose, onChanged }) {
     catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { setBusy(false); }
   }
-  return <Modal title="E-posta parolasını değiştir" onClose={onClose} busy={busy}><form className="ws-form" onSubmit={submit}><ErrorNotice error={error} /><label>Yeni parola<input disabled={change.pending} type="password" value={password} required autoComplete="new-password" onChange={(event) => setPassword(event.target.value)} /></label><p className="ws-muted">Yeni parola posta hizmetine uygulanıp doğrulanır.</p><footer className="ws-modal-footer"><Button disabled={busy} onClick={onClose}>Vazgeç</Button><Button type="submit" variant="primary" disabled={busy || !password}>{busy ? 'Kaydediliyor…' : 'Parolayı değiştir'}</Button></footer></form></Modal>;
+  return <Modal title="E-posta parolasını değiştir" onClose={onClose} busy={busy}><form className="ws-form" onSubmit={submit}><ErrorNotice error={error} /><label>Yeni parola<input disabled={change.pending} type="password" value={password} required autoComplete="new-password" onChange={(event) => setPassword(event.target.value)} /></label><p className="ws-muted">Yeni parola posta hizmetine uygulanıp doğrulanır.</p><footer className="ws-modal-footer"><ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton><Button type="submit" variant="primary" disabled={busy || !password}>{busy ? 'Kaydediliyor…' : 'Parolayı değiştir'}</Button></footer></form></Modal>;
 }
 
 function MailboxDiagnosticsModal({ mailbox, onClose }) {
@@ -114,7 +114,7 @@ function MailboxDiagnosticsModal({ mailbox, onClose }) {
   const reception = data?.reception;
 
   return (
-    <Modal title={`Bağlantı & Teslimat Tanılama · ${mailbox.address}`} onClose={onClose} busy={busy}>
+    <Modal title={`Bağlantı & Teslimat Tanılama · ${mailbox.address}`} onClose={onClose} busy={busy || sending}>
       <div className="ws-diagnostics-modal">
         <ErrorNotice error={error} />
         {busy && <div className="ws-loading"><span className="ws-spinner" />Tanılama bilgileri alınıyor…</div>}
@@ -183,7 +183,7 @@ function MailboxDiagnosticsModal({ mailbox, onClose }) {
           </>
         )}
         <footer className="ws-modal-footer">
-          <Button onClick={onClose}>Kapat</Button>
+          <ModalCloseButton disabled={busy || sending}>Kapat</ModalCloseButton>
         </footer>
       </div>
     </Modal>

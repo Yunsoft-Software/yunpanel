@@ -2228,8 +2228,12 @@ test('SCN-V3-02b: WebsiteTaskCard renders clean 1-level subdomain cards without 
 
   // No FileRootBadge or ASCII connectors
   assert.doesNotMatch(html, /Yayın klasörü:|Ortak Kök:|\/var\/www\/vhosts|├─|yp-tree-connector/);
-  // Root domain has disclosure button for its 2 subdomains
-  assert.match(html, /2 alt alan adı · Daralt/);
+  // Root domain keeps subdomain count as visible info and uses single-icon accordion toggle with accessible aria-label/title
+  assert.match(html, /2 alt alan adı/);
+  assert.match(html, /class="[^"]*ws-website-subdomains-toggle[^"]*"[^>]*aria-expanded="true"[^>]*aria-label="webrich\.news · 2 alt alan adını daralt"[^>]*title="2 alt alan adını daralt"/);
+  assert.match(html, /class="[^"]*ws-website-task-toggle[^"]*"[^>]*aria-expanded="false"[^>]*aria-label="webrich\.news · Tüm araçları göster"[^>]*title="Tüm araçları göster"/);
+  assert.doesNotMatch(html, />2 alt alan adı · Daralt</);
+  assert.doesNotMatch(html, />Tüm araçlar</);
   // Subdomain card has yp-subdomain-task-card class
   assert.match(html, /yp-subdomain-task-card/);
   // Suspended domain card has prominent Yayını Etkinleştir link to quickResume=1

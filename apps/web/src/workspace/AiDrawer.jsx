@@ -146,7 +146,7 @@ function ConversationPanel({ actorId, websiteId, onClose }) {
   const loading = ['loading', 'loadingMore'].includes(history.status);
   const denied = history.status === 'forbidden' || detail.status === 'forbidden';
   const loadMore = () => scope.current?.list.more();
-  return <Modal title="YunPanel AI Yönetim Asistanı" onClose={onClose} wide>
+  return <Modal title="YunPanel AI Yönetim Asistanı" onClose={onClose} busy={sending} wide>
     <div className="ws-ai-layout ws-ai-history-layout">
       <aside className="ws-ai-sidebar" aria-label="Sohbet geçmişi">
         <div className="ws-actions"><strong>SOHBETLER</strong><Button variant="primary" icon="plus" disabled={sending || denied} onClick={handleNewChat}>Yeni</Button><Button disabled={loading || denied} icon="refresh" aria-label="Geçmişi yenile" title="Geçmişi yenile" onClick={() => scope.current?.list.load()} /></div>

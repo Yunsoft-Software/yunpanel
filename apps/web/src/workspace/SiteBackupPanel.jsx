@@ -5,7 +5,7 @@ import { panelRequest } from '../api.js';
 import { usePanelSession } from '../panel-session.jsx';
 import { sessionTransitionPending, sessionVersion } from '../session-client.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
-import { Badge, Button, ConfirmationForm, EmptyState, ErrorNotice, KeyValues, Modal, Section } from './PanelKit.jsx';
+import { Badge, Button, ConfirmationForm, EmptyState, ErrorNotice, KeyValues, Modal, ModalCloseButton, Section } from './PanelKit.jsx';
 import { formatDate } from './site-model.js';
 import { resolveSiteBackupAccess, siteBackupErrorMessage } from './site-backup-model.js';
 import { createSiteBackupClient } from './site-backup-client.js';
@@ -356,7 +356,7 @@ function BackupWorkspace({ scope, generation, isOwner }) {
         {isOwner && <Button icon="archive" disabled={state?.loading || isOperationBusy || readyRepositories.length === 0} onClick={handleOpenBackupModal}>Yedek Al</Button>}
         <Button icon="refresh" disabled={state?.loading || state?.denied} onClick={() => void ref.current?.load()}>Yedekleri yenile</Button>
       </div>}>
-      <div className="ws-section-body"><ErrorNotice error={state?.error} /><ErrorNotice error={operationError} />
+      <div className="ws-section-body"><ErrorNotice error={state?.error} />{operationError && operationError !== state?.error && <ErrorNotice error={operationError} />}
         {data?.schedule?.error && <ErrorNotice error={data.schedule.error} />}
         {state?.loading && !data && <p role="status">Yedekleme bilgileri okunuyor…</p>}
         {data && <><p className="ws-muted">{state.fresh ? 'Son kontrol' : 'Önceki kontrol'}: {formatDate(data.inspectedAt)}</p>
@@ -427,6 +427,7 @@ function BackupWorkspace({ scope, generation, isOwner }) {
 
     {/* Plan and Schedule Modal */}
     {planModalOpen && <Modal title="Yedekleme Planı ve Saklama Politikası" onClose={() => !planBusy && setPlanModalOpen(false)} busy={planBusy}>
+      <form className="ws-form" onSubmit={(event) => { event.preventDefault(); void handleConfirmPlan(); }}>
       {readyRepositories.length > 1 && <div style={{ marginBottom: '1rem' }}>
         <label>Yedek Deposu Seçin:
           <select value={planRepoId} disabled={planBusy} onChange={(e) => setPlanRepoId(e.target.value)}>
@@ -487,11 +488,12 @@ function BackupWorkspace({ scope, generation, isOwner }) {
       </div>
       <ErrorNotice error={planError} />
       <footer className="ws-modal-footer">
-        <Button disabled={planBusy} onClick={() => !planBusy && setPlanModalOpen(false)}>Vazgeç</Button>
-        <Button variant="primary" disabled={planBusy} onClick={handleConfirmPlan}>
+        <ModalCloseButton disabled={planBusy}>Vazgeç</ModalCloseButton>
+        <Button type="submit" variant="primary" disabled={planBusy}>
           {planBusy ? 'Kaydediliyor…' : 'Planı Kaydet'}
         </Button>
       </footer>
+      </form>
     </Modal>}
 
     {/* Restore Confirmation Modal */}

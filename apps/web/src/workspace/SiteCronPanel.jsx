@@ -3,7 +3,7 @@ import { panelRequest } from '../api.js';
 import { usePanelSession } from '../panel-session.jsx';
 import { sessionTransitionPending, sessionVersion } from '../session-client.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
-import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, LinkButton, Modal, Section } from './PanelKit.jsx';
+import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, LinkButton, Modal, ModalCloseButton, Section } from './PanelKit.jsx';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
 import { CronTaskClientError, createCronTaskClient, cronDraft, cronErrorMessage } from './cron-task-client.js';
 import { resolveCronAccess } from './cron-task-access.js';
@@ -46,11 +46,10 @@ function CronWorkspace({ scope, name, ready, generation }) {
   const { jobs, canManage, resourceBusy, observe, updateJob, refreshAll } = useWorkspace();
   const [state, setState] = useState(INITIAL);
   const [editor, setEditor] = useState(null), [removeTarget, setRemoveTarget] = useState(null);
-  const [discard, setDiscard] = useState(false), [acknowledge, setAcknowledge] = useState(false);
+  const [acknowledge, setAcknowledge] = useState(false);
   const [formError, setFormError] = useState(null), [query, setQuery] = useState('');
-  const client = useRef(null), active = useRef(false), live = useRef(null), editorRef = useRef(null);
+  const client = useRef(null), active = useRef(false), live = useRef(null);
   live.current = { ready, canManage, jobs, resourceBusy, observe, updateJob };
-  editorRef.current = editor;
   const hint = useId();
   const current = () => active.current && live.current.canManage && sessionVersion() === generation && !sessionTransitionPending();
   const canWrite = (task) => current() && live.current.ready && live.current.jobs.status === 'ready'
@@ -95,12 +94,11 @@ function CronWorkspace({ scope, name, ready, generation }) {
   function openEditor(task = null) {
     if (locked || (task && resourceBusy('website_cron', task.id))) return;
     const draft = task ? cronDraft(task) : { ...EMPTY_DRAFT };
-    setFormError(null); setDiscard(false); setEditor({ task, draft, base: draft, review: false });
+    setFormError(null); setEditor({ task, draft, base: draft, review: false });
   }
   function closeEditor() {
     if (state.busy) return;
-    if (isDirty(editorRef.current)) setDiscard(true);
-    else { setEditor(null); setDiscard(false); }
+    setEditor(null);
   }
   function review(event) {
     event.preventDefault(); if (locked || !editor) return;
@@ -110,7 +108,7 @@ function CronWorkspace({ scope, name, ready, generation }) {
   async function save() {
     if (locked || !editor?.review) return;
     const accepted = await client.current?.save(editor.draft, editor.task);
-    if (active.current && (accepted || client.current?.getSnapshot().operation?.phase === 'unknown')) { setEditor(null); setDiscard(false); }
+    if (active.current && (accepted || client.current?.getSnapshot().operation?.phase === 'unknown')) { setEditor(null); }
   }
   async function remove() {
     if (locked || !removeTarget) return;
@@ -143,16 +141,15 @@ function CronWorkspace({ scope, name, ready, generation }) {
       {operation.phase === 'unknown' && <Button disabled={state.busy || !state.fresh || state.reads <= operation.reads} onClick={() => setAcknowledge(true)}>Listeyi inceledim…</Button>}
       {operation.phase === 'failed' && <p className="ws-muted">Kısmi değişiklik olabilir. Yeni bir işlemden önce kayıtları inceleyip görev listesini yenileyin.</p>}
     </div></Section>}
-    {editor && !state.denied && <Modal title={editor.task ? 'Zamanlanmış görevi düzenle' : 'Zamanlanmış görev ekle'} busy={state.busy} onClose={closeEditor} wide>
+    {editor && !state.denied && <Modal title={editor.task ? 'Zamanlanmış görevi düzenle' : 'Zamanlanmış görev ekle'} busy={state.busy} dirty={isDirty(editor)} onClose={closeEditor} wide>
       <ErrorNotice error={formError ?? state.error} />
-      {discard ? <><p>Kaydedilmemiş görev değişiklikleri bırakılacak. Devam edilsin mi?</p><div className="ws-modal-footer"><Button onClick={() => setDiscard(false)}>Düzenlemeye dön</Button><Button variant="danger" onClick={() => { setEditor(null); setDiscard(false); }}>Değişiklikleri bırak</Button></div></>
-        : editor.review ? <><KeyValues items={[["Görev", editor.draft.name], ["Site", name], ["Zamanlama", editor.draft.schedule], ["Komut", <code className="ws-cron-command">{editor.draft.command}</code>], ["Tercih", editor.draft.enabled ? 'Etkin' : 'Devre dışı'], ["Sistem kullanıcısı", scope.unixUser]]} /><p className="ws-muted">Bu kayıt kaydedilecek ve aynı işlemle sunucuya uygulanacak. Sonuç aşağıdaki işlem kaydından takip edilir.</p><div className="ws-modal-footer"><Button disabled={state.busy} onClick={() => setEditor({ ...editor, review: false })}>Düzenlemeye dön</Button><Button variant="primary" disabled={locked} onClick={() => void save()}>Kaydet ve sunucuya uygula</Button></div></>
+      {editor.review ? <><KeyValues items={[["Görev", editor.draft.name], ["Site", name], ["Zamanlama", editor.draft.schedule], ["Komut", <code className="ws-cron-command">{editor.draft.command}</code>], ["Tercih", editor.draft.enabled ? 'Etkin' : 'Devre dışı'], ["Sistem kullanıcısı", scope.unixUser]]} /><p className="ws-muted">Bu kayıt kaydedilecek ve aynı işlemle sunucuya uygulanacak. Sonuç aşağıdaki işlem kaydından takip edilir.</p><div className="ws-modal-footer"><Button disabled={state.busy} onClick={() => setEditor({ ...editor, review: false })}>Düzenlemeye dön</Button><Button variant="primary" disabled={locked} onClick={() => void save()}>Kaydet ve sunucuya uygula</Button></div></>
           : <form onSubmit={review}><fieldset disabled={locked} className="ws-cron-fields"><label>Görev adı<input autoFocus required maxLength={80} value={editor.draft.name} onChange={(event) => edit('name', event.target.value)} /></label>
             <label>Hazır zamanlama<select value={PRESETS.some(([value]) => value === editor.draft.schedule) ? editor.draft.schedule : ''} onChange={(event) => edit('schedule', event.target.value)}><option value="">Özel zamanlama</option>{PRESETS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
             <label>Cron ifadesi<input required maxLength={320} value={editor.draft.schedule} onChange={(event) => edit('schedule', event.target.value)} aria-describedby={`${hint}-schedule`} spellCheck={false} /></label><p id={`${hint}-schedule`} className="ws-muted">Dakika · saat · ayın günü · ay · haftanın günü. Örnek: 0 3 * * * — her gün sunucu saatiyle 03:00.</p>
             <label>Çalıştırılacak komut<input required maxLength={4096} value={editor.draft.command} onChange={(event) => edit('command', event.target.value)} spellCheck={false} autoComplete="off" aria-describedby={hint} /></label>
             <label><input type="checkbox" checked={editor.draft.enabled} onChange={(event) => edit('enabled', event.target.checked)} /> Görev etkin olsun</label>
-          </fieldset><div className="ws-modal-footer"><Button disabled={state.busy} onClick={closeEditor}>Vazgeç</Button><Button type="submit" variant="primary" disabled={locked}>Değişikliği incele</Button></div></form>}
+          </fieldset><div className="ws-modal-footer"><ModalCloseButton disabled={state.busy}>Vazgeç</ModalCloseButton><Button type="submit" variant="primary" disabled={locked}>Değişikliği incele</Button></div></form>}
     </Modal>}
     {removeTarget && !state.denied && <ConfirmDialog title="Zamanlanmış görevi sil" message={`${name} sitesindeki “${removeTarget.name}” görevinin zamanlaması ve kaydı kaldırılacak. Önceden başlatılmış bir komutun durduğu anlamına gelmez.`}
       confirmation={removeTarget.name} error={state.error} busy={state.busy} onCancel={() => setRemoveTarget(null)} onConfirm={() => void remove()} confirmLabel="Görevi sil" />}

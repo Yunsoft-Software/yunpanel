@@ -4,6 +4,7 @@ import { passwordLogin, requestPasswordReset, resetPasswordWithToken, verifyMfa 
 import { authMessage } from './auth-message.js';
 import { PREFERENCE_KEY, writePreferences } from './workspace/ui/ux-model.js';
 import { apply as applyThemePreferences, readStored as readStoredTheme } from './workspace/ui/Preferences.jsx';
+import { Icon } from './workspace/PanelKit.jsx';
 
 export default function LoginForm({ setupRequired, notice, onLogin, onSetup }) {
   const [view, setView] = useState('login'); // 'login' | 'forgot' | 'reset'
@@ -162,6 +163,16 @@ export default function LoginForm({ setupRequired, notice, onLogin, onSetup }) {
   const expired = challenge && challenge.expiresAt <= now;
   const activeNotice = localNotice || notice;
 
+  useEffect(() => {
+    if (typeof document === 'undefined' || typeof MutationObserver !== 'function') return undefined;
+    const syncTheme = () => {
+      setThemeMode(document.documentElement.dataset.wsTheme === 'light' ? 'light' : 'dark');
+    };
+    const observer = new MutationObserver(syncTheme);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-ws-theme'] });
+    return () => observer.disconnect();
+  }, []);
+
   function toggleTheme() {
     const nextTheme = (typeof document !== 'undefined' && document.documentElement.dataset.wsTheme === 'light') ? 'dark' : 'light';
     setThemeMode(nextTheme);
@@ -193,10 +204,11 @@ export default function LoginForm({ setupRequired, notice, onLogin, onSetup }) {
         <button
           type="button"
           className="auth-theme-toggle"
-          aria-label="Gece ve Açık tema arasında geçiş yap"
+          aria-label={themeMode === 'light' ? 'Gece temasına geç' : 'Açık temaya geç'}
+          title={themeMode === 'light' ? 'Gece temasına geç' : 'Açık temaya geç'}
           onClick={toggleTheme}
         >
-          {themeMode === 'light' ? 'Gece Modu' : 'Açık Mod'}
+          <Icon name={themeMode === 'light' ? 'moon' : 'sun'} size={17} />
         </button>
       </div>
       <form className="auth-form" onSubmit={submit} aria-labelledby="auth-heading">

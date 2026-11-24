@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Badge, Button, ErrorNotice, Section } from './PanelKit.jsx';
+import { Badge, Button, ConfirmDialog, ErrorNotice, Section } from './PanelKit.jsx';
 import {
   deleteAiProvider,
   getAiPolicy,
@@ -25,6 +25,8 @@ export default function AiSettingsPanel() {
   const [formModel, setFormModel] = useState('');
   const [formActive, setFormActive] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteTargetId, setDeleteTargetId] = useState(null);
   const [testingId, setTestingId] = useState(null);
   const [testResult, setTestResult] = useState(null);
 
@@ -93,15 +95,20 @@ export default function AiSettingsPanel() {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm(`"${id}" sağlayıcısını silmek istediğinize emin misiniz?`)) return;
+  const handleDeleteConfirm = async () => {
+    const id = deleteTargetId;
+    if (!id || deleting) return;
+    setDeleting(true);
     setError(null);
     try {
       await deleteAiProvider(id);
+      setDeleteTargetId(null);
       setSuccess(`"${id}" silindi.`);
       await loadData();
     } catch (err) {
       setError(err.message || 'Sağlayıcı silinemedi');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -199,7 +206,7 @@ export default function AiSettingsPanel() {
                         Aktif Yap
                       </Button>
                     )}
-                    <Button variant="danger" onClick={() => handleDelete(prov.id)}>
+                    <Button variant="danger" disabled={deleting} onClick={() => { setError(null); setDeleteTargetId(prov.id); }}>
                       Sil
                     </Button>
                   </div>
@@ -310,14 +317,19 @@ export default function AiSettingsPanel() {
           </form>
         )}
 
-        {/* Global Security Policy Info */}
-        <div style={{ padding: '12px 14px', background: 'var(--ws-surface-subtle)', borderRadius: '8px', fontSize: '13px' }}>
-          <strong>🛡️ Güvenlik Sınırı ve İzolasyon Sözleşmesi:</strong>
-          <p style={{ margin: '4px 0 0 0', color: 'var(--ws-muted)' }}>
-            AI Asistanı sunucuda ham terminal komutları veya kabuk scriptleri çalıştırmaz. Bütün eylemler şema kontrollü dahili adapterlar üzerinden yürütülür. Okuma işlemleri otomatik tamamlanırken, yeniden başlatma, dağıtım ve yedekleme gibi eylemler Onay Kartı üzerinden sizin açık onayınızla yürütülür.
-          </p>
-        </div>
       </div>
+      {deleteTargetId && (
+        <ConfirmDialog
+          title="AI sağlayıcısını sil"
+          message={`"${deleteTargetId}" sağlayıcısını kalıcı olarak silmek istiyor musunuz?`}
+          confirmLabel="Sağlayıcıyı sil"
+          cancelLabel="Vazgeç"
+          busy={deleting}
+          error={error}
+          onCancel={() => setDeleteTargetId(null)}
+          onConfirm={handleDeleteConfirm}
+        />
+      )}
     </Section>
   );
 }

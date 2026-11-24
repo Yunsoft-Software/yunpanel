@@ -421,9 +421,37 @@ html .workspace-shell .ws-section-body > :is(p, div, dl, details, .ws-actions, .
   margin: 0 !important;
 }
 
+html .workspace-shell .ws-section-body > :is(.ws-button, a.ws-button) {
+  align-self: flex-start !important;
+}
+
+html .workspace-shell .ws-section-body.ws-actions {
+  flex-direction: row !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+html .workspace-shell .ws-section-body.ws-filters {
+  flex-direction: row !important;
+  flex-wrap: wrap !important;
+  align-items: flex-end !important;
+  justify-content: flex-start !important;
+  gap: 12px !important;
+}
+
+html .workspace-shell .ws-section-body.ws-filters > :is(.ws-button, a.ws-button) {
+  align-self: flex-end !important;
+}
+
 /* Equal-Height Desktop Cards & Grids (Symmetric Multi-Column Layout) */
 html .workspace-shell :is(.ws-equal-columns, .ws-two-columns, .ws-console-grid, .ws-console-bottom, .ws-metrics, .ws-quota-cards, .yp-docker-catalog-grid) {
   align-items: stretch !important;
+}
+
+html .workspace-shell :is(.ws-equal-columns, .ws-two-columns, .ws-console-grid, .ws-console-bottom) {
+  gap: 16px !important;
+  margin-bottom: 16px !important;
 }
 
 html .workspace-shell :is(.ws-equal-columns, .ws-two-columns, .ws-console-grid, .ws-console-bottom, .ws-metrics, .ws-quota-cards) > :is(.ws-section, .panel, .ws-metric, article) {
@@ -524,6 +552,10 @@ html .workspace-shell .ws-badge {
   font-size: 11px !important;
   font-weight: 600 !important;
   line-height: 1 !important;
+  white-space: nowrap !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+  flex-shrink: 0 !important;
 }
 
 /* Website & Subdomain Hierarchy Cards on /websites — Clean, Compact, Aligned */
@@ -750,8 +782,8 @@ html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-group {
 }
 
 html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-group:not(:last-child) {
-  padding-right: 12px !important;
-  border-right: 1px solid var(--ws-border) !important;
+  padding-right: 0 !important;
+  border-right: 0 !important;
 }
 
 html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-group-label {
@@ -985,13 +1017,34 @@ html .workspace-shell .ws-table {
   padding: 0 !important;
 }
 
-html .workspace-shell .ws-table th {
+html .workspace-shell .ws-table caption {
+  caption-side: top !important;
+  padding: 10px 16px !important;
+  text-align: left !important;
+  font-size: 12px !important;
+  color: var(--ws-muted) !important;
+  border-bottom: 1px solid var(--ws-border) !important;
+  background: transparent !important;
+}
+
+html .workspace-shell .ws-table thead th {
   padding: 10px 16px !important;
   border-bottom: 1px solid var(--ws-border) !important;
   background: var(--ws-surface-subtle) !important;
   color: var(--ws-muted) !important;
   font-size: 11.5px !important;
   font-weight: 600 !important;
+  white-space: nowrap !important;
+}
+
+html .workspace-shell .ws-table tbody th {
+  padding: 11px 16px !important;
+  border-bottom: 1px solid var(--ws-border) !important;
+  background: transparent !important;
+  color: var(--ws-text) !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  vertical-align: middle !important;
 }
 
 html .workspace-shell .ws-table td {
@@ -999,6 +1052,11 @@ html .workspace-shell .ws-table td {
   border-bottom: 1px solid var(--ws-border) !important;
   border-radius: 0 !important;
   font-size: 13px !important;
+}
+
+html .workspace-shell .ws-websites-table :is(td[data-label='Durum'], td[data-label='SSL']),
+html .workspace-shell .yf-table td.yf-date {
+  white-space: nowrap !important;
 }
 
 html .ws-modal {
@@ -1048,10 +1106,26 @@ html .workspace-shell .yp-plesk-tool-group-title {
 
 html .workspace-shell .ws-console-quicklinks {
   display: grid !important;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)) !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
   align-items: stretch !important;
+  gap: 12px !important;
+  padding: 16px 18px !important;
+}
+
+html .workspace-shell .ws-console-bottom .ws-console-quicklinks {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+html .workspace-shell .yp-plesk-tool-group > .ws-console-quicklinks {
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)) !important;
   gap: 10px !important;
   padding: 0 !important;
+}
+
+@media (max-width: 1023px) and (min-width: 641px) {
+  html .workspace-shell .ws-console-quicklinks {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
 }
 
 html .workspace-shell .ws-console-quicklink {
@@ -1393,6 +1467,8 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
     position: fixed !important;
     inset: 0 !important;
     z-index: 150 !important;
+    background: rgba(0, 0, 0, 0.65) !important;
+    backdrop-filter: blur(3px) !important;
   }
 
   html .workspace-shell .ws-toolbar {
@@ -1698,9 +1774,19 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
     margin-top: 10px !important;
   }
 
-  html .workspace-shell .ws-console-quicklinks {
+  html .workspace-shell .ws-console-quicklinks,
+  html .workspace-shell .ws-console-bottom .ws-console-quicklinks,
+  html .workspace-shell .yp-plesk-tool-group > .ws-console-quicklinks {
     grid-template-columns: 1fr !important;
     gap: 8px !important;
+  }
+
+  html .workspace-shell .ws-console-quicklinks {
+    padding: 12px 14px !important;
+  }
+
+  html .workspace-shell .yp-plesk-tool-group > .ws-console-quicklinks {
+    padding: 0 !important;
   }
 
   /* 8. Websites Page & Subdomain Cards (2-Column Symmetrical Quick Tools) */
@@ -2012,13 +2098,15 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   }
 }
 
-@media (max-width: 900px) {
-  html .workspace-shell .ws-sidebar-backdrop {
-    position: fixed !important;
-    inset: 0 !important;
-    z-index: 155 !important;
-    background: rgba(0, 0, 0, 0.65) !important;
-    backdrop-filter: blur(3px) !important;
+@media (max-width: 640px) {
+  html .workspace-shell .ws-alert-item {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 10px !important;
+  }
+
+  html .workspace-shell .ws-alert-item > :is(.ws-button, a.ws-button, a) {
+    align-self: flex-start !important;
   }
 }
 
@@ -2138,15 +2226,16 @@ html .auth-form-topbar {
 html .auth-theme-toggle {
   display: inline-flex !important;
   align-items: center !important;
-  gap: 6px !important;
-  height: 32px !important;
-  padding: 0 12px !important;
+  justify-content: center !important;
+  width: 34px !important;
+  min-width: 34px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  padding: 0 !important;
   border-radius: var(--ws-radius, 6px) !important;
   border: 1px solid var(--ws-control-border) !important;
   background: var(--ws-surface) !important;
   color: var(--ws-text-secondary) !important;
-  font-size: 12.5px !important;
-  font-weight: 600 !important;
   cursor: pointer !important;
   transition: var(--ws-transition) !important;
 }
@@ -2492,6 +2581,298 @@ html .owner-enrollment-footer {
   }
 }
 
+/* ==========================================================================
+   22. SHARED VISUAL POLISH — THEME ICON, ACCORDIONS, LIGHT CONTRAST & LAYOUT
+   ========================================================================== */
 
+/* Icon-Only Theme Toggle in Workspace Toolbar */
+html .workspace-shell .ws-toolbar-actions .ws-theme-toggle {
+  width: 34px !important;
+  min-width: 34px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  padding: 0 !important;
+  justify-content: center !important;
+}
 
+/* Fix Light-Mode First Dashboard KPI Card Contrast (overrides ember-theme white text) */
+html .workspace-shell .ws-console-metrics .ws-metric:first-child {
+  background-color: var(--ws-surface) !important;
+  color: var(--ws-text) !important;
+}
 
+html .workspace-shell .ws-console-metrics .ws-metric:first-child > strong {
+  color: var(--ws-text) !important;
+}
+
+html .workspace-shell .ws-console-metrics .ws-metric:first-child :is(.ws-metric-label, .ws-metric-label span, .ws-metric-label svg, small) {
+  color: var(--ws-muted) !important;
+}
+
+html .workspace-shell .ws-console-metrics .ws-metric:first-child a {
+  color: var(--ws-brand) !important;
+}
+
+/* Fix Light-Mode Active View Toggle Icon in FilesPanel */
+html .workspace-shell .yf-view .ws-button[aria-pressed='true'] {
+  background: var(--ws-pill) !important;
+  border-color: var(--ws-pill) !important;
+  color: var(--ws-on-pill) !important;
+}
+
+/* Prominent Single-Direction Accordion Chevron (Icon-Only, Consistent Position & aria-expanded Rotation) */
+html .workspace-shell .ws-accordion-toggle {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 0 !important;
+}
+
+html .workspace-shell .ws-accordion-icon-btn {
+  flex: 0 0 auto !important;
+  width: 34px !important;
+  min-width: 34px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  padding: 0 !important;
+  border: 1px solid var(--ws-control-border) !important;
+  background: var(--ws-surface-subtle) !important;
+  color: var(--ws-text) !important;
+}
+
+html .workspace-shell .ws-accordion-icon-btn:hover:not(:disabled) {
+  border-color: var(--ws-brand) !important;
+  background: var(--ws-surface-hover) !important;
+  color: var(--ws-brand) !important;
+}
+
+html .workspace-shell .ws-accordion-icon-btn[aria-expanded='true'] {
+  border-color: var(--ws-brand) !important;
+  background: var(--ws-accent-soft, var(--ws-surface-hover)) !important;
+}
+
+html .workspace-shell .ws-accordion-chevron {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  flex-shrink: 0 !important;
+  color: currentColor !important;
+  transition: transform 150ms ease !important;
+}
+
+html .workspace-shell .ws-accordion-chevron svg {
+  width: 18px !important;
+  height: 18px !important;
+  stroke-width: 2.3 !important;
+}
+
+html .workspace-shell .ws-accordion-toggle[aria-expanded='true'] .ws-accordion-chevron {
+  transform: rotate(180deg) !important;
+}
+
+@media (max-width: 640px) {
+  html .workspace-shell .ws-website-task-status > button.ws-button.ws-accordion-icon-btn,
+  html .workspace-shell .ws-website-task-quick > .ws-actions > button.ws-button.ws-accordion-icon-btn {
+    flex: 0 0 36px !important;
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    min-height: 36px !important;
+    padding: 0 !important;
+  }
+
+  html .workspace-shell .ws-website-task-quick > .ws-actions {
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+  }
+
+  html .workspace-shell .ws-website-task-quick > .ws-actions > a.ws-button {
+    flex: 1 1 auto !important;
+    min-height: 36px !important;
+  }
+
+  html .workspace-shell .ws-filters > .ws-list-options {
+    flex: 0 0 auto !important;
+    width: 100% !important;
+  }
+
+  html .workspace-shell .ws-sidebar {
+    padding: 12px 12px 20px !important;
+  }
+
+  html .workspace-shell .ws-sidebar .ws-nav a {
+    min-height: 34px !important;
+    padding: 6px 10px !important;
+  }
+}
+
+/* Consistent Disclosure Summaries (Websites filter options, Alan adı bilgileri, Tanılama) */
+html .workspace-shell .ws-list-options > summary {
+  min-height: 36px !important;
+  height: 36px !important;
+  padding: 0 12px !important;
+  border: 1px solid var(--ws-border) !important;
+  border-radius: 6px !important;
+  background: var(--ws-surface-subtle) !important;
+  color: var(--ws-text) !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  gap: 8px !important;
+  justify-content: space-between !important;
+}
+
+html .workspace-shell .ws-list-options > summary::after {
+  content: '▾' !important;
+  margin-left: 6px !important;
+  color: var(--ws-text-secondary) !important;
+  font-size: 13px !important;
+  line-height: 1 !important;
+  transition: transform 150ms ease !important;
+}
+
+html .workspace-shell .ws-list-options[open] > summary::after {
+  content: '▾' !important;
+  transform: rotate(180deg) !important;
+}
+
+html .workspace-shell details.ws-section > summary {
+  padding: 14px 18px !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: var(--ws-text) !important;
+  cursor: pointer !important;
+}
+
+/* Unified Search Input Containers (FilesPanel, SiteResourcesPanel & CommandPalette) */
+html .workspace-shell label.yf-search,
+html .workspace-shell div.ys-resource-search,
+html .ws-modal div.ws-command-search {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  min-height: 36px !important;
+  padding: 0 10px !important;
+  border: 1px solid var(--ws-border) !important;
+  border-radius: 6px !important;
+  background: var(--ws-surface-subtle) !important;
+  color: var(--ws-muted) !important;
+}
+
+html .ws-modal div.ws-command-search {
+  width: 100% !important;
+}
+
+html .workspace-shell div.ys-resource-search > label {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+}
+
+html .workspace-shell label.yf-search:focus-within,
+html .workspace-shell div.ys-resource-search:focus-within,
+html .ws-modal div.ws-command-search:focus-within {
+  border-color: var(--ws-brand) !important;
+  outline: 1px solid var(--ws-brand) !important;
+}
+
+html .workspace-shell label.yf-search > input:not([type='checkbox']):not([type='radio']),
+html .workspace-shell div.ys-resource-search input:not([type='checkbox']):not([type='radio']),
+html .ws-modal div.ws-command-search > input:not([type='checkbox']):not([type='radio']) {
+  flex: 1 1 auto !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  min-height: 34px !important;
+  height: 34px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Prevent Docker Catalog Image Tag Clipping on Desktop & Mobile */
+html .workspace-shell .yp-docker-catalog-card,
+html .workspace-shell .yp-docker-catalog-card > div {
+  min-width: 0 !important;
+}
+
+html .workspace-shell .yp-docker-catalog-card .yp-port-mapping-badge {
+  display: inline-block !important;
+  vertical-align: middle !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+/* Read-Only Websites Table Domain Column & Checkbox Spacing */
+html .workspace-shell .ws-websites-table td:first-child {
+  min-width: 250px !important;
+}
+
+html .workspace-shell .ws-websites-table .ws-domain-name a {
+  word-break: normal !important;
+  overflow-wrap: break-word !important;
+}
+
+html .workspace-shell .ws-actions > label.ws-check {
+  gap: 8px !important;
+  margin-right: 10px !important;
+}
+
+html .workspace-shell .domain-card,
+html .workspace-shell .update-package-row {
+  background: var(--ws-surface-subtle) !important;
+  border-color: var(--ws-border) !important;
+}
+
+/* Firewall Symmetric 2x2 Service Profiles Grid on Desktop */
+@media (min-width: 760px) {
+  html .workspace-shell .ws-firewall-profiles-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+/* Align Legacy .primary-button / .secondary-button Inside Workspace Pages */
+html .workspace-shell .primary-button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  min-height: 34px !important;
+  padding: 0 14px !important;
+  border-radius: 6px !important;
+  border: 1px solid transparent !important;
+  background: var(--ws-brand) !important;
+  color: var(--ws-on-brand) !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  cursor: pointer !important;
+}
+
+html .workspace-shell .secondary-button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  min-height: 34px !important;
+  padding: 0 14px !important;
+  border-radius: 6px !important;
+  border: 1px solid var(--ws-border) !important;
+  background: var(--ws-surface-subtle) !important;
+  color: var(--ws-text) !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  cursor: pointer !important;
+}
+
+html .workspace-shell .secondary-button:hover:not(:disabled) {
+  background: var(--ws-surface-hover) !important;
+  border-color: var(--ws-control-border) !important;
+}
+
+/* Lock Background Page Scroll While Any Native Modal Dialog is Open */
+body:has(dialog.ws-modal[open], dialog.auth-dialog[open]) {
+  overflow: hidden;
+}

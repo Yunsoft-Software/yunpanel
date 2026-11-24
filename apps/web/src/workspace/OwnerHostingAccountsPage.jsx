@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { panelRequest } from '../api.js';
 import { sessionGeneration, setSession } from '../session-client.js';
-import { Badge, Button, EmptyState, ErrorNotice, LinkButton, Modal, PageHeading, Section } from './PanelKit.jsx';
+import { Badge, Button, EmptyState, ErrorNotice, LinkButton, Modal, ModalCloseButton, PageHeading, Section } from './PanelKit.jsx';
 import { HostingProfileDialog } from './HostingAccountsPanel.jsx';
 import CustomerQuotaDialog from './CustomerQuotaDialog.jsx';
 import { createHostingAccountClient, hostingAccountMessage } from './hosting-account-client.js';
@@ -203,7 +203,7 @@ function AccountCreateDialog({ kind, client, initialDraft = null, licensePath, o
         {kind === 'customer' && <label>Bağlı bayi<select value={form.resellerId} onChange={event => change('resellerId', event.target.value)}><option value="">Doğrudan yönetim</option>{parents.map(parent => <option key={parent.id} value={parent.id}>{parent.username}</option>)}</select></label>}
         {kind === 'reseller' && <div className="ws-form-grid"><label>En fazla müşteri<input type="number" min="0" required value={form.maxCustomers} onChange={event => change('maxCustomers', event.target.value)} /></label><label>En fazla web sitesi<input type="number" min="0" required value={form.maxWebsites} onChange={event => change('maxWebsites', event.target.value)} /></label></div>}
       </fieldset>
-      <footer className="ws-modal-footer"><Button onClick={onClose} disabled={busy}>Vazgeç</Button><Button type="submit" variant="primary" disabled={busy || Boolean(error?.reconcile)}>{busy ? 'Hesap oluşturuluyor…' : 'Hesabı oluştur'}</Button></footer>
+      <footer className="ws-modal-footer"><ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton><Button type="submit" variant="primary" disabled={busy || Boolean(error?.reconcile)}>{busy ? 'Hesap oluşturuluyor…' : 'Hesabı oluştur'}</Button></footer>
     </form>
   </Modal>;
 }

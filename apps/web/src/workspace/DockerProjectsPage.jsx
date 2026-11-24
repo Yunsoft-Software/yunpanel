@@ -348,7 +348,7 @@ function DockerProjectList() {
                 <div>
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px', marginBottom: '8px' }}>
                     <strong style={{ fontSize: '14px', lineHeight: 1.35, wordBreak: 'break-word', width: '100%' }}>{title}</strong>
-                    <span className="yp-port-mapping-badge" style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tpl.image}</span>
+                    <span className="yp-port-mapping-badge" title={tpl.image}>{tpl.image}</span>
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
                     {isOneClick && <Badge state="active">Hazır Uygulama</Badge>}

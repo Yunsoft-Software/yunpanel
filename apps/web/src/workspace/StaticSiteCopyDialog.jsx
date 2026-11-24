@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { panelRequest } from '../api.js';
 import { sessionTransitionPending, sessionVersion } from '../session-client.js';
-import { Badge, Button, ErrorNotice, KeyValues, Modal } from './PanelKit.jsx';
+import { Badge, Button, ErrorNotice, KeyValues, Modal, ModalCloseButton } from './PanelKit.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { formatBytes, jobActive, jobFromResponse } from './site-model.js';
 import { newerJob } from './job-tracking.js';
@@ -248,7 +248,7 @@ export default function SiteCopyDialog({ website }) {
           ...(php ? [['Tablo sayısı', readyPlan.tables]] : []),
         ]} />}
         <ErrorNotice error={submissionError?.message} />
-        <footer className="ws-modal-footer"><Button disabled={Boolean(busy)} onClick={closeDialog}>Vazgeç</Button>
+        <footer className="ws-modal-footer"><ModalCloseButton disabled={Boolean(busy)}>Vazgeç</ModalCloseButton>
           <Button type="submit" variant="primary" disabled={!eligible || !target || Boolean(busy)}>{busy ? 'İşleniyor…' : readyPlan ? mode.submitLabel : 'Önizle'}</Button>
         </footer>
       </form>}

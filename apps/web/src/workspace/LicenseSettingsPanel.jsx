@@ -122,7 +122,7 @@ export function LicenseSummaryView({
         </table>
       </div>
       {isOwner && (onRefresh || onRequestDeactivate) && (
-        <div className="ws-actions">
+        <div className="ws-section-body ws-actions">
           {license.hasStoredLicenseKey && onRefresh && (
             <Button icon="refresh" disabled={busy} onClick={onRefresh}>
               Lisansı doğrula ve yenile
@@ -360,7 +360,7 @@ function LicenseSettingsPanelInner({
           title="Lisans etkinleştirme ve yenileme"
           description="Yunsoft hesabınızdan aldığınız lisans anahtarını veya imzalı lisans jetonunu girin."
         >
-          <div className="ws-actions">
+          <div className="ws-section-body ws-actions" style={{ paddingBottom: 0 }}>
             <Button
               variant={mode === 'key' ? 'primary' : 'secondary'}
               aria-pressed={mode === 'key'}

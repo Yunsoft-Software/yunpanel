@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { panelRequest } from '../api.js';
 import { usePanelSession } from '../panel-session.jsx';
 import { requestJson, sessionGeneration, setSession } from '../session-client.js';
-import { Badge, Button, EmptyState, ErrorNotice, Icon, Modal, PageHeading, Section } from './PanelKit.jsx';
+import { Badge, Button, EmptyState, ErrorNotice, Icon, Modal, ModalCloseButton, PageHeading, Section } from './PanelKit.jsx';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
 import { createHostingAccountClient, hostingAccountMessage } from './hosting-account-client.js';
 import { buildResellerAccountQuotaMetrics } from './quota-model.js';
@@ -255,7 +255,6 @@ function CustomerDialog({ mode, account, statusTarget, reseller, client, onClose
   const [form, setForm] = useState(() => mode === 'create' ? blankForm() : editForm(account));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const [discard, setDiscard] = useState(false);
   const pending = useRef(false);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -268,8 +267,7 @@ function CustomerDialog({ mode, account, statusTarget, reseller, client, onClose
 
   function close() {
     if (pending.current) return;
-    if (!status && dirty && !reconcile && !discard) setDiscard(true);
-    else onClose();
+    onClose();
   }
   function update(key, value) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -303,11 +301,8 @@ function CustomerDialog({ mode, account, statusTarget, reseller, client, onClose
   }
 
   const title = creating ? 'Müşteri ekle' : editing ? 'Müşteri girişini düzenle' : statusTarget ? 'Müşteriyi yeniden aç' : 'Müşteriyi askıya al';
-  return <Modal title={title} onClose={close} busy={busy}>
-    {discard ? <>
-      <p>Kaydedilmemiş giriş bilgileri bırakılacak. Pencereyi kapatmak istiyor musunuz?</p>
-      <footer className="ws-modal-footer"><Button onClick={() => setDiscard(false)}>Düzenlemeye dön</Button><Button variant="danger" onClick={onClose}>Değişiklikleri bırak</Button></footer>
-    </> : <form className="ws-form" onSubmit={submit}>
+  return <Modal title={title} onClose={close} busy={busy} dirty={!status && dirty && !reconcile}>
+    <form className="ws-form" onSubmit={submit}>
       <ErrorNotice error={error ? hostingAccountMessage(error) : null} />
       {reconcile && <p role="alert">Sonuç kesin doğrulanamadı. İşlemi tekrar göndermeyin; pencereyi kapatıp güncel müşteri listesini yeniden okuyun.</p>}
       <fieldset disabled={busy || reconcile}>
@@ -325,12 +320,12 @@ function CustomerDialog({ mode, account, statusTarget, reseller, client, onClose
         </>}
       </fieldset>
       <footer className="ws-modal-footer">
-        <Button disabled={busy} onClick={close}>{reconcile ? 'Kapat ve listeyi yenile' : 'Vazgeç'}</Button>
+        <ModalCloseButton disabled={busy}>{reconcile ? 'Kapat ve listeyi yenile' : 'Vazgeç'}</ModalCloseButton>
         <Button type="submit" variant={status && !statusTarget ? 'danger' : 'primary'} disabled={busy || reconcile || (!status && !dirty)}>
           {busy ? 'İşleniyor…' : creating ? 'Müşteriyi oluştur' : editing ? 'Girişi kaydet' : statusTarget ? 'Girişi yeniden aç' : 'Hesabı askıya al'}
         </Button>
       </footer>
-    </form>}
+    </form>
   </Modal>;
 }
 
@@ -343,7 +338,6 @@ function AllocateSiteDialog({ account, reseller, servers, onClose, onSaved }) {
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const [discard, setDiscard] = useState(false);
   const pending = useRef(false);
   const mounted = useRef(true);
 
@@ -352,15 +346,14 @@ function AllocateSiteDialog({ account, reseller, servers, onClose, onSaved }) {
     return () => { mounted.current = false; };
   }, []);
 
-  const dirty = Boolean(form.primaryDomain.trim());
+  const dirty = Boolean(form.primaryDomain.trim()) || form.runtime !== 'new_static' || form.wwwMode !== 'alias';
   useUnsavedChanges(dirty || busy);
 
   const serverId = servers?.items?.[0]?.id ?? null;
 
   function close() {
     if (pending.current) return;
-    if (dirty && !discard) setDiscard(true);
-    else onClose();
+    onClose();
   }
 
   function update(key, value) {
@@ -441,17 +434,8 @@ function AllocateSiteDialog({ account, reseller, servers, onClose, onSaved }) {
   const isQuotaFull = websiteQuota !== null && websiteQuota !== undefined && websiteUsage !== null && websiteUsage >= websiteQuota;
 
   return (
-    <Modal title={`${account.username} · Site Tahsis Et`} onClose={close} busy={busy}>
-      {discard ? (
-        <>
-          <p>Kaydedilmemiş site tahsis bilgileri bırakılacak. Pencereyi kapatmak istiyor musunuz?</p>
-          <footer className="ws-modal-footer">
-            <Button onClick={() => setDiscard(false)}>Forma dön</Button>
-            <Button variant="danger" onClick={onClose}>Değişiklikleri bırak</Button>
-          </footer>
-        </>
-      ) : (
-        <div className="ws-form">
+    <Modal title={`${account.username} · Site Tahsis Et`} onClose={close} busy={busy} dirty={dirty}>
+      <div className="ws-form">
           <ErrorNotice error={error ? (hostingAccountMessage(error) || error.message) : null} />
           {isSuspended && (
             <div className="ws-notice ws-notice-danger" role="alert" style={{ marginBottom: '1rem', color: 'var(--ws-danger)', backgroundColor: 'var(--ws-danger-soft)', padding: '0.75rem', borderRadius: '4px' }}>
@@ -497,8 +481,8 @@ function AllocateSiteDialog({ account, reseller, servers, onClose, onSaved }) {
                 </label>
               </fieldset>
               <footer className="ws-modal-footer">
-                <Button disabled={busy} onClick={close}>Vazgeç</Button>
-                <Button type="submit" variant="primary" disabled={busy || !dirty || !serverId || isQuotaFull || isSuspended}>
+                <ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton>
+                <Button type="submit" variant="primary" disabled={busy || !form.primaryDomain.trim() || !serverId || isQuotaFull || isSuspended}>
                   {busy ? 'Doğrulanıyor…' : 'Planı Önizle'}
                 </Button>
               </footer>
@@ -519,8 +503,7 @@ function AllocateSiteDialog({ account, reseller, servers, onClose, onSaved }) {
               </footer>
             </div>
           )}
-        </div>
-      )}
+      </div>
     </Modal>
   );
 }

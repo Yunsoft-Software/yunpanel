@@ -88,8 +88,17 @@ function Shell() {
     window.scrollTo({ top: 0, behavior: 'instant' });
   }, [location.pathname]);
   useEffect(() => {
+    if (typeof document === 'undefined' || typeof MutationObserver !== 'function') return undefined;
+    const syncTheme = () => {
+      setThemeMode(document.documentElement.dataset.wsTheme === 'light' ? 'light' : 'dark');
+    };
+    const observer = new MutationObserver(syncTheme);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-ws-theme'] });
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
     const shortcut = (event) => {
-      const blocked = menuOpen || event.isComposing || document.querySelector('dialog[open]');
+      const blocked = menuOpen || event.isComposing || document.querySelector('dialog[open]') || document.querySelector('.ws-drawer-backdrop');
       if (blocked) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault(); setPaletteOpen(true);
@@ -171,7 +180,7 @@ function Shell() {
   }, [menuOpen, narrow]);
   return <div className={`workspace-shell ${!narrow && sidebarCollapsed ? 'is-sidebar-collapsed' : ''}`} data-ws-design-system="shadcn-zinc-indigo">
     <a href="#workspace-main" className="ws-skip">İçeriğe geç</a>
-    {narrow && menuOpen && <button type="button" tabIndex={-1} className="ws-nav-backdrop" aria-label="Menüyü kapat" onClick={() => setMenuOpen(false)} />}
+    {narrow && menuOpen && <div className="ws-nav-backdrop" aria-hidden="true" onClick={() => setMenuOpen(false)} />}
     <aside ref={menu} id="workspace-navigation" className={`ws-sidebar ${menuOpen ? 'is-open' : ''} ${!narrow && sidebarCollapsed ? 'is-collapsed' : ''}`} inert={narrow && !menuOpen} aria-label="Ana menü" role={narrow && menuOpen ? 'dialog' : undefined} aria-modal={narrow && menuOpen ? true : undefined}>
       <div className="ws-brand"><span className="ws-brand-mark" aria-hidden="true">Y</span><div><strong>YunPanel</strong><small>{isOwner ? 'SUNUCU YÖNETİMİ' : isReseller ? 'BAYİ PANELİ' : isCustomer ? 'MÜŞTERİ PANELİ' : canManage ? 'SİTE YÖNETİMİ' : 'SALT OKUNUR'}</small></div><Button className="ws-nav-close" icon="close" aria-label="Menüyü kapat" title="Yan menüyü daralt / kapat" onClick={closeSidebar} /></div>
       <nav aria-label="Panel bölümleri">{groups.map((group) => <div className="ws-nav-group" key={group.id}><p className="ws-nav-label" id={`ws-nav-${group.id}`}>{group.label}</p><div className="ws-nav" role="group" aria-labelledby={`ws-nav-${group.id}`}>{group.items.map(([to, label, icon]) => { const requiredCapability = navigationItemRequiredCapability(to, isOwner); const premiumBadge = Boolean(requiredCapability && isPremiumRequired(license, requiredCapability)); return <Fragment key={to}><Link to={to} className={navigationItemActive(to, location.pathname) ? 'active' : undefined} aria-current={navigationItemActive(to, location.pathname) ? (to === location.pathname ? 'page' : 'location') : undefined}><Icon name={icon} /><span>{label}</span>{premiumBadge && <span className="ws-nav-count" data-premium-badge="true">Premium</span>}{to === '/jobs' && jobCount > 0 && <span className="ws-nav-count">{jobCount}</span>}</Link>{to === '/websites' && canManage && isOwner && <Link key="/docker" to="/docker" className={navigationItemActive('/docker', location.pathname) ? 'active' : undefined} aria-current={navigationItemActive('/docker', location.pathname) ? (location.pathname === '/docker' ? 'page' : 'location') : undefined}><Icon name="box" /><span>Uygulama Marketi</span></Link>}</Fragment>; })}</div></div>)}</nav>
@@ -183,9 +192,13 @@ function Shell() {
         <Button className="ws-mobile-menu" icon="menu" aria-label="Ana menüyü aç" title={sidebarCollapsed ? 'Yan menüyü göster' : 'Yan menüyü gizle'} aria-expanded={narrow ? menuOpen : !sidebarCollapsed} aria-controls="workspace-navigation" onClick={toggleSidebar} />
         <button type="button" className="ws-command-trigger" aria-label="Site veya panel bölümü ara" aria-haspopup="dialog" onClick={() => setPaletteOpen(true)}><Icon name="search" /><span>Site veya araç ara…</span><kbd>⌘ / Ctrl K</kbd></button>
         <div className="ws-toolbar-actions">
-          <Button icon={themeMode === 'light' ? 'moon' : 'sun'} onClick={toggleThemeMode} aria-label="Gece ve Açık tema arasında geçiş yap" title="Tema Değiştir">
-            <span className="ws-toolbar-label">{themeMode === 'light' ? 'Gece Modu' : 'Açık Mod'}</span>
-          </Button>
+          <Button
+            className="ws-theme-toggle"
+            icon={themeMode === 'light' ? 'moon' : 'sun'}
+            onClick={toggleThemeMode}
+            aria-label={themeMode === 'light' ? 'Gece temasına geç' : 'Açık temaya geç'}
+            title={themeMode === 'light' ? 'Gece temasına geç' : 'Açık temaya geç'}
+          />
           {canManage && isOwner && <Button icon="terminal" aria-label="AI asistanı aç" title="AI Asistan · Ctrl / ⌘ Shift A" onClick={() => setAiOpen(true)}><span className="ws-toolbar-label">AI Asistan</span></Button>}
           <Button icon="bell" aria-label="Bildirim ve Görev Merkezi" title="Bildirim ve Görev Merkezi" onClick={() => setNotificationsOpen(true)}><span className="ws-toolbar-label">Bildirimler</span>{(activeJobCount + alertCount) > 0 && <span className="ws-nav-count">{activeJobCount + alertCount}</span>}</Button>
           {canManage && <LinkButton to="/jobs" icon="jobs" aria-label={`İşlemler${jobCount > 0 ? `, ${jobCount} aktif` : ''}`} title="İşlemler"><span className="ws-toolbar-label">İşlemler</span>{jobCount > 0 && <span className="ws-nav-count">{jobCount}</span>}</LinkButton>}

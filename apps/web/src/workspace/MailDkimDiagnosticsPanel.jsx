@@ -10,7 +10,7 @@ import {
   sendMailDomainTestDelivery,
 } from './mail-client.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
-import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, Modal, Section } from './PanelKit.jsx';
+import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, Modal, ModalCloseButton, Section } from './PanelKit.jsx';
 import { dmarcPolicy, mailDnsRequirementStatus } from './mail-dns-requirements.js';
 
 function diagnosticState(value) {
@@ -32,7 +32,7 @@ function DkimKeyModal({ keyState, domain, onClose, onChanged }) {
     } catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { setBusy(false); }
   }
-  return <Modal title={keyState ? 'DKIM key rotate et' : 'DKIM key oluştur'} onClose={onClose} busy={busy}><form className="ws-form" onSubmit={submit}><ErrorNotice error={error} /><label>Selector<input value={selector} required pattern="[a-z0-9](?:[a-z0-9-]*[a-z0-9])?" autoCapitalize="none" spellCheck={false} onChange={(event) => setSelector(event.target.value)} placeholder={keyState ? 'mail-2026' : 'mail'} /></label>{keyState && <p className="ws-muted">Mevcut selector <strong>{keyState.selector}</strong>. Rotation için farklı selector gerekir; eski DNS kaydı retirement tamamlanana kadar korunur.</p>}<p className="ws-muted">Private key protected server state’inde kalır. Panel yalnız public DNS metadata gösterir.</p><footer className="ws-modal-footer"><Button disabled={busy} onClick={onClose}>Vazgeç</Button><Button type="submit" variant="primary" disabled={busy || !selector}>{busy ? 'Hazırlanıyor…' : keyState ? 'Rotate et' : 'DKIM oluştur'}</Button></footer></form></Modal>;
+  return <Modal title={keyState ? 'DKIM key rotate et' : 'DKIM key oluştur'} onClose={onClose} busy={busy}><form className="ws-form" onSubmit={submit}><ErrorNotice error={error} /><label>Selector<input value={selector} required pattern="[a-z0-9](?:[a-z0-9-]*[a-z0-9])?" autoCapitalize="none" spellCheck={false} onChange={(event) => setSelector(event.target.value)} placeholder={keyState ? 'mail-2026' : 'mail'} /></label>{keyState && <p className="ws-muted">Mevcut selector <strong>{keyState.selector}</strong>. Rotation için farklı selector gerekir; eski DNS kaydı retirement tamamlanana kadar korunur.</p>}<p className="ws-muted">Private key protected server state’inde kalır. Panel yalnız public DNS metadata gösterir.</p><footer className="ws-modal-footer"><ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton><Button type="submit" variant="primary" disabled={busy || !selector}>{busy ? 'Hazırlanıyor…' : keyState ? 'Rotate et' : 'DKIM oluştur'}</Button></footer></form></Modal>;
 }
 
 export default function MailDkimDiagnosticsPanel({ domain, onChanged }) {

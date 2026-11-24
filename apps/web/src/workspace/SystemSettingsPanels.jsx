@@ -148,8 +148,10 @@ export default function SystemSettingsPanels({
   if (error) {
     return (
       <Section title="Sistem ayarları">
-        <ErrorNotice error={error} />
-        <Button onClick={load} icon="refresh">Yeniden dene</Button>
+        <div className="ws-section-body">
+          <ErrorNotice error={error} />
+          <Button onClick={load} icon="refresh">Yeniden dene</Button>
+        </div>
       </Section>
     );
   }

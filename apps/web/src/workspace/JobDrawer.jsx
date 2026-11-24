@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { panelRequest } from '../api.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
-import { Badge, Button, EmptyState, ErrorNotice, KeyValues, Modal } from './PanelKit.jsx';
+import { Badge, Button, EmptyState, ErrorNotice, KeyValues, Modal, ModalCloseButton } from './PanelKit.jsx';
 import {
   jobAttemptCount,
   jobHealthIndicator,
@@ -83,7 +83,7 @@ export function JobObservation({ id, close, update, refresh, onRetry, onCancel }
   const metadata = safeJobResultMetadata(job);
   const stage = jobStageProgress(job);
   const health = jobHealthIndicator(job);
-  return <Modal title="İşlem durumu" onClose={close}>
+  return <Modal title="İşlem durumu" onClose={close} busy={cancelling}>
     {!job && !error && <div className="ws-loading" role="status"><span className="ws-spinner" />İşlem kaydı doğrulanıyor…</div>}
     <ErrorNotice error={error ?? (job?.status === 'failed' ? job.error?.message ?? job.error?.code ?? 'İşlem başarısız.' : null)} />
     <ErrorNotice error={cancelError} />
@@ -121,7 +121,7 @@ export function JobObservation({ id, close, update, refresh, onRetry, onCancel }
       {typeof onRetry === 'function' && jobSupportsManualRetry(job, { canManage: true }) && (
         <Button variant="primary" onClick={() => onRetry(job)}>Yeniden dene</Button>
       )}
-      <Button onClick={close}>Kapat</Button>
+      <ModalCloseButton disabled={cancelling}>Kapat</ModalCloseButton>
     </footer>
   </Modal>;
 }

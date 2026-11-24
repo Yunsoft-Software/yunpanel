@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router';
 import { panelRequest, waitForJob } from '../api.js';
 import { sessionVersion } from '../session-client.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
-import { Badge, Button, ErrorNotice, KeyValues, Modal } from './PanelKit.jsx';
+import { Badge, Button, ErrorNotice, KeyValues, Modal, ModalCloseButton } from './PanelKit.jsx';
 
 export default function DatabaseSetupDialog({ website = null, databaseName = '', onClose, onChanged }) {
   const { websites, domains, updateJob, jobs } = useWorkspace();
@@ -65,7 +65,7 @@ export default function DatabaseSetupDialog({ website = null, databaseName = '',
       <label>Kullanıcı parolası<input type="password" disabled={busy || Boolean(result)} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" minLength="16" maxLength="128" placeholder="Boş bırakırsanız güçlü parola oluşturulur" /><small>En az 16 karakter. Harf, rakam ve _ ! @ # % ^ * + = . : , - kullanabilirsiniz.</small></label>
       <p className="ws-muted">Bu siteye özel veritabanı kullanıcısı otomatik oluşturulur. Bağlantı bilgileri ve parola işlem tamamlanınca erişilebilir.</p>
       {result && <label>Devam biçimi<select value={mode} onChange={(event) => setMode(event.target.value)}><option value="continue">Mevcut kuruluma devam et</option></select></label>}
-      <footer className="ws-modal-footer"><Button disabled={busy} onClick={() => { forget(); onClose(); }}>Vazgeç</Button><Button variant="primary" type="submit" disabled={busy || !selected}>{busy ? 'Kuruluyor…' : result ? 'Kuruluma devam et' : databaseName ? 'Bağla ve erişimi hazırla' : 'Oluştur'}</Button></footer>
+      <footer className="ws-modal-footer"><ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton><Button variant="primary" type="submit" disabled={busy || !selected}>{busy ? 'Kuruluyor…' : result ? 'Kuruluma devam et' : databaseName ? 'Bağla ve erişimi hazırla' : 'Oluştur'}</Button></footer>
     </form>}
   </Modal>;
 }

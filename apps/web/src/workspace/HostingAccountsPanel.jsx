@@ -1,7 +1,7 @@
 import { useContext, useEffect, useRef, useState } from 'react';
 import { panelRequest } from '../api.js';
 import { sessionGeneration } from '../session-client.js';
-import { Badge, Button, EmptyState, ErrorNotice, LinkButton, Modal, Section } from './PanelKit.jsx';
+import { Badge, Button, EmptyState, ErrorNotice, LinkButton, Modal, ModalCloseButton, Section } from './PanelKit.jsx';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
 import { WorkspaceContext } from './WorkspaceContext.jsx';
 import { createHostingAccountClient, hostingAccountMessage } from './hosting-account-client.js';
@@ -145,7 +145,6 @@ export function HostingProfileDialog({ user = null, accountId, onClose, onSaved,
   const [busy, setBusy] = useState(false); const pending = useRef(false); const mounted = useRef(true);
   const [removing, setRemoving] = useState(false); const [confirmation, setConfirmation] = useState('');
   const [statusTarget, setStatusTarget] = useState(null);
-  const [discard, setDiscard] = useState(false);
   const licensePath = buildLicenseSettingsPath({ returnTo: '/users', feature: 'hosting_profile' });
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => {
@@ -168,7 +167,7 @@ export function HostingProfileDialog({ user = null, accountId, onClose, onSaved,
   const eligible = Boolean(account || (user?.role === 'site_manager' && Array.isArray(user.websiteIds) && user.websiteIds.length === 0));
   function close() {
     if (pending.current) return;
-    if (dirty && !reload && !discard) setDiscard(true); else onClose();
+    onClose();
   }
   function update(key, value) { setForm((current) => ({ ...current, [key]: value })); setError(null); }
   const canSubmit = ready && eligible && (removing ? confirmation === account.username
@@ -225,10 +224,8 @@ export function HostingProfileDialog({ user = null, accountId, onClose, onSaved,
     } catch (failure) { if (mounted.current && failure.name !== 'AbortError') setError(failure); }
     finally { pending.current = false; if (mounted.current) setBusy(false); }
   }
-  return <Modal title="Bayi / müşteri profili" onClose={close} busy={busy}>
-    {discard ? <><p>Kaydedilmemiş değişiklikler bırakılacak. Pencereyi kapatmak istiyor musunuz?</p><footer className="ws-modal-footer">
-      <Button onClick={() => setDiscard(false)}>Düzenlemeye dön</Button><Button variant="danger" onClick={onClose}>Değişiklikleri bırak</Button>
-    </footer></> : <form className="ws-form" onSubmit={submit}>
+  return <Modal title="Bayi / müşteri profili" onClose={close} busy={busy} dirty={dirty && !reload}>
+    <form className="ws-form" onSubmit={submit}>
       <p><strong>{account?.username ?? user?.username ?? 'Seçili hesap'}</strong></p>
       <p className="ws-muted">Bu ekran Owner için profil ve limit yönetimidir. Yeni giriş hesabı, site yetkisi, paket veya abonelik oluşturmaz.</p>
       {loaded.status === 'loading' && <p role="status">Güncel profil doğrulanıyor…</p>}
@@ -290,12 +287,12 @@ export function HostingProfileDialog({ user = null, accountId, onClose, onSaved,
       <footer className="ws-modal-footer">
         {statusTarget !== null && <Button disabled={busy || reload} onClick={() => { setStatusTarget(null); setError(null); }}>Profile dön</Button>}
         {removing && <Button disabled={busy || reload} onClick={() => { setRemoving(false); setConfirmation(''); setError(null); }}>Profile dön</Button>}
-        <Button disabled={busy} onClick={close}>{reload ? 'Kapat ve listeyi yenile' : 'Kapat'}</Button>
+        <ModalCloseButton disabled={busy}>{reload ? 'Kapat ve listeyi yenile' : 'Kapat'}</ModalCloseButton>
         {statusTarget !== null && <Button type="button" variant={statusTarget ? 'primary' : 'danger'} disabled={busy || reload || mutationLicenseBlocked} onClick={changeStatus}>
           {busy ? 'Uygulanıyor…' : statusTarget ? 'Girişi etkinleştir' : 'Hesabı askıya al'}
         </Button>}
         {statusTarget === null && ready && eligible && (!account || account.kind === 'reseller' || removing) && <Button type="submit" variant={removing ? 'danger' : 'primary'} disabled={busy || reload || !canSubmit || mutationLicenseBlocked}>{busy ? 'Kaydediliyor…' : removing ? 'Profili kaldır' : account ? 'Sınırları kaydet' : 'Profili bağla'}</Button>}
       </footer>
-    </form>}
+    </form>
   </Modal>;
 }

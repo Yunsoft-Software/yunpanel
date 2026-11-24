@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router';
 import { panelRequest } from '../api.js';
 import { sessionVersion, sessionTransitionPending } from '../session-client.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
-import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, LinkButton, Modal, Section } from './PanelKit.jsx';
+import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, LinkButton, Modal, ModalCloseButton, Section } from './PanelKit.jsx';
 import { formatBytes, siteHref } from './site-model.js';
 
 const labels = { install: 'WordPress kur', remove: 'WordPress’i kaldır', password: 'Yönetici parolasını değiştir', 'core.update': 'WordPress’i güncelle',
@@ -273,7 +273,7 @@ export default function SiteWordPressPanel({ domainId, scope }) {
           <label>Yönetici hesabı<select required value={username} disabled={disabled} onChange={event => setUsername(event.target.value)}>{(status.administrators ?? []).map(name => <option key={name}>{name}</option>)}</select></label>
           <label>Yeni parola<input required type="password" minLength={16} maxLength={128} autoComplete="new-password" value={password} disabled={disabled} onChange={event => setPassword(event.target.value)} /></label>
         </> : <label>WordPress.org adı<input required pattern="[a-z0-9][a-z0-9-]{0,99}" placeholder={dialog === 'plugin.install' ? 'Örnek: wordpress-seo' : 'Örnek: twentytwentyfive'} value={packageName} disabled={disabled} onChange={event => setPackageName(event.target.value)} /><span className="ws-muted">WordPress.org adresindeki eklenti veya tema adını yazın.</span></label>}
-        <ErrorNotice error={error} /><footer className="ws-modal-footer"><Button disabled={busy} onClick={() => { setPassword(''); setDialog(null); }}>Vazgeç</Button><Button type="submit" variant="primary" disabled={disabled}>{busy ? 'İşleniyor…' : labels[dialog]}</Button></footer>
+        <ErrorNotice error={error} /><footer className="ws-modal-footer"><ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton><Button type="submit" variant="primary" disabled={disabled}>{busy ? 'İşleniyor…' : labels[dialog]}</Button></footer>
       </form>
     </Modal>}
     {removal && <ConfirmDialog title="WordPress’i kaldır" message={removal.impact} confirmation={removal.confirmation} confirmLabel="Yedekle ve WordPress’i kaldır"

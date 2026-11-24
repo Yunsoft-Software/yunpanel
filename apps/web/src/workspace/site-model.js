@@ -11,6 +11,7 @@ export const SITE_TABS = [
 ];
 export function domainTargetLabel(domain) {
   if (domain.targetType === 'redirect') return `Yönlendirme → ${domain.target?.url ?? '—'}`;
+  if (domain.targetType === 'php') return 'PHP-FPM';
   return domain.targetType === 'static' ? domain.target?.root : `127.0.0.1:${domain.target?.upstreamPort ?? '—'}`;
 }
 

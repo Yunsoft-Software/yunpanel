@@ -3,7 +3,7 @@ import { panelRequest, waitForJob } from '../api.js';
 import { usePanelSession } from '../panel-session.jsx';
 import { sessionVersion, sessionTransitionPending } from '../session-client.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
-import { Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, LinkButton, Modal, Section } from './PanelKit.jsx';
+import { Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, LinkButton, Modal, ModalCloseButton, Section } from './PanelKit.jsx';
 import { formatDate, siteHref } from './site-model.js';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
 import { createDomainAliasClient } from './domain-alias-client.js';
@@ -180,7 +180,7 @@ function AliasReview({ plan, busy, onCancel, onSave }) {
     <p>Kaydet, kaydı günceller; canlı yönlendirmeyi değiştirmez. Sonrasında Yayına uygula ile devam edilir. DNS ve posta kaydı oluşturulmaz.</p>
     <form onSubmit={(event) => { event.preventDefault(); if (!busy && (!requiresTyping || confirmation === plan.base.primaryDomain)) onSave(); }}>
       {requiresTyping && <label>Etkiyi onaylamak için <strong>{plan.base.primaryDomain}</strong> yazın<input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} required autoComplete="off" spellCheck={false} disabled={busy} /></label>}
-      <footer className="ws-modal-footer"><Button onClick={onCancel} disabled={busy}>Vazgeç</Button><Button variant="primary" type="submit" disabled={busy || (requiresTyping && confirmation !== plan.base.primaryDomain)}>Kaydet</Button></footer>
+      <footer className="ws-modal-footer"><ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton><Button variant="primary" type="submit" disabled={busy || (requiresTyping && confirmation !== plan.base.primaryDomain)}>Kaydet</Button></footer>
     </form>
   </Modal>;
 }

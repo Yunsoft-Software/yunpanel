@@ -2,7 +2,7 @@ import {useEffect,useRef,useState} from 'react';
 import {panelRequest} from '../api.js';
 import {usePanelSession} from '../panel-session.jsx';
 import {sessionTransitionPending,sessionVersion} from '../session-client.js';
-import {Badge,Button,ConfirmDialog,ErrorNotice,Icon} from './PanelKit.jsx';
+import {Badge,Button,ConfirmDialog,ErrorNotice,hasOpenModalLayer,Icon} from './PanelKit.jsx';
 import {globalRemovalOperation,removalErrorMessage} from './website-removal-model.js';
 import WebsiteRemovalProgress from './WebsiteRemovalProgress.jsx';
 
@@ -10,7 +10,7 @@ export default function WebsiteRemovalRecoveryPanel({onChanged}){
  const {session}=usePanelSession(),generation=sessionVersion();
  const [state,setState]=useState({operations:[],loading:true,busy:null,error:null,unknown:false});
  const [drawerOpen,setDrawerOpen]=useState(false);
- const [confirm,setConfirm]=useState(null);const live=useRef(true),seq=useRef(0),knownActive=useRef(new Set());
+ const [confirm,setConfirm]=useState(null);const live=useRef(true),seq=useRef(0),knownActive=useRef(new Set()),pointerDownBackdropRef=useRef(false);
  const current=()=>live.current&&generation===sessionVersion()&&!sessionTransitionPending();
  async function load(){
   if(!current())return;const requestSeq=++seq.current;setState(value=>({...value,loading:true}));
@@ -59,6 +59,17 @@ export default function WebsiteRemovalRecoveryPanel({onChanged}){
    if(current())setState(value=>({...value,error:removalErrorMessage(error)}));
   }finally{if(current())setState(value=>({...value,busy:null}));}
  }
+ useEffect(()=>{
+  if(!drawerOpen)return undefined;
+  const onKeyDown=(event)=>{
+   if(event.key==='Escape'&&!confirm&&!state.busy&&!hasOpenModalLayer()){
+    event.preventDefault();
+    setDrawerOpen(false);
+   }
+  };
+  window.addEventListener('keydown',onKeyDown);
+  return ()=>window.removeEventListener('keydown',onKeyDown);
+ },[drawerOpen,confirm,state.busy]);
  if(active.length===0&&!state.error)return null;
  return <>
   <div className="ws-notice ws-notice-warn yp-removal-recovery-bar" role="region" aria-label="Site silme işlemleri"
@@ -74,7 +85,7 @@ export default function WebsiteRemovalRecoveryPanel({onChanged}){
        ?`${runningCount} site silme işlemi arka planda yürütülüyor.`
        :pausedCount>0
         ?`${pausedCount} yarım kalan silme işlemi bildirim panelinde bekliyor.`
-        :'Silme işlemleri durumu güncellenemedi.'}
+        :(typeof state.error==='string'?state.error:(state.error?.message??'Silme işlemleri durumu güncellenemedi.'))}
     </span>
    </div>
    <div className="ws-actions" style={{alignItems:'center',gap:'0.45rem'}}>
@@ -84,8 +95,8 @@ export default function WebsiteRemovalRecoveryPanel({onChanged}){
     <Button icon="refresh" disabled={state.loading||Boolean(state.busy)} onClick={()=>void load()}>Yenile</Button>
    </div>
   </div>
-  {!drawerOpen&&state.error&&<ErrorNotice error={state.error}/>}
-  {drawerOpen&&<div className="ws-drawer-backdrop yp-notification-backdrop" onClick={event=>{if(event.target===event.currentTarget)setDrawerOpen(false);}}>
+  {!drawerOpen&&active.length>0&&state.error&&<ErrorNotice error={state.error}/>}
+  {drawerOpen&&<div className="ws-drawer-backdrop yp-notification-backdrop" onPointerDown={event=>{pointerDownBackdropRef.current=event.button===0&&event.target===event.currentTarget;}} onPointerCancel={()=>{pointerDownBackdropRef.current=false;}} onClick={event=>{const started=pointerDownBackdropRef.current;pointerDownBackdropRef.current=false;if(started&&event.target===event.currentTarget&&!state.busy)setDrawerOpen(false);}}>
    <aside className="ws-drawer ws-notification-drawer yp-notification-drawer" role="complementary" aria-label="Site silme bildirim paneli">
     <header className="ws-drawer-header yp-notification-header">
      <div>
@@ -94,7 +105,7 @@ export default function WebsiteRemovalRecoveryPanel({onChanged}){
      </div>
      <div className="ws-actions" style={{alignItems:'center',gap:'0.4rem'}}>
       <Button icon="refresh" disabled={state.loading||Boolean(state.busy)} onClick={()=>void load()}>Yenile</Button>
-      <Button icon="close" aria-label="Silme bildirim panelini kapat" onClick={()=>setDrawerOpen(false)}/>
+      <Button icon="close" disabled={Boolean(state.busy)} aria-label="Silme bildirim panelini kapat" onClick={()=>{if(!state.busy)setDrawerOpen(false);}}/>
      </div>
     </header>
     <div className="ws-drawer-body yp-notification-body" style={{display:'flex',flexDirection:'column',gap:'0.75rem'}}>

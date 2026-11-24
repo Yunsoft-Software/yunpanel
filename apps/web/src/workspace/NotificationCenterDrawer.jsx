@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { panelRequest } from '../api.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
-import { Badge, Button, EmptyState, Icon, LinkButton } from './PanelKit.jsx';
+import { Badge, Button, EmptyState, hasOpenModalLayer, Icon, LinkButton } from './PanelKit.jsx';
 import { certificateState, formatDate, jobActive, siteHref } from './site-model.js';
 import { usagePercent } from './ui/console-model.js';
 
@@ -200,6 +200,7 @@ export function NotificationCenterDrawer({ open = true, onClose, initialTab = 't
   const [activeTab, setActiveTab] = useState(initialTab);
   const [noticeHistory, setNoticeHistory] = useState([]);
   const [dismissedIds, setDismissedIds] = useState(() => new Set());
+  const pointerDownBackdropRef = useRef(false);
 
   useEffect(() => {
     if (!notice) return;
@@ -223,6 +224,7 @@ export function NotificationCenterDrawer({ open = true, onClose, initialTab = 't
     if (!open) return undefined;
     const onKeyDown = (event) => {
       if (event.key === 'Escape') {
+        if (hasOpenModalLayer()) return;
         event.preventDefault();
         onClose?.();
       }
@@ -278,7 +280,16 @@ export function NotificationCenterDrawer({ open = true, onClose, initialTab = 't
   }
 
   return (
-    <div className="ws-drawer-backdrop yp-notification-backdrop" onClick={(event) => { if (event.target === event.currentTarget) onClose?.(); }}>
+    <div
+      className="ws-drawer-backdrop yp-notification-backdrop"
+      onPointerDown={(event) => { pointerDownBackdropRef.current = event.button === 0 && event.target === event.currentTarget; }}
+      onPointerCancel={() => { pointerDownBackdropRef.current = false; }}
+      onClick={(event) => {
+        const started = pointerDownBackdropRef.current;
+        pointerDownBackdropRef.current = false;
+        if (started && event.target === event.currentTarget) onClose?.();
+      }}
+    >
       <aside
         className="ws-drawer ws-notification-drawer yp-notification-drawer"
         role="dialog"

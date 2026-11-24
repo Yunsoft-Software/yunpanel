@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router';
 import { panelRequest } from '../api.js';
 import { formatUserRoleLabel } from '../panel-session.jsx';
 import { sessionGeneration, setSession } from '../session-client.js';
-import { Badge, Button, EmptyState, ErrorNotice, LinkButton, Modal, PageHeading, Section } from './PanelKit.jsx';
+import { Badge, Button, EmptyState, ErrorNotice, LinkButton, Modal, ModalCloseButton, PageHeading, Section } from './PanelKit.jsx';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { HostingAccountsPanel, HostingProfileDialog } from './HostingAccountsPanel.jsx';
@@ -152,7 +152,6 @@ function UserDialog({ mode, user, licensePath, onClose, onSave }) {
   const { websites } = useWorkspace();
   const [form, setForm] = useState(() => initialForm(user));
   const [confirmation, setConfirmation] = useState('');
-  const [discard, setDiscard] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const pending = useRef(false); const mounted = useRef(true);
@@ -167,9 +166,7 @@ function UserDialog({ mode, user, licensePath, onClose, onSave }) {
   const reload = mustReload(error);
   function close() {
     if (pending.current) return;
-    if (discard) setDiscard(false);
-    else if (dirty && !reload) setDiscard(true);
-    else onClose();
+    onClose();
   }
   function update(key, value) { setForm((current) => ({ ...current, [key]: value })); if (!reload) setError(null); }
   async function submit(event) {
@@ -182,10 +179,8 @@ function UserDialog({ mode, user, licensePath, onClose, onSave }) {
     } catch (failure) { if (mounted.current && failure.name !== 'AbortError') setError(failure); }
     finally { pending.current = false; if (mounted.current) setBusy(false); }
   }
-  return <Modal title={deleting ? 'Kullanıcıyı sil' : user ? 'Kullanıcıyı düzenle' : 'Kullanıcı ekle'} onClose={close} busy={busy}>
-    {discard ? <><p>Kaydedilmemiş değişiklikleriniz silinecek. Formu kapatmak istiyor musunuz?</p><footer className="ws-modal-footer">
-      <Button onClick={() => setDiscard(false)}>Düzenlemeye dön</Button><Button variant="danger" onClick={onClose}>Değişiklikleri bırak</Button>
-    </footer></> : <form className="ws-form" onSubmit={submit}>
+  return <Modal title={deleting ? 'Kullanıcıyı sil' : user ? 'Kullanıcıyı düzenle' : 'Kullanıcı ekle'} onClose={close} busy={busy} dirty={dirty && !reload}>
+    <form className="ws-form" onSubmit={submit}>
       <ErrorNotice error={error ? userAdminMessage(error) : null} />
       {error?.code === 'premium_license_required' && licensePath && (
         <div className="ws-notice ws-notice-warn" role="status">
@@ -238,9 +233,9 @@ function UserDialog({ mode, user, licensePath, onClose, onSave }) {
           <p className="ws-muted">{user ? 'Kullanıcı adı, rol veya durum değişirse bu hesabın bütün oturumları ve bekleyen giriş doğrulamaları iptal edilir. Kendi hesabınızı değiştirirseniz yeniden giriş gerekir.' : 'Yeni Sunucu Yöneticisi hesabı, ilk HTTPS girişinde iki adımlı doğrulamayı kurmadan yönetim ekranlarına erişemez.'}</p>
         </>}
       </fieldset>
-      <footer className="ws-modal-footer"><Button disabled={busy} onClick={close}>{reload ? 'Kapat ve listeyi yenile' : 'Vazgeç'}</Button>
+      <footer className="ws-modal-footer"><ModalCloseButton disabled={busy}>{reload ? 'Kapat ve listeyi yenile' : 'Vazgeç'}</ModalCloseButton>
         <Button type="submit" variant={deleting ? 'danger' : 'primary'} disabled={busy || reload || (deleting ? confirmation !== user.username : !dirty)}>{busy ? 'İşleniyor…' : deleting ? 'Hesabı sil' : user ? 'Değişiklikleri kaydet' : 'Hesap oluştur'}</Button>
       </footer>
-    </form>}
+    </form>
   </Modal>;
 }

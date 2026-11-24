@@ -61,9 +61,9 @@ export default function LogsPanel({ application, domain }) {
   }, [live, canFollow, source, domain?.id, search]);
 
   const download = domain?.websiteId ? `/api/panel${siteLogPath({ domain, source }).replace('/logs', '/logs/download')}` : null;
-  return <Section title="Site logları" actions={<>
+  return <Section title="Site logları" actions={<div className="ws-actions">
     {canFollow && <Button onClick={() => setLive(value => !value)} aria-pressed={live}>{live ? 'Durdur' : 'Canlı'}</Button>}
-    <Button icon="refresh" disabled={busy || live} onClick={load}>Yenile</Button></>}>
+    <Button icon="refresh" disabled={busy || live} onClick={load}>Yenile</Button></div>}>
     <ErrorNotice error={error} />
     <div className="ws-section-body ws-filters"><label>Kaynak<select value={source} onChange={(event) => setSource(event.target.value)}>{application?.type === 'node' && <option value="node">Node.js uygulaması</option>}<option value="nginx-access">Erişim</option><option value="nginx-error">Hata</option></select></label><label className="ws-filter-search">Ara<input value={search} maxLength={100} onChange={(event) => setSearch(event.target.value)} /></label><Button disabled={busy || live} onClick={load}>Uygula</Button>{download && <a className="ws-button ws-button-secondary" href={download}>İndir</a>}</div>
     {busy && !result && <div className="ws-loading" role="status"><span className="ws-spinner" />Loglar yükleniyor…</div>}

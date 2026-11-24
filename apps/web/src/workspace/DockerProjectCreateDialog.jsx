@@ -16,6 +16,7 @@ import {
   ErrorNotice,
   KeyValues,
   Modal,
+  ModalCloseButton,
 } from './PanelKit.jsx';
 
 export default function DockerProjectCreateDialog({ onClose, initialTemplate = null }) {
@@ -202,5 +203,5 @@ export default function DockerProjectCreateDialog({ onClose, initialTemplate = n
     <label>Compose document<textarea rows={18} value={document} onChange={(event) => { setDocument(event.target.value); setValidation(null); }} required spellCheck={false} /></label>
   </>}{validation && <KeyValues items={[
     ['Servis', validation.serviceCount], ['Network', validation.networks?.length ?? 0], ['Volume', validation.volumes?.length ?? 0], ['Secret', validation.secretCount], ['Config', validation.configCount], ['Yan etki', validation.sideEffects === false ? 'Yok' : 'Bilinmiyor'],
-  ]} />}<footer className="ws-modal-footer"><Button disabled={busy} onClick={onClose}>Vazgeç</Button><Button disabled={busy || !server || !projectName || !document} onClick={validate}>Validate</Button><Button variant="primary" type="submit" disabled={busy || !server || !projectName || !document}>{busy ? 'İşleniyor…' : (initialTemplate?.oneClick ? '⚡ Uygulamayı Kur ve Yayınla' : 'Projeyi kaydet')}</Button></footer></fieldset></form></Modal>;
+  ]} />}<footer className="ws-modal-footer"><ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton><Button disabled={busy || !server || !projectName || !document} onClick={validate}>Validate</Button><Button variant="primary" type="submit" disabled={busy || !server || !projectName || !document}>{busy ? 'İşleniyor…' : (initialTemplate?.oneClick ? '⚡ Uygulamayı Kur ve Yayınla' : 'Projeyi kaydet')}</Button></footer></fieldset></form></Modal>;
 }

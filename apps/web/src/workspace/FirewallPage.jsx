@@ -36,6 +36,9 @@ import {
 } from './firewall-model.js';
 
 function SectionLoadError({ title, message, onRetry, disabled = false }) {
+  const normalizedTitle = String(title ?? '').trim().replace(/\.$/, '').toLowerCase();
+  const normalizedMessage = String(message ?? '').trim().replace(/\.$/, '').toLowerCase();
+  const showDetail = Boolean(message) && normalizedMessage !== normalizedTitle;
   return (
     <div
       role="alert"
@@ -53,7 +56,7 @@ function SectionLoadError({ title, message, onRetry, disabled = false }) {
         <Icon name="alert" size={18} />
         <div>
           <strong>{title}</strong>
-          <div style={{ fontSize: '0.875rem', marginTop: '0.2rem' }}>{message}</div>
+          {showDetail && <div style={{ fontSize: '0.875rem', marginTop: '0.2rem' }}>{message}</div>}
         </div>
       </div>
       <Button icon="refresh" onClick={onRetry} disabled={disabled}>
@@ -396,12 +399,12 @@ export default function FirewallPage() {
       )}
 
       {/* Cloud / Provider Firewall Advisory Box */}
-      <div className="ws-notice ws-notice-warning" style={{ marginBottom: '1.5rem', padding: '1rem', borderLeft: '4px solid var(--ws-warning)', backgroundColor: 'var(--ws-warning-soft)', color: 'var(--ws-warning)', borderRadius: '4px' }}>
+      <div className="ws-notice ws-notice-warning ws-firewall-advisory" style={{ marginBottom: '1.25rem', padding: '0.9rem 1rem', borderLeft: '4px solid var(--ws-warning)', backgroundColor: 'var(--ws-warning-soft)', color: 'var(--ws-warning)', borderRadius: '6px', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '0.35rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}>
           <Icon name="shield" size={18} />
           <span>Cloud / Sağlayıcı Güvenlik Duvarı Durumu: Bilinmiyor</span>
         </div>
-        <p style={{ marginTop: '0.5rem', marginBottom: 0, fontSize: '0.9rem', lineHeight: '1.4' }}>
+        <p style={{ margin: 0, fontSize: '0.875rem', lineHeight: '1.45' }}>
           {providerNotice.advisory}
         </p>
       </div>
@@ -548,7 +551,7 @@ export default function FirewallPage() {
               Güvenlik duvarı durumu doğrulanmadan servis profilleri değiştirilemez.
             </p>
           )}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
+          <div className="ws-firewall-profiles-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1rem' }}>
             {/* Sistem / SSH */}
             <div style={{ padding: '1rem', border: '1px solid var(--ws-border)', borderRadius: '6px', background: 'var(--ws-surface)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

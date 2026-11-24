@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Button, ErrorNotice, Modal } from './PanelKit.jsx';
+import { Button, ErrorNotice, Modal, ModalCloseButton } from './PanelKit.jsx';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
 import { hostingAccountMessage } from './hosting-account-client.js';
 
@@ -25,7 +25,6 @@ export function CustomerQuotaDialog({ account, reseller = null, client, onClose,
   }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const [discard, setDiscard] = useState(false);
   const pending = useRef(false);
   const mounted = useRef(true);
 
@@ -50,8 +49,7 @@ export function CustomerQuotaDialog({ account, reseller = null, client, onClose,
 
   function close() {
     if (pending.current) return;
-    if (dirty && !reconcile && !discard) setDiscard(true);
-    else onClose();
+    onClose();
   }
 
   function update(key, value) {
@@ -94,17 +92,8 @@ export function CustomerQuotaDialog({ account, reseller = null, client, onClose,
   }
 
   return (
-    <Modal title={`${account.username} · Kaynak Kotalarını Yönet`} onClose={close} busy={busy}>
-      {discard ? (
-        <>
-          <p>Kaydedilmemiş kota bilgileri bırakılacak. Pencereyi kapatmak istiyor musunuz?</p>
-          <footer className="ws-modal-footer">
-            <Button onClick={() => setDiscard(false)}>Düzenlemeye dön</Button>
-            <Button variant="danger" onClick={onClose}>Değişiklikleri bırak</Button>
-          </footer>
-        </>
-      ) : (
-        <form className="ws-form" onSubmit={submit}>
+    <Modal title={`${account.username} · Kaynak Kotalarını Yönet`} onClose={close} busy={busy} dirty={dirty && !reconcile}>
+      <form className="ws-form" onSubmit={submit}>
           <ErrorNotice error={error ? (hostingAccountMessage(error) || error.message) : null} />
           {reconcile && (
             <p role="alert">Sonuç kesin doğrulanamadı. İşlemi tekrar göndermeyin; pencereyi kapatıp güncel hesap listesini yeniden okuyun.</p>
@@ -189,13 +178,12 @@ export function CustomerQuotaDialog({ account, reseller = null, client, onClose,
             </label>
           </fieldset>
           <footer className="ws-modal-footer">
-            <Button disabled={busy} onClick={close}>{reconcile ? 'Kapat ve listeyi yenile' : 'Vazgeç'}</Button>
+            <ModalCloseButton disabled={busy}>{reconcile ? 'Kapat ve listeyi yenile' : 'Vazgeç'}</ModalCloseButton>
             <Button type="submit" variant="primary" disabled={busy || reconcile || !dirty}>
               {busy ? 'Kaydediliyor…' : 'Kotaları Kaydet'}
             </Button>
           </footer>
-        </form>
-      )}
+      </form>
     </Modal>
   );
 }
