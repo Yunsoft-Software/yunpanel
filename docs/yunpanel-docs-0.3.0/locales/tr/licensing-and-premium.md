@@ -17,14 +17,14 @@ YunPanel, temel sunucu ve sınırsız site yönetimini **Ücretsiz** sürümde k
 
 ## Üç aylık ücretsiz Premium kampanyası (Yunsoft Website)
 
-> **Canlı kampanya durumu:** Yunsoft Website üzerindeki 3 aylık ücretsiz Premium kampanyası şu an canlıda etkin değildir; Website tarafında SMTP doğrulaması ve kabul aşamasını beklemektedir. Aşağıdaki görünüm ve etkinleştirme adımları **kampanya Yunsoft Website'de açıldığında** geçerli olacaktır. Bu sayfadaki kampanya teklifi ve aktif kampanya ekran görüntüleri yerel `0.3.0` (`f30fd779`) aday derlemesinde alınan teknik doğrulama görselleridir; canlı kampanya kullanım kanıtı sayılmaz.
+> Başvuru ve güncel koşullar için [Yunsoft'un üç aylık Premium kampanya sayfasına](https://yunsoft.com/kampanya/premium-3-ay) bakın. Kampanya görselleri yerel `0.3.0` (`f30fd779`) aday derlemesinde alınmıştır.
 
-Kampanya Yunsoft Website'de etkinleştirildiğinde, yeni kurulumlar ve ücretsiz sürümdeki sunucular isteğe bağlı olarak Yunsoft e-posta aboneliğiyle **kredi kartı gerektirmeyen 3 aylık YunPanel Premium** teklifinden yararlanabileceklerdir:
+Yeni kurulumlarda ve ücretsiz sürümü kullanırken Yunsoft üzerinden isteğe bağlı olarak **kredi kartsız üç aylık YunPanel Premium** teklifine başvurabilirsiniz.
 
-- **İlk kurulum ve Lisans ekranı yönlendirmesi:** İlk kurulum formunda (bkz. [İlk Kurulum](doc:first-time-setup)) ve ücretsiz sürümdeki **Ayarlar → Lisans** (`/settings?section=license`) ekranında **Teklifi Yunsoft'ta incele** bağlantısı yer alır; kampanya Yunsoft Website'de açıldığında kayıt sayfasına yönlendirir.
+- **İlk kurulum ve Lisans ekranı** — [İlk Kurulum](doc:first-time-setup) formunda veya ücretsiz sürümdeki **Ayarlar → Lisans** ekranında **Teklifi Yunsoft'ta incele** düğmesi Yunsoft kampanya sayfasını açar.
 - **Gizlilik ve veri sınırı:** Kampanya kaydı yalnızca **Yunsoft Website** tarafından yönetilir. Müşteri paneli hiçbir e-posta bülteni veya abone listesi saklamaz. Yönlendirme bağlantısı sorgu parametresi ve parça içermeyen sabit bir HTTPS adresidir (`referrerPolicy="no-referrer"`); e-posta, alan adı veya kurulum kimliği bağlantıya eklenmez.
-- **Tekil hak kuralı:** Kampanya açıldığında aynı normalize e-posta adresi veya aynı alan adı ikinci kez 3 aylık kampanya hakkı alamaz.
-- **Tek kampanya kaydı, iki ürün kapsamı:** Yunsoft Website üzerindeki tek kampanya kaydı YunPanel ve YunCMS haklarını birlikte taşır; kampanya etkinleştiğinde YunPanel etkinleştirme isteği (`productCode: "yunpanel_premium"`) yalnızca doğrulanmış YunPanel kurulumu için ilgili hakkı etkinleştirir. Başka bir ürüne ait (`yuncms_premium`) jetonlar YunPanel tarafından `PRODUCT_MISMATCH` ile reddedilir.
+- **Tekil hak** — Aynı e-posta adresi veya alan adı için kampanyadan bir kez yararlanılabilir.
+- **Tek başvuru, iki ürün** — Tek başvuru YunPanel ve YunCMS haklarını kapsar. YunPanel'de etkinleştirme, YunPanel hakkını doğrulanmış kuruluma bağlar. YunCMS anahtarını kendi ürününde etkinleştirin.
 
 ![Ayarlar Lisans ekranında ücretsiz sürüm ve yerel aday 3 aylık Premium teklifi görünümü](assets/tr/16-license-free-offer.png)
 
@@ -39,7 +39,7 @@ YunPanel lisansları `YUNSOFT-ENTITLEMENT+JWT` sözleşmesiyle yerel olarak **Ed
   2. **İmzalı jeton** yapıştırarak (tamamen çevrimdışı) etkinleştirme yapabilir.
 - **Sıfır rutin dış ağ çağrısı:** Etkinleştirme sonrası tüm yetki kontrolleri yerel diskteki imzalı jeton üzerinden çevrimdışı çalışır; uzak servis geçici olarak erişilemez olsa bile geçerli lisansınız çalışmayı sürdürür.
 
-![Ayarlar Lisans ekranında yerel aday 3 aylık kampanya Premium görünümü (canlı kampanya açıldığında geçerli akış)](assets/tr/17-license-campaign-active.png)
+![Yerel aday derlemesinde üç aylık kampanya hakkının Lisans ekranındaki görünümü](assets/tr/17-license-campaign-active.png)
 
 ## Ücretli / kalıcı hak koruması ve kesintisiz yaşam döngüsü
 

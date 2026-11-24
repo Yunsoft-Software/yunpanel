@@ -15,10 +15,10 @@
 
 - **Kaynak paket dizini:** `docs/yunpanel-docs-0.3.0/` (`manifest.json`, `locales/tr/<slug>.md`, `locales/en/<slug>.md`, `assets/tr/*.png`, `assets/en/*.png`)
 - **Hazır aktarım arşivi (tar.gz):** `.local/website-docs/yunpanel-docs-0.3.0.tar.gz` (arşiv kökü: `yunpanel-docs-0.3.0/`, 64 girdi, sıfır symlink, sıfır path traversal, sıfır `.DS_Store`)
-- **Arşiv SHA-256:** `ab98ad9e0ccd33ad26ba1577a405f6573748332879f2e68a909a25705cfcaa23`
+- **Arşiv SHA-256:** `86942da4db7be1b16a6475372d7973cb46ade23c87eeed6ba67d1c437304d4a4`
 - **Manifest sözleşmesi:** `schemaVersion: 1`, `product: "yunpanel"`, `version: "0.3.0"`, `sourceRepo: "Yunsoft-Software/yunpanel"`, `sourceCommit: "f30fd779293ad96f83e7a76846fa70e71562730b"`, `verifiedAt: "2026-11-24T19:44:58.502Z"`, `defaultPage: "installation-and-upgrade"`.
 - **Görsel ve sayfa dili:** Tüm 22 Markdown kılavuzu kendi dilindeki `assets/<locale>/<image>.png` kaydına bağlanır. `screenshot:<manifest-id>` bağlantıları da aynı dil eşleşmesiyle desteklenir. İç bağlantılar `doc:<slug>` biçimindedir.
-- **Canlı kampanya sınırı:** Yunsoft Website üzerindeki 3 aylık ücretsiz Premium kampanyası şu an canlıda etkin değildir; Website tarafında SMTP doğrulaması ve kabul aşamasını beklemektedir. İlk kurulum ve lisans kılavuzlarındaki (`01-first-time-setup-dark.png`, `02-first-time-setup-light.png`, `16-license-free-offer.png`, `17-license-campaign-active.png`) kampanya görselleri yerel `0.3.0` (`f30fd779`) aday derlemesinden alınmış teknik doğrulama görüntüleridir; **canlı kampanya kullanım kanıtı sayılmaz**. Metinlerde 3 aylık teklifin görünümü ve etkinleştirme akışı açıkça Website'de kampanya açıldığında geçerli olacak biçimde anlatılmıştır.
+- **Kampanya bağlantıları** — İlk kurulum ve lisans kılavuzları Türkçe ve İngilizce canlı kampanya sayfalarına bağlanır. Kampanya ekran görüntüleri yerel `0.3.0` (`f30fd779`) aday derlemesinden alınmıştır.
 - **Arayüz dili:** YunPanel `0.3.0` arayüzü Türkçedir. Pakette 17 gerçek Chromium görüntüsü, her kılavuz dili için ayrı alt metin ve açıklamayla toplam 34 görsel kaydında yer alır. İngilizce kılavuzlardaki görseller aynı Türkçe arayüzü gösterir. Kaynak arayüz dili her İngilizce görsel kaydının `capturedFrom` bilgisinde belirtilir. 15 ortak ekran `tr-TR` ve `en-US` tarayıcı ayarlarında doğrulandı. Toplam 30 kontrolde sayfa hatası veya yatay taşma görülmedi (`.local/website-docs/capture-report-0.3.0.json`).
 
 ### Sayfa, Slug, Dil ve Görsel Bağları (11 Sayfa × 2 Dil = 22 Kılavuz · 17 Doğrulanmış PNG)
@@ -51,9 +51,10 @@
 3. **Ücretli ve kalıcı hakların korunması (`license-entitlement-verifier.js`, `license-entitlement-service.js`):**
    - `billingModel` desteği: mevcut `monthly_term` yanında süreli kampanya için `promotional_term` (zorunlu `exp` + `periodMonths`) ve kalıcı haklar için `permanent` / `lifetime` (`exp: null` destekli, arayüzde `Kalıcı` / `Süresiz`) eklendi.
    - `assertPaidOrPermanentEntitlementProtected`: Aktif ücretli (`paid`) lisans varken kampanya (`promotional`) jetonu/anahtarıyla ezme `409 paid_or_permanent_entitlement_protected` (`PAID_ENTITLEMENT_PROTECTED`) ile reddedilir; aktif kalıcı (`permanent`) lisans varken süreli veya kampanya hakkıyla ezme `409` (`PERMANENT_ENTITLEMENT_PROTECTED`) ile reddedilir. Kampanyadan ücretli veya kalıcı lisansa yükseltme serbesttir.
-4. **Açık kalan ortak Website bağımlılığı ve canlı sınırlar:**
-   - **Website kampanyası henüz canlı değil:** Yunsoft Website kampanyası SMTP doğrulaması ve yayın kabulünü beklemektedir; canlı kampanya açılmadan müşteri kaydı veya canlı 3 aylık kampanya dağıtımı gerçekleşmez. Yerel aday derlemesinden alınan kampanya görselleri (`01-first-time-setup-*.png`, `16-license-free-offer.png`, `17-license-campaign-active.png`) yalnızca yerel entegrasyon doğrulamasıdır, canlı kullanım kanıtı sayılmaz.
-   - **URL / claim eşlemesi:** Yunsoft Website'ın kesin nihai kampanya/doküman URL slug'ı ve Commerce `promotional_term` / `campaignCode` claim alan adları kesinleştiğinde gerekirse yalnız `YUNPANEL_PREMIUM_OFFER_URL` / `YUNPANEL_DOCS_URL` varsayılanları veya claim eşlemesi güncellenir; diğer projelerin dosyalarına dokunulmamıştır.
+4. **Website yayını ve kabul kanıtı**
+   - Website ekibi 24 Kasım 2026 saat 23.21'de `XRSjtF4lwCPHmXV5lpCZI` derlemesinde YunPanel 0.3.0 ve YunCMS 2.1.3 kılavuzlarını iki dilde doğruladı. YunPanel'in 34 ve YunCMS'in 16 canlı görsel dosyasının özeti manifestlerle eşleşti.
+   - Sabit kurulum adresi `/kampanya/premium-3-ay`, 308 ile Türkçe `/tr/kampanya/premium-3-ay` yoluna yönlendirir. İngilizce kampanya yolu `/campaign/premium-3-months` olarak doğrulandı. Türkçe ve İngilizce ilk kurulum ve lisans kılavuzları bu sayfalara bağlanır.
+   - Uygulamaya özel mevcut posta taşıması için yerel `SmtpMailer.verify()` geçti. Gerçek dış gelen kutusuna teslim ve üretimde verilen hakkın ürün kurulumunda etkinleşmesi açık kabul olarak izlenir.
 
 ## 4. Doğrulama Komutları ve Gerçek Çıktılar
 
@@ -74,3 +75,4 @@ Aşağıdaki tüm komutlar mock/stub olmadan gerçek SQLite, gerçek API, gerçe
    - `node scripts/verify-and-package-docs.mjs --bundle docs/yunpanel-docs-0.3.0 --package .local/website-docs/yunpanel-docs-0.3.0.tar.gz` → 11 sayfa, 22 kılavuz dosyası, 34 görsel kaydı, 50 iç bağlantı, 36 görsel bağlantısı ve 64 arşiv girdisiyle geçti.
    - `node --test apps/web/test/versioned-docs-package.test.js` → **3 / 3 geçti**. Sayfaya farklı dilde kayıtlı bir görselin hem dosya yoluyla hem `screenshot:<id>` ile bağlanması reddedilir.
    - Yunsoft Website'in `validateDocsBundle` ve `importDocsBundle` işlevleri paketi izole geçici dizinde uyarısız kabul etti. İçe aktarılan dizinde 34 görsel dosyasının varlığı doğrulandı.
+   - Canlı kampanya sayfalarına bağlanan dört kılavuz güncellendikten sonra repo denetimi, üç paket testi ve Website'in kendi paket doğrulayıcısı tekrar geçti. Güncellenen arşiv 64 girdi içerir.

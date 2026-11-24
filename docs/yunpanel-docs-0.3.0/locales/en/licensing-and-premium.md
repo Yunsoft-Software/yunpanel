@@ -17,14 +17,14 @@ YunPanel includes unlimited website management for a single Owner permanently in
 
 ## Credit-card-free 3-month Premium campaign (Yunsoft Website)
 
-> **Live campaign status:** The 3-month free Premium campaign on Yunsoft Website is not yet live; it is currently awaiting SMTP verification and launch acceptance on Yunsoft Website. The offer visibility and activation workflow described below applies **once the campaign opens on Yunsoft Website**. The campaign offer and active-campaign screenshots shown on this page are technical verification captures from the local `0.3.0` (`f30fd779`) candidate build and are not evidence of live production campaign usage.
+> Visit [Yunsoft's three-month Premium campaign page](https://yunsoft.com/campaign/premium-3-months) for the application and current terms. Campaign screenshots were captured in the local `0.3.0` (`f30fd779`) candidate build.
 
-Once the campaign is live on Yunsoft Website, fresh installations and Free-tier panels will be able to opt into the credit-card-free **3-month YunPanel Premium** offer via Yunsoft email subscription:
+New installations and Free-tier panels can apply for the optional **three-month YunPanel Premium** offer through Yunsoft without a credit card.
 
-- **First-Time Setup and License settings entry points:** An optional **Teklifi Yunsoft'ta incele** (View offer on Yunsoft) link appears during [First-Time Setup](doc:first-time-setup) and on **Ayarlar → Lisans** (Settings → License, `/settings?section=license`) when no Premium license is active, and applies once the campaign opens on Yunsoft Website.
+- **First-Time Setup and License settings** — Choose **Teklifi Yunsoft'ta incele** (View offer on Yunsoft) during [First-Time Setup](doc:first-time-setup) or in **Ayarlar → Lisans** (Settings → License) on the Free tier to open the Yunsoft campaign page.
 - **Strict privacy boundary:** Campaign registration is managed solely by **Yunsoft Website**. The customer panel never stores a newsletter or subscriber email list. The referral link is a static HTTPS URL without query strings or fragments (`referrerPolicy="no-referrer"`); recovery email, domain name, and installation ID are never appended to the URL.
-- **One grant per email or domain:** Once live, the same normalized email address or domain cannot claim a second 3-month promotional grant.
-- **Single campaign record covering YunPanel and YunCMS:** A single campaign record on Yunsoft Website carries YunPanel and YunCMS entitlements together; once the campaign is active, YunPanel activation sends `productCode: "yunpanel_premium"` to activate only the YunPanel entitlement for the verified installation. Tokens issued for another product (`yuncms_premium`) are strictly rejected with `PRODUCT_MISMATCH`.
+- **One grant per email or domain** — The same email address or domain may be used once.
+- **One application, two products** — One application covers YunPanel and YunCMS. Activate the YunPanel entitlement in your verified YunPanel installation and use the YunCMS key in YunCMS.
 
 ![YunPanel License settings screen showing Free tier and local candidate 3-month Premium offer view (Turkish UI)](assets/en/16-license-free-offer.png)
 
@@ -39,7 +39,7 @@ YunPanel verifies entitlements locally using the `YUNSOFT-ENTITLEMENT+JWT` contr
   2. **İmzalı jeton** (Signed token): Paste a signed entitlement JWT directly for 100% offline activation.
 - **Zero routine remote calls:** Once activated, every status and capability check runs offline against local disk state, so temporary upstream outages never disrupt an active license.
 
-![YunPanel License settings screen showing local candidate 3-month Campaign Premium view, applicable once live on Yunsoft Website (Turkish UI)](assets/en/17-license-campaign-active.png)
+![License settings showing the three-month campaign entitlement in the local candidate build (Turkish UI)](assets/en/17-license-campaign-active.png)
 
 ## Paid / permanent entitlement protection and non-destructive lifecycle
 

@@ -23,17 +23,19 @@ test('YunPanel 0.3.0 bilingual docs bundle satisfies Yunsoft Website importer co
   assert.ok(result.internalLinkCount >= 40, `Expected rich internal doc:<slug> cross-links, got ${result.internalLinkCount}`);
   assert.ok(result.imageRefCount >= 34, `Expected TR & EN image references, got ${result.imageRefCount}`);
 
-  // Live campaign accuracy & local-candidate boundary checks in TR & EN setup/license docs
+  // Public campaign links and screenshot provenance in both guide languages.
   const trLicense = readFileSync(path.join(BUNDLE_DIR, 'locales/tr/licensing-and-premium.md'), 'utf8');
   const enLicense = readFileSync(path.join(BUNDLE_DIR, 'locales/en/licensing-and-premium.md'), 'utf8');
   const trSetup = readFileSync(path.join(BUNDLE_DIR, 'locales/tr/first-time-setup.md'), 'utf8');
   const enSetup = readFileSync(path.join(BUNDLE_DIR, 'locales/en/first-time-setup.md'), 'utf8');
-  assert.match(trLicense, /SMTP doğrulaması/);
-  assert.match(trLicense, /canlı kampanya kullanım kanıtı sayılmaz/);
-  assert.match(enLicense, /SMTP verification/);
-  assert.match(enLicense, /not evidence of live production campaign usage/);
-  assert.match(trSetup, /SMTP doğrulaması/);
-  assert.match(enSetup, /SMTP verification/);
+  for (const guide of [trLicense, trSetup]) {
+    assert.match(guide, /https:\/\/yunsoft\.com\/kampanya\/premium-3-ay\)/);
+    assert.match(guide, /yerel `0\.3\.0` \(`f30fd779`\) aday derlemesi/);
+  }
+  for (const guide of [enLicense, enSetup]) {
+    assert.match(guide, /https:\/\/yunsoft\.com\/campaign\/premium-3-months\)/);
+    assert.match(guide, /local `0\.3\.0` \(`f30fd779`\) candidate build/);
+  }
 });
 
 test('Docs validator checks image paths and the language of file and screenshot ID references', () => {

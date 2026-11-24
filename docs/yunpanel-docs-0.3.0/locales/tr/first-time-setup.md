@@ -37,14 +37,14 @@ Açık ve koyu tema arasında sağ üstteki tema düğmesiyle geçiş yapabilirs
 
 ## 3. İsteğe bağlı 3 aylık ücretsiz Premium teklifi
 
-> **Kampanya yayın durumu:** Yunsoft Website üzerindeki 3 aylık ücretsiz Premium kampanyası şu an canlıda etkin değildir; Website tarafında SMTP doğrulaması ve yayın kabulünü beklemektedir. Aşağıdaki yönlendirme ve etkinleştirme akışı **kampanya Yunsoft Website'de açıldığında** geçerli olacaktır. Bu sayfadaki kampanya görselleri yerel `0.3.0` (`f30fd779`) aday derlemesinden alınmış teknik doğrulama görüntüleridir ve canlı kampanya kullanım kanıtı değildir.
+> Başvuru ve güncel koşullar için [Yunsoft'un üç aylık Premium kampanya sayfasına](https://yunsoft.com/kampanya/premium-3-ay) bakın. Kampanya görselleri yerel `0.3.0` (`f30fd779`) aday derlemesinde alınmıştır.
 
 İlk kurulum formunun altında isteğe bağlı **3 aylık ücretsiz Premium teklifi** kartı yer alır:
 
 - **Tamamen isteğe bağlıdır:** Owner hesabını oluşturmak veya paneli ücretsiz sürümde kullanmak için bu bağlantıyı açmanız gerekmez.
-- **Kredi kartı gerekmez:** Kampanya Yunsoft Website'de açıldığında, Yunsoft e-posta aboneliği ile kredi kartı gerektirmeyen 3 aylık YunPanel Premium hakkı Yunsoft web sitesi üzerinden sağlanacaktır.
+- **Kredi kartı gerekmez** — Uygun başvurular için Yunsoft web sitesinde e-posta aboneliğini doğrulayarak üç aylık YunPanel Premium hakkı alabilirsiniz.
 - **Gizlilik sınırı:** Müşteri paneli e-posta bülteni listesi saklamaz. Teklif bağlantısı (`referrerPolicy="no-referrer"`) sabit bir HTTPS adresidir; kurtarma e-postanız, alan adınız veya kurulum kimliğiniz bağlantıya eklenmez.
-- **Tekil hak ve ortak kampanya:** Kampanya canlıya alındığında aynı normalize e-posta veya alan adı ikinci kez kampanya hakkı alamayacaktır. Tek kampanya kaydı YunPanel ve YunCMS haklarını birlikte taşır; kampanya açıldıktan sonra aldığınız lisans anahtarını **Ayarlar → Lisans** ekranından girdiğinizde yalnız doğrulanmış YunPanel kurulumunuz için etkinleşir.
+- **Tekil hak ve ortak kampanya** — Aynı e-posta adresi veya alan adı için kampanyadan bir kez yararlanılabilir. Tek başvuru YunPanel ve YunCMS haklarını birlikte kapsar. Aldığınız YunPanel anahtarını **Ayarlar → Lisans** ekranında doğrulanmış kurulumunuz için etkinleştirin.
 
 Ayrıntılı lisans ve ücretli/kalıcı hak koruması kuralları için [Lisanslama ve Üç Aylık Premium](doc:licensing-and-premium) kılavuzuna bakın.
 

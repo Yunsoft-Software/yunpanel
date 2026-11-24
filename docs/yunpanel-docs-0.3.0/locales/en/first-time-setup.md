@@ -37,14 +37,14 @@ You can switch between dark and light themes at any time using the top-right the
 
 ## 3. Optional 3-month free Premium offer
 
-> **Campaign launch status:** The 3-month free Premium campaign on Yunsoft Website is not yet live; it is awaiting SMTP verification and launch acceptance on Yunsoft Website. The referral and activation workflow described below applies **once the campaign opens on Yunsoft Website**. Campaign screenshots on this page are technical verification captures from the local `0.3.0` (`f30fd779`) candidate build and do not represent live production campaign usage.
+> Visit [Yunsoft's three-month Premium campaign page](https://yunsoft.com/campaign/premium-3-months) for the application and current terms. Campaign screenshots were captured in the local `0.3.0` (`f30fd779`) candidate build.
 
 Below the setup form, YunPanel displays an optional **3 aylık ücretsiz Premium teklifi** (3-Month Free Premium Offer) card:
 
 - **Completely optional:** You can complete Owner setup and run YunPanel Free without opening the offer link.
-- **No credit card required:** Once the campaign is enabled on Yunsoft Website, subscribing to the Yunsoft email newsletter on Yunsoft Website will grant a credit-card-free 3-month YunPanel Premium entitlement.
+- **No credit card required** — Eligible applicants can verify their email subscription on the Yunsoft website to receive three months of YunPanel Premium.
 - **Privacy boundary:** The customer panel does not store any newsletter subscriber list. The external link (**Teklifi Yunsoft'ta incele**, `referrerPolicy="no-referrer"`) is a static HTTPS URL with no query parameters or fragments; neither your recovery email, domain name, nor installation ID is appended to the link.
-- **Single-claim & shared campaign rules:** Once active on Yunsoft Website, the same normalized email address or domain cannot claim a second promotional entitlement. A single campaign record on Yunsoft Website carries YunPanel and YunCMS entitlements together; activating the issued key later in **Ayarlar → Lisans** (Settings → License) activates only the YunPanel entitlement for your verified installation.
+- **One claim per email or domain** — The same email address or domain may be used once. One application covers YunPanel and YunCMS. Use **Ayarlar → Lisans** (Settings → License) to activate the YunPanel key for your verified installation.
 
 See [Licensing and Three-Month Premium](doc:licensing-and-premium) for full offline verification and paid/permanent entitlement protection details.
 

@@ -288,7 +288,7 @@
       "file": "assets/tr/01-first-time-setup-dark.png",
       "sha256": "e21a70c62de58dbb4270254b6a729dc5112db70bf5d50bd97cb60e98253aa786",
       "alt": "YunPanel ilk kurulum ekrani ve yerel aday 3 aylik ucretsiz Premium teklifi (koyu tema)",
-      "caption": "YunPanel 0.3.0 yerel aday derlemesinde Owner hesabi olusturma formu ve Website kampanyasi acildiginda gecerli olacak istege bagli 3 aylik Premium yonlendirmesi (canli kampanya kaniti degildir).",
+      "caption": "YunPanel 0.3.0 yerel aday derlemesinde Owner hesabı oluşturma formu ve isteğe bağlı üç aylık Premium bağlantısı.",
       "capturedFrom": "local-candidate route=/ (setupRequired=true) role=anonymous theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b liveCampaignActive=false",
       "sanitized": true
     },
@@ -456,7 +456,7 @@
       "file": "assets/tr/16-license-free-offer.png",
       "sha256": "4c46530516325648c09f37424cf1aed3aa3c662bdc3e1b84b6ff3626699b67a1",
       "alt": "YunPanel Lisans ekrani ucretsiz surum ve yerel aday 3 aylik Premium teklifi",
-      "caption": "Yerel 0.3.0 aday derlemesinde ucretsiz surum lisans durumu ve Website kampanyasi acildiginda gecerli olacak teklif bolumu (canli kampanya kaniti degildir).",
+      "caption": "Yerel 0.3.0 aday derlemesinde ücretsiz sürümün lisans durumu ve kampanya teklifi.",
       "capturedFrom": "local-candidate route=/settings?section=license (free tier) role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b liveCampaignActive=false",
       "sanitized": true
     },
@@ -468,7 +468,7 @@
       "file": "assets/tr/17-license-campaign-active.png",
       "sha256": "03080649298db8f9b9617e30952f3e990d84af7d18ffae26df92a0171a776174",
       "alt": "YunPanel Lisans ekrani yerel aday 3 aylik kampanya Premium durumu",
-      "caption": "Yerel 0.3.0 aday derlemesinde 3 aylik kampanya jetonu dogrulama gorunumu; Website kampanyasi acildiginda gecerlidir (canli kampanya kaniti degildir).",
+      "caption": "Yerel 0.3.0 aday derlemesinde doğrulanan üç aylık kampanya hakkının Lisans ekranındaki görünümü.",
       "capturedFrom": "local-candidate route=/settings?section=license (campaign active) role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b liveCampaignActive=false",
       "sanitized": true
     },
@@ -623,8 +623,8 @@
       "locale": "en",
       "file": "assets/en/17-license-campaign-active.png",
       "sha256": "03080649298db8f9b9617e30952f3e990d84af7d18ffae26df92a0171a776174",
-      "alt": "YunPanel License settings screen showing local candidate 3-month Campaign Premium view, applicable once live on Yunsoft Website (Turkish UI)",
-      "caption": "YunPanel License settings screen showing local candidate 3-month Campaign Premium view, applicable once live on Yunsoft Website (Turkish UI). This is the original YunPanel 0.3.0 interface shown with English guide text.",
+      "alt": "License settings showing the three-month campaign entitlement in the local candidate build (Turkish UI)",
+      "caption": "License settings showing the three-month campaign entitlement in the local YunPanel 0.3.0 candidate build. The interface is in Turkish.",
       "capturedFrom": "local-candidate route=/settings?section=license (campaign active) role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b liveCampaignActive=false docLocale=en actualUiLocale=tr",
       "sanitized": true
     },
