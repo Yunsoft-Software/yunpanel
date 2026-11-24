@@ -807,6 +807,8 @@ const licenseEntitlementService = createLicenseEntitlementService({
   instanceId: localServerId,
   masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY ?? null,
   development: process.env.NODE_ENV === 'development',
+  offerUrl: process.env.YUNPANEL_PREMIUM_OFFER_URL,
+  docsUrl: process.env.YUNPANEL_DOCS_URL,
 });
 authorizeApiKeyActor = createApiKeyActorAuthorizer({ apiKeyStore, tenantSiteStore, ownerMfaRequired,
   getAutomationUser: (userId) => authStore.getAutomationUser(userId), mfaEnabled: (userId) => authStore.mfa.enabled(userId) });
@@ -1415,6 +1417,8 @@ const listener = createAuthenticatedApi({
   proxyToken: internalProxyToken,
   trustedProxyIps: process.env.YUNPANEL_TRUSTED_PROXY_IPS,
   licenseEntitlementService,
+  setupOfferUrl: process.env.YUNPANEL_PREMIUM_OFFER_URL,
+  docsUrl: process.env.YUNPANEL_DOCS_URL,
   onCustomerQuotaUpdated: async () => {
     if (process.platform !== 'linux' || !localRuntimeInstance) return;
     try {

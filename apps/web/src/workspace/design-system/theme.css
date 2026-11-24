@@ -2371,6 +2371,79 @@ html .auth-help {
   border-top: 1px solid var(--ws-border) !important;
 }
 
+html .auth-setup-offer {
+  margin-top: 20px !important;
+  padding: 14px 16px !important;
+  border-radius: var(--ws-radius-md, 8px) !important;
+  border: 1px solid var(--ws-border) !important;
+  background: var(--ws-surface-subtle) !important;
+  display: grid !important;
+  gap: 8px !important;
+}
+
+html .auth-setup-offer-title {
+  margin: 0 !important;
+  font-size: 13.5px !important;
+  font-weight: 600 !important;
+  color: var(--ws-text) !important;
+}
+
+html .auth-setup-offer-copy {
+  margin: 0 !important;
+  font-size: 12.5px !important;
+  line-height: 1.55 !important;
+  color: var(--ws-muted) !important;
+}
+
+html .auth-setup-offer-actions {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 10px 14px !important;
+  margin-top: 4px !important;
+}
+
+html .auth-setup-offer-link {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  min-height: 34px !important;
+  padding: 6px 12px !important;
+  border-radius: var(--ws-radius, 6px) !important;
+  border: 1px solid var(--ws-control-border) !important;
+  background: var(--ws-surface-raised) !important;
+  color: var(--ws-text) !important;
+  font-size: 12.5px !important;
+  font-weight: 600 !important;
+  text-decoration: none !important;
+  transition: var(--ws-transition) !important;
+}
+
+html .auth-setup-offer-link:hover {
+  background: var(--ws-surface-hover) !important;
+  border-color: var(--ws-primary) !important;
+}
+
+html .auth-setup-offer-link:focus-visible,
+html .auth-setup-offer-doc:focus-visible {
+  outline: none !important;
+  box-shadow: 0 0 0 2px var(--ws-ring) !important;
+}
+
+html .auth-setup-offer-doc {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  font-size: 12.5px !important;
+  font-weight: 600 !important;
+  color: var(--ws-primary-hover, #818cf8) !important;
+  text-decoration: none !important;
+}
+
+html .auth-setup-offer-doc:hover {
+  text-decoration: underline !important;
+}
+
 html :is(.auth-error, .auth-banner) {
   padding: 10px 14px !important;
   border-radius: var(--ws-radius, 6px) !important;

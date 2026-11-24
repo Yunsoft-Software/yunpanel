@@ -94,8 +94,55 @@ export function resolveLicenseBadgeState(license) {
   return 'unknown';
 }
 
+export const DEFAULT_PREMIUM_OFFER_URL = 'https://yunsoft.com/kampanya/premium-3-ay';
+export const DEFAULT_DOCS_URL = 'https://yunsoft.com/docs/yunpanel';
+
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+
+function isBrowserLoopbackHost() {
+  if (typeof window === 'undefined' || !window.location?.hostname) return false;
+  return LOOPBACK_HOSTS.has(window.location.hostname.toLowerCase());
+}
+
+export function sanitizeExternalYunsoftUrl(rawUrl, {
+  fallbackUrl = null,
+  allowLoopbackHttp = isBrowserLoopbackHost(),
+} = {}) {
+  const validate = (candidate) => {
+    if (typeof candidate !== 'string') return null;
+    const trimmed = candidate.trim();
+    if (!trimmed || trimmed.length > 512 || /[\u0000-\u001f\u007f\s?#]/.test(trimmed)) return null;
+    let parsed;
+    try {
+      parsed = new URL(trimmed);
+    } catch {
+      return null;
+    }
+    if (parsed.username || parsed.password || parsed.search || parsed.hash) return null;
+    const hostLower = parsed.hostname.toLowerCase();
+    if (/\.44$/.test(hostLower)) return null;
+    const loopbackHttp = Boolean(allowLoopbackHttp && LOOPBACK_HOSTS.has(hostLower) && parsed.protocol === 'http:');
+    if (parsed.protocol !== 'https:' && !loopbackHttp) return null;
+    if (parsed.pathname.includes('@') || /%40/i.test(parsed.pathname)) return null;
+    const normalizedPath = parsed.pathname.replace(/\/+$/, '') || '/';
+    return normalizedPath === '/' ? parsed.origin : `${parsed.origin}${normalizedPath}`;
+  };
+
+  return validate(rawUrl) ?? (fallbackUrl ? validate(fallbackUrl) : null);
+}
+
 export function formatBillingPeriodLabel(license) {
   if (!license) return '—';
+  if (license.isPermanent || license.grantKind === 'permanent' || license.billingPeriod === 'permanent') {
+    return 'Kalıcı';
+  }
+  if (
+    (license.isPromotional || license.grantKind === 'promotional' || license.billingPeriod === 'promotional')
+    && Number.isSafeInteger(license.periodMonths)
+    && license.periodMonths > 0
+  ) {
+    return `Kampanya · ${license.periodMonths} ay`;
+  }
   if (license.periodMonths === 1 || license.billingPeriod === 'monthly') {
     return 'Aylık · 1 ay';
   }
@@ -114,6 +161,8 @@ export function formatLicenseError(error) {
   switch (code) {
     case 'premium_license_required':
       return 'Bu işlem için aktif bir YunPanel Premium lisansı gerekiyor.';
+    case 'paid_or_permanent_entitlement_protected':
+      return 'Aktif ücretli veya kalıcı lisansınız korunuyor; kampanya hakkı mevcut lisansın üzerine yazılmaz.';
     case 'license_public_key_not_configured':
       return 'Sunucuda lisans doğrulama açık anahtarı tanımlı değil.';
     case 'panel_domain_unconfigured':

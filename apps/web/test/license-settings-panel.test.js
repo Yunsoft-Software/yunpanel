@@ -39,6 +39,7 @@ const {
   formatLicenseError,
   formatLicenseStatusLabel,
   resolveLicenseBadgeState,
+  sanitizeExternalYunsoftUrl,
 } = await import('../src/workspace/license-client.js');
 const { WorkspaceContext } = await import('../src/workspace/WorkspaceContext.jsx');
 
@@ -140,8 +141,27 @@ test('license-client formatters cover Free, Monthly (1m), Yearly (12m), Expired,
 
   assert.equal(formatBillingPeriodLabel({ periodMonths: 1, billingPeriod: 'monthly' }), 'Aylık · 1 ay');
   assert.equal(formatBillingPeriodLabel({ periodMonths: 12, billingPeriod: 'yearly' }), 'Yıllık · 12 ay');
+  assert.equal(formatBillingPeriodLabel({ periodMonths: 3, billingPeriod: 'promotional', grantKind: 'promotional' }), 'Kampanya · 3 ay');
+  assert.equal(formatBillingPeriodLabel({ periodMonths: null, billingPeriod: 'permanent', grantKind: 'permanent' }), 'Kalıcı');
   assert.equal(formatBillingPeriodLabel({ periodMonths: null, billingPeriod: null }), '—');
 
+  assert.equal(
+    sanitizeExternalYunsoftUrl('https://yunsoft.com/kampanya/premium-3-ay?email=owner@ornek.test', {
+      fallbackUrl: 'https://yunsoft.com/kampanya/premium-3-ay',
+      allowLoopbackHttp: false,
+    }),
+    'https://yunsoft.com/kampanya/premium-3-ay',
+  );
+  assert.equal(
+    sanitizeExternalYunsoftUrl('http://yunsoft.com/kampanya/premium-3-ay', { allowLoopbackHttp: false }),
+    null,
+  );
+  assert.equal(
+    sanitizeExternalYunsoftUrl('https://192.0.2.44/kampanya/premium-3-ay', { allowLoopbackHttp: false }),
+    null,
+  );
+
+  assert.match(formatLicenseError({ code: 'paid_or_permanent_entitlement_protected' }), /ücretli veya kalıcı lisansınız korunuyor/);
   assert.match(formatLicenseError({ code: 'stale_license_token' }), /mevcut sürümden daha eski/);
   assert.match(formatLicenseError({ code: 'license_product_mismatch' }), /başka bir Yunsoft ürününe/);
   assert.match(formatLicenseError({ code: 'license_domain_mismatch' }), /eşleşmiyor/);

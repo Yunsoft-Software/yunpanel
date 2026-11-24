@@ -36,6 +36,10 @@ const IPV4_REGEX = /^(?:\d{1,3}\.){3}\d{1,3}$/;
 const LABEL_REGEX = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const KEY_ID_REGEX = /^[a-f0-9]{16}$/;
 const PUBLIC_KEY_BLOCK_REGEX = /-----BEGIN PUBLIC KEY-----[\s\S]*?-----END PUBLIC KEY-----/g;
+const TERM_BILLING_MODELS = new Set(['monthly_term', 'promotional_term']);
+const PERMANENT_BILLING_MODELS = new Set(['permanent', 'lifetime']);
+const PROMOTIONAL_GRANT_TYPES = new Set(['promotional', 'promo', 'campaign', 'newsletter_promo', 'trial']);
+const CAMPAIGN_CODE_REGEX = /^[A-Za-z0-9][A-Za-z0-9._-]{1,63}$/;
 
 export function isCanonicalBase64Url(segment) {
   if (typeof segment !== 'string' || segment.length === 0) return false;
@@ -285,7 +289,41 @@ export function classifyYunpanelProductCode(rawCode) {
   return Object.freeze({ valid: false, reason: 'INVALID_PRODUCT_CODE', productCode: null });
 }
 
-export function resolveBillingPeriodLabel(periodMonths) {
+export function sanitizeCampaignCode(rawCode) {
+  if (typeof rawCode !== 'string') return null;
+  const trimmed = rawCode.trim();
+  if (!trimmed || !CAMPAIGN_CODE_REGEX.test(trimmed)) return null;
+  return trimmed;
+}
+
+export function classifyEntitlementGrantKind(payload) {
+  if (!payload || typeof payload !== 'object') return 'paid';
+  if (PERMANENT_BILLING_MODELS.has(payload.billingModel)) {
+    return 'permanent';
+  }
+  if (payload.billingModel === 'promotional_term' || payload.promotional === true || payload.trial === true) {
+    return 'promotional';
+  }
+  const explicitKind = String(
+    payload.grantKind ?? payload.grantType ?? payload.entitlementType ?? '',
+  ).trim().toLowerCase();
+  if (PROMOTIONAL_GRANT_TYPES.has(explicitKind)) {
+    return 'promotional';
+  }
+  if (sanitizeCampaignCode(payload.campaignCode ?? payload.campaignId) && payload.paid !== true) {
+    return 'promotional';
+  }
+  return 'paid';
+}
+
+export function resolveBillingPeriodLabel(periodMonths, options = {}) {
+  const { billingModel = null, grantKind = null } = options;
+  if (grantKind === 'permanent' || PERMANENT_BILLING_MODELS.has(billingModel)) {
+    return 'permanent';
+  }
+  if (grantKind === 'promotional' && Number.isSafeInteger(periodMonths) && periodMonths > 0) {
+    return 'promotional';
+  }
   if (periodMonths === 1) return 'monthly';
   if (periodMonths === 12) return 'yearly';
   if (Number.isSafeInteger(periodMonths) && periodMonths > 0) return 'custom_term';
@@ -316,6 +354,10 @@ function rejectedVerification(reason, status = 'invalid', extra = {}) {
     reason,
     keyId: extra.keyId ?? null,
     claims: extra.claims ?? null,
+    grantKind: extra.grantKind ?? null,
+    isPermanent: extra.grantKind === 'permanent',
+    isPromotional: extra.grantKind === 'promotional',
+    campaignCode: extra.campaignCode ?? null,
     billingPeriod: extra.billingPeriod ?? null,
     periodMonths: extra.periodMonths ?? null,
     startsAt: extra.startsAt ?? null,
@@ -408,12 +450,23 @@ export function verifyYunpanelEntitlementToken(token, options = {}) {
     return rejectedVerification(productCheck.reason, 'invalid', { keyId: header.kid });
   }
 
-  if (payload.billingModel !== 'monthly_term') {
+  const isTermModel = TERM_BILLING_MODELS.has(payload.billingModel);
+  const isPermanentModel = PERMANENT_BILLING_MODELS.has(payload.billingModel);
+  if (!isTermModel && !isPermanentModel) {
     return rejectedVerification('INVALID_BILLING_MODEL', 'invalid', { keyId: header.kid });
   }
 
-  if (!Number.isSafeInteger(payload.periodMonths) || payload.periodMonths < 1 || payload.periodMonths > 120) {
-    return rejectedVerification('INVALID_BILLING_PERIOD', 'invalid', { keyId: header.kid });
+  let resolvedPeriodMonths = null;
+  if (isTermModel) {
+    if (!Number.isSafeInteger(payload.periodMonths) || payload.periodMonths < 1 || payload.periodMonths > 120) {
+      return rejectedVerification('INVALID_BILLING_PERIOD', 'invalid', { keyId: header.kid });
+    }
+    resolvedPeriodMonths = payload.periodMonths;
+  } else if (payload.periodMonths !== null && payload.periodMonths !== undefined) {
+    if (!Number.isSafeInteger(payload.periodMonths) || payload.periodMonths < 1 || payload.periodMonths > 1200) {
+      return rejectedVerification('INVALID_BILLING_PERIOD', 'invalid', { keyId: header.kid });
+    }
+    resolvedPeriodMonths = payload.periodMonths;
   }
 
   const nowMs = now instanceof Date ? now.getTime() : Number(now);
@@ -433,28 +486,50 @@ export function verifyYunpanelEntitlementToken(token, options = {}) {
     return rejectedVerification('TOKEN_NOT_YET_VALID', 'invalid', { keyId: header.kid });
   }
 
-  if (payload.exp === null || payload.exp === undefined) {
-    return rejectedVerification('MISSING_EXPIRATION_FOR_TERM_LICENSE', 'invalid', { keyId: header.kid });
-  }
-  if (!Number.isSafeInteger(payload.exp) || payload.exp <= 0 || payload.exp <= payload.iat) {
+  let resolvedExpiresAtMs = null;
+  let resolvedExpiresAtIso = null;
+  if (isTermModel) {
+    if (payload.exp === null || payload.exp === undefined) {
+      return rejectedVerification('MISSING_EXPIRATION_FOR_TERM_LICENSE', 'invalid', { keyId: header.kid });
+    }
+    if (!Number.isSafeInteger(payload.exp) || payload.exp <= 0 || payload.exp <= payload.iat) {
+      return rejectedVerification('INVALID_EXPIRATION', 'invalid', { keyId: header.kid });
+    }
+    resolvedExpiresAtMs = payload.exp * 1000;
+    resolvedExpiresAtIso = new Date(resolvedExpiresAtMs).toISOString();
+    if (payload.expiresAt !== null && payload.expiresAt !== undefined) {
+      if (typeof payload.expiresAt !== 'string') {
+        return rejectedVerification('INVALID_EXPIRATION', 'invalid', { keyId: header.kid });
+      }
+      const parsedExpiresMs = Date.parse(payload.expiresAt);
+      if (!Number.isFinite(parsedExpiresMs)) {
+        return rejectedVerification('INVALID_EXPIRATION', 'invalid', { keyId: header.kid });
+      }
+      if (Math.abs(Math.floor(parsedExpiresMs / 1000) - payload.exp) > 2) {
+        return rejectedVerification('INVALID_EXPIRATION', 'invalid', { keyId: header.kid });
+      }
+      resolvedExpiresAtMs = Math.min(resolvedExpiresAtMs, parsedExpiresMs);
+      resolvedExpiresAtIso = new Date(parsedExpiresMs).toISOString();
+    }
+  } else if (payload.exp !== null && payload.exp !== undefined) {
+    if (!Number.isSafeInteger(payload.exp) || payload.exp <= 0 || payload.exp <= payload.iat) {
+      return rejectedVerification('INVALID_EXPIRATION', 'invalid', { keyId: header.kid });
+    }
+    resolvedExpiresAtMs = payload.exp * 1000;
+    resolvedExpiresAtIso = new Date(resolvedExpiresAtMs).toISOString();
+    if (payload.expiresAt !== null && payload.expiresAt !== undefined) {
+      if (typeof payload.expiresAt !== 'string') {
+        return rejectedVerification('INVALID_EXPIRATION', 'invalid', { keyId: header.kid });
+      }
+      const parsedExpiresMs = Date.parse(payload.expiresAt);
+      if (!Number.isFinite(parsedExpiresMs) || Math.abs(Math.floor(parsedExpiresMs / 1000) - payload.exp) > 2) {
+        return rejectedVerification('INVALID_EXPIRATION', 'invalid', { keyId: header.kid });
+      }
+      resolvedExpiresAtMs = Math.min(resolvedExpiresAtMs, parsedExpiresMs);
+      resolvedExpiresAtIso = new Date(parsedExpiresMs).toISOString();
+    }
+  } else if (payload.expiresAt !== null && payload.expiresAt !== undefined) {
     return rejectedVerification('INVALID_EXPIRATION', 'invalid', { keyId: header.kid });
-  }
-
-  let resolvedExpiresAtMs = payload.exp * 1000;
-  let resolvedExpiresAtIso = new Date(resolvedExpiresAtMs).toISOString();
-  if (payload.expiresAt !== null && payload.expiresAt !== undefined) {
-    if (typeof payload.expiresAt !== 'string') {
-      return rejectedVerification('INVALID_EXPIRATION', 'invalid', { keyId: header.kid });
-    }
-    const parsedExpiresMs = Date.parse(payload.expiresAt);
-    if (!Number.isFinite(parsedExpiresMs)) {
-      return rejectedVerification('INVALID_EXPIRATION', 'invalid', { keyId: header.kid });
-    }
-    if (Math.abs(Math.floor(parsedExpiresMs / 1000) - payload.exp) > 2) {
-      return rejectedVerification('INVALID_EXPIRATION', 'invalid', { keyId: header.kid });
-    }
-    resolvedExpiresAtMs = Math.min(resolvedExpiresAtMs, parsedExpiresMs);
-    resolvedExpiresAtIso = new Date(parsedExpiresMs).toISOString();
   }
 
   const domainCheck = normalizeLicenseDomain(payload.domain, { allowLoopback: Boolean(allowStaging) });
@@ -499,7 +574,12 @@ export function verifyYunpanelEntitlementToken(token, options = {}) {
     ? payload.licenseId.trim()
     : payload.sub.trim();
 
-  const billingPeriod = resolveBillingPeriodLabel(payload.periodMonths);
+  const grantKind = classifyEntitlementGrantKind(payload);
+  const campaignCode = sanitizeCampaignCode(payload.campaignCode ?? payload.campaignId);
+  const billingPeriod = resolveBillingPeriodLabel(resolvedPeriodMonths, {
+    billingModel: payload.billingModel,
+    grantKind,
+  });
   const startsAt = typeof payload.startsAt === 'string' && Number.isFinite(Date.parse(payload.startsAt))
     ? new Date(Date.parse(payload.startsAt)).toISOString()
     : new Date(payload.nbf * 1000).toISOString();
@@ -513,7 +593,9 @@ export function verifyYunpanelEntitlementToken(token, options = {}) {
     productCode: productCheck.productCode,
     edition: typeof payload.edition === 'string' ? payload.edition : 'premium',
     billingModel: payload.billingModel,
-    periodMonths: payload.periodMonths,
+    grantKind,
+    campaignCode,
+    periodMonths: resolvedPeriodMonths,
     billingPeriod,
     status: payload.status,
     domain: domainCheck.normalizedDomain,
@@ -527,15 +609,17 @@ export function verifyYunpanelEntitlementToken(token, options = {}) {
     expiresAt: resolvedExpiresAtIso,
     iat: payload.iat,
     nbf: payload.nbf,
-    exp: payload.exp,
+    exp: payload.exp ?? null,
   });
 
   if (payload.status === 'refunded') {
     return rejectedVerification('LICENSE_REFUNDED', 'refunded', {
       keyId: header.kid,
       claims: safeClaims,
+      grantKind,
+      campaignCode,
       billingPeriod,
-      periodMonths: payload.periodMonths,
+      periodMonths: resolvedPeriodMonths,
       startsAt,
       expiresAt: resolvedExpiresAtIso,
     });
@@ -544,8 +628,10 @@ export function verifyYunpanelEntitlementToken(token, options = {}) {
     return rejectedVerification('LICENSE_REVOKED', 'revoked', {
       keyId: header.kid,
       claims: safeClaims,
+      grantKind,
+      campaignCode,
       billingPeriod,
-      periodMonths: payload.periodMonths,
+      periodMonths: resolvedPeriodMonths,
       startsAt,
       expiresAt: resolvedExpiresAtIso,
     });
@@ -554,8 +640,10 @@ export function verifyYunpanelEntitlementToken(token, options = {}) {
     return rejectedVerification('LICENSE_SUSPENDED', 'suspended', {
       keyId: header.kid,
       claims: safeClaims,
+      grantKind,
+      campaignCode,
       billingPeriod,
-      periodMonths: payload.periodMonths,
+      periodMonths: resolvedPeriodMonths,
       startsAt,
       expiresAt: resolvedExpiresAtIso,
     });
@@ -564,8 +652,10 @@ export function verifyYunpanelEntitlementToken(token, options = {}) {
     return rejectedVerification('LICENSE_EXPIRED', 'expired', {
       keyId: header.kid,
       claims: safeClaims,
+      grantKind,
+      campaignCode,
       billingPeriod,
-      periodMonths: payload.periodMonths,
+      periodMonths: resolvedPeriodMonths,
       startsAt,
       expiresAt: resolvedExpiresAtIso,
     });
@@ -574,26 +664,30 @@ export function verifyYunpanelEntitlementToken(token, options = {}) {
     return rejectedVerification('LICENSE_NOT_ACTIVE', String(payload.status || 'inactive'), {
       keyId: header.kid,
       claims: safeClaims,
+      grantKind,
+      campaignCode,
       billingPeriod,
-      periodMonths: payload.periodMonths,
+      periodMonths: resolvedPeriodMonths,
       startsAt,
       expiresAt: resolvedExpiresAtIso,
     });
   }
 
-  if (payload.exp <= nowSeconds || resolvedExpiresAtMs <= nowMs) {
+  if (resolvedExpiresAtMs !== null && ((payload.exp !== null && payload.exp <= nowSeconds) || resolvedExpiresAtMs <= nowMs)) {
     return rejectedVerification('LICENSE_EXPIRED', 'expired', {
       keyId: header.kid,
       claims: safeClaims,
+      grantKind,
+      campaignCode,
       billingPeriod,
-      periodMonths: payload.periodMonths,
+      periodMonths: resolvedPeriodMonths,
       startsAt,
       expiresAt: resolvedExpiresAtIso,
     });
   }
 
-  const remainingMs = Math.max(0, resolvedExpiresAtMs - nowMs);
-  const daysRemaining = Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
+  const remainingMs = resolvedExpiresAtMs === null ? null : Math.max(0, resolvedExpiresAtMs - nowMs);
+  const daysRemaining = remainingMs === null ? null : Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
 
   return Object.freeze({
     valid: true,
@@ -602,12 +696,16 @@ export function verifyYunpanelEntitlementToken(token, options = {}) {
     reason: null,
     keyId: header.kid,
     claims: safeClaims,
+    grantKind,
+    isPermanent: grantKind === 'permanent',
+    isPromotional: grantKind === 'promotional',
+    campaignCode,
     billingPeriod,
-    periodMonths: payload.periodMonths,
+    periodMonths: resolvedPeriodMonths,
     startsAt,
     expiresAt: resolvedExpiresAtIso,
     daysRemaining,
-    renewalRequired: daysRemaining <= RENEWAL_NOTICE_DAYS,
+    renewalRequired: daysRemaining !== null && daysRemaining <= RENEWAL_NOTICE_DAYS,
     capabilities: sanitizePremiumCapabilities(payload.capabilities),
   });
 }

@@ -82,6 +82,7 @@ export async function requestJson(url, { method = 'GET', body, signal, notifyExp
       error.code = payload?.error?.code ?? `http_${response.status}`;
       error.status = response.status;
       error.setupRequired = payload?.setupRequired === true;
+      error.setupOffer = payload?.setupOffer && typeof payload.setupOffer === 'object' ? payload.setupOffer : null;
       const retryAfter = Number(response.headers.get('retry-after'));
       error.retryAfter = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : null;
       throw error;

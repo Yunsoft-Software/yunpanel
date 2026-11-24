@@ -12,7 +12,7 @@ import './auth.css';
 import './mfa.css';
 
 export default function AuthGate({ children }) {
-  const [state, update] = useState({ status: 'checking', session: null, setupRequired: false });
+  const [state, update] = useState({ status: 'checking', session: null, setupRequired: false, setupOffer: null });
   const [notice, setNotice] = useState('');
   const [actionError, setActionError] = useState('');
   const [accountOpen, setAccountOpen] = useState(false);
@@ -28,13 +28,13 @@ export default function AuthGate({ children }) {
     requestVersion.current += 1;
     setSession(session); setNow(Date.now());
     if (ownerAccess(session) === 'enrollment') { setEnrollmentOpen(true); setAccountOpen(false); }
-    update({ status: 'ready', session, setupRequired: false });
+    update({ status: 'ready', session, setupRequired: false, setupOffer: null });
     setActionError('');
   }, []);
   const signedOut = useCallback((text = 'Oturumunuz kapatıldı.') => {
     requestVersion.current += 1;
     setSession(null); setAccountOpen(false); setEnrollmentOpen(false); setNotice(text);
-    update({ status: 'anonymous', session: null, setupRequired: false });
+    update({ status: 'anonymous', session: null, setupRequired: false, setupOffer: null });
   }, []);
   const refresh = useCallback(async (signal, background = false) => {
     if (sessionTransitionPending()) return;
@@ -46,9 +46,9 @@ export default function AuthGate({ children }) {
       if (error.name === 'AbortError' || signal?.aborted || version !== requestVersion.current) return;
       if (error.status === 401) {
         setSession(null); setAccountOpen(false); setEnrollmentOpen(false);
-        update({ status: 'anonymous', session: null, setupRequired: error.setupRequired });
+        update({ status: 'anonymous', session: null, setupRequired: error.setupRequired, setupOffer: error.setupOffer ?? null });
       } else if (background) setActionError(authMessage(error));
-      else update({ status: 'error', session: null, setupRequired: false, error: authMessage(error) });
+      else update({ status: 'error', session: null, setupRequired: false, setupOffer: null, error: authMessage(error) });
     }
   }, [accept]);
 
@@ -123,7 +123,7 @@ export default function AuthGate({ children }) {
   }
   if (state.status === 'checking') return <div className="auth-loading" role="status">Oturum kontrol ediliyor…</div>;
   if (state.status === 'error') return <div className="auth-loading"><h1>Panele bağlanılamadı</h1><p role="alert">{state.error}</p><button className="auth-primary" onClick={() => refresh()}>Tekrar dene</button></div>;
-  if (state.status === 'anonymous') return <LoginForm setupRequired={state.setupRequired} notice={notice} onLogin={(session) => { accept(session); setNotice(''); }} onSetup={() => { setNotice('Kurulum tamamlandı. Yeni hesabınızla giriş yapın.'); update({ status: 'anonymous', session: null, setupRequired: false }); }} />;
+  if (state.status === 'anonymous') return <LoginForm setupRequired={state.setupRequired} setupOffer={state.setupOffer} notice={notice} onLogin={(session) => { accept(session); setNotice(''); }} onSetup={() => { setNotice('Kurulum tamamlandı. Yeni hesabınızla giriş yapın.'); update({ status: 'anonymous', session: null, setupRequired: false, setupOffer: null }); }} />;
   const deadline = sessionDeadline(state.session, now);
   const access = ownerAccess(state.session);
   const showEnrollment = access === 'enrollment' || (access === 'management' && enrollmentOpen);

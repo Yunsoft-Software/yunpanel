@@ -5,8 +5,13 @@ import { authMessage } from './auth-message.js';
 import { PREFERENCE_KEY, writePreferences } from './workspace/ui/ux-model.js';
 import { apply as applyThemePreferences, readStored as readStoredTheme } from './workspace/ui/Preferences.jsx';
 import { Icon } from './workspace/PanelKit.jsx';
+import {
+  DEFAULT_DOCS_URL,
+  DEFAULT_PREMIUM_OFFER_URL,
+  sanitizeExternalYunsoftUrl,
+} from './workspace/license-client.js';
 
-export default function LoginForm({ setupRequired, notice, onLogin, onSetup }) {
+export default function LoginForm({ setupRequired, setupOffer = null, notice, onLogin, onSetup }) {
   const [view, setView] = useState('login'); // 'login' | 'forgot' | 'reset'
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -162,6 +167,13 @@ export default function LoginForm({ setupRequired, notice, onLogin, onSetup }) {
   const [themeMode, setThemeMode] = useState(() => (typeof document !== 'undefined' && document.documentElement.dataset.wsTheme === 'light' ? 'light' : 'dark'));
   const expired = challenge && challenge.expiresAt <= now;
   const activeNotice = localNotice || notice;
+  const showSetupOffer = Boolean(setupRequired && view === 'login' && !challenge && setupOffer?.enabled !== false);
+  const setupOfferUrl = showSetupOffer
+    ? sanitizeExternalYunsoftUrl(setupOffer?.offerUrl, { fallbackUrl: DEFAULT_PREMIUM_OFFER_URL })
+    : null;
+  const setupDocsUrl = showSetupOffer
+    ? sanitizeExternalYunsoftUrl(setupOffer?.docsUrl, { fallbackUrl: DEFAULT_DOCS_URL })
+    : null;
 
   useEffect(() => {
     if (typeof document === 'undefined' || typeof MutationObserver !== 'function') return undefined;
@@ -296,6 +308,44 @@ export default function LoginForm({ setupRequired, notice, onLogin, onSetup }) {
             {!setupRequired && <button type="button" className="auth-link" onClick={() => { setView('forgot'); setError(''); setLocalNotice(''); }}>Parolamı unuttum</button>}
           </>}
         </fieldset>
+        {showSetupOffer && setupOfferUrl && (
+          <aside
+            className="auth-setup-offer"
+            data-setup-premium-offer="true"
+            aria-label="3 aylık ücretsiz Premium teklifi"
+          >
+            <p className="auth-setup-offer-title">3 aylık ücretsiz Premium teklifi</p>
+            <p className="auth-setup-offer-copy">
+              İsteğe bağlı olarak Yunsoft e-posta aboneliğiyle kredi kartı gerekmeden 3 aylık YunPanel Premium hakkı alabilirsiniz. Kayıt Yunsoft web sitesinde tamamlanır; e-posta ve alan adı bilgileriniz bağlantıyla paylaşılmaz.
+            </p>
+            <div className="auth-setup-offer-actions">
+              <a
+                className="auth-setup-offer-link"
+                href={setupOfferUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                referrerPolicy="no-referrer"
+                data-setup-offer-link="true"
+              >
+                Teklifi Yunsoft’ta incele
+                <Icon name="external" size={14} />
+              </a>
+              {setupDocsUrl && (
+                <a
+                  className="auth-setup-offer-doc"
+                  href={setupDocsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  referrerPolicy="no-referrer"
+                  data-setup-docs-link="true"
+                >
+                  Kurulum kılavuzu
+                  <Icon name="external" size={13} />
+                </a>
+              )}
+            </div>
+          </aside>
+        )}
         <p className="auth-help">Hesabınıza erişemiyorsanız sunucu yöneticiniz yerel kurtarma komutlarını kullanabilir.</p>
       </form>
     </section>

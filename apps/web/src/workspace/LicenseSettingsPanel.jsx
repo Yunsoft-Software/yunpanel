@@ -6,6 +6,7 @@ import {
   Button,
   ConfirmDialog,
   ErrorNotice,
+  Icon,
   KeyValues,
   LinkButton,
   Section,
@@ -13,6 +14,8 @@ import {
 import { WorkspaceContext } from './WorkspaceContext.jsx';
 import {
   activateLicense,
+  DEFAULT_DOCS_URL,
+  DEFAULT_PREMIUM_OFFER_URL,
   deactivateLicense,
   describeLicenseReturnTarget,
   formatBillingPeriodLabel,
@@ -21,6 +24,7 @@ import {
   getLicenseStatus,
   refreshLicense,
   resolveLicenseBadgeState,
+  sanitizeExternalYunsoftUrl,
   sanitizeLicenseReturnTo,
 } from './license-client.js';
 
@@ -54,9 +58,11 @@ export function LicenseSummaryView({
     ['Lisanslı alan adı', license.domain ?? (isLoopbackPanel ? 'Yerel geliştirme ortamı' : (license.panelDomain ?? '—'))],
     [
       'Geçerlilik sonu',
-      license.expiresAt
-        ? `${formatDate(license.expiresAt)}${license.valid && license.daysRemaining > 0 ? ` · ${license.daysRemaining} gün kaldı` : ''}`
-        : '—',
+      license.valid && (license.isPermanent || license.grantKind === 'permanent')
+        ? 'Süresiz'
+        : license.expiresAt
+          ? `${formatDate(license.expiresAt)}${license.valid && license.daysRemaining > 0 ? ` · ${license.daysRemaining} gün kaldı` : ''}`
+          : '—',
     ],
   ];
 
@@ -188,6 +194,21 @@ function LicenseSettingsPanelInner({
   const safeReturnTo = sanitizeLicenseReturnTo(returnTo);
   const returnMeta = safeReturnTo ? describeLicenseReturnTarget(safeReturnTo, feature) : null;
   const premiumActive = Boolean(license?.valid && license?.tier === 'premium');
+  const hasProtectedPaidOrPermanent = Boolean(
+    license?.valid && (license.isPermanent || license.grantKind === 'paid' || license.grantKind === 'permanent'),
+  );
+  const offerUrl = isOwner
+    ? sanitizeExternalYunsoftUrl(license?.premiumOffer?.offerUrl, { fallbackUrl: DEFAULT_PREMIUM_OFFER_URL })
+    : null;
+  const docsUrl = isOwner
+    ? sanitizeExternalYunsoftUrl(license?.docsUrl, { fallbackUrl: DEFAULT_DOCS_URL })
+    : null;
+  const showPremiumOffer = Boolean(
+    isOwner
+    && offerUrl
+    && license?.premiumOffer?.available !== false
+    && !hasProtectedPaidOrPermanent,
+  );
 
   async function load(signal) {
     setLoading(true);
@@ -324,9 +345,24 @@ function LicenseSettingsPanelInner({
         title="Lisans durumu"
         description="Aylık ve yıllık YunPanel lisans doğrulaması yerel imza kontrolüyle çevrimdışı çalışır."
         actions={
-          <Button icon="refresh" disabled={loading || busy} onClick={() => void load()}>
-            Yenile
-          </Button>
+          <div className="ws-actions">
+            {isOwner && docsUrl && (
+              <a
+                className="ws-button"
+                href={docsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                referrerPolicy="no-referrer"
+                data-license-docs-link="true"
+              >
+                <Icon name="external" size={14} />
+                Dokümantasyon
+              </a>
+            )}
+            <Button icon="refresh" disabled={loading || busy} onClick={() => void load()}>
+              Yenile
+            </Button>
+          </div>
         }
       >
         <ErrorNotice error={error} />
@@ -354,6 +390,32 @@ function LicenseSettingsPanelInner({
           />
         )}
       </Section>
+
+      {showPremiumOffer && (
+        <Section
+          title="3 aylık ücretsiz Premium teklifi"
+          description="Kredi kartı gerekmeden Yunsoft e-posta aboneliğiyle 3 aylık YunPanel Premium deneyin."
+        >
+          <div className="ws-section-body" data-license-premium-offer="true">
+            <p className="ws-muted" style={{ marginTop: 0 }}>
+              Kampanya kaydı Yunsoft web sitesinde yönetilir; e-posta ve alan adı bilgileriniz bu bağlantıyla gönderilmez. Aynı e-posta veya alan adı için ikinci kampanya hakkı tanımlanmaz; aktif ücretli veya kalıcı lisanslarınız her zaman korunur.
+            </p>
+            <div className="ws-actions">
+              <a
+                className="ws-button ws-button-primary"
+                href={offerUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                referrerPolicy="no-referrer"
+                data-license-offer-link="true"
+              >
+                <Icon name="external" size={14} />
+                Teklifi Yunsoft’ta incele
+              </a>
+            </div>
+          </div>
+        </Section>
+      )}
 
       {isOwner && (
         <Section

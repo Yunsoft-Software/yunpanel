@@ -10,6 +10,7 @@ import { requireToolGatewaySession } from './tool-gateway-session-policy.js';
 import { requireReadOnlyRequest } from './panel-access.js';
 import { handleUserAdmin } from './user-admin-http.js';
 import { isGithubWebhookPath } from './github-webhook-http.js';
+import { buildSetupOfferMetadata } from './yunsoft-links.js';
 import {
   isManagementToolGatewayAccessPath,
   managementToolGatewayForAccessPath,
@@ -193,6 +194,8 @@ export function createAuthenticatedApi({
   automationHandler = null,
   licenseEntitlementService = null,
   onCustomerQuotaUpdated = null,
+  setupOfferUrl = undefined,
+  docsUrl = undefined,
 }) {
   const boundary = createBrowserAuthBoundary({ store, publicOrigin, development, ownerMfaRequired, proxyToken, trustedProxyIps });
   const { localDevelopment, ownerPolicy, cookieName, mfaCookieName, readCookie, checkOrigin } = boundary;
@@ -309,7 +312,14 @@ export function createAuthenticatedApi({
 
     const session = store.getSession(rawToken);
     if (!session) {
-      return json(response, 401, { error: { code: 'unauthorized', message: 'Sign in to continue.' }, setupRequired: pathname === '/api/auth/session' ? !store.configured() : undefined });
+      const setupRequired = pathname === '/api/auth/session' ? !store.configured() : undefined;
+      return json(response, 401, {
+        error: { code: 'unauthorized', message: 'Sign in to continue.' },
+        setupRequired,
+        ...(setupRequired === true
+          ? { setupOffer: buildSetupOfferMetadata({ offerUrl: setupOfferUrl, docsUrl, development }) }
+          : {}),
+      });
     }
     if (!SAFE_METHODS.has(request.method)) {
       checkOrigin(request);

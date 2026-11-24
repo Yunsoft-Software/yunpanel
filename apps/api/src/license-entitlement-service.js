@@ -28,6 +28,11 @@ import {
   parseTrustedPublicKeys,
   verifyYunpanelEntitlementToken,
 } from './license-entitlement-verifier.js';
+import {
+  DEFAULT_YUNSOFT_DOCS_URL,
+  DEFAULT_YUNSOFT_PREMIUM_OFFER_URL,
+  resolveYunsoftPublicUrl,
+} from './yunsoft-links.js';
 
 const STORE_SCHEMA_VERSION = 1;
 const REMOTE_TIMEOUT_MS = 15_000;
@@ -352,6 +357,8 @@ export function createLicenseEntitlementService(rawOptions = {}) {
     storeLockFactory = createProcessStoreLock,
     vendorPublicKeyFile = defaultVendorEntitlementPublicKeyFile(),
     systemPublicKeyFile = DEFAULT_SYSTEM_ENTITLEMENT_PUBLIC_KEY_FILE,
+    offerUrl = undefined,
+    docsUrl = undefined,
   } = rawOptions;
 
   const hasExplicitPemOption = Object.hasOwn(rawOptions, 'publicKeyPem');
@@ -805,6 +812,52 @@ export function createLicenseEntitlementService(rawOptions = {}) {
     }
   }
 
+  function assertPaidOrPermanentEntitlementProtected(candidateVerification, currentState, trustedKeys, binding, nowMs) {
+    if (!currentState.entitlementToken || currentState.remoteInvalidation) {
+      return;
+    }
+    let currentVerification = null;
+    try {
+      currentVerification = verifyYunpanelEntitlementToken(currentState.entitlementToken, {
+        trustedKeys,
+        expectedDomain: binding.panelHost,
+        expectedInstanceId: currentState.instanceId,
+        allowStaging: binding.allowStaging,
+        now: nowMs,
+      });
+    } catch {
+      return;
+    }
+    if (!currentVerification?.valid) {
+      return;
+    }
+
+    const currentKind = currentVerification.grantKind ?? currentVerification.claims?.grantKind ?? 'paid';
+    const candidateKind = candidateVerification?.grantKind ?? candidateVerification?.claims?.grantKind ?? 'paid';
+    const currentIdentity = resolveLicenseIdentity(currentVerification.claims);
+    const candidateIdentity = resolveLicenseIdentity(candidateVerification?.claims);
+
+    if (currentKind === 'permanent' && candidateKind !== 'permanent') {
+      if (candidateIdentity !== currentIdentity || candidateVerification?.status === 'active') {
+        throw new LicenseEntitlementError(
+          'paid_or_permanent_entitlement_protected',
+          'Active permanent license cannot be replaced by a temporary or promotional entitlement.',
+          409,
+          { reason: 'PERMANENT_ENTITLEMENT_PROTECTED' },
+        );
+      }
+    }
+
+    if (currentKind === 'paid' && candidateKind === 'promotional') {
+      throw new LicenseEntitlementError(
+        'paid_or_permanent_entitlement_protected',
+        'Active paid license cannot be replaced by a promotional campaign entitlement.',
+        409,
+        { reason: 'PAID_ENTITLEMENT_PROTECTED' },
+      );
+    }
+  }
+
   function evaluateCurrentEntitlement() {
     const currentState = syncStateFromDisk();
     const binding = resolvePanelBinding();
@@ -947,11 +1000,16 @@ export function createLicenseEntitlementService(rawOptions = {}) {
       productCode: claims?.productCode ?? YUNPANEL_PRODUCT_CODE,
       edition: evaluation.valid ? (claims?.edition ?? 'premium') : 'free',
       billingModel: claims?.billingModel ?? null,
+      grantKind: claims?.grantKind ?? null,
+      isPermanent: Boolean(evaluation.valid && (evaluation.isPermanent || claims?.grantKind === 'permanent')),
+      isPromotional: Boolean(evaluation.valid && (evaluation.isPromotional || claims?.grantKind === 'promotional')),
       billingPeriod: evaluation.billingPeriod ?? null,
       periodMonths: evaluation.periodMonths ?? null,
       startsAt: evaluation.startsAt ?? null,
       expiresAt: evaluation.expiresAt ?? null,
-      daysRemaining: evaluation.daysRemaining ?? 0,
+      daysRemaining: evaluation.daysRemaining === null
+        ? null
+        : (evaluation.daysRemaining ?? 0),
       renewalRequired: Boolean(evaluation.renewalRequired),
     };
 
@@ -959,12 +1017,25 @@ export function createLicenseEntitlementService(rawOptions = {}) {
       return Object.freeze(base);
     }
 
+    const resolvedOfferUrl = resolveYunsoftPublicUrl(
+      offerUrl !== undefined ? offerUrl : process.env.YUNPANEL_PREMIUM_OFFER_URL,
+      { fallbackUrl: DEFAULT_YUNSOFT_PREMIUM_OFFER_URL, development },
+    );
+    const resolvedDocsUrl = resolveYunsoftPublicUrl(
+      docsUrl !== undefined ? docsUrl : process.env.YUNPANEL_DOCS_URL,
+      { fallbackUrl: DEFAULT_YUNSOFT_DOCS_URL, development },
+    );
+    const hasProtectedPaidOrPermanent = Boolean(
+      evaluation.valid && (claims?.grantKind === 'paid' || claims?.grantKind === 'permanent'),
+    );
+
     return Object.freeze({
       ...base,
       reason: evaluation.reason ?? null,
       keyId: evaluation.keyId ?? null,
       entitlementVersion: claims?.entitlementVersion ?? null,
       licenseId: claims?.licenseId ?? null,
+      campaignCode: claims?.campaignCode ?? null,
       tokenType: ENTITLEMENT_TOKEN_TYPE,
       issuer: ENTITLEMENT_ISSUER,
       domain: claims?.domain ?? null,
@@ -980,6 +1051,15 @@ export function createLicenseEntitlementService(rawOptions = {}) {
       refreshedAt: currentState.refreshedAt ?? null,
       verificationKeyConfigured: evaluation.trustedKeysConfigured,
       trustedKeyIds: evaluation.trustedKeyIds,
+      premiumOffer: Object.freeze({
+        available: Boolean(resolvedOfferUrl && !hasProtectedPaidOrPermanent),
+        durationMonths: 3,
+        creditCardRequired: false,
+        managedBy: 'yunsoft-website',
+        products: Object.freeze(['yunpanel', 'yuncms']),
+        offerUrl: resolvedOfferUrl,
+      }),
+      docsUrl: resolvedDocsUrl,
     });
   }
 
@@ -1198,6 +1278,7 @@ export function createLicenseEntitlementService(rawOptions = {}) {
         }
 
         assertNotSupersededEntitlement(verification, latestState, trustedKeys, binding, nowMs);
+        assertPaidOrPermanentEntitlementProtected(verification, latestState, trustedKeys, binding, nowMs);
 
         const nowIso = new Date(nowMs).toISOString();
         writePersistedState({
@@ -1280,6 +1361,7 @@ export function createLicenseEntitlementService(rawOptions = {}) {
       }
 
       assertNotSupersededEntitlement(verification, latestState, trustedKeys, binding, nowMs);
+      assertPaidOrPermanentEntitlementProtected(verification, latestState, trustedKeys, binding, nowMs);
 
       const nowIso = new Date(nowMs).toISOString();
       const keyPersistence = buildLicenseKeyPersistence(normalizedKey, latestState);
@@ -1348,6 +1430,7 @@ export function createLicenseEntitlementService(rawOptions = {}) {
         }
 
         assertNotSupersededEntitlement(verification, latestState, trustedKeys, binding, nowMs);
+        assertPaidOrPermanentEntitlementProtected(verification, latestState, trustedKeys, binding, nowMs);
 
         const nowIso = new Date(nowMs).toISOString();
         writePersistedState({
@@ -1421,6 +1504,7 @@ export function createLicenseEntitlementService(rawOptions = {}) {
 
         if (verification.valid) {
           assertNotSupersededEntitlement(verification, latestState, trustedKeys, binding, nowMs);
+          assertPaidOrPermanentEntitlementProtected(verification, latestState, trustedKeys, binding, nowMs);
           const keyPersistence = buildLicenseKeyPersistence(resolvedKey, latestState);
           writePersistedState({
             ...latestState,
