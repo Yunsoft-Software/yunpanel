@@ -326,11 +326,12 @@ test('Real Playwright Chromium E2E: first-time setup optional 3-month Premium re
     assert.equal(await page.locator('[data-license-offer-link="true"]').getAttribute('href'), offerUrl);
     assert.equal(await page.locator('[data-license-docs-link="true"]').getAttribute('href'), docsUrl);
 
-    // 1. Activate 3-month promotional campaign key -> Kampanya · 3 ay
+    // 1. Activate 3-month promotional campaign key -> Kampanya · 3 ay (hides duplicate promo CTA)
     await page.getByLabel('Lisans anahtarı').fill('YUN-CAMP-3M-2026');
     await page.getByLabel('Lisanslı alan adı').fill('panel.ornek.test');
     await page.getByRole('button', { name: 'Lisansı etkinleştir' }).click();
     await page.getByText('Kampanya · 3 ay').waitFor({ timeout: 10_000 });
+    assert.equal(await page.locator('[data-license-premium-offer="true"]').count(), 0);
 
     // 2. Upgrade to Paid Yearly -> offer section hides automatically!
     await page.getByLabel('Lisans anahtarı').fill('YUN-PAID-12M-2026');

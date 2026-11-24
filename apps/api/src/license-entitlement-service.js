@@ -1025,9 +1025,7 @@ export function createLicenseEntitlementService(rawOptions = {}) {
       docsUrl !== undefined ? docsUrl : process.env.YUNPANEL_DOCS_URL,
       { fallbackUrl: DEFAULT_YUNSOFT_DOCS_URL, development },
     );
-    const hasProtectedPaidOrPermanent = Boolean(
-      evaluation.valid && (claims?.grantKind === 'paid' || claims?.grantKind === 'permanent'),
-    );
+    const hasActivePremium = Boolean(evaluation.valid && evaluation.tier === 'premium');
 
     return Object.freeze({
       ...base,
@@ -1052,7 +1050,7 @@ export function createLicenseEntitlementService(rawOptions = {}) {
       verificationKeyConfigured: evaluation.trustedKeysConfigured,
       trustedKeyIds: evaluation.trustedKeyIds,
       premiumOffer: Object.freeze({
-        available: Boolean(resolvedOfferUrl && !hasProtectedPaidOrPermanent),
+        available: Boolean(resolvedOfferUrl && !hasActivePremium),
         durationMonths: 3,
         creditCardRequired: false,
         managedBy: 'yunsoft-website',

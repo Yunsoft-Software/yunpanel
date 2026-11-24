@@ -194,9 +194,6 @@ function LicenseSettingsPanelInner({
   const safeReturnTo = sanitizeLicenseReturnTo(returnTo);
   const returnMeta = safeReturnTo ? describeLicenseReturnTarget(safeReturnTo, feature) : null;
   const premiumActive = Boolean(license?.valid && license?.tier === 'premium');
-  const hasProtectedPaidOrPermanent = Boolean(
-    license?.valid && (license.isPermanent || license.grantKind === 'paid' || license.grantKind === 'permanent'),
-  );
   const offerUrl = isOwner
     ? sanitizeExternalYunsoftUrl(license?.premiumOffer?.offerUrl, { fallbackUrl: DEFAULT_PREMIUM_OFFER_URL })
     : null;
@@ -207,7 +204,7 @@ function LicenseSettingsPanelInner({
     isOwner
     && offerUrl
     && license?.premiumOffer?.available !== false
-    && !hasProtectedPaidOrPermanent,
+    && !premiumActive,
   );
 
   async function load(signal) {

@@ -322,6 +322,7 @@ test('3-month promotional campaign, shared campaign product scoping, and paid/pe
     assert.equal(promoStatus.billingPeriod, 'promotional');
     assert.equal(promoStatus.periodMonths, 3);
     assert.equal(promoStatus.campaignCode, 'NEWSLETTER-3M-2026');
+    assert.equal(promoStatus.premiumOffer.available, false);
     assert.equal(svc.hasCapability('aiOperations'), true);
     assert.equal(svc.hasCapability('resellerAccounts'), true);
     assert.equal(svc.hasCapability('perSiteIsolatedUsers'), true);
