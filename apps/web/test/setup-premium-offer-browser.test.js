@@ -37,9 +37,13 @@ function signToken(privateKey, kid, {
   domain = 'panel.ornek.test',
   instanceId,
   nowSec = Math.floor(Date.now() / 1000),
+  exp = undefined,
+  extraClaims = {},
 } = {}) {
   const isPermanent = billingModel === 'permanent' || billingModel === 'lifetime';
-  const exp = isPermanent ? null : nowSec + (periodMonths * 30 * 86400);
+  const resolvedExp = exp === undefined
+    ? (isPermanent ? null : nowSec + (periodMonths * 30 * 86400))
+    : exp;
   const header = {
     alg: 'EdDSA',
     crv: 'Ed25519',
@@ -53,14 +57,14 @@ function signToken(privateKey, kid, {
     entitlementVersion,
     iat: nowSec,
     nbf: nowSec,
-    exp,
+    exp: resolvedExp,
     productCode: 'yunpanel_premium',
     tier: 'premium',
     status: 'active',
     billingModel,
     periodMonths: isPermanent ? null : periodMonths,
     startsAt: new Date(nowSec * 1000).toISOString(),
-    expiresAt: exp === null ? null : new Date(exp * 1000).toISOString(),
+    expiresAt: resolvedExp === null ? null : new Date(resolvedExp * 1000).toISOString(),
     domain,
     normalizedDomain: domain,
     allowedHosts: [domain, `www.${domain}`],
@@ -68,6 +72,7 @@ function signToken(privateKey, kid, {
     activatedInstanceId: instanceId,
     capabilities: { ...PREMIUM_CAPABILITIES },
     ...(campaignCode ? { campaignCode } : {}),
+    ...extraClaims,
   };
   const h = Buffer.from(JSON.stringify(header)).toString('base64url');
   const p = Buffer.from(JSON.stringify(payload)).toString('base64url');
@@ -325,6 +330,80 @@ test('Real Playwright Chromium E2E: first-time setup optional 3-month Premium re
     await page.locator('[data-license-premium-offer="true"]').waitFor({ timeout: 10_000 });
     assert.equal(await page.locator('[data-license-offer-link="true"]').getAttribute('href'), offerUrl);
     assert.equal(await page.locator('[data-license-docs-link="true"]').getAttribute('href'), docsUrl);
+
+    // 0. Legacy untagged 3-month token -> "3 ay" (not guessed), refreshes safely for exact same license/domain/instance/term -> "Kampanya · 3 ay" (reload persists), then promo->paid upgrade protects paid right
+    const sharedNowSec = Math.floor(Date.now() / 1000) - 30;
+    const sharedPromoExp = sharedNowSec + 90 * 86400;
+    const legacyUntagged3mToken = signToken(keys.privateKey, keys.kid, {
+      licenseId: 'camp_legacy_qa_e2e',
+      billingModel: 'monthly_term',
+      periodMonths: 3,
+      domain: 'panel.ornek.test',
+      instanceId: localServer.id,
+      entitlementVersion: 2,
+      nowSec: sharedNowSec,
+      exp: sharedPromoExp,
+    });
+    const resignedSignedPromoToken = signToken(keys.privateKey, keys.kid, {
+      licenseId: 'camp_legacy_qa_e2e',
+      billingModel: 'monthly_term',
+      periodMonths: 3,
+      campaignCode: 'newsletter_3m_premium_v1',
+      domain: 'panel.ornek.test',
+      instanceId: localServer.id,
+      entitlementVersion: 4,
+      nowSec: sharedNowSec + 10,
+      exp: sharedPromoExp,
+      extraClaims: { grantKind: 'promotional', originType: 'newsletter_promo', promotional: true, paid: false },
+    });
+    await page.getByRole('button', { name: 'İmzalı jeton' }).click();
+    await page.getByLabel('İmzalı lisans jetonu').fill(legacyUntagged3mToken);
+    await page.getByRole('button', { name: 'Lisansı etkinleştir' }).click();
+    await page.getByText('3 ay', { exact: true }).waitFor({ timeout: 10_000 });
+    assert.equal(await page.getByText('Kampanya · 3 ay', { exact: true }).count(), 0);
+
+    await page.getByLabel('İmzalı lisans jetonu').fill(resignedSignedPromoToken);
+    await page.getByRole('button', { name: 'Lisansı etkinleştir' }).click();
+    await page.getByText('Kampanya · 3 ay', { exact: true }).waitFor({ timeout: 10_000 });
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.getByText('Kampanya · 3 ay', { exact: true }).waitFor({ timeout: 10_000 });
+
+    const upgradedPaidSameLicenseToken = signToken(keys.privateKey, keys.kid, {
+      licenseId: 'camp_legacy_qa_e2e',
+      billingModel: 'monthly_term',
+      periodMonths: 12,
+      domain: 'panel.ornek.test',
+      instanceId: localServer.id,
+      entitlementVersion: 5,
+      nowSec: sharedNowSec + 15,
+      extraClaims: { grantKind: 'paid', originType: 'newsletter_promo', promotional: false, paid: true, campaignCode: null },
+    });
+    const higherPromoSameLicenseToken = signToken(keys.privateKey, keys.kid, {
+      licenseId: 'camp_legacy_qa_e2e',
+      billingModel: 'monthly_term',
+      periodMonths: 3,
+      campaignCode: 'newsletter_3m_premium_v1',
+      domain: 'panel.ornek.test',
+      instanceId: localServer.id,
+      entitlementVersion: 6,
+      nowSec: sharedNowSec + 20,
+      extraClaims: { grantKind: 'promotional', originType: 'newsletter_promo', promotional: true, paid: false },
+    });
+    await page.getByRole('button', { name: 'İmzalı jeton' }).click();
+    await page.getByLabel('İmzalı lisans jetonu').fill(upgradedPaidSameLicenseToken);
+    await page.getByRole('button', { name: 'Lisansı etkinleştir' }).click();
+    await page.getByText('Yıllık · 12 ay').waitFor({ timeout: 10_000 });
+    await page.getByLabel('İmzalı lisans jetonu').fill(higherPromoSameLicenseToken);
+    await page.getByRole('button', { name: 'Lisansı etkinleştir' }).click();
+    await page.getByText('Aktif ücretli veya kalıcı lisansınız korunuyor; kampanya hakkı mevcut lisansın üzerine yazılmaz.').waitFor({ timeout: 10_000 });
+
+    await page.getByRole('button', { name: 'Lisansı kaldır' }).click();
+    const confirmDialog = page.getByRole('dialog');
+    await confirmDialog.waitFor({ timeout: 10_000 });
+    await confirmDialog.locator('input').fill('deactivate-license');
+    await confirmDialog.getByRole('button', { name: 'Lisansı kaldır' }).click();
+    await page.locator('[data-license-premium-offer="true"]').waitFor({ timeout: 10_000 });
+    await page.getByRole('button', { name: 'Lisans anahtarı' }).click();
 
     // 1. Activate 3-month promotional campaign key -> Kampanya · 3 ay (hides duplicate promo CTA)
     await page.getByLabel('Lisans anahtarı').fill('YUN-CAMP-3M-2026');

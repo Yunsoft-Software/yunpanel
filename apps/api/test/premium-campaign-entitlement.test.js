@@ -559,3 +559,188 @@ test('first-time setup HTTP session exposes sanitized setupOffer without storing
     rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test('legacy untagged 3-month token is not guessed, migrates safely via real YunPanel API+SQLite only for exact same license/domain/instance/term, and protects paid/upgraded-paid/permanent', async () => {
+  const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'yunpanel-legacy-promo-api-'));
+  let apiServer = null;
+  let authStore = null;
+  try {
+    const keys = generateTestEd25519KeyPair();
+    const nowMs = Date.now();
+    const nowSec = Math.floor(nowMs / 1000);
+    const sharedExp = nowSec + 90 * 86400;
+
+    // 1. No guessing from duration (periodMonths=3) or originType alone
+    assert.equal(classifyEntitlementGrantKind({ billingModel: 'monthly_term', periodMonths: 3 }), 'paid');
+    assert.equal(classifyEntitlementGrantKind({ billingModel: 'monthly_term', periodMonths: 3, originType: 'newsletter_promo' }), 'paid');
+    assert.equal(
+      classifyEntitlementGrantKind({ billingModel: 'monthly_term', periodMonths: 1, originType: 'newsletter_promo', grantKind: 'paid', promotional: false, paid: true, campaignCode: null }),
+      'paid',
+    );
+    assert.equal(
+      classifyEntitlementGrantKind({ billingModel: 'monthly_term', periodMonths: 3, originType: 'newsletter_promo', grantKind: 'promotional', promotional: true, paid: false, campaignCode: 'newsletter_3m_premium_v1' }),
+      'promotional',
+    );
+
+    // 2. Boot REAL YunPanel API + SQLite (zero mock Commerce HTTP server)
+    const origin = 'http://127.0.0.1:4322';
+    const registry = createServerRegistry({ filePath: path.join(tmpDir, 'servers.json') });
+    const localServer = await registry.createLocalServer({ hostname: 'panel.ornek.test', displayName: 'QA Legacy Migration' });
+    const masterKey = crypto.randomBytes(32).toString('hex');
+    authStore = createAuthStore({ filePath: path.join(tmpDir, 'auth.sqlite'), masterKey });
+    const { token: setupToken } = authStore.issueSetupToken();
+    const licenseService = createLicenseEntitlementService({
+      filePath: path.join(tmpDir, 'entitlement.json'),
+      publicKeyPem: keys.publicKeyPem,
+      publicKeyFile: '',
+      publicOrigin: 'https://panel.ornek.test',
+      instanceId: localServer.id,
+      masterKey,
+      development: false,
+      now: () => nowMs,
+    });
+
+    apiServer = await listenHttpServer(
+      createAuthenticatedApi({
+        store: authStore,
+        publicOrigin: origin,
+        development: true,
+        ownerMfaRequired: false,
+        licenseEntitlementService: licenseService,
+        createHandler: () => createApp({
+          registry,
+          localServerId: localServer.id,
+          authStore,
+          userAdminStore: authStore.users,
+          licenseEntitlementService: licenseService,
+        }),
+      }),
+    );
+
+    const setupRes = await fetch(`${apiServer.baseUrl}/api/auth/setup`, {
+      method: 'POST',
+      headers: { Origin: origin, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ setupToken, username: 'legacyowner', password: 'StrongLegacyOwnerPass!2026' }),
+    });
+    assert.equal(setupRes.status, 201);
+    const loginRes = await fetch(`${apiServer.baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { Origin: origin, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'legacyowner', password: 'StrongLegacyOwnerPass!2026' }),
+    });
+    assert.equal(loginRes.status, 200);
+    const sessionCookie = loginRes.headers.getSetCookie().map((c) => c.split(';')[0]).find((c) => c.startsWith('yunpanel_session='));
+    const csrf = csrfForSession(sessionCookie.slice(sessionCookie.indexOf('=') + 1));
+    const postLicense = async (endpoint, body) => {
+      const res = await fetch(`${apiServer.baseUrl}/api/panel/license/${endpoint}`, {
+        method: 'POST',
+        headers: { Cookie: sessionCookie, Origin: origin, 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      return { status: res.status, body: await res.json() };
+    };
+
+    const makeTok = (opts) => signCampaignOrLicenseToken(keys.privateKey, keys.kid, {
+      nowSec,
+      sub: 'lic_qa_campaign_001',
+      licenseId: 'lic_qa_campaign_001',
+      billingModel: 'monthly_term',
+      periodMonths: 3,
+      iat: nowSec - 120,
+      nbf: nowSec - 120,
+      exp: sharedExp,
+      domain: 'panel.ornek.test',
+      activatedInstanceId: localServer.id,
+      ...opts,
+    });
+
+    // Activate legacy untagged BEFORE-style 3-month token -> stays paid/custom_term (never guessed)
+    const beforeAct = await postLicense('activate', { token: makeTok({ entitlementVersion: 2 }) });
+    assert.equal(beforeAct.status, 200);
+    assert.equal(beforeAct.body.data.grantKind, 'paid');
+    assert.equal(beforeAct.body.data.billingPeriod, 'custom_term');
+
+    // Reject migration if period/expiry changes OR different licenseId
+    const promoClaims = { grantKind: 'promotional', campaignCode: 'newsletter_3m_premium_v1', payloadOverrides: { originType: 'newsletter_promo', promotional: true, paid: false } };
+    assert.equal((await postLicense('refresh', { token: makeTok({ entitlementVersion: 3, iat: nowSec - 10, exp: sharedExp + 86400, ...promoClaims }) })).status, 409);
+    assert.equal((await postLicense('refresh', { token: makeTok({ entitlementVersion: 3, iat: nowSec - 10, periodMonths: 6, ...promoClaims }) })).status, 409);
+    assert.equal((await postLicense('activate', { token: makeTok({ sub: 'lic_other_999', licenseId: 'lic_other_999', entitlementVersion: 5, iat: nowSec - 5, ...promoClaims }) })).status, 409);
+
+    // Same licenseId + domain + instanceId + unchanged period & exp + fresher iat (same version) refreshes safely -> promotional
+    const migrated = await postLicense('refresh', { token: makeTok({ entitlementVersion: 2, iat: nowSec - 10, ...promoClaims }) });
+    assert.equal(migrated.status, 200);
+    assert.equal(migrated.body.data.grantKind, 'promotional');
+    assert.equal(migrated.body.data.billingPeriod, 'promotional');
+    assert.equal(migrated.body.data.periodMonths, 3);
+    assert.equal(migrated.body.data.campaignCode, 'newsletter_3m_premium_v1');
+
+    // Promo -> Paid upgrade on SAME licenseId (keeping originType='newsletter_promo') becomes explicit paid and blocks promotional overwrite
+    const upgraded = await postLicense('activate', {
+      token: makeTok({
+        entitlementVersion: 5,
+        iat: nowSec - 2,
+        periodMonths: 1,
+        exp: sharedExp + 30 * 86400,
+        grantKind: 'paid',
+        payloadOverrides: { originType: 'newsletter_promo', promotional: false, paid: true, campaignCode: null },
+      }),
+    });
+    assert.equal(upgraded.status, 200);
+    assert.equal(upgraded.body.data.grantKind, 'paid');
+    assert.equal(upgraded.body.data.billingPeriod, 'monthly');
+
+    const postUpgradePromo = await postLicense('refresh', {
+      token: makeTok({ entitlementVersion: 6, iat: nowSec - 1, periodMonths: 1, exp: sharedExp + 30 * 86400, ...promoClaims }),
+    });
+    assert.equal(postUpgradePromo.status, 409);
+    assert.equal(postUpgradePromo.body.error.code, 'paid_or_permanent_entitlement_protected');
+
+    // Permanent license stays strictly protected even on same licenseId
+    const perm = await postLicense('activate', {
+      token: makeTok({ billingModel: 'permanent', periodMonths: null, exp: null, expiresAt: null, entitlementVersion: 7, iat: nowSec, grantKind: 'permanent' }),
+    });
+    assert.equal(perm.status, 200);
+    assert.equal(perm.body.data.isPermanent, true);
+    const overPerm = await postLicense('activate', {
+      token: makeTok({ entitlementVersion: 8, iat: nowSec, exp: sharedExp + 180 * 86400, ...promoClaims }),
+    });
+    assert.equal(overPerm.status, 409);
+    assert.equal(overPerm.body.error.code, 'paid_or_permanent_entitlement_protected');
+
+    // Contradictory grant claims and invalid permanent claims fail closed
+    const trustedKeys = new Map([[keys.kid, { keyId: keys.kid, publicKey: keys.publicKey }]]);
+    const verifyOpts = { trustedKeys, expectedDomain: 'panel.ornek.test', expectedInstanceId: localServer.id, now: new Date(nowMs) };
+    const invalidClaimCases = [
+      [{ payloadOverrides: { paid: true, promotional: true } }, 'INVALID_ENTITLEMENT_CLAIMS'],
+      [{ grantKind: 'paid', payloadOverrides: { promotional: true } }, 'INVALID_ENTITLEMENT_CLAIMS'],
+      [{ grantKind: 'promotional', payloadOverrides: { paid: true } }, 'INVALID_ENTITLEMENT_CLAIMS'],
+      [{ campaignCode: 'newsletter_3m_premium_v1', payloadOverrides: { paid: true } }, 'INVALID_ENTITLEMENT_CLAIMS'],
+      [{ payloadOverrides: { paid: false } }, 'INVALID_ENTITLEMENT_CLAIMS'],
+      [{ grantKind: 'permanent' }, 'INVALID_ENTITLEMENT_CLAIMS'],
+      [{ grantKind: 'unknown_kind' }, 'INVALID_ENTITLEMENT_CLAIMS'],
+      [{ grantKind: 'promotional', payloadOverrides: { promotional: false } }, 'INVALID_ENTITLEMENT_CLAIMS'],
+      [{ payloadOverrides: { paid: 'true' } }, 'INVALID_ENTITLEMENT_CLAIMS'],
+      [{ billingModel: 'permanent', periodMonths: 3, exp: null, expiresAt: null }, 'INVALID_BILLING_PERIOD'],
+      [{ billingModel: 'permanent', periodMonths: null, exp: sharedExp, expiresAt: new Date(sharedExp * 1000).toISOString() }, 'INVALID_EXPIRATION'],
+      [{ billingModel: 'permanent', periodMonths: null, exp: null, expiresAt: null, payloadOverrides: { promotional: true } }, 'INVALID_ENTITLEMENT_CLAIMS'],
+      [{ billingModel: 'permanent', periodMonths: null, exp: null, expiresAt: null, grantKind: 'promotional' }, 'INVALID_ENTITLEMENT_CLAIMS'],
+      [{ billingModel: 'permanent', periodMonths: null, exp: null, expiresAt: null, payloadOverrides: { paid: false } }, 'INVALID_ENTITLEMENT_CLAIMS'],
+      [{ billingModel: 'permanent', periodMonths: null, exp: null, expiresAt: null, campaignCode: 'newsletter_3m_premium_v1' }, 'INVALID_ENTITLEMENT_CLAIMS'],
+    ];
+    for (const [opts, expectedReason] of invalidClaimCases) {
+      const check = verifyYunpanelEntitlementToken(makeTok(opts), verifyOpts);
+      assert.equal(check.valid, false);
+      assert.equal(check.reason, expectedReason);
+    }
+    const validPermanentCheck = verifyYunpanelEntitlementToken(
+      makeTok({ billingModel: 'permanent', periodMonths: null, exp: null, expiresAt: null, grantKind: 'permanent', payloadOverrides: { paid: true, promotional: false, campaignCode: null } }),
+      verifyOpts,
+    );
+    assert.equal(validPermanentCheck.valid, true);
+    assert.equal(validPermanentCheck.grantKind, 'permanent');
+  } finally {
+    if (apiServer) await apiServer.close();
+    if (authStore) authStore.close();
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

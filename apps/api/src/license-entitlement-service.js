@@ -849,12 +849,38 @@ export function createLicenseEntitlementService(rawOptions = {}) {
     }
 
     if (currentKind === 'paid' && candidateKind === 'promotional') {
-      throw new LicenseEntitlementError(
-        'paid_or_permanent_entitlement_protected',
-        'Active paid license cannot be replaced by a promotional campaign entitlement.',
-        409,
-        { reason: 'PAID_ENTITLEMENT_PROTECTED' },
-      );
+      const currentClaims = currentVerification.claims;
+      const candidateClaims = candidateVerification?.claims;
+      const currentVersion = currentClaims?.entitlementVersion ?? 1;
+      const candidateVersion = candidateClaims?.entitlementVersion ?? 1;
+      const currentIat = currentClaims?.iat ?? 0;
+      const candidateIat = candidateClaims?.iat ?? 0;
+      const currentExp = currentClaims?.exp ?? null;
+      const candidateExp = candidateClaims?.exp ?? null;
+      const isLegacyUntaggedSameLicenseCorrection =
+        currentVerification.grantKindExplicit === false
+        && candidateVerification?.grantKindExplicit === true
+        && Boolean(currentIdentity)
+        && candidateIdentity === currentIdentity
+        && Boolean(currentClaims?.domain)
+        && candidateClaims?.domain === currentClaims.domain
+        && Boolean(currentClaims?.activatedInstanceId)
+        && candidateClaims?.activatedInstanceId === currentClaims.activatedInstanceId
+        && candidateClaims.activatedInstanceId === currentState.instanceId
+        && currentClaims?.periodMonths === candidateClaims?.periodMonths
+        && currentExp !== null
+        && candidateExp === currentExp
+        && candidateVerification?.status === 'active'
+        && (candidateVersion > currentVersion || (candidateVersion === currentVersion && candidateIat > currentIat));
+
+      if (!isLegacyUntaggedSameLicenseCorrection) {
+        throw new LicenseEntitlementError(
+          'paid_or_permanent_entitlement_protected',
+          'Active paid license cannot be replaced by a promotional campaign entitlement.',
+          409,
+          { reason: 'PAID_ENTITLEMENT_PROTECTED' },
+        );
+      }
     }
   }
 

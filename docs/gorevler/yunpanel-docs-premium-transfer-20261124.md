@@ -76,3 +76,10 @@ Aşağıdaki tüm komutlar mock/stub olmadan gerçek SQLite, gerçek API, gerçe
    - `node --test apps/web/test/versioned-docs-package.test.js` → **3 / 3 geçti**. Sayfaya farklı dilde kayıtlı bir görselin hem dosya yoluyla hem `screenshot:<id>` ile bağlanması reddedilir.
    - Yunsoft Website'in `validateDocsBundle` ve `importDocsBundle` işlevleri paketi izole geçici dizinde uyarısız kabul etti. İçe aktarılan dizinde 34 görsel dosyasının varlığı doğrulandı.
    - Canlı kampanya sayfalarına bağlanan dört kılavuz güncellendikten sonra repo denetimi, üç paket testi ve Website'in kendi paket doğrulayıcısı tekrar geçti. Güncellenen arşiv 64 girdi içerir.
+
+## 25 Kasım 2026 — Kampanya lisansının sınıflandırılması
+
+- YunPanel 0.3.0 adayı doğrulanmış imzalı kampanya alanlarını kullanır. Eski türsüz jeton aynı lisans, alan adı, kurulum, dönem ve bitiş için daha yeni bir imzalı kampanya jetonuyla yenilenebilir. Önceden ücretliye geçmiş ve kalıcı haklar korunur.
+- Son adayla `python3 orkestra/orchestrator.py verify` geçti. Lisans API ve tarayıcı regresyonları ile Website'in 25 birim ve gerçek geçici MySQL kullanan 6 kampanya testi geçti. Bağımsız inceleme kabul verdi. İlk tam koşuda kırılan eski modal testi [T950](../../tasks/done/T950.md) altında güncellendi.
+- `.28` üzerindeki izole Linux örneğinde önceki kampanyanın gerçek, Yunsoft imzalı jetonu API'de `promotional` döndü. Chromium'da `Kampanya · 3 ay` etiketi yenileme sonrasında göründü. Yanlış kurulum için jeton 422 ile reddedildi. Önceki türsüz jeton ayrı kurulumda sınandı. Aynı kurulumdaki yenileme kaynak testinde doğrulandı. Sonuç `.local/campaign-live-20261125/dot28-campaign-verification.json` içinde.
+- Test ortamı kaldırıldı ve kurulu `.28` ana panelinin API/web sağlık kontrolleri geçti. Ana panel paketi `0.3.0-2026112301` olarak kaldı. Yunsoft Website imzalayıcı düzeltmesi yerel kaynakta test edildi. Website yayını ve ana panel paket kurulumu ayrı dağıtım adımları olarak açık.

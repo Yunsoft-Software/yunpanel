@@ -39,6 +39,8 @@ const PUBLIC_KEY_BLOCK_REGEX = /-----BEGIN PUBLIC KEY-----[\s\S]*?-----END PUBLI
 const TERM_BILLING_MODELS = new Set(['monthly_term', 'promotional_term']);
 const PERMANENT_BILLING_MODELS = new Set(['permanent', 'lifetime']);
 const PROMOTIONAL_GRANT_TYPES = new Set(['promotional', 'promo', 'campaign', 'newsletter_promo', 'trial']);
+const PAID_GRANT_TYPES = new Set(['paid', 'paid_order', 'commercial', 'standard', 'subscription']);
+const PERMANENT_GRANT_TYPES = new Set(['permanent', 'lifetime']);
 const CAMPAIGN_CODE_REGEX = /^[A-Za-z0-9][A-Za-z0-9._-]{1,63}$/;
 
 export function isCanonicalBase64Url(segment) {
@@ -296,24 +298,89 @@ export function sanitizeCampaignCode(rawCode) {
   return trimmed;
 }
 
-export function classifyEntitlementGrantKind(payload) {
-  if (!payload || typeof payload !== 'object') return 'paid';
+const INVALID_GRANT = Object.freeze({
+  valid: false,
+  grantKind: null,
+  explicit: false,
+  campaignCode: null,
+});
+
+export function classifyEntitlementGrantKindWithSource(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return Object.freeze({ valid: true, grantKind: 'paid', explicit: false, campaignCode: null });
+  }
+  for (const flag of ['paid', 'promotional', 'trial']) {
+    if (payload[flag] !== undefined && typeof payload[flag] !== 'boolean') return INVALID_GRANT;
+  }
+
+  let explicitCategory = null;
+  let explicitRawKind = null;
+  for (const field of ['grantKind', 'grantType', 'entitlementType']) {
+    const raw = payload[field];
+    if (raw === undefined || raw === null) continue;
+    if (typeof raw !== 'string' || !raw.trim()) return INVALID_GRANT;
+    const norm = raw.trim().toLowerCase();
+    const cat = PROMOTIONAL_GRANT_TYPES.has(norm)
+      ? 'promotional'
+      : PAID_GRANT_TYPES.has(norm)
+        ? 'paid'
+        : PERMANENT_GRANT_TYPES.has(norm)
+          ? 'permanent'
+          : null;
+    if (!cat || (explicitCategory && explicitCategory !== cat)) return INVALID_GRANT;
+    explicitCategory = cat;
+    explicitRawKind = norm;
+  }
+
+  let campaignCode = null;
+  for (const field of ['campaignCode', 'campaignId']) {
+    const raw = payload[field];
+    if (raw === undefined || raw === null) continue;
+    const code = sanitizeCampaignCode(raw);
+    if (!code || (campaignCode && campaignCode !== code)) return INVALID_GRANT;
+    campaignCode = code;
+  }
+
   if (PERMANENT_BILLING_MODELS.has(payload.billingModel)) {
-    return 'permanent';
+    if (
+      (explicitCategory && explicitCategory !== 'permanent')
+      || payload.promotional === true
+      || payload.trial === true
+      || payload.paid === false
+      || campaignCode
+    ) {
+      return INVALID_GRANT;
+    }
+    return Object.freeze({ valid: true, grantKind: 'permanent', explicit: true, campaignCode: null });
   }
-  if (payload.billingModel === 'promotional_term' || payload.promotional === true || payload.trial === true) {
-    return 'promotional';
+
+  if (explicitCategory === 'permanent') return INVALID_GRANT;
+
+  const hasPromo = payload.billingModel === 'promotional_term'
+    || explicitCategory === 'promotional'
+    || payload.promotional === true
+    || payload.trial === true
+    || Boolean(campaignCode);
+  const hasPaid = explicitCategory === 'paid' || payload.paid === true;
+
+  if (
+    (hasPromo && hasPaid)
+    || (hasPromo && payload.promotional === false)
+    || (explicitRawKind === 'trial' && payload.trial === false)
+    || (payload.paid === false && (hasPaid || !hasPromo))
+  ) {
+    return INVALID_GRANT;
   }
-  const explicitKind = String(
-    payload.grantKind ?? payload.grantType ?? payload.entitlementType ?? '',
-  ).trim().toLowerCase();
-  if (PROMOTIONAL_GRANT_TYPES.has(explicitKind)) {
-    return 'promotional';
+
+  if (hasPromo) {
+    return Object.freeze({ valid: true, grantKind: 'promotional', explicit: true, campaignCode });
   }
-  if (sanitizeCampaignCode(payload.campaignCode ?? payload.campaignId) && payload.paid !== true) {
-    return 'promotional';
-  }
-  return 'paid';
+  const explicit = hasPaid || payload.promotional === false || payload.trial === false;
+  return Object.freeze({ valid: true, grantKind: 'paid', explicit, campaignCode: null });
+}
+
+export function classifyEntitlementGrantKind(payload) {
+  return classifyEntitlementGrantKindWithSource(payload).grantKind;
 }
 
 export function resolveBillingPeriodLabel(periodMonths, options = {}) {
@@ -463,10 +530,7 @@ export function verifyYunpanelEntitlementToken(token, options = {}) {
     }
     resolvedPeriodMonths = payload.periodMonths;
   } else if (payload.periodMonths !== null && payload.periodMonths !== undefined) {
-    if (!Number.isSafeInteger(payload.periodMonths) || payload.periodMonths < 1 || payload.periodMonths > 1200) {
-      return rejectedVerification('INVALID_BILLING_PERIOD', 'invalid', { keyId: header.kid });
-    }
-    resolvedPeriodMonths = payload.periodMonths;
+    return rejectedVerification('INVALID_BILLING_PERIOD', 'invalid', { keyId: header.kid });
   }
 
   const nowMs = now instanceof Date ? now.getTime() : Number(now);
@@ -511,24 +575,10 @@ export function verifyYunpanelEntitlementToken(token, options = {}) {
       resolvedExpiresAtMs = Math.min(resolvedExpiresAtMs, parsedExpiresMs);
       resolvedExpiresAtIso = new Date(parsedExpiresMs).toISOString();
     }
-  } else if (payload.exp !== null && payload.exp !== undefined) {
-    if (!Number.isSafeInteger(payload.exp) || payload.exp <= 0 || payload.exp <= payload.iat) {
-      return rejectedVerification('INVALID_EXPIRATION', 'invalid', { keyId: header.kid });
-    }
-    resolvedExpiresAtMs = payload.exp * 1000;
-    resolvedExpiresAtIso = new Date(resolvedExpiresAtMs).toISOString();
-    if (payload.expiresAt !== null && payload.expiresAt !== undefined) {
-      if (typeof payload.expiresAt !== 'string') {
-        return rejectedVerification('INVALID_EXPIRATION', 'invalid', { keyId: header.kid });
-      }
-      const parsedExpiresMs = Date.parse(payload.expiresAt);
-      if (!Number.isFinite(parsedExpiresMs) || Math.abs(Math.floor(parsedExpiresMs / 1000) - payload.exp) > 2) {
-        return rejectedVerification('INVALID_EXPIRATION', 'invalid', { keyId: header.kid });
-      }
-      resolvedExpiresAtMs = Math.min(resolvedExpiresAtMs, parsedExpiresMs);
-      resolvedExpiresAtIso = new Date(parsedExpiresMs).toISOString();
-    }
-  } else if (payload.expiresAt !== null && payload.expiresAt !== undefined) {
+  } else if (
+    (payload.exp !== null && payload.exp !== undefined)
+    || (payload.expiresAt !== null && payload.expiresAt !== undefined)
+  ) {
     return rejectedVerification('INVALID_EXPIRATION', 'invalid', { keyId: header.kid });
   }
 
@@ -574,8 +624,13 @@ export function verifyYunpanelEntitlementToken(token, options = {}) {
     ? payload.licenseId.trim()
     : payload.sub.trim();
 
-  const grantKind = classifyEntitlementGrantKind(payload);
-  const campaignCode = sanitizeCampaignCode(payload.campaignCode ?? payload.campaignId);
+  const grantClassification = classifyEntitlementGrantKindWithSource(payload);
+  if (!grantClassification.valid) {
+    return rejectedVerification('INVALID_ENTITLEMENT_CLAIMS', 'invalid', { keyId: header.kid });
+  }
+  const grantKind = grantClassification.grantKind;
+  const grantKindExplicit = grantClassification.explicit;
+  const campaignCode = grantClassification.campaignCode;
   const billingPeriod = resolveBillingPeriodLabel(resolvedPeriodMonths, {
     billingModel: payload.billingModel,
     grantKind,
@@ -697,6 +752,7 @@ export function verifyYunpanelEntitlementToken(token, options = {}) {
     keyId: header.kid,
     claims: safeClaims,
     grantKind,
+    grantKindExplicit,
     isPermanent: grantKind === 'permanent',
     isPromotional: grantKind === 'promotional',
     campaignCode,
