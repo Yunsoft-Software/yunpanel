@@ -62,6 +62,12 @@
 - **Ortak PanelKit modal ve kirli form koruması:** Dış tıklama temiz formu kapatır; kaydedilmemiş değişiklik varsa ortak PanelKit uyarısı (`Kaydedilmemiş değişiklikler var` · `Düzenlemeye dön` / `Değişiklikleri bırak`) açılır ve tarayıcı `alert`/`confirm`/`prompt` kullanılmaz. Düzenlemeye dönüş, uyarıda Escape veya dış tıklama yalnız en üst uyarıyı kapatıp taslağı ve odağı korur; başlangıç değerine dönmüş form temiz sayılır. İç tıklama ve içeriden dışarı sürükleme kapatmaz; `busy` tüm kapatma yollarını kilitler; odak ve `Tab` klavye döngüsü korunur.
 - **Site dosya editörü kapanış ve doğrudan bağlantı kuralı:** Kapatılan site dosya editörü `?file=` parametresini temizler; yenileme, poll veya gezinmeyle kendiliğinden yeniden açılmaz, kullanıcı açıkça açabilir. Kirli doğrudan bağlantıda (`?file=...`) ilk açık `Değişiklikleri bırak` onayı ikinci bir sayfa-ayrılma uyarısı açmadan `?file=` parametresini kaldırır; gerçek sayfa gezinmelerindeki taslak koruması ve site kapsam izolasyonu korunur.
 
+### 24 Kasım 2026 — Sürümlü Türkçe ve İngilizce ürün dokümantasyonu
+
+- YunPanel'in herkese açık kurulum ve kullanım dokümantasyonu Yunsoft websitesinde Türkçe ve İngilizce yayımlanır. Her sayfada ilgili YunPanel sürümü görünür. Kaynak belgeler ve görseller, doğrulandıkları sürüm ve kaynak revizyonuyla birlikte izlenir.
+- Kullanıcı davranışını değiştiren geliştirmelerde kod, ilgili testler, Türkçe ve İngilizce dokümantasyon paralel ilerler ve aynı değişiklik kapsamında doğrulanır. Etkilenen ekran görüntüleri ilgili sürümden yeniden alınır. Gerçek tarayıcı görsellerinde müşteri verisi ve erişim bilgileri kullanılmaz.
+- Yayın öncesinde iki dilde sürüm eşleşmesi, sayfa bağlantıları ve görseller kontrol edilir. Doğrulaması tamamlanan iki dil ve görseller, Yunsoft websitesine birlikte aktarılır.
+
 ### Değişmeyen güvenlik ve veri sınırları
 
 - `.44` ile biten Plesk sunucusuna SSH, salt okunur inceleme, test, deploy veya başka amaçla dokunulmaz. (27 Ekim 2026 tek istisna: yalnız senior Claude, İNSAN'ın kendi açtığı Plesk tarayıcı oturumunda, hiçbir şeyi değiştirmeden özellik envanteri için bakabilir; junior ajanlar için yasak aynen geçerlidir. Ayrıntı `docs/orkestra/DECISIONS.md`.) Canlı işlemler yalnız repo dışı `.local/test-server.env` içindeki açık izinli YunPanel test hedefinde ve adres teyidinden sonra yapılır.
