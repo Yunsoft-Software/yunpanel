@@ -22,7 +22,7 @@ The generated token is valid for 10 minutes and is permanently consumed once the
 
 Opening the panel URL on an unconfigured installation displays the **İLK KURULUM · Owner hesabını oluşturun** (First-Time Setup · Create Owner Account) screen.
 
-![YunPanel first-time setup screen in dark theme (Turkish UI)](assets/tr/01-first-time-setup-dark.png)
+![YunPanel first-time setup screen in dark theme (Turkish UI)](assets/en/01-first-time-setup-dark.png)
 
 Complete the form fields:
 
@@ -33,7 +33,7 @@ Complete the form fields:
 
 You can switch between dark and light themes at any time using the top-right theme icon button:
 
-![YunPanel first-time setup screen in light theme (Turkish UI)](assets/tr/02-first-time-setup-light.png)
+![YunPanel first-time setup screen in light theme (Turkish UI)](assets/en/02-first-time-setup-light.png)
 
 ## 3. Optional 3-month free Premium offer
 
@@ -52,7 +52,7 @@ See [Licensing and Three-Month Premium](doc:licensing-and-premium) for full offl
 
 After creating the Owner account, YunPanel redirects to the sign-in screen (**YunPanel'e giriş yapın**).
 
-![YunPanel sign-in screen (Turkish UI)](assets/tr/03-login.png)
+![YunPanel sign-in screen (Turkish UI)](assets/en/03-login.png)
 
 On HTTPS production installations (`YUNPANEL_OWNER_MFA_REQUIRED=true`), the first sign-in opens **Hesap Güvenliği** (Account Security):
 

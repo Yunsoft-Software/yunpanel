@@ -17,7 +17,7 @@ From **Dosya Yöneticisi**, you can:
 - **Built-in code editor:** Clicking any text or code file—or opening a direct deep link such as `?file=index.html` or `?path=public&file=notes.txt`—opens the line-numbered editor (`Ctrl/Cmd + S` to save, with concurrent-modification protection).
 - **Unsaved-changes protection and clean dismissal:** Attempting to close a dirty editor opens the shared **Kaydedilmemiş değişiklikler var** (Unsaved changes) dialog (**Düzenlemeye dön** / **Değişiklikleri bırak**). Closing the editor removes the `?file=` query parameter cleanly so reloads or background polls never reopen a closed file.
 
-![YunPanel Site File Manager with built-in code editor open (Turkish UI)](assets/tr/11-files-editor.png)
+![YunPanel Site File Manager with built-in code editor open (Turkish UI)](assets/en/11-files-editor.png)
 
 ## Integrated elFinder, SFTP keys, and Site Terminal
 

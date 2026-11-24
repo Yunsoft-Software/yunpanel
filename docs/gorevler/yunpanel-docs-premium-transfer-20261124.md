@@ -13,17 +13,17 @@
 
 ## 2. Yunsoft Website Aktarım Paketi ve Arşiv Özeti
 
-- **Kaynak paket dizini:** `docs/yunpanel-docs-0.3.0/` (`manifest.json`, `locales/tr/<slug>.md`, `locales/en/<slug>.md`, `assets/tr/*.png`)
-- **Hazır aktarım arşivi (tar.gz):** `.local/website-docs/yunpanel-docs-0.3.0.tar.gz` (arşiv kökü: `yunpanel-docs-0.3.0/`, 46 girdi, sıfır symlink, sıfır path traversal, sıfır `.DS_Store`)
-- **Arşiv SHA-256:** `fa9c2b7c3bff5c6ca2c83611d111b7c6e210f32e463e91037705153181c6dd1a`
+- **Kaynak paket dizini:** `docs/yunpanel-docs-0.3.0/` (`manifest.json`, `locales/tr/<slug>.md`, `locales/en/<slug>.md`, `assets/tr/*.png`, `assets/en/*.png`)
+- **Hazır aktarım arşivi (tar.gz):** `.local/website-docs/yunpanel-docs-0.3.0.tar.gz` (arşiv kökü: `yunpanel-docs-0.3.0/`, 64 girdi, sıfır symlink, sıfır path traversal, sıfır `.DS_Store`)
+- **Arşiv SHA-256:** `ab98ad9e0ccd33ad26ba1577a405f6573748332879f2e68a909a25705cfcaa23`
 - **Manifest sözleşmesi:** `schemaVersion: 1`, `product: "yunpanel"`, `version: "0.3.0"`, `sourceRepo: "Yunsoft-Software/yunpanel"`, `sourceCommit: "f30fd779293ad96f83e7a76846fa70e71562730b"`, `verifiedAt: "2026-11-24T19:44:58.502Z"`, `defaultPage: "installation-and-upgrade"`.
-- **Görsel yol ve kaynak sınırı beyanı:** Tüm 22 Markdown kılavuzundaki görsel referansları paket köküne göre `assets/tr/<image>.png` biçimindedir (`../../assets` kullanımı sıfırdır ve doğrulayıcı tarafından kesin olarak reddedilir; `screenshot:<manifest-id>` de desteklenir). İç bağlantılar yalnızca `doc:<slug>` biçimindedir.
+- **Görsel ve sayfa dili:** Tüm 22 Markdown kılavuzu kendi dilindeki `assets/<locale>/<image>.png` kaydına bağlanır. `screenshot:<manifest-id>` bağlantıları da aynı dil eşleşmesiyle desteklenir. İç bağlantılar `doc:<slug>` biçimindedir.
 - **Canlı kampanya sınırı:** Yunsoft Website üzerindeki 3 aylık ücretsiz Premium kampanyası şu an canlıda etkin değildir; Website tarafında SMTP doğrulaması ve kabul aşamasını beklemektedir. İlk kurulum ve lisans kılavuzlarındaki (`01-first-time-setup-dark.png`, `02-first-time-setup-light.png`, `16-license-free-offer.png`, `17-license-campaign-active.png`) kampanya görselleri yerel `0.3.0` (`f30fd779`) aday derlemesinden alınmış teknik doğrulama görüntüleridir; **canlı kampanya kullanım kanıtı sayılmaz**. Metinlerde 3 aylık teklifin görünümü ve etkinleştirme akışı açıkça Website'de kampanya açıldığında geçerli olacak biçimde anlatılmıştır.
-- **Arayüz dili dürüstlük beyanı:** YunPanel `0.3.0` web arayüzü (`apps/web/src/`) yalnızca **Türkçe (`tr`)** dilindedir; İngilizce UI çeviri katmanı bulunmaz. Bu nedenle sahte İngilizce arayüz görüntüsü üretilmemiştir. Tüm 17 gerçek Chromium ekran görüntüsü `assets/tr/*.png` altında ve `manifest.json` içinde `locale: "tr"` olarak kayıtlıdır; İngilizce kılavuzlar (`locales/en/*.md`) Türkçe arayüz etiketlerini İngilizce açıklamalarıyla eşleştirir. Ayrıca tüm 15 ortak ekran gerçek Chromium üzerinde hem `tr-TR` hem `en-US` tarayıcı locale'i ile (toplam 30 kontrol, 0 `pageerror`, 0 yatay taşma `overflowX=0`) doğrulanmıştır (`.local/website-docs/capture-report-0.3.0.json`).
+- **Arayüz dili:** YunPanel `0.3.0` arayüzü Türkçedir. Pakette 17 gerçek Chromium görüntüsü, her kılavuz dili için ayrı alt metin ve açıklamayla toplam 34 görsel kaydında yer alır. İngilizce kılavuzlardaki görseller aynı Türkçe arayüzü gösterir. Kaynak arayüz dili her İngilizce görsel kaydının `capturedFrom` bilgisinde belirtilir. 15 ortak ekran `tr-TR` ve `en-US` tarayıcı ayarlarında doğrulandı. Toplam 30 kontrolde sayfa hatası veya yatay taşma görülmedi (`.local/website-docs/capture-report-0.3.0.json`).
 
 ### Sayfa, Slug, Dil ve Görsel Bağları (11 Sayfa × 2 Dil = 22 Kılavuz · 17 Doğrulanmış PNG)
 
-| Sıra | Bölüm | Ortak Slug | TR Dosyası | EN Dosyası | Bağlı Görseller (`assets/tr/`, `commit=f30fd779...`) |
+| Sıra | Bölüm | Ortak Slug | TR Dosyası | EN Dosyası | Bağlı Görseller (`assets/tr/` ve `assets/en/`, `commit=f30fd779...`) |
 | :---: | :--- | :--- | :--- | :--- | :--- |
 | 1 | `getting-started` | `installation-and-upgrade` | `locales/tr/installation-and-upgrade.md` | `locales/en/installation-and-upgrade.md` | `18-tools-settings.png` (`64f6e865de69...`) |
 | 2 | `getting-started` | `first-time-setup` | `locales/tr/first-time-setup.md` | `locales/en/first-time-setup.md` | `01-first-time-setup-dark.png` (`e21a70c62de5...`), `02-first-time-setup-light.png` (`0936ea5388d4...`), `03-login.png` (`138cd4e9b588...`) |
@@ -71,5 +71,6 @@ Aşağıdaki tüm komutlar mock/stub olmadan gerçek SQLite, gerçek API, gerçe
 4. **Gerçek Chromium ekran görüntüsü yakalama ve TR/EN browser locale doğrulaması (`f30fd779`):**
    - `node scripts/capture-docs-screenshots.mjs` → **17 son doküman PNG'si** (`assets/tr/`), **30 / 30 TR (`tr-TR`) + EN (`en-US`) tarayıcı locale kontrolü**, **0 `pageerror`**, **0 yatay taşma (`overflowX=0`)**; kanıt `.local/website-docs/capture-report-0.3.0.json`.
 5. **Website importer doğrulaması ve paketleme:**
-   - `node scripts/verify-and-package-docs.mjs --bundle docs/yunpanel-docs-0.3.0 --package .local/website-docs/yunpanel-docs-0.3.0.tar.gz` → geçti (`pagesCount: 11`, `docFilesCount: 22`, `screenshotsCount: 17`, `internalLinkCount: 50`, `imageRefCount: 36`, `archiveEntries: 46`, `archiveSha256: fa9c2b7c3bff5c6ca2c83611d111b7c6e210f32e463e91037705153181c6dd1a`).
-   - `(cd apps/web && node --test test/versioned-docs-package.test.js)` → **3 / 3 PASS** (`../../assets` reddi + `screenshot:<id>` kabulü + canlı kampanya/SMTP/yerel-aday sınır metni + tarball kontrolleri dahil).
+   - `node scripts/verify-and-package-docs.mjs --bundle docs/yunpanel-docs-0.3.0 --package .local/website-docs/yunpanel-docs-0.3.0.tar.gz` → 11 sayfa, 22 kılavuz dosyası, 34 görsel kaydı, 50 iç bağlantı, 36 görsel bağlantısı ve 64 arşiv girdisiyle geçti.
+   - `node --test apps/web/test/versioned-docs-package.test.js` → **3 / 3 geçti**. Sayfaya farklı dilde kayıtlı bir görselin hem dosya yoluyla hem `screenshot:<id>` ile bağlanması reddedilir.
+   - Yunsoft Website'in `validateDocsBundle` ve `importDocsBundle` işlevleri paketi izole geçici dizinde uyarısız kabul etti. İçe aktarılan dizinde 34 görsel dosyasının varlığı doğrulandı.

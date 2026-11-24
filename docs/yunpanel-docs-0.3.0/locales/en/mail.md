@@ -11,7 +11,7 @@ When clicking **Mail alan adı ekle** (Add mail domain), choose one of two modes
 - **Bu sunucuda (Local):** Host mailboxes, aliases, forwarding, DKIM signing, and Webmail directly on this server.
 - **Harici mail sağlayıcısı (External):** Disable local mail delivery for domains whose mail is hosted on an external provider to prevent local routing conflicts.
 
-![YunPanel Mail domains management screen (Turkish UI)](assets/tr/14-mail-domains.png)
+![YunPanel Mail domains management screen (Turkish UI)](assets/en/14-mail-domains.png)
 
 ## Mailboxes, quotas, forwarding, and aliases
 

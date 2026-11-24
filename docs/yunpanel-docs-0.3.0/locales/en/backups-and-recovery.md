@@ -13,7 +13,7 @@ Each website's **Yedekleme ve Geri Yükleme** (`/websites/<id>/backup`) tab mana
 - **Schedules and retention (`Plan ve Zamanlama`):** Configure daily, weekly, or custom cron schedules alongside snapshot retention policies.
 - **Guarded restore:** Previews snapshot contents before restoring, captures a safety backup of live state, and verifies configuration drift safely.
 
-![YunPanel Site Backup and Restore screen (Turkish UI)](assets/tr/15-site-backup.png)
+![YunPanel Site Backup and Restore screen (Turkish UI)](assets/en/15-site-backup.png)
 
 ## Control-plane migration and bare-metal recovery backups
 

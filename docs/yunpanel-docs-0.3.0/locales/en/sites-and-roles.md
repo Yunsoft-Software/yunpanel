@@ -8,7 +8,7 @@ Daily hosting management centers on the **Web Siteleri** (Websites, `/websites`)
 
 The **Web Siteleri** page clearly displays root domain and subdomain counts (`X ana alan adı · Y alt alan adı`). Subdomains appear nested under their parent domain in the UI and live inside the parent domain workspace on disk (`<domain-root>/subdomains/<subdomain>`), while still supporting independent PHP, Node.js, Python, Static, database, and Docker proxy workloads.
 
-![YunPanel Websites hierarchy screen (Turkish UI)](assets/tr/04-websites-hierarchy.png)
+![YunPanel Websites hierarchy screen (Turkish UI)](assets/en/04-websites-hierarchy.png)
 
 ## Creating a website or subdomain
 
@@ -19,7 +19,7 @@ Click **Web sitesi ekle** (Add website) in the header or **Alt alan adı ekle** 
 3. **DNS, HTTPS, and Mail:** Configure local/external DNS, Let's Encrypt HTTPS, and mail support.
 4. **Preview and confirm:** Mutations execute through the durable job queue only after preview digest verification and explicit confirmation.
 
-![YunPanel new website wizard (Turkish UI)](assets/tr/05-new-website.png)
+![YunPanel new website wizard (Turkish UI)](assets/en/05-new-website.png)
 
 ## Site detail overview and tool cards
 
@@ -28,7 +28,7 @@ Clicking **Yönet** (Manage) opens `/websites/<id>` with symmetric tool cards or
 - **Sık kullanılan araçlar** (Frequently used): Dosya Yöneticisi (File Manager), Veritabanları (Databases), Site Kaynakları (Site Resources), SSL/TLS Sertifikaları (SSL/TLS Certificates), E-posta (Mail), Yedekleme ve Geri Yükleme (Backup & Restore), WordPress.
 - **Geliştirici ve sunucu araçları** (Developer & server tools): Web Sunucusu & Nginx, Alan Adları & Yönlendirme (Domains & Redirects), DNS, PHP Ayarları (PHP Settings), Git / Yayınlama (Git / Deploy), Günlükler (Logs), İstatistikler (Statistics), Zamanlanmış Görevler (Cron), Erişim Hesapları (SFTP/SSH Access), Terminal.
 
-![YunPanel site detail overview and tool cards (Turkish UI)](assets/tr/06-site-overview.png)
+![YunPanel site detail overview and tool cards (Turkish UI)](assets/en/06-site-overview.png)
 
 From the site view, you can also suspend a website or remove it with guarded cleanup tracking.
 
@@ -46,7 +46,7 @@ YunPanel uses a streamlined, strictly isolated role hierarchy:
 
 Each website keeps its own dedicated Unix user for runtime, cron, files, SFTP, and site terminal; multiple sites under a Customer or Reseller are never merged onto one Unix user.
 
-![YunPanel Users and Roles screen (Turkish UI)](assets/tr/07-users-and-roles.png)
+![YunPanel Users and Roles screen (Turkish UI)](assets/en/07-users-and-roles.png)
 
 ## Related guides
 

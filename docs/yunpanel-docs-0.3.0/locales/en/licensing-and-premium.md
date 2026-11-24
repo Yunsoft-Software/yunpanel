@@ -26,7 +26,7 @@ Once the campaign is live on Yunsoft Website, fresh installations and Free-tier 
 - **One grant per email or domain:** Once live, the same normalized email address or domain cannot claim a second 3-month promotional grant.
 - **Single campaign record covering YunPanel and YunCMS:** A single campaign record on Yunsoft Website carries YunPanel and YunCMS entitlements together; once the campaign is active, YunPanel activation sends `productCode: "yunpanel_premium"` to activate only the YunPanel entitlement for the verified installation. Tokens issued for another product (`yuncms_premium`) are strictly rejected with `PRODUCT_MISMATCH`.
 
-![YunPanel License settings screen showing Free tier and local candidate 3-month Premium offer view (Turkish UI)](assets/tr/16-license-free-offer.png)
+![YunPanel License settings screen showing Free tier and local candidate 3-month Premium offer view (Turkish UI)](assets/en/16-license-free-offer.png)
 
 ## Offline Ed25519 verification and activation
 
@@ -39,7 +39,7 @@ YunPanel verifies entitlements locally using the `YUNSOFT-ENTITLEMENT+JWT` contr
   2. **İmzalı jeton** (Signed token): Paste a signed entitlement JWT directly for 100% offline activation.
 - **Zero routine remote calls:** Once activated, every status and capability check runs offline against local disk state, so temporary upstream outages never disrupt an active license.
 
-![YunPanel License settings screen showing local candidate 3-month Campaign Premium view, applicable once live on Yunsoft Website (Turkish UI)](assets/tr/17-license-campaign-active.png)
+![YunPanel License settings screen showing local candidate 3-month Campaign Premium view, applicable once live on Yunsoft Website (Turkish UI)](assets/en/17-license-campaign-active.png)
 
 ## Paid / permanent entitlement protection and non-destructive lifecycle
 

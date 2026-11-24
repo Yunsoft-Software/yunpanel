@@ -11,7 +11,7 @@ YunPanel provisions isolated MariaDB databases and per-schema database users for
 3. YunPanel creates the schema and dedicated user with access limited to that database, and stores credentials encrypted with `YUNPANEL_SECRET_MASTER_KEY`.
 4. Customer database count quotas (`maxDatabases`) are enforced automatically during provisioning.
 
-![YunPanel Databases workspace screen (Turkish UI)](assets/tr/13-databases.png)
+![YunPanel Databases workspace screen (Turkish UI)](assets/en/13-databases.png)
 
 ## Day-to-day database operations
 

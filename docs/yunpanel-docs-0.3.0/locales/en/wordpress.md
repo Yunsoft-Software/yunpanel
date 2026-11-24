@@ -4,7 +4,7 @@
 
 Every PHP-FPM website and subdomain exposes the **WordPress** tab (`/websites/<id>/wordpress`). All WordPress operations run through the bundled, pinned **WP-CLI** binary (`/usr/lib/yunpanel/vendor/wp-cli/wp`) under the website's dedicated Linux user.
 
-![YunPanel PHP site overview showing the WordPress tool card (Turkish UI)](assets/tr/06-site-overview.png)
+![YunPanel site detail overview and tool cards (Turkish UI)](assets/en/06-site-overview.png)
 
 > **Runtime note:** WordPress installation, WP-CLI updates, and live HTTP rollback execute on Linux hosts with PHP-FPM and MariaDB (verified end-to-end in Chromium and on Linux under package `0.3.0-2026112301` / `f13b2b78`).
 

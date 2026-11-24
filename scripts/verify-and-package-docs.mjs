@@ -215,6 +215,7 @@ export function verifyVersionedDocsBundle(bundleDir) {
   const usedAssets = new Set();
 
   for (const relDoc of referencedDocFiles) {
+    const docLocale = relDoc.split('/')[1];
     const absDoc = path.join(resolvedRoot, relDoc);
     const content = readFileSync(absDoc, 'utf8');
     assertNoSecrets(content, relDoc);
@@ -229,25 +230,29 @@ export function verifyVersionedDocsBundle(bundleDir) {
     for (const match of content.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)) {
       const target = match[1].trim();
       imageRefCount += 1;
+      let shot;
       if (target.startsWith('screenshot:')) {
         const shotId = target.slice('screenshot:'.length);
-        const byId = manifest.screenshots.find((s) => s.id === shotId);
-        if (!byId) {
+        shot = manifest.screenshots.find((s) => s.id === shotId);
+        if (!shot) {
           throw new Error(`Unknown screenshot:<id> referenced in ${relDoc}: ${target}`);
         }
-        usedAssets.add(byId.file);
-        continue;
+      } else {
+        if (target.includes('..') || target.startsWith('/') || target.startsWith('./') || /^[a-z]+:/i.test(target)) {
+          throw new Error(`Image link in ${relDoc} must be screenshot:<id> or package-root assets/... (got: ${target})`);
+        }
+        if (!ASSET_FILE_PATTERN.test(target) || !SAFE_RELATIVE_PATTERN.test(target)) {
+          throw new Error(`Image link in ${relDoc} must be package-root assets/(tr|en)/... (got: ${target})`);
+        }
+        shot = registeredAssets.get(target);
+        if (!shot) {
+          throw new Error(`Image referenced in ${relDoc} is not registered in manifest.screenshots: ${target}`);
+        }
       }
-      if (target.includes('..') || target.startsWith('/') || target.startsWith('./') || /^[a-z]+:/i.test(target)) {
-        throw new Error(`Image link in ${relDoc} must be screenshot:<id> or package-root assets/... (got: ${target})`);
+      if (shot.locale !== docLocale) {
+        throw new Error(`Image locale mismatch in ${relDoc}: ${docLocale} page references ${shot.locale} screenshot ${shot.id}`);
       }
-      if (!ASSET_FILE_PATTERN.test(target) || !SAFE_RELATIVE_PATTERN.test(target)) {
-        throw new Error(`Image link in ${relDoc} must be package-root assets/(tr|en)/... (got: ${target})`);
-      }
-      if (!registeredAssets.has(target)) {
-        throw new Error(`Image referenced in ${relDoc} is not registered in manifest.screenshots: ${target}`);
-      }
-      usedAssets.add(target);
+      usedAssets.add(shot.file);
     }
 
     // Non-image links: [label](target)

@@ -65,7 +65,7 @@ To upgrade from the panel UI, open **Araçlar ve Ayarlar → YunPanel güncellem
 2. When an update is available, click **YunPanel'i güncelle** (Update YunPanel) and confirm (`upgrade-yunpanel`).
 3. After the upgrade finishes, `yunpanel-api` and `yunpanel-web` restart while preserving your `/etc/yunpanel/control-plane/` configuration and hosted sites.
 
-![YunPanel Tools and Settings directory (Turkish UI)](assets/tr/18-tools-settings.png)
+![YunPanel Tools and Settings directory (Turkish UI)](assets/en/18-tools-settings.png)
 
 ## Next step
 

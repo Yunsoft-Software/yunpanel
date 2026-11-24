@@ -19,7 +19,7 @@ test('YunPanel 0.3.0 bilingual docs bundle satisfies Yunsoft Website importer co
   assert.match(result.sourceCommit, /^[0-9a-f]{40}$/);
   assert.equal(result.pagesCount, 11);
   assert.equal(result.docFilesCount, 22);
-  assert.equal(result.screenshotsCount, 17);
+  assert.equal(result.screenshotsCount, 34);
   assert.ok(result.internalLinkCount >= 40, `Expected rich internal doc:<slug> cross-links, got ${result.internalLinkCount}`);
   assert.ok(result.imageRefCount >= 34, `Expected TR & EN image references, got ${result.imageRefCount}`);
 
@@ -36,7 +36,7 @@ test('YunPanel 0.3.0 bilingual docs bundle satisfies Yunsoft Website importer co
   assert.match(enSetup, /SMTP verification/);
 });
 
-test('Website docs validator strictly rejects ../../assets traversal and accepts screenshot:<id> references', () => {
+test('Docs validator checks image paths and the language of file and screenshot ID references', () => {
   const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'yunpanel-docs-neg-'));
   try {
     const copyDir = path.join(tmpDir, 'yunpanel-docs-0.3.0');
@@ -54,7 +54,14 @@ test('Website docs validator strictly rejects ../../assets traversal and accepts
     // 2. screenshot:<manifest-id> MUST be accepted
     writeFileSync(trInstall, original.replace('(assets/tr/18-tools-settings.png)', '(screenshot:tools-settings-overview)'), 'utf8');
     const ok = verifyVersionedDocsBundle(copyDir);
-    assert.equal(ok.screenshotsCount, 17);
+    assert.equal(ok.screenshotsCount, 34);
+
+    const enInstall = path.join(copyDir, 'locales/en/installation-and-upgrade.md');
+    const englishOriginal = readFileSync(enInstall, 'utf8');
+    for (const wrongLocaleReference of ['assets/tr/18-tools-settings.png', 'screenshot:tools-settings-overview']) {
+      writeFileSync(enInstall, englishOriginal.replace('(assets/en/18-tools-settings.png)', `(${wrongLocaleReference})`), 'utf8');
+      assert.throws(() => verifyVersionedDocsBundle(copyDir), /Image locale mismatch.*en page references tr screenshot/);
+    }
   } finally {
     rmSync(tmpDir, { recursive: true, force: true });
   }

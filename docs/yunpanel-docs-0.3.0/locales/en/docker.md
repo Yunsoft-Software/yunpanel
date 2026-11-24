@@ -32,7 +32,7 @@ The **Uygulama Marketi** section on `/docker` includes 14 pre-configured templat
 
 Templates automatically generate required secrets, define persistent volumes, and pre-wire Inner ↔ Outer loopback port mappings.
 
-![YunPanel Docker, Compose Stack, and Application Catalog screen (Turkish UI)](assets/tr/12-docker-compose.png)
+![YunPanel Docker, Compose Stack, and Application Catalog screen (Turkish UI)](assets/en/12-docker-compose.png)
 
 ## Related guides
 

@@ -18,7 +18,7 @@ The site **DNS** tab (`/websites/<id>/dns`) and **Ayarlar → DNS ve SSL** (`/se
 1. **Local Authoritative DNS (PowerDNS):** Once the server DNS identity (IPv4/IPv6, `ns1`/`ns2`, SOA, and optional secondary DNS AXFR/NOTIFY targets) is configured, YunPanel creates and manages local authoritative zones with A, AAAA, CNAME, MX, TXT, CAA, SRV records, and DNSSEC controls.
 2. **External DNS (Cloudflare API or manual provider):** When a domain's DNS is hosted externally, the panel clearly indicates that no local PowerDNS zone exists and supports Cloudflare DNS API integration for DNS-01 challenges and record management.
 
-![YunPanel site DNS management screen (Turkish UI)](assets/tr/09-site-dns.png)
+![YunPanel site DNS management screen (Turkish UI)](assets/en/09-site-dns.png)
 
 ## SSL/TLS certificates and automated renewal
 
@@ -29,7 +29,7 @@ Open **SSL/TLS Sertifikaları** (`/websites/<id>/ssl`) on any site to issue and 
 - **Automatic renewal scheduler:** Checks certificates every 6 hours by default (`YUNPANEL_CERTIFICATE_RENEWAL_INTERVAL_MS`) and renews certificates within 30 days of expiration (`YUNPANEL_CERTIFICATE_RENEW_BEFORE_MS`).
 - **Central alerts:** The top-bar **Bildirimler** (Notifications) drawer highlights missing or expiring SSL certificates.
 
-![YunPanel site SSL/TLS certificate management screen (Turkish UI)](assets/tr/08-site-ssl.png)
+![YunPanel site SSL/TLS certificate management screen (Turkish UI)](assets/en/08-site-ssl.png)
 
 ## Related guides
 
