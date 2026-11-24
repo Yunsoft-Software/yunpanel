@@ -333,3 +333,5 @@
 - 2026-11-22 00:35 orchestrator: verify a6d3ca77..fe4eea2c: failed, yeniden açılan -, bulgu ['T949']
 - 2026-11-22 00:42 orchestrator: verify a6d3ca77..6708dc07: ok, yeniden açılan -, bulgu -
 - 2026-11-22 15:35 orchestrator: verify 6708dc07..f54f6f13: ok, yeniden açılan -, bulgu -
+- 2026-11-25 00:28 orchestrator: Aktif dal 25-11-2026, 24-11-2026 (f6a078ec) üzerinden açıldı. Canlı Premium kampanyası kabulü Website işiyle koordine ediliyor.
+- 2026-11-25 02:19 orchestrator: verify f54f6f13..f6a078ec: failed, yeniden açılan -, bulgu ['T950']
