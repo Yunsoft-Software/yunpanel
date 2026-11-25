@@ -88,7 +88,7 @@ export default function WebsiteRemovalRecoveryPanel({onChanged}){
         :(typeof state.error==='string'?state.error:(state.error?.message??'Silme işlemleri durumu güncellenemedi.'))}
     </span>
    </div>
-   <div className="ws-actions" style={{alignItems:'center',gap:'0.45rem'}}>
+   <div className="ws-actions" style={{alignItems:'center',gap:'0.45rem',flex:'0 0 auto'}}>
     {active.length>0&&<Button variant="primary" onClick={()=>setDrawerOpen(true)}>
      Silme bildirimlerini aç ({active.length})
     </Button>}

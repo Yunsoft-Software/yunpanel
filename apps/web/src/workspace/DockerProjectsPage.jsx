@@ -249,7 +249,7 @@ function DockerProjectList() {
       title="Docker & Compose Stack Yönetimi"
       description="Docker Hub üzerinden dilediğiniz imajı arayın, tek tıkla konteyner veya Compose stack oluşturun, .yml dosyası yükleyin ve alan adlarınıza proxy olarak bağlayın."
       actions={<>
-        <Button icon="refresh" onClick={projects.refresh}>Yenile</Button>
+        <Button className="ws-icon-btn" icon="refresh" aria-label="Yenile" title="Yenile" onClick={projects.refresh} />
         <LinkButton to="/websites/new?mode=subdomain" icon="globe">Subdomain'e Docker Bağla</LinkButton>
         <Button variant="primary" icon="plus" onClick={() => openWithTemplate(null)}>Compose / Stack Ekle</Button>
       </>}
@@ -310,7 +310,7 @@ function DockerProjectList() {
       description="Hazır uygulamaları kurun veya Docker Hub üzerinden imaj arayın."
       actions={(liveCatalog.status === 'loading' || oneClickCatalog.status === 'loading') ? <Badge state="running">Katalog yükleniyor…</Badge> : <Badge state="active">{debouncedQuery ? `${filteredCatalog.length} sonuç` : `${filteredCatalog.length} uygulama`}</Badge>}
     >
-      <div className="yp-category-pills" role="tablist" aria-label="Uygulama Kategorileri" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '14px 18px 0 18px' }}>
+      <div className="yp-category-pills" role="tablist" aria-label="Uygulama Kategorileri">
         {EASYPANEL_CATEGORY_FILTERS.map((cat) => {
           const isSelected = activeCategory === cat.id;
           return (
@@ -604,7 +604,7 @@ function DockerProjectDetail({ projectId }) {
   );
   const storageCount = project?.services?.reduce((total, service) => total + storageMounts(service).length, 0) ?? 0;
   const refresh = () => { detail.refresh(); storageBackup.refresh(); };
-  return <><nav className="ws-breadcrumb"><Link to="/docker">Docker</Link><span>/ {project?.projectName ?? projectId}</span></nav><PageHeading title={project?.projectName ? project.projectName : 'Docker projesi'} description="Compose desired state, depolama yedekleme politikası, yayınlanan portlar, runtime ve işlem geçmişi." actions={<Button icon="refresh" onClick={refresh}>Yenile</Button>} /><LoadNotice resource={detail} label="Docker proje detayı" />{project && <><Section title="Desired state"><div className="ws-section-body"><KeyValues items={[
+  return <><nav className="ws-breadcrumb"><Link to="/docker">Docker</Link><span>/ {project?.projectName ?? projectId}</span></nav><PageHeading title={project?.projectName ? project.projectName : 'Docker projesi'} description="Compose desired state, depolama yedekleme politikası, yayınlanan portlar, runtime ve işlem geçmişi." actions={<Button className="ws-icon-btn" icon="refresh" aria-label="Yenile" title="Yenile" onClick={refresh} />} /><LoadNotice resource={detail} label="Docker proje detayı" />{project && <><Section title="Desired state"><div className="ws-section-body"><KeyValues items={[
     ['Revizyon', project.revision], ['Compose SHA-256', project.composeSha256], ['Servis', project.services?.length ?? 0], ['Network', project.networks?.length ?? 0], ['Named volume', project.volumes?.length ?? 0], ['Mount', storageCount], ['Env revizyonu', data.environment?.revision ?? 0], ['Registry credential', data.credentials?.length ?? 0],
   ]} /><div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Servis</th><th>Kaynak</th><th>Inner Port (Container targetPort)</th><th>Outer Port (Host publishedPort)</th><th>Published ports</th><th>Domain / Subdomain Proxy Hedefi</th></tr></thead><tbody>{project.services?.map((service) => <tr key={service.name}><td><strong>{service.name}</strong></td><td>{service.imageConfigured ? 'image' : service.buildConfigured ? 'build' : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <span key={`in:${portLabel(port)}`} className="yp-port-mapping-badge">Inner: {port.targetPort}/{port.protocol ?? 'tcp'}</span>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <span key={`out:${portLabel(port)}`} className="yp-port-mapping-badge">Outer: {(port.hostIp ?? '127.0.0.1')}:{port.publishedPort}</span>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <small key={portLabel(port)}>{portLabel(port)}</small>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <code key={`proxy:${portLabel(port)}`}>{innerOuterPortLabel(port)}</code>) : '—'}</td></tr>)}</tbody></table></div></div></Section><LoadNotice resource={storageBackup} label="Docker storage backup policy" /><StoragePanel project={project} backup={storageBackup.data} /><DockerVolumesPanel project={project} onChanged={refresh} /><DockerConfigPanel data={data} onChanged={detail.refresh} /><DockerLifecyclePanel project={project} onChanged={detail.refresh} /><Section title="Website / Nginx diagnosis" description="Konteyner servislerinin web sitesi ve alan adı yönlendirme durumu."><DiagnosisPanel project={project} /></Section><RuntimePanel key={project.id} projectId={project.id} projectRevision={project.revision} /><LogsPanel project={project} /><HistoryPanel projectId={project.id} /></>}</>;
 }

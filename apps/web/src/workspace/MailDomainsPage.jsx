@@ -60,7 +60,7 @@ function MailDomainList() {
     setParams((current) => { const next = new URLSearchParams(current); if (value && value !== 'all') next.set(key, value); else next.delete(key); if (key !== 'page') next.delete('page'); return next; }, { replace: key === 'q' });
   }
   return <>
-    <PageHeading title="Mail" description="Posta hesapları, webmail ve alan adı ayarları." actions={<><Button icon="refresh" onClick={domains.refresh}>Yenile</Button><Button icon="plus" variant="primary" onClick={() => setCreating(true)}>Mail alan adı ekle</Button></>} />
+    <PageHeading title="Mail" description="Posta hesapları, webmail ve alan adı ayarları." actions={<><Button className="ws-icon-btn" icon="refresh" aria-label="Yenile" title="Yenile" onClick={domains.refresh} /><Button icon="plus" variant="primary" onClick={() => setCreating(true)}>Mail alan adı ekle</Button></>} />
     <LoadNotice resource={domains} label="Mail alan adları" />
     <Section title="Mail alan adları" actions={<span className="ws-muted">{domains.data ? `${items.length} kayıt` : 'Bağlantı bekleniyor'}</span>}>
       <div className="ws-filters"><label className="ws-filter-search">Alan adı ara<input type="search" value={query} onChange={(event) => filter('q', event.target.value)} placeholder="Örneğin: sirket.com" /></label><label>Yönetim<select aria-label="Mail yönetim modu" value={mode} onChange={(event) => filter('mode', event.target.value)}><option value="all">Tümü</option><option value="local">Bu sunucuda</option><option value="external">Harici sağlayıcı</option></select></label></div>
@@ -86,7 +86,7 @@ function MailDomainDetail({ mailDomainId }) {
   const href = (key) => { const next = new URLSearchParams(params); next.set('section', key); return `/mail/${encodeURIComponent(mailDomainId)}?${next}`; };
   return <>
     <nav className="ws-breadcrumb" aria-label="Mail konumu"><Link to="/mail">Mail</Link><span>/</span><span>{domain?.domainName ?? 'Alan adı'}</span></nav>
-    <PageHeading title={domain?.domainName ?? 'Mail alan adı'} description="Bu alan adına ait posta hesapları ve mail hizmetleri." actions={<Button icon="refresh" onClick={detail.refresh}>Yenile</Button>} />
+    <PageHeading title={domain?.domainName ?? 'Mail alan adı'} description="Bu alan adına ait posta hesapları ve mail hizmetleri." actions={<Button className="ws-icon-btn" icon="refresh" aria-label="Yenile" title="Yenile" onClick={detail.refresh} />} />
     <LoadNotice resource={detail} label="Mail alan adı" />
     {domain && <>
       <div className="ws-site-meta"><Badge state={mailState(domain)}>{mailStatusLabel(domain)}</Badge><span>{domain.managementMode === 'local' ? 'Bu sunucuda' : 'Harici sağlayıcı'}</span>{domain.managementMode === 'local' && <><span>{data.mailboxes.length} posta kutusu</span><span>{data.aliases.length} takma ad</span></>}</div>

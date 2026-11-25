@@ -104,28 +104,24 @@ test('Criterion 2: Existing saved preferences (light, system, dark) are preserve
    depolama engeli durumunda UI bozulmadan çalışmalıdır.
    ========================================================================== */
 
-test('Criterion 3: Sol menü > Görünüm tercihleri defines accessible controls and options', async () => {
+test('Criterion 3: Theme preferences stay clean — sidebar omits Görünüm tercihleri and topbar exposes icon-only theme toggle', async () => {
   const preferencesSrc = await readWebSource('workspace/ui/Preferences.jsx');
   const layoutSrc = await readWebSource('workspace/WorkspaceLayout.jsx');
 
-  // Sidebar navigation hosts Görünüm tercihleri details disclosure
-  assert.match(layoutSrc, /<details className="ws-appearance"><summary>Görünüm tercihleri<\/summary><Preferences \/><\/details>/);
+  // Sidebar omits the legacy Görünüm tercihleri disclosure; topbar owns the light/dark mode icon button
+  assert.doesNotMatch(layoutSrc, /ws-appearance|Görünüm tercihleri/);
+  assert.match(layoutSrc, /className="ws-theme-toggle ws-icon-btn"/);
+  assert.match(layoutSrc, /icon=\{themeMode === 'light' \? 'moon' : 'sun'\}/);
 
-  // Fieldset has legend "Görünüm"
+  // Preferences helper module retains accessible storage semantics
   assert.match(preferencesSrc, /<fieldset className="ws-preferences"><legend>Görünüm<\/legend>/);
-
-  // Theme preference selector with Gece, Açık, Sistem options
   assert.match(preferencesSrc, /<label htmlFor="ws-theme-preference">Tema<select id="ws-theme-preference"/);
   assert.match(preferencesSrc, /<option value="dark">Gece<\/option>/);
   assert.match(preferencesSrc, /<option value="light">Açık<\/option>/);
   assert.match(preferencesSrc, /<option value="system">Sistem<\/option>/);
-
-  // Density preference selector with Rahat, Kompakt options
   assert.match(preferencesSrc, /<label htmlFor="ws-density-preference">Yoğunluk<select id="ws-density-preference"/);
   assert.match(preferencesSrc, /<option value="comfortable">Rahat<\/option>/);
   assert.match(preferencesSrc, /<option value="compact">Kompakt<\/option>/);
-
-  // Status notification when storage write is not permitted
   assert.match(preferencesSrc, /role="status"/);
   assert.match(preferencesSrc, /Tercih bu oturumda uygulandı; tarayıcı kalıcı kayda izin vermiyor\./);
 });
@@ -218,19 +214,19 @@ test('Criterion 5: Mobile top bar has search, menu, AI, and active jobs buttons 
   const emberTheme = await readWebSource('workspace/ui/ember-theme.css');
   const workspaceCss = await readWebSource('workspace/workspace.css');
 
-  // 1. Menu button: .ws-mobile-menu in toolbar
-  assert.match(layoutSrc, /<Button\s+className="ws-mobile-menu"\s+icon="menu"\s+aria-label="Ana menüyü aç"/);
+  // 1. Single menu/sidebar toggle button: .ws-mobile-menu in toolbar
+  assert.match(layoutSrc, /className="ws-mobile-menu ws-icon-btn"[\s\S]*?icon=\{narrow \? 'menu' : 'sidebar'\}[\s\S]*?aria-label="Ana menüyü aç"/);
 
   // 2. Search button: .ws-command-trigger in toolbar
   assert.match(layoutSrc, /<button\s+type="button"\s+className="ws-command-trigger"\s+aria-label="Site veya panel bölümü ara"\s+aria-haspopup="dialog"/);
-  assert.match(layoutSrc, /<Icon name="search" \/>/);
+  assert.match(layoutSrc, /<Icon name="search"/);
 
-  // 3. AI assistant button in toolbar actions
-  assert.match(layoutSrc, /<Button\s+icon="terminal"\s+aria-label="AI asistanı aç"\s+title="AI Asistan · Ctrl \/ ⌘ Shift A"/);
+  // 3. Icon-only AI assistant button in toolbar actions
+  assert.match(layoutSrc, /className="ws-icon-btn"[\s\S]*?icon="sparkles"[\s\S]*?aria-label="AI asistanı aç"[\s\S]*?title="AI Asistan · Ctrl \/ ⌘ Shift A"/);
 
-  // 4. Active jobs link in toolbar actions with dynamic jobCount
-  assert.match(layoutSrc, /<LinkButton\s+to="\/jobs"\s+icon="jobs"\s+aria-label=\{`İşlemler\$\{jobCount > 0 \? `, \$\{jobCount\} aktif` : ''\}`\}\s+title="İşlemler"/);
-  assert.match(layoutSrc, /\{jobCount > 0 && <span className="ws-nav-count">\{jobCount\}<\/span>\}/);
+  // 4. Icon-only active jobs link in toolbar actions with dynamic jobCount badge
+  assert.match(layoutSrc, /<LinkButton[\s\S]*?to="\/jobs"[\s\S]*?icon="jobs"[\s\S]*?aria-label=\{`İşlemler\$\{jobCount > 0 \? `, \$\{jobCount\} aktif` : ''\}`\}[\s\S]*?title="İşlemler"/);
+  assert.match(layoutSrc, /\{jobCount > 0 && <span className="ws-icon-badge" aria-hidden="true">\{jobCount\}<\/span>\}/);
 
   // Mobile menu button is displayed on narrow viewports (<= 900px)
   assert.match(workspaceCss, /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.ws-mobile-menu,\s*\.ws-nav-close\s*\{[^}]*display:\s*inline-flex/);

@@ -5,6 +5,7 @@ import { authMessage } from './auth-message.js';
 import MfaSettings from './MfaSettings.jsx';
 import {
   ConfirmDialog,
+  Icon,
   isPointOutsideRect,
   isTopModalLayer,
   registerModalLayer,
@@ -229,7 +230,7 @@ export default function AccountDialog({ session, onClose, onSession, onSignedOut
 
   return <>
     <dialog ref={dialog} className="auth-dialog" aria-modal="true" aria-labelledby="account-heading" onFocus={(event) => { if (event.target !== dialog.current && dialog.current?.contains(event.target)) lastFocusedInsideRef.current = event.target; }} onPointerDown={handlePointerDown} onPointerCancel={() => { pointerDownOutsideRef.current = false; }} onClick={handleClick} onKeyDown={handleKeyDown} onCancel={close}>
-      <header><h2 id="account-heading">Hesabım</h2><button type="button" disabled={locked} onClick={close}>Kapat</button></header>
+      <header><h2 id="account-heading">Hesabım</h2><button type="button" className="auth-dialog-close" aria-label="Kapat" title="Kapat" disabled={locked} onClick={close}><Icon name="close" size={16} /></button></header>
       {error && <p className="auth-error" role="alert">{error}</p>}
       {sensitive && <p className="auth-notice" role="status">Pencereyi kapatmadan önce kurtarma kodlarını aşağıdan kaydedip onaylayın.</p>}
       <form onSubmit={changePassword}>

@@ -453,7 +453,7 @@ function BackupWorkspace({ scope, generation, isOwner }) {
         {planSchedule.frequency === 'custom' && <div className="ws-field"><label htmlFor="backup-cron">Özel zamanlama (cron)</label><input id="backup-cron" value={planSchedule.expression}
           disabled={planBusy || !planSchedule.enabled} onChange={event => setPlanSchedule(previous => ({ ...previous, expression: event.target.value }))} /></div>}
         <p className="ws-muted">Saat dilimi: {planSchedule.timeZone}. Otomatik yedekleme kapalıyken istediğiniz zaman elle yedek alabilirsiniz.</p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 110px), 1fr))', gap: '0.75rem' }}>
           <label>Son N Kopya:
             <input
               type="number"
@@ -598,7 +598,7 @@ function Repository({ repository, isOwner, isOperationBusy, onRestore, onCheckHe
         detail={repository.snapshotStatus === 'error'
           ? 'Snapshot listesi okunamadı; depo yolunu veya ham hatayı site hesabına göstermeden Owner kontrolü gerekir.'
           : 'Bu depoda bu Website etiketiyle eşleşen snapshot bulunamadı.'} />
-      : <div className="ws-table-wrap"><table className="ws-table"><thead><tr><th>Yedek</th><th>Tür</th><th>Durum</th><th>Tarih</th>{isOwner && <th>İşlem</th>}</tr></thead><tbody>
+      : <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Yedek</th><th>Tür</th><th>Durum</th><th>Tarih</th>{isOwner && <th>İşlem</th>}</tr></thead><tbody>
         {repository.snapshots.map((snapshot) => {
           const isFailed = snapshot.status === 'failed';
           const isStale = snapshot.status === 'stale';

@@ -48,7 +48,7 @@ export function HostingAccountsPanel({ refreshKey, locked, onOpen, onAccessLost 
   }, [kind, offset, refreshKey, retry]);
   const visible = page.status === 'ready' && page.kind === kind && page.offset === offset ? page.data : null;
   function changeKind(next) { setKind(next); setOffset(0); }
-  return <Section title="Bayi ve müşteri profilleri" description="Owner için hesap hazırlığı. Profil bağlamak henüz site erişimi veya bayi paneli açmaz." actions={<Button icon="refresh" disabled={locked || page.status === 'loading'} onClick={() => setRetry((value) => value + 1)}>Yenile</Button>}>
+  return <Section title="Bayi ve müşteri profilleri" description="Owner için hesap hazırlığı. Profil bağlamak henüz site erişimi veya bayi paneli açmaz." actions={<Button className="ws-icon-btn" icon="refresh" aria-label="Yenile" title="Yenile" disabled={locked || page.status === 'loading'} onClick={() => setRetry((value) => value + 1)} />}>
     <div className="ws-section-body">
       <div className="ws-actions" role="group" aria-label="Profil türü">
         <Button aria-pressed={kind === 'reseller'} disabled={locked} onClick={() => changeKind('reseller')}>Bayiler</Button>
@@ -79,14 +79,14 @@ export function HostingAccountsPanel({ refreshKey, locked, onOpen, onAccessLost 
       <ErrorNotice error={page.status === 'error' ? hostingAccountMessage(page.error) : null} />
       {page.status !== 'error' && !visible && <p role="status">Profiller yükleniyor…</p>}
     </div>
-    {visible && (visible.accounts.length ? <div className="ws-table-scroll"><table className="ws-table">
+    {visible && (visible.accounts.length ? <div className="ws-table-scroll"><table className="ws-table ws-accounts-table">
       <caption className="ws-muted">{kind === 'reseller' ? 'Bayi' : 'Müşteri'} profilleri — yalnız kayıtlı hesap ilişkileri</caption>
-      <thead><tr><th scope="col">Hesap</th><th scope="col">{kind === 'reseller' ? 'Adet kullanımı / sınır' : 'Bağlı bayi'}</th><th scope="col">Giriş hesabı</th><th scope="col">İşlem</th></tr></thead>
+      <thead><tr><th scope="col">Hesap</th><th scope="col">{kind === 'reseller' ? 'Adet kullanımı / sınır' : 'Bağlı bayi'}</th><th scope="col">Giriş hesabı</th><th scope="col" className="ws-row-end">İşlem</th></tr></thead>
       <tbody>{visible.accounts.map((account) => <tr key={account.id}>
-        <th scope="row">{account.username}</th>
+        <th scope="row" className="ws-col-nowrap">{account.username}</th>
         <td>{kind === 'reseller' ? <>Müşteri: {account.usage.customers} / {limitText(account.limits.maxCustomers)}<br />Kayıtlı / ayrılmış site: {account.usage.websites} / {limitText(account.limits.maxWebsites)}</> : account.resellerId === null ? 'Doğrudan Owner' : <Button disabled={locked} aria-label={`${account.username} hesabının bağlı bayisini aç`} onClick={() => onOpen(account.resellerId)}>Bağlı bayiyi aç</Button>}</td>
-        <td><Badge state={account.active ? 'active' : 'off'}>{account.active ? 'Etkin' : 'Kapalı'}</Badge></td>
-        <td><Button disabled={locked} aria-label={`${account.username} profilini yönet`} onClick={() => onOpen(account.id)}>Profili yönet</Button></td>
+        <td className="ws-col-nowrap"><Badge state={account.active ? 'active' : 'off'}>{account.active ? 'Etkin' : 'Kapalı'}</Badge></td>
+        <td className="ws-row-end ws-col-nowrap"><Button disabled={locked} aria-label={`${account.username} profilini yönet`} onClick={() => onOpen(account.id)}>Profili yönet</Button></td>
       </tr>)}</tbody>
     </table></div> : <EmptyState title="Bu türde profil yok" detail="Üstteki kullanıcı listesinden mevcut uygun hesaba profil bağlayabilirsiniz." icon="user" />)}
     <footer className="ws-pagination"><span>{visible ? `${visible.total} profil` : 'Profil sayısı doğrulanıyor'}</span><div className="ws-actions">

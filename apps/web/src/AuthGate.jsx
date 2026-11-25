@@ -8,6 +8,7 @@ import AccountDialog from './AccountDialog.jsx';
 import OwnerEnrollment from './OwnerEnrollment.jsx';
 import { ownerAccess } from './owner-access.js';
 import { formatUserRoleLabel, PanelSessionProvider } from './panel-session.jsx';
+import { Icon } from './workspace/PanelKit.jsx';
 import './auth.css';
 import './mfa.css';
 
@@ -127,17 +128,26 @@ export default function AuthGate({ children }) {
   const deadline = sessionDeadline(state.session, now);
   const access = ownerAccess(state.session);
   const showEnrollment = access === 'enrollment' || (access === 'management' && enrollmentOpen);
-  return <div className="authenticated-panel">
-    <div className="auth-sessionbar" aria-label="Hesap işlemleri">
-      <span>YunPanel <span className="auth-separator">/</span> Yönetim</span>
-      <div><span>{state.session.user.username}</span><span className="auth-role">{formatUserRoleLabel(state.session.user)}</span><button disabled={busy || showEnrollment} onClick={() => setAccountOpen(true)}>Hesabım</button><button disabled={busy} onClick={logout}>{busy ? 'İşleniyor…' : 'Çıkış yap'}</button></div>
-    </div>
+  const hasWorkspaceShell = !showEnrollment && ['management', 'site_management', 'read_only'].includes(access);
+  const accountControls = {
+    username: state.session.user.username,
+    roleLabel: formatUserRoleLabel(state.session.user),
+    openAccount: () => setAccountOpen(true),
+    logout,
+    busy,
+    accountDisabled: busy || showEnrollment,
+  };
+  return <div className={`authenticated-panel ${hasWorkspaceShell ? 'has-unified-topbar' : ''}`.trim()}>
+    {!hasWorkspaceShell && <div className="auth-sessionbar" aria-label="Hesap işlemleri">
+      <span>YunPanel</span>
+      <div><span>{accountControls.username}</span><span className="auth-role">{accountControls.roleLabel}</span><button type="button" className="auth-icon-btn" disabled={accountControls.accountDisabled} aria-label="Hesabım" title={`Hesabım (${accountControls.username})`} onClick={accountControls.openAccount}><Icon name="user" size={16} /></button><button type="button" className="auth-icon-btn auth-icon-btn-logout" disabled={busy} aria-label="Çıkış yap" title={busy ? 'İşleniyor…' : 'Çıkış yap'} onClick={logout}><Icon name="logout" size={16} /></button></div>
+    </div>}
     {deadline.warning && <div className="auth-expiry" role="status"><span>{deadline.absolute ? 'Azami oturum süresi dolmak üzere. Yeniden giriş gerekecek.' : 'Oturumunuz hareketsizlik nedeniyle kapanmak üzere.'}</span>{!deadline.absolute && <button className="auth-secondary" disabled={busy} onClick={extend}>Oturumu uzat</button>}</div>}
     {actionError && <p className="auth-banner" role="alert">{actionError}</p>}
     {showEnrollment
       ? <OwnerEnrollment session={state.session} onSession={accept} onSignedOut={signedOut} onComplete={() => setEnrollmentOpen(false)} />
-      : ['management', 'site_management', 'read_only'].includes(access)
-        ? <PanelSessionProvider session={state.session}><div key={state.session.id}>{children}</div></PanelSessionProvider>
+      : hasWorkspaceShell
+        ? <PanelSessionProvider session={state.session} accountControls={accountControls}><div key={state.session.id}>{children}</div></PanelSessionProvider>
         : <main className="auth-loading"><h1>{access === 'unknown' ? 'Güvenlik durumu alınamadı' : 'Yönetim erişimi yok'}</h1><p role="alert">{access === 'unknown' ? 'Web arayüzü ve API sürümlerini kontrol edin. Yönetim ekranları güvenlik bilgisi doğrulanana kadar açılmaz.' : 'Bu hesap için sunucu yönetimi yetkisi tanımlı değil.'}</p><button className="auth-primary" onClick={() => refresh()}>Durumu yeniden kontrol et</button></main>}
     {accountOpen && <AccountDialog session={state.session} onClose={() => setAccountOpen(false)} onSession={accept} onSignedOut={signedOut} />}
   </div>;

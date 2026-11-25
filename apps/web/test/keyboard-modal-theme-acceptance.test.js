@@ -44,27 +44,22 @@ const [
 
 /* ==========================================================================\n   1. Mobile Menu & Appearance Details Keyboard Navigation (Tab/Shift+Tab/Escape)\n   ========================================================================== */
 
-test('Appearance details supports Escape dismissal and Tab/Shift+Tab boundary wrapping', () => {
-  // Preserves exact literal details tag for plesk-navigation test
-  assert.match(layoutJsx, /<details className="ws-appearance">/);
-
-  // Escape key collapses details and refocuses summary
-  assert.match(layoutJsx, /if \(event\.key === 'Escape'\)/);
-  assert.match(layoutJsx, /details\.open = false/);
-  assert.match(layoutJsx, /details\.querySelector\('summary'\)\?\.focus\(\)/);
-
-  // Tab key cycles within open appearance details
-  assert.match(layoutJsx, /if \(event\.key === 'Tab' && details\.open\)/);
-  assert.match(layoutJsx, /event\.shiftKey && document\.activeElement === first/);
-  assert.match(layoutJsx, /!event\.shiftKey && document\.activeElement === last/);
+test('Topbar theme toggle syncs across tabs via storage listener and omits legacy sidebar appearance disclosure', () => {
+  assert.doesNotMatch(layoutJsx, /ws-appearance|Görünüm tercihleri/);
+  assert.match(layoutJsx, /className="ws-theme-toggle ws-icon-btn"/);
+  assert.match(layoutJsx, /window\.addEventListener\('storage',\s*onStorage\)/);
+  assert.match(layoutJsx, /window\.removeEventListener\('storage',\s*onStorage\)/);
 });
 
-test('Mobile navigation drawer traps Tab/Shift+Tab and restores focus to trigger on close', () => {
+test('Mobile navigation drawer traps Tab/Shift+Tab, renders close button only on narrow screens, and restores focus to trigger on close', () => {
   // Focus moves into drawer on open
   assert.match(layoutJsx, /menu\.current\.querySelector\('button'\)\?\.focus\(\)/);
 
-  // Drawer escape handler checks nested appearance details first
-  assert.match(layoutJsx, /appearanceRef\.current\?\.open && appearanceRef\.current\.contains\(document\.activeElement\)/);
+  // Close button is only rendered inside mobile drawer (no duplicate desktop close button)
+  assert.match(layoutJsx, /\{narrow && <Button className="ws-nav-close ws-icon-btn"/);
+
+  // Drawer escape handler closes menu
+  assert.match(layoutJsx, /if \(event\.key === 'Escape'\)/);
   assert.match(layoutJsx, /setMenuOpen\(false\)/);
 
   // Drawer cycles focus on Tab and Shift+Tab

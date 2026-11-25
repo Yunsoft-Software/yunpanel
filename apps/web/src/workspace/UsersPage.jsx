@@ -82,7 +82,7 @@ export default function UsersPage() {
   return <>
     <nav className="ws-breadcrumb" aria-label="Sayfa yolu"><Link to="/settings">Ayarlar</Link><span>/ Kullanıcılar</span></nav>
     <PageHeading title="Kullanıcılar" description="Panel hesaplarını ve yönetim erişimini yönetin." actions={<>
-      <Button icon="refresh" onClick={refresh} disabled={dialog !== null || premiumGateOpen || page.status === 'loading'}>Yenile</Button>
+      <Button className="ws-icon-btn" icon="refresh" aria-label="Yenile" title="Yenile" onClick={refresh} disabled={dialog !== null || premiumGateOpen || page.status === 'loading'} />
       <Button icon="plus" variant="primary" disabled={locked || usersLicensePendingOrError} onClick={() => { setNotice(''); if (usersGateState === 'allowed') setDialog({ type: 'create' }); else if (usersGateState === 'premium_required') setPremiumGateOpen(true); }}><span>Kullanıcı ekle</span>{isolatedUsersPremiumRequired && <Badge state="unknown">Premium</Badge>}</Button>
     </>} />
     {usersGateState === 'loading' && (
@@ -110,15 +110,15 @@ export default function UsersPage() {
     <Section title="Hesaplar" description="Panel kullanıcı hesapları, roller ve iki adımlı doğrulama durumları.">
       {(page.status === 'loading' || (page.status === 'ready' && !ready)) && <div className="ws-loading" role="status"><span className="ws-spinner" />Hesaplar doğrulanıyor…</div>}
       {page.status === 'error' && <div className="ws-section-body"><ErrorNotice error={userAdminMessage(page.error)} /><Button disabled={dialog !== null} onClick={refresh}>Listeyi yeniden yükle</Button></div>}
-      {ready && (visible.users.length ? <div className="ws-table-scroll"><table className="ws-table">
+      {ready && (visible.users.length ? <div className="ws-table-scroll"><table className="ws-table ws-users-table">
         <caption className="ws-muted">Panel kullanıcıları; her sayfada en fazla {LIMIT} hesap.</caption>
-        <thead><tr><th scope="col">Kullanıcı adı</th><th scope="col">Rol</th><th scope="col">Durum</th><th scope="col">MFA</th><th scope="col">İşlemler</th></tr></thead>
+        <thead><tr><th scope="col">Kullanıcı adı</th><th scope="col">Rol</th><th scope="col">Durum</th><th scope="col">MFA</th><th scope="col" className="ws-row-end">İşlemler</th></tr></thead>
         <tbody>{visible.users.map((user) => <tr key={user.id}>
           <th scope="row" style={{ overflowWrap: 'anywhere' }}>{user.username}</th>
-          <td>{formatUserRoleLabel(user)}</td>
-          <td><Badge state={user.active ? 'active' : 'off'}>{user.active ? 'Aktif' : 'Devre dışı'}</Badge></td>
-          <td><Badge state={user.mfaEnabled ? 'active' : 'warning'}>{user.mfaEnabled ? 'Kurulu' : 'Kurulu değil'}</Badge></td>
-          <td><div className="ws-actions"><Button disabled={locked} aria-label={`${user.username} hesabını düzenle`} onClick={() => { setNotice(''); setDialog({ type: 'edit', user }); }}>Düzenle</Button>
+          <td className="ws-col-nowrap">{formatUserRoleLabel(user)}</td>
+          <td className="ws-col-nowrap"><Badge state={user.active ? 'active' : 'off'}>{user.active ? 'Aktif' : 'Devre dışı'}</Badge></td>
+          <td className="ws-col-nowrap"><Badge state={user.mfaEnabled ? 'active' : 'warning'}>{user.mfaEnabled ? 'Kurulu' : 'Kurulu değil'}</Badge></td>
+          <td className="ws-row-end ws-col-nowrap"><div className="ws-actions ws-actions-nowrap" style={{ justifyContent: 'flex-end' }}><Button disabled={locked} aria-label={`${user.username} hesabını düzenle`} onClick={() => { setNotice(''); setDialog({ type: 'edit', user }); }}>Düzenle</Button>
             {user.role === 'site_manager' && <Button disabled={locked} aria-label={`${user.username} bayi veya müşteri profilini yönet`} onClick={() => { setNotice(''); setDialog({ type: 'hosting', user }); }}>Bayi / müşteri</Button>}
             <Button disabled={locked} variant="danger" aria-label={`${user.username} hesabını sil`} onClick={() => { setNotice(''); setDialog({ type: 'delete', user }); }}>Sil</Button></div></td>
         </tr>)}</tbody>

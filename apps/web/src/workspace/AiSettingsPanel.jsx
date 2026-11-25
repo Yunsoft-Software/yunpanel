@@ -164,8 +164,10 @@ export default function AiSettingsPanel() {
                   data-provider-id={prov.id}
                   style={{
                     display: 'flex',
+                    flexWrap: 'wrap',
                     justifyContent: 'space-between',
                     alignItems: 'center',
+                    gap: '10px',
                     padding: '12px 14px',
                     border: '1px solid var(--ws-border)',
                     borderRadius: '8px',
@@ -232,7 +234,7 @@ export default function AiSettingsPanel() {
           >
             <h4 style={{ margin: 0 }}>Yeni AI Sağlayıcısı Yapılandır</h4>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <div className="ws-form-grid">
               <label>
                 Sağlayıcı Kimliği (ID):
                 <input
@@ -241,7 +243,6 @@ export default function AiSettingsPanel() {
                   placeholder="örn: anthropic-main, openai-gpt4"
                   value={formId}
                   onChange={(e) => setFormId(e.target.value)}
-                  style={{ width: '100%', padding: '8px', marginTop: '4px' }}
                 />
               </label>
 
@@ -250,7 +251,6 @@ export default function AiSettingsPanel() {
                 <select
                   value={formType}
                   onChange={(e) => setFormType(e.target.value)}
-                  style={{ width: '100%', padding: '8px', marginTop: '4px' }}
                 >
                   <option value="openrouter">OpenRouter (GLM 5.2, Claude, Llama vb.)</option>
                   <option value="anthropic">Anthropic (Claude 3.7 Sonnet)</option>
@@ -269,11 +269,10 @@ export default function AiSettingsPanel() {
                 placeholder={formType === 'openrouter' ? 'sk-or-v1-...' : formType === 'anthropic' ? 'sk-ant-...' : formType === 'openai' ? 'sk-...' : 'AI API Key'}
                 value={formKey}
                 onChange={(e) => setFormKey(e.target.value)}
-                style={{ width: '100%', padding: '8px', marginTop: '4px' }}
               />
             </label>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <div className="ws-form-grid">
               <label>
                 Özel Base URL (İsteğe bağlı):
                 <input
@@ -281,7 +280,6 @@ export default function AiSettingsPanel() {
                   placeholder={formType === 'openrouter' ? 'https://openrouter.ai/api/v1' : formType === 'ollama' ? 'http://127.0.0.1:11434' : 'Varsayılan endpoint kullanılır'}
                   value={formBaseUrl}
                   onChange={(e) => setFormBaseUrl(e.target.value)}
-                  style={{ width: '100%', padding: '8px', marginTop: '4px' }}
                 />
               </label>
 
@@ -292,7 +290,6 @@ export default function AiSettingsPanel() {
                   placeholder={formType === 'openrouter' ? 'z-ai/glm-5.2' : formType === 'anthropic' ? 'claude-3-7-sonnet-20250219' : formType === 'openai' ? 'gpt-4o' : formType === 'gemini' ? 'gemini-2.0-flash' : 'llama3.2'}
                   value={formModel}
                   onChange={(e) => setFormModel(e.target.value)}
-                  style={{ width: '100%', padding: '8px', marginTop: '4px' }}
                 />
               </label>
             </div>

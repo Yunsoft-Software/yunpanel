@@ -92,7 +92,7 @@ export default function DashboardPage() {
     isOwner ? ['/servers', 'Sunucu', 'Servisler ve terminal', 'server'] : ['/websites', 'Sitelerim', 'Dosyalar ve uygulamalar', 'globe'],
   ];
   return <>
-    <PageHeading title="Genel bakış" description="Sunucunuz, siteleriniz ve dikkat gerektiren işler." actions={<><Button icon="refresh" onClick={refreshAll}>Yenile</Button><LinkButton to="/websites/new" variant="primary" icon="plus">Site ekle</LinkButton></>} />
+    <PageHeading title="Genel bakış" description="Sunucunuz, siteleriniz ve dikkat gerektiren işler." actions={<><Button className="ws-icon-btn" icon="refresh" aria-label="Yenile" title="Yenile" onClick={refreshAll} /><LinkButton to="/websites/new" variant="primary" icon="plus">Site ekle</LinkButton></>} />
     <CollectionNotice resource={websites} label="Web siteleri" />
     <CollectionNotice resource={applications} label="Uygulamalar" />
     <section className="ws-metrics ws-console-metrics" aria-label="Yönetim özeti">{metrics.map(([label, value, detail, icon, to, linkLabel]) => <article className="ws-metric" key={label}>
@@ -122,7 +122,7 @@ export default function DashboardPage() {
       </Section>
     )}
     <div className="ws-console-grid">
-      <Section title="Performans" description="Canlı sunucu kaynak kullanımı" actions={<div className="ws-actions" style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}><Badge state={telemetryIntervalMs > 0 ? 'active' : 'draft'}>{telemetryIntervalMs > 0 ? 'Canlı' : 'Duraklatıldı'}</Badge><select aria-label="Yenileme aralığı" style={{ width: 'auto', minWidth: '88px', height: '34px', minHeight: '34px', padding: '0 26px 0 10px' }} value={telemetryIntervalMs} onChange={(event) => setTelemetryIntervalMs?.(Number(event.target.value))}><option value={3000}>3 sn</option><option value={5000}>5 sn</option><option value={15000}>15 sn</option><option value={0}>Duraklat</option></select><Button icon="refresh" onClick={() => servers.refresh?.()}>Şimdi ölç</Button></div>}>
+      <Section title="Performans" description="Canlı sunucu kaynak kullanımı" actions={<div className="ws-actions" style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}><Badge state={telemetryIntervalMs > 0 ? 'active' : 'draft'}>{telemetryIntervalMs > 0 ? 'Canlı' : 'Duraklatıldı'}</Badge><select aria-label="Yenileme aralığı" style={{ width: 'auto', minWidth: '88px', height: '34px', minHeight: '34px', padding: '0 26px 0 10px' }} value={telemetryIntervalMs} onChange={(event) => setTelemetryIntervalMs?.(Number(event.target.value))}><option value={3000}>3 sn</option><option value={5000}>5 sn</option><option value={15000}>15 sn</option><option value={0}>Duraklat</option></select><Button className="ws-icon-btn" icon="refresh" aria-label="Şimdi ölç" title="Şimdi ölç" onClick={() => servers.refresh?.()} /></div>}>
         <CollectionNotice resource={servers} label="Sunucu" />
         <UsageHistory key={server?.id ?? 'unavailable'} server={['ready', 'stale'].includes(servers.status) ? server : null} />
       </Section>
@@ -141,7 +141,7 @@ export default function DashboardPage() {
     </div>
     <Section title="Sertifika kontrolleri" actions={<Link to="/websites">Web siteleri</Link>}>
       <CollectionNotice resource={domains} label="Alan adları" /><CollectionNotice resource={certificates} label="Sertifikalar" />
-      {warnings.length ? <div className="ws-alert-list" aria-label="SSL sertifika uyarıları">{warnings.slice(0, 5).map(({ domain, ssl }) => <div className="ws-alert-item" key={domain.id}><Icon name="shield" /><div><strong>{domain.primaryDomain}</strong><p>{ssl.label}</p></div><Link to={siteHref(domain.id, 'ssl')}>SSL’i incele</Link></div>)}</div> : hasCerts && <div className="ws-section-body ws-health-clear"><Icon name="check" /><span>Sertifika kayıtlarında uyarı yok.</span></div>}
+      {warnings.length ? <div className="ws-alert-list" aria-label="SSL sertifika uyarıları">{warnings.slice(0, 5).map(({ domain, ssl }) => <div className="ws-alert-item" key={domain.id}><Icon name="shield" /><div><strong>{domain.primaryDomain}</strong><p>{ssl.label}</p></div><Link to={siteHref(domain.id, 'ssl')}>SSL’i incele</Link></div>)}</div> : hasCerts ? <div className="ws-section-body ws-health-clear"><Icon name="check" /><span>Sertifika kayıtlarında uyarı yok.</span></div> : certsReadable && <div className="ws-section-body"><p className="ws-muted">Sertifika kaydı henüz bulunmuyor.</p></div>}
     </Section>
   </>;
 }

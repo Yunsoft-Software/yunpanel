@@ -121,10 +121,7 @@ test('source: WorkspaceApp guards routes with role checks', async () => {
 
 test('source: WorkspaceLayout displays distinct branding for Reseller, Customer, and Owner', async () => {
   const layout = await source('WorkspaceLayout.jsx');
-  assert.match(layout, /isReseller \? 'BAYİ PANELİ' : isCustomer \? 'MÜŞTERİ PANELİ'/);
-  assert.match(layout, /isReseller \? 'Bayi yönetimi' : isCustomer \? 'Müşteri paneli'/);
-  assert.match(layout, /SUNUCU YÖNETİMİ/);
-  assert.match(layout, /Sunucu yönetimi/);
+  assert.match(layout, /isOwner \? 'SUNUCU YÖNETİMİ' : isReseller \? 'BAYİ PANELİ' : isCustomer \? 'MÜŞTERİ PANELİ'/);
 });
 
 test('source: WebsitesPage preserves owner test invariants and adapts heading for reseller', async () => {

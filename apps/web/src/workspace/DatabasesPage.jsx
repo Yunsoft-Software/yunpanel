@@ -196,7 +196,7 @@ export default function DatabasesPage() {
 
   return <>
     <PageHeading title="Veritabanları" description="Veritabanlarınıza ve phpMyAdmin’e tek yerden erişin."
-      actions={<><Button icon="refresh" disabled={!server || busy || ['loading', 'refreshing'].includes(status)} onClick={load}>Yenile</Button><Button variant="primary" icon="plus" disabled={!canAct} onClick={startCreate}>Veritabanı oluştur</Button></>} />
+      actions={<><Button className="ws-icon-btn" icon="refresh" aria-label="Yenile" title="Yenile" disabled={!server || busy || ['loading', 'refreshing'].includes(status)} onClick={load} /><Button variant="primary" icon="plus" disabled={!canAct} onClick={startCreate}>Veritabanı oluştur</Button></>} />
     <CollectionNotice resource={servers} label="Yerel sunucu" />
     {server && <CollectionNotice resource={domains} label="Site bağlantıları" />}
     <ErrorNotice error={loadError} />

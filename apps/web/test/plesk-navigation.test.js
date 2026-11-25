@@ -174,11 +174,11 @@ test('source: global chooser does not render server mail/database consoles', asy
   assert.match(page, /params.has\('site'\)/);
   assert.doesNotMatch(page, /MailDomainsPage|DatabasesPage|panelRequest|fetch\(|localStorage/);
 });
-test('source: command palette uses actual Owner context and preferences are not open by default', async () => {
+test('source: command palette uses actual Owner context and sidebar omits appearance disclosure in favor of topbar theme toggle', async () => {
   const layout = await source('WorkspaceLayout.jsx');
   assert.match(layout, /<CommandPalette[^>]+isOwner=\{isOwner\}[^>]+isReseller=\{isReseller\}/);
-  assert.match(layout, /<details className="ws-appearance">/);
-  assert.match(layout, /<Preferences \/>/);
+  assert.doesNotMatch(layout, /<details className="ws-appearance">|<Preferences \/>/);
+  assert.match(layout, /className="ws-theme-toggle ws-icon-btn"/);
   assert.match(layout, /inert=\{narrow && !menuOpen\}/);
   const palette = await source('ui/CommandPalette.jsx');
   assert.match(palette, /commandEntries\(\{ query, canManage, isOwner, isReseller(?:, isCustomer)?, domains \}\)/);

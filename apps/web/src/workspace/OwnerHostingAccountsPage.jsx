@@ -61,7 +61,7 @@ function AccountsWorkspace({ kind }) {
   const saved = message => { clearHostingAccountDraft?.(kind); setNotice(message); close(); };
   return <>
     <PageHeading title={kind === 'reseller' ? 'Bayiler' : 'Müşteriler'} description={kind === 'reseller' ? 'Bayilerinizin müşterilerini, site sınırlarını ve panel erişimini yönetin.' : 'Müşteri hesaplarını ve onlara ait web sitelerini yönetin.'}
-      actions={<><Button icon="refresh" disabled={loading || Boolean(dialog)} onClick={refresh}>Yenile</Button><Button variant="primary" icon="plus" disabled={loading || Boolean(dialog) || licensePendingOrError} onClick={() => { if (gateState === 'allowed') setDialog({ type: 'create' }); else if (gateState === 'premium_required') setDialog({ type: 'premium_gate' }); }}><span>{label} ekle</span>{premiumRequired && <Badge state="unknown">Premium</Badge>}</Button></>} />
+      actions={<><Button className="ws-icon-btn" icon="refresh" aria-label="Yenile" title="Yenile" disabled={loading || Boolean(dialog)} onClick={refresh} /><Button variant="primary" icon="plus" disabled={loading || Boolean(dialog) || licensePendingOrError} onClick={() => { if (gateState === 'allowed') setDialog({ type: 'create' }); else if (gateState === 'premium_required') setDialog({ type: 'premium_gate' }); }}><span>{label} ekle</span>{premiumRequired && <Badge state="unknown">Premium</Badge>}</Button></>} />
     {gateState === 'loading' && (
       <p className="ws-notice" role="status" data-license-gate-state="loading">Lisans durumu doğrulanıyor…</p>
     )}
@@ -98,12 +98,12 @@ function AccountsWorkspace({ kind }) {
     )}
     {notice && <p className="ws-notice" role="status">{notice}</p>}
     <Section title={`${label} hesapları`}>
-      <div className="ws-section-body"><ErrorNotice error={error} />{loading && <p role="status">Hesaplar yükleniyor…</p>}</div>
-      {!loading && !error && page && (page.accounts.length ? <div className="ws-table-wrap"><table className="ws-table">
-        <thead><tr><th scope="col">Hesap</th><th scope="col">Durum</th><th scope="col">Web siteleri</th>{kind === 'reseller' && <th scope="col">Müşteriler</th>}<th scope="col">İşlemler</th></tr></thead>
+      {(error || loading) && <div className="ws-section-body"><ErrorNotice error={error} />{loading && <div className="ws-loading" role="status"><span className="ws-spinner" />Hesaplar yükleniyor…</div>}</div>}
+      {!loading && !error && page && (page.accounts.length ? <div className="ws-table-scroll"><table className="ws-table ws-accounts-table">
+        <thead><tr><th scope="col">Hesap</th><th scope="col">Durum</th><th scope="col">Web siteleri</th>{kind === 'reseller' && <th scope="col">Müşteriler</th>}<th scope="col" className="ws-row-end">İşlemler</th></tr></thead>
         <tbody>{page.accounts.map(account => {
           const metrics = buildResellerAccountQuotaMetrics(account);
-          return <tr key={account.id}><th scope="row">{account.username}</th><td><Badge state={account.active ? 'active' : 'off'}>{account.active ? 'Etkin' : 'Giriş kapalı'}</Badge></td>
+          return <tr key={account.id}><th scope="row" className="ws-col-nowrap">{account.username}</th><td className="ws-col-nowrap"><Badge state={account.active ? 'active' : 'off'}>{account.active ? 'Etkin' : 'Giriş kapalı'}</Badge></td>
             <td>
               <span>{metrics.websites.measured ? metrics.websites.summaryText : metrics.websites.usageText}</span>
               {metrics.websites.reservedCount > 0 && <span className="ws-field-hint" style={{ display: 'block' }}>{metrics.websites.reservedCount} bekleyen tahsis dahil</span>}
@@ -116,7 +116,7 @@ function AccountsWorkspace({ kind }) {
               <span>{metrics.customers.measured ? metrics.customers.summaryText : metrics.customers.usageText}</span>
               {metrics.customers.isFull && <span className="ws-field-hint" style={{ color: 'var(--ws-warning)', display: 'block' }}>Kota doldu</span>}
             </td>}
-            <td><div className="ws-actions"><Button disabled={Boolean(dialog)} onClick={() => setDialog({ type: 'profile', account })}>Hesabı yönet</Button>
+            <td className="ws-row-end"><div className="ws-actions ws-actions-nowrap" style={{ justifyContent: 'flex-end' }}><Button disabled={Boolean(dialog)} onClick={() => setDialog({ type: 'profile', account })}>Hesabı yönet</Button>
               {kind === 'customer' && <Button disabled={Boolean(dialog)} onClick={() => setDialog({ type: 'quotas', account })}>Kota tahsis et</Button>}
               {kind === 'customer' && <><Link className="ws-button" to={`/websites?customer=${encodeURIComponent(account.id)}`}>Web siteleri</Link>{account.active && <Link className="ws-button" to={`/websites/new?customer=${encodeURIComponent(account.id)}`}>Site ekle</Link>}</>}</div></td>
           </tr>;

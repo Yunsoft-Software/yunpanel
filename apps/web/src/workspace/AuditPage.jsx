@@ -78,7 +78,7 @@ export default function AuditPage() {
   function reset() { const next = blankFilters(); setDraft(next); setFilters(auditFilterInput()); setNumber(1); setFilterError(null); }
   function refresh() { client.current?.load({ filters, offset: (number - 1) * LIMIT, limit: LIMIT }); }
   return <>
-    <PageHeading title="Denetim kayıtları" description="Yönetim işlemleri, erişim kararları ve işlem geçmişi kayıtları." actions={<Button icon="refresh" onClick={refresh} disabled={loading}>Yenile</Button>} />
+    <PageHeading title="Denetim kayıtları" description="Yönetim işlemleri, erişim kararları ve işlem geçmişi kayıtları." actions={<Button className="ws-icon-btn" icon="refresh" aria-label="Yenile" title="Yenile" onClick={refresh} disabled={loading} />} />
     <Section title="Filtreler" description="Kaynak filtresinde tür ve kimlik birlikte kullanılmalıdır.">
       <form className="ws-form ws-section-body" onSubmit={apply}>
         <ErrorNotice error={filterError} />
@@ -97,15 +97,15 @@ export default function AuditPage() {
     <Section title="Kayıtlar">
       {loading && <div className="ws-loading" role="status"><span className="ws-spinner" />Denetim kayıtları doğrulanıyor…</div>}
       {page.status === 'error' && <div className="ws-section-body"><ErrorNotice error={auditMessage(page.error)} /><Button onClick={refresh}>Listeyi yeniden yükle</Button></div>}
-      {ready && (visible.events.length ? <div className="ws-table-scroll"><table className="ws-table">
+      {ready && (visible.events.length ? <div className="ws-table-scroll"><table className="ws-table ws-audit-table">
         <caption className="ws-muted">En yeni kayıtlar önce gösterilir; her sayfada en fazla {LIMIT} kayıt.</caption>
         <thead><tr><th scope="col">Zaman</th><th scope="col">İşlem</th><th scope="col">Actor</th><th scope="col">Kaynak</th><th scope="col">Sonuç</th></tr></thead>
         <tbody>{visible.events.map((event) => <tr key={event.id}>
-          <td>{formatDate(event.createdAt)}</td>
+          <td className="ws-col-nowrap">{formatDate(event.createdAt)}</td>
           <td><strong>{event.action}</strong>{event.code && <small>{event.code}</small>}</td>
           <td style={{ overflowWrap: 'anywhere' }}>{event.actorId ?? 'system'}</td>
           <td>{event.resourceType ?? '—'}{event.resourceId && <small style={{ overflowWrap: 'anywhere' }}>{event.resourceId}</small>}</td>
-          <td><Badge state={event.outcome === 'accepted' ? 'queued' : event.outcome === 'denied' ? 'failed' : event.outcome}>{outcomeLabels[event.outcome]}</Badge></td>
+          <td className="ws-col-nowrap"><Badge state={event.outcome === 'accepted' ? 'queued' : event.outcome === 'denied' ? 'failed' : event.outcome}>{outcomeLabels[event.outcome]}</Badge></td>
         </tr>)}</tbody>
       </table></div> : <EmptyState title="Filtreye uyan kayıt yok" detail="Filtreleri temizleyin veya yeni yönetim işlemlerinden sonra listeyi yenileyin." icon="shield" />)}
       <footer className="ws-pagination"><span>{visible ? `${visible.total} kayıt` : 'Kayıt sayısı doğrulanıyor'}</span><div className="ws-actions">

@@ -67,12 +67,13 @@ function ApplicationInventory() {
         description="Sistemde kayıtlı çalışma zamanı uygulamalarının Owner tanılama envanteri. Günlük uygulama yönetimi ve yayın işlemleri yalnızca ait oldukları web sitesi altında yürütülür."
         actions={
           <Button
+            className="ws-icon-btn"
             icon="refresh"
+            aria-label="Yenile"
+            title="Yenile"
             onClick={refreshAll}
             disabled={applications.status === 'loading'}
-          >
-            Yenile
-          </Button>
+          />
         }
       />
       <div className="ws-notice">

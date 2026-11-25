@@ -15,7 +15,7 @@ export function formatUserRoleLabel(user) {
   return 'Kullanıcı';
 }
 
-export function PanelSessionProvider({ session, children }) {
+export function PanelSessionProvider({ session, accountControls = null, children }) {
   const value = useMemo(() => {
     const role = session?.user?.role;
     const hosting = session?.user?.hosting;
@@ -25,6 +25,7 @@ export function PanelSessionProvider({ session, children }) {
     const isSiteManager = role === 'site_manager' && !isReseller && !isCustomer;
     return {
       session,
+      accountControls,
       can: (permission) => panelPermission(session, permission),
       canManage: panelPermission(session, '*'),
       isOwner,
@@ -34,7 +35,7 @@ export function PanelSessionProvider({ session, children }) {
       hostingProfile: hosting ?? null,
       readOnly: session?.access?.mode === 'read_only' || role === 'read_only',
     };
-  }, [session]);
+  }, [session, accountControls]);
   return <PanelSessionContext.Provider value={value}>{children}</PanelSessionContext.Provider>;
 }
 

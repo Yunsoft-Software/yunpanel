@@ -11,20 +11,30 @@ html:root[data-ws-theme='light'] {
   color-scheme: light;
   --ws-brand: #4f46e5;
   --ws-brand-hover: #4338ca;
+  --ws-brand-soft: rgba(79, 70, 229, 0.10);
+  --ws-primary: #4f46e5;
+  --ws-primary-hover: #4338ca;
+  --ws-console-blue: #4f46e5;
   --ws-on-brand: #ffffff;
+  --ws-accent-ink: #ffffff;
   --ws-canvas: #fafafa;
+  --ws-bg: #fafafa;
   --ws-surface: #ffffff;
   --ws-surface-raised: #ffffff;
   --ws-surface-subtle: #f4f4f5;
-  --ws-surface-hover: #f4f4f5;
+  --ws-surface-hover: #eceef2;
   --ws-text: #09090b;
+  --ws-ink: #09090b;
   --ws-muted: #52525b;
+  --ws-text-secondary: #52525b;
   --ws-border: #e4e4e7;
+  --ws-border-strong: #d4d4d8;
   --ws-control-border: #d4d4d8;
   --ws-accent: #4f46e5;
   --ws-accent-soft: #eef2ff;
   --ws-accent-hover: #3730a3;
   --ws-focus: #4f46e5;
+  --ws-ring: rgba(79, 70, 229, 0.28);
   --ws-on-accent: #ffffff;
   --ws-success: #059669;
   --ws-success-soft: #ecfdf5;
@@ -36,12 +46,12 @@ html:root[data-ws-theme='light'] {
   --ws-info-soft: #f0f9ff;
   --ws-unknown: #52525b;
   --ws-unknown-soft: #f4f4f5;
-  --ws-nav: #fafafa;
+  --ws-nav: #f6f7f9;
   --ws-nav-text: #3f3f46;
   --ws-nav-muted: #71717a;
-  --ws-nav-hover: #f4f4f5;
-  --ws-nav-active: #e4e4e7;
-  --ws-nav-on-active: #09090b;
+  --ws-nav-hover: #eceef2;
+  --ws-nav-active: #eef2ff;
+  --ws-nav-on-active: #3730a3;
   --ws-pill: #18181b;
   --ws-on-pill: #fafafa;
   --ws-chart-cpu: #4f46e5;
@@ -49,12 +59,17 @@ html:root[data-ws-theme='light'] {
   --ws-chart-disk: #d97706;
   --ws-folder: #4f46e5;
   --ws-file: #52525b;
+  --ws-sidebar-width: 244px;
   --ws-radius: 12px;
+  --ws-radius-lg: 12px;
+  --ws-radius-md: 8px;
   --ws-radius-control: 8px;
   --ws-radius-small: 6px;
   --ws-control-height: 36px;
   --ws-section-pad: 18px;
   --ws-row-pad: 11px;
+  --ws-mono: var(--ws-font-code, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  --ws-transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
   --ws-shadow: 0 1px 2px 0 rgba(9, 9, 11, 0.04);
   --ws-overlay-shadow: 0 16px 40px -8px rgba(9, 9, 11, 0.16);
 }
@@ -64,21 +79,31 @@ html:root[data-ws-theme='dark'] {
   color-scheme: dark;
   --ws-brand: #6366f1;
   --ws-brand-hover: #4f46e5;
+  --ws-brand-soft: rgba(99, 102, 241, 0.16);
+  --ws-primary: #6366f1;
+  --ws-primary-hover: #818cf8;
+  --ws-console-blue: #6366f1;
   --ws-on-brand: #ffffff;
+  --ws-accent-ink: #ffffff;
   --ws-canvas: #09090b;
+  --ws-bg: #09090b;
   --ws-surface: #141418;
-  --ws-surface-raised: #18181b;
-  --ws-surface-subtle: #0e0e11;
-  --ws-surface-hover: #1f1f23;
+  --ws-surface-raised: #18181c;
+  --ws-surface-subtle: #101014;
+  --ws-surface-hover: #1f1f25;
   --ws-text: #fafafa;
+  --ws-ink: #fafafa;
   --ws-muted: #a1a1aa;
+  --ws-text-secondary: #a1a1aa;
   --ws-border: #27272a;
+  --ws-border-strong: #3f3f46;
   --ws-control-border: #3f3f46;
   --ws-accent: #818cf8;
   --ws-accent-soft: #1e1b4b;
   --ws-accent-hover: #a5b4fc;
-  --ws-on-accent: #09090b;
   --ws-focus: #6366f1;
+  --ws-ring: rgba(99, 102, 241, 0.35);
+  --ws-on-accent: #09090b;
   --ws-success: #10b981;
   --ws-success-soft: #064e3b;
   --ws-warning: #fbbf24;
@@ -89,11 +114,11 @@ html:root[data-ws-theme='dark'] {
   --ws-info-soft: #082f49;
   --ws-unknown: #a1a1aa;
   --ws-unknown-soft: #27272a;
-  --ws-nav: #09090b;
+  --ws-nav: #0c0c10;
   --ws-nav-text: #a1a1aa;
   --ws-nav-muted: #71717a;
-  --ws-nav-hover: #141418;
-  --ws-nav-active: #1f1f23;
+  --ws-nav-hover: #16161c;
+  --ws-nav-active: #1a1b26;
   --ws-nav-on-active: #fafafa;
   --ws-pill: #27272a;
   --ws-on-pill: #fafafa;
@@ -102,12 +127,17 @@ html:root[data-ws-theme='dark'] {
   --ws-chart-disk: #fbbf24;
   --ws-folder: #818cf8;
   --ws-file: #a1a1aa;
+  --ws-sidebar-width: 244px;
   --ws-radius: 12px;
+  --ws-radius-lg: 12px;
+  --ws-radius-md: 8px;
   --ws-radius-control: 8px;
   --ws-radius-small: 6px;
   --ws-control-height: 36px;
   --ws-section-pad: 18px;
   --ws-row-pad: 11px;
+  --ws-mono: var(--ws-font-code, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  --ws-transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
   --ws-shadow: none;
   --ws-overlay-shadow: 0 20px 50px -12px rgba(0, 0, 0, 0.7);
 }
@@ -122,19 +152,23 @@ html .workspace-shell .ws-main {
   color: var(--ws-text) !important;
 }
 
-/* Top Session Bar & Toolbar — Compact, Flat, Unified */
+/* Standalone Session Bar (Non-workspace screens like OwnerEnrollment) */
 html .authenticated-panel .auth-sessionbar {
-  min-height: 38px !important;
-  height: 38px !important;
+  min-height: 44px !important;
+  height: 44px !important;
   padding: 0 24px 0 calc(var(--ws-sidebar-width, 236px) + 24px) !important;
   background: var(--ws-canvas) !important;
   border-bottom: 1px solid var(--ws-border) !important;
   font-size: 12px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 10px !important;
 }
 
 html .authenticated-panel .auth-sessionbar button {
-  min-height: 28px !important;
-  height: 28px !important;
+  min-height: 32px !important;
+  height: 32px !important;
   padding: 0 10px !important;
   border-radius: 6px !important;
   border: 1px solid var(--ws-border) !important;
@@ -144,82 +178,332 @@ html .authenticated-panel .auth-sessionbar button {
   font-weight: 500 !important;
 }
 
+html .authenticated-panel .auth-sessionbar button.auth-icon-btn {
+  width: 32px !important;
+  min-width: 32px !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
 html .authenticated-panel .auth-sessionbar button:hover {
   background: var(--ws-surface-hover) !important;
 }
 
+/* Unified 56px Sticky Icon-First Topbar */
 html .workspace-shell .ws-toolbar {
-  min-height: 52px !important;
-  padding: 8px 24px !important;
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 40 !important;
+  min-height: 56px !important;
+  height: 56px !important;
+  padding: 0 24px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  flex-wrap: nowrap !important;
+  gap: 12px !important;
   background: var(--ws-canvas) !important;
   border-bottom: 1px solid var(--ws-border) !important;
   backdrop-filter: none !important;
 }
 
+html .workspace-shell .ws-toolbar-left {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
 html .workspace-shell .ws-command-trigger {
+  flex: 0 1 340px !important;
+  width: 100% !important;
+  max-width: 340px !important;
+  min-width: 0 !important;
   height: 34px !important;
   min-height: 34px !important;
-  max-width: 380px !important;
-  padding: 0 12px !important;
+  padding: 0 10px 0 11px !important;
   border: 1px solid var(--ws-border) !important;
-  border-radius: 6px !important;
+  border-radius: 7px !important;
   background: var(--ws-surface) !important;
   color: var(--ws-muted) !important;
   font-size: 13px !important;
   box-shadow: none !important;
+  transition: var(--ws-transition) !important;
 }
 
 html .workspace-shell .ws-command-trigger:hover {
   border-color: var(--ws-control-border) !important;
   background: var(--ws-surface-raised) !important;
+  color: var(--ws-text) !important;
   box-shadow: none !important;
 }
 
 html .workspace-shell .ws-command-trigger kbd {
-  padding: 1px 5px !important;
+  padding: 1px 6px !important;
   border: 1px solid var(--ws-border) !important;
   border-radius: 4px !important;
   background: var(--ws-surface-subtle) !important;
   font-size: 11px !important;
+  font-weight: 500 !important;
+  color: var(--ws-muted) !important;
 }
 
-/* Sidebar — Clean Shadcn Zinc Navigation */
+html .workspace-shell .ws-toolbar-actions {
+  display: inline-flex !important;
+  align-items: center !important;
+  flex-wrap: nowrap !important;
+  gap: 4px !important;
+  flex-shrink: 0 !important;
+}
+
+html .workspace-shell .ws-toolbar-divider {
+  display: inline-block !important;
+  width: 1px !important;
+  height: 18px !important;
+  background: var(--ws-border) !important;
+  margin: 0 4px !important;
+  flex-shrink: 0 !important;
+}
+
+/* Global Crisp Icon-Only Buttons (Topbar, PageHeading, Cards, Notices) */
+html .workspace-shell .ws-button.ws-icon-btn,
+html .ws-modal .ws-button.ws-icon-btn {
+  width: 34px !important;
+  min-width: 34px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  padding: 0 !important;
+  gap: 0 !important;
+  justify-content: center !important;
+  align-items: center !important;
+  flex: 0 0 auto !important;
+}
+
+html .workspace-shell .ws-button.ws-icon-btn svg,
+html .ws-modal .ws-button.ws-icon-btn svg {
+  width: 16px !important;
+  height: 16px !important;
+}
+
+html .workspace-shell .ws-toolbar .ws-button.ws-icon-btn {
+  background: transparent !important;
+  border-color: transparent !important;
+  color: var(--ws-muted) !important;
+  border-radius: 7px !important;
+}
+
+html .workspace-shell .ws-toolbar .ws-button.ws-icon-btn:hover:not(:disabled) {
+  background: var(--ws-surface-hover) !important;
+  border-color: var(--ws-border) !important;
+  color: var(--ws-text) !important;
+}
+
+html .workspace-shell .ws-toolbar .ws-button.ws-icon-btn-logout:hover:not(:disabled) {
+  background: var(--ws-danger-soft) !important;
+  border-color: color-mix(in srgb, var(--ws-danger) 35%, transparent) !important;
+  color: var(--ws-danger) !important;
+}
+
+html .workspace-shell .ws-icon-btn-badged {
+  position: relative !important;
+  overflow: visible !important;
+}
+
+html .workspace-shell .ws-icon-badge {
+  position: absolute !important;
+  top: 2px !important;
+  right: 2px !important;
+  min-width: 15px !important;
+  height: 15px !important;
+  padding: 0 4px !important;
+  border-radius: 999px !important;
+  background: var(--ws-brand) !important;
+  color: #ffffff !important;
+  font-size: 9.5px !important;
+  font-weight: 700 !important;
+  line-height: 15px !important;
+  text-align: center !important;
+  pointer-events: none !important;
+  box-shadow: 0 0 0 2px var(--ws-canvas) !important;
+}
+
+/* Integrated Topbar Account Cluster (overrides standalone auth-sessionbar rules) */
+html .authenticated-panel .workspace-shell .ws-toolbar .ws-topbar-account.auth-sessionbar {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  flex-wrap: nowrap !important;
+  gap: 4px !important;
+  width: auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  overflow: visible !important;
+  flex-shrink: 0 !important;
+}
+
+html .authenticated-panel .workspace-shell .ws-toolbar .ws-topbar-account.auth-sessionbar button {
+  width: 34px !important;
+  min-width: 34px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  padding: 0 !important;
+  border-radius: 7px !important;
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  color: var(--ws-muted) !important;
+}
+
+html .authenticated-panel .workspace-shell .ws-toolbar .ws-topbar-account.auth-sessionbar button:hover:not(:disabled) {
+  background: var(--ws-surface-hover) !important;
+  border-color: var(--ws-border) !important;
+  color: var(--ws-text) !important;
+}
+
+html .authenticated-panel .workspace-shell .ws-toolbar .ws-topbar-account.auth-sessionbar button.ws-icon-btn-logout:hover:not(:disabled) {
+  background: var(--ws-danger-soft) !important;
+  border-color: color-mix(in srgb, var(--ws-danger) 35%, transparent) !important;
+  color: var(--ws-danger) !important;
+}
+
+html .workspace-shell .ws-topbar-identity {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 0 6px 0 2px !important;
+  max-width: 240px !important;
+  min-width: 0 !important;
+}
+
+html .workspace-shell .ws-topbar-username {
+  font-size: 12.5px !important;
+  font-weight: 600 !important;
+  color: var(--ws-text) !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+html .workspace-shell .ws-topbar-identity .auth-role {
+  display: inline-flex !important;
+  align-items: center !important;
+  height: 20px !important;
+  padding: 0 7px !important;
+  border-radius: 999px !important;
+  background: var(--ws-surface-subtle) !important;
+  border: 1px solid var(--ws-border) !important;
+  color: var(--ws-muted) !important;
+  font-size: 10.5px !important;
+  font-weight: 600 !important;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+}
+
+@media (max-width: 1120px) {
+  html .workspace-shell .ws-topbar-identity {
+    display: none !important;
+  }
+}
+
+/* Sidebar — Sleek Shadcn Zinc Navigation (56px Header Aligned With Topbar) */
 html .workspace-shell .ws-sidebar {
-  width: var(--ws-sidebar-width, 236px) !important;
-  padding: 16px 12px !important;
+  width: var(--ws-sidebar-width, 244px) !important;
+  padding: 0 !important;
   background: var(--ws-nav) !important;
   border-right: 1px solid var(--ws-border) !important;
   box-shadow: none !important;
+  display: flex !important;
+  flex-direction: column !important;
 }
 
 html .workspace-shell .ws-brand {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
   gap: 10px !important;
-  padding: 2px 8px 16px !important;
-  margin-bottom: 8px !important;
+  height: 56px !important;
+  min-height: 56px !important;
+  padding: 0 16px !important;
+  margin: 0 !important;
   border-bottom: 1px solid var(--ws-border) !important;
+  flex-shrink: 0 !important;
+}
+
+html .workspace-shell .ws-brand-link {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  min-width: 0 !important;
+  flex: 1 1 auto !important;
+  text-decoration: none !important;
+  color: inherit !important;
+}
+
+html .workspace-shell .ws-brand-link:hover {
+  text-decoration: none !important;
 }
 
 html .workspace-shell .ws-brand-mark {
   width: 30px !important;
   height: 30px !important;
-  border-radius: 6px !important;
-  background: var(--ws-text) !important;
-  color: var(--ws-canvas) !important;
-  font-size: 15px !important;
+  border-radius: 8px !important;
+  background: var(--ws-brand) !important;
+  color: #ffffff !important;
+  font-size: 14px !important;
   font-weight: 700 !important;
-  box-shadow: none !important;
+  box-shadow: 0 1px 4px rgba(99, 102, 241, 0.3) !important;
+  flex-shrink: 0 !important;
 }
 
 html .workspace-shell .ws-brand strong {
-  font-size: 16px !important;
+  font-size: 15.5px !important;
   font-weight: 650 !important;
   letter-spacing: -0.3px !important;
+  line-height: 1.15 !important;
   color: var(--ws-text) !important;
 }
 
 html .workspace-shell .ws-brand small {
-  font-size: 10px !important;
-  letter-spacing: 0.8px !important;
+  font-size: 9.5px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.9px !important;
+  line-height: 1.2 !important;
+  margin-top: 2px !important;
+  color: var(--ws-nav-muted) !important;
+}
+
+html .workspace-shell .ws-sidebar-nav {
+  flex: 1 1 auto !important;
+  overflow-y: auto !important;
+  padding: 14px 10px 20px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 16px !important;
+}
+
+html .workspace-shell .ws-nav-group {
+  margin: 0 !important;
+}
+
+html .workspace-shell .ws-nav-group + .ws-nav-group {
+  margin-top: 0 !important;
+  padding-top: 14px !important;
+  border-top: 1px solid var(--ws-border) !important;
+}
+
+html .workspace-shell .ws-nav-label {
+  margin: 0 0 6px !important;
+  padding: 0 10px !important;
+  font-size: 10.5px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase !important;
   color: var(--ws-nav-muted) !important;
 }
 
@@ -231,13 +515,15 @@ html .workspace-shell .ws-nav a {
   min-height: 36px !important;
   height: 36px !important;
   padding: 0 10px !important;
+  gap: 10px !important;
   border: 1px solid transparent !important;
-  border-radius: 6px !important;
+  border-radius: 7px !important;
   background: transparent !important;
   color: var(--ws-nav-text) !important;
   font-size: 13px !important;
   font-weight: 500 !important;
   box-shadow: none !important;
+  transition: var(--ws-transition) !important;
 }
 
 html .workspace-shell .ws-nav a:hover {
@@ -249,24 +535,46 @@ html .workspace-shell .ws-nav a:hover {
 html .workspace-shell .ws-nav a.active {
   background: var(--ws-nav-active) !important;
   color: var(--ws-nav-on-active) !important;
-  border-color: var(--ws-border) !important;
+  border-color: color-mix(in srgb, var(--ws-brand) 28%, var(--ws-border)) !important;
   font-weight: 600 !important;
-  box-shadow: none !important;
+  box-shadow: inset 2.5px 0 0 0 var(--ws-brand) !important;
 }
 
 html .workspace-shell .ws-nav a > svg {
   width: 16px !important;
   height: 16px !important;
   color: var(--ws-nav-muted) !important;
+  transition: color 140ms ease !important;
 }
 
-html .workspace-shell .ws-nav a.active > svg {
+html .workspace-shell .ws-nav a:hover > svg {
   color: var(--ws-text) !important;
 }
 
+html .workspace-shell .ws-nav a.active > svg {
+  color: var(--ws-brand) !important;
+}
+
+html .workspace-shell .ws-nav-premium {
+  margin-left: auto !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  height: 18px !important;
+  padding: 0 6px !important;
+  border-radius: 999px !important;
+  background: var(--ws-brand-soft) !important;
+  border: 1px solid color-mix(in srgb, var(--ws-brand) 28%, transparent) !important;
+  color: var(--ws-brand) !important;
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+  flex-shrink: 0 !important;
+}
+
 html .workspace-shell .ws-nav-count {
+  margin-left: auto !important;
   padding: 1px 6px !important;
-  border-radius: 4px !important;
+  border-radius: 999px !important;
   background: var(--ws-surface-raised) !important;
   border: 1px solid var(--ws-border) !important;
   color: var(--ws-text) !important;
@@ -499,14 +807,17 @@ html .ws-modal .ws-loading .ws-spinner {
 }
 
 /* Desktop & Mobile Sidebar Collapse / Toggle Controls */
-html .workspace-shell .ws-nav-close,
 html .workspace-shell .ws-mobile-menu {
   display: inline-flex !important;
-  min-width: 32px !important;
-  width: 32px !important;
-  min-height: 32px !important;
-  height: 32px !important;
+  min-width: 34px !important;
+  width: 34px !important;
+  min-height: 34px !important;
+  height: 34px !important;
   padding: 0 !important;
+}
+
+html .workspace-shell .ws-nav-close {
+  display: none !important;
 }
 
 @media (min-width: 901px) {
@@ -529,6 +840,14 @@ html .workspace-shell .ws-mobile-menu {
   html .authenticated-panel:has(.workspace-shell.is-sidebar-collapsed) :is(.auth-expiry, .auth-banner) {
     margin-left: 24px !important;
   }
+}
+
+html .workspace-shell .ws-section > .ws-loading {
+  margin: 16px 18px !important;
+}
+
+html .workspace-shell .ws-section > .ws-alert-list {
+  padding: 4px 18px !important;
 }
 
 html .workspace-shell .ws-filters {
@@ -585,12 +904,69 @@ html .workspace-shell .ws-website-task-card:hover {
 }
 
 html .workspace-shell .ws-website-task-card.yp-subdomain-task-card {
-  margin-inline-start: calc(var(--ws-card-depth, 1) * 24px) !important;
+  position: relative !important;
+  margin-inline-start: calc(var(--ws-card-depth, 1) * 28px) !important;
   border: 1px solid var(--ws-border) !important;
-  border-left: 2px solid var(--ws-control-border) !important;
-  border-radius: 6px !important;
+  border-left: 2.5px solid var(--ws-brand) !important;
+  border-radius: 7px !important;
   background: var(--ws-surface-subtle) !important;
   padding: 12px 14px !important;
+}
+
+html .workspace-shell .ws-website-task-card.yp-subdomain-task-card::before {
+  content: '' !important;
+  position: absolute !important;
+  left: -17px !important;
+  top: 24px !important;
+  width: 15px !important;
+  height: 1px !important;
+  background: var(--ws-border-strong) !important;
+  pointer-events: none !important;
+}
+
+html .workspace-shell .ws-website-task-card.yp-subdomain-task-card::after {
+  content: '' !important;
+  position: absolute !important;
+  left: -17px !important;
+  top: -10px !important;
+  bottom: 0 !important;
+  width: 1px !important;
+  background: var(--ws-border) !important;
+  pointer-events: none !important;
+}
+
+html .workspace-shell .ws-subdomain-accordion-group {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  margin-left: 2px !important;
+  padding-left: 8px !important;
+  border-left: 1px solid var(--ws-border) !important;
+}
+
+html .workspace-shell .ws-subdomain-count-pill {
+  display: inline-flex !important;
+  align-items: center !important;
+  height: 24px !important;
+  padding: 0 8px !important;
+  border-radius: 999px !important;
+  background: var(--ws-brand-soft) !important;
+  color: var(--ws-brand) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  white-space: nowrap !important;
+}
+
+html .workspace-shell .ws-website-subdomains-toggle.ws-accordion-icon-btn {
+  border-color: color-mix(in srgb, var(--ws-brand) 42%, var(--ws-border)) !important;
+  background: var(--ws-brand-soft) !important;
+  color: var(--ws-brand) !important;
+}
+
+html .workspace-shell .ws-website-subdomains-toggle.ws-accordion-icon-btn:hover:not(:disabled) {
+  border-color: var(--ws-brand) !important;
+  background: var(--ws-brand) !important;
+  color: #ffffff !important;
 }
 
 html .workspace-shell .ws-website-task-header {
@@ -753,13 +1129,13 @@ html .workspace-shell .ws-website-task-children .ws-button {
   font-size: 12px !important;
 }
 
-/* Compact Horizontal Tab Bar (SiteNavigation) & 4-Column Quicklinks (SiteDetailPage) */
+/* Compact Horizontal Tab Bar (SiteNavigation) */
 html .workspace-shell .ws-plesk-site-navigation {
   display: flex !important;
   flex-wrap: wrap !important;
   align-items: center !important;
-  gap: 6px 12px !important;
-  padding: 8px 12px !important;
+  gap: 4px !important;
+  padding: 6px 8px !important;
   margin-bottom: 16px !important;
   border: 1px solid var(--ws-border) !important;
   border-radius: 8px !important;
@@ -801,20 +1177,29 @@ html .workspace-shell .ws-plesk-site-navigation .ws-tabs {
   background: transparent !important;
 }
 
+@media (min-width: 769px) {
+  html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-group,
+  html .workspace-shell .ws-plesk-site-navigation .ws-tabs {
+    display: contents !important;
+  }
+}
+
 html .workspace-shell .ws-plesk-site-navigation .ws-tabs a {
   display: inline-flex !important;
   align-items: center !important;
-  gap: 6px !important;
+  gap: 5px !important;
   min-height: 30px !important;
   height: 30px !important;
-  padding: 0 10px !important;
+  padding: 0 9px !important;
   border: 1px solid transparent !important;
   border-radius: 6px !important;
   background: transparent !important;
   color: var(--ws-muted) !important;
-  font-size: 12.5px !important;
+  font-size: 12px !important;
   font-weight: 500 !important;
+  white-space: nowrap !important;
   box-shadow: none !important;
+  transition: var(--ws-transition) !important;
 }
 
 html .workspace-shell .ws-plesk-site-navigation .ws-tabs a:hover {
@@ -823,38 +1208,10 @@ html .workspace-shell .ws-plesk-site-navigation .ws-tabs a:hover {
 }
 
 html .workspace-shell .ws-plesk-site-navigation .ws-tabs a[aria-current='page'] {
-  background: var(--ws-surface-subtle) !important;
-  border-color: var(--ws-border) !important;
+  background: var(--ws-brand-soft) !important;
+  border-color: color-mix(in srgb, var(--ws-brand) 35%, var(--ws-border)) !important;
   color: var(--ws-text) !important;
   font-weight: 600 !important;
-}
-
-html .workspace-shell .ws-console-quicklinks {
-  display: grid !important;
-  grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)) !important;
-  gap: 8px !important;
-  padding: 14px 18px !important;
-}
-
-html .workspace-shell .ws-console-quicklink {
-  display: flex !important;
-  align-items: center !important;
-  justify-content: flex-start !important;
-  gap: 10px !important;
-  min-height: 38px !important;
-  padding: 8px 12px !important;
-  border: 1px solid var(--ws-border) !important;
-  border-radius: 6px !important;
-  background: var(--ws-surface-subtle) !important;
-  color: var(--ws-text) !important;
-  font-size: 13px !important;
-  font-weight: 500 !important;
-  text-decoration: none !important;
-}
-
-html .workspace-shell .ws-console-quicklink:hover {
-  border-color: var(--ws-control-border) !important;
-  background: var(--ws-surface-hover) !important;
 }
 
 /* Horizontal Action Buttons in Tables (.ws-db-access, .ys-resource-actions) */
@@ -1052,11 +1409,45 @@ html .workspace-shell .ws-table td {
   border-bottom: 1px solid var(--ws-border) !important;
   border-radius: 0 !important;
   font-size: 13px !important;
+  word-break: normal !important;
+  overflow-wrap: break-word !important;
 }
 
+html .workspace-shell .ws-table .ws-col-nowrap,
 html .workspace-shell .ws-websites-table :is(td[data-label='Durum'], td[data-label='SSL']),
 html .workspace-shell .yf-table td.yf-date {
   white-space: nowrap !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+}
+
+html .workspace-shell .ws-actions-nowrap {
+  flex-wrap: nowrap !important;
+  white-space: nowrap !important;
+}
+
+html .workspace-shell .ws-table-scroll > table.ws-services-table {
+  min-width: 680px !important;
+}
+
+html .workspace-shell .ws-table-scroll > table.ws-users-table,
+html .workspace-shell .ws-table-scroll > table.ws-accounts-table {
+  min-width: 640px !important;
+}
+
+html .workspace-shell .ws-table-scroll > table.ws-firewall-table {
+  min-width: 880px !important;
+}
+
+html .workspace-shell .ws-table-scroll > table.ws-firewall-bans-table,
+html .workspace-shell .ws-table-scroll > table.ws-audit-table {
+  min-width: 680px !important;
+}
+
+@media (min-width: 641px) and (max-width: 960px) {
+  html .workspace-shell .ws-table-scroll > table:is(.ws-mail-table, .ws-jobs-table, .ys-resource-table) {
+    min-width: 620px !important;
+  }
 }
 
 html .ws-modal {
@@ -1109,7 +1500,21 @@ html .workspace-shell .ws-console-quicklinks {
   grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
   align-items: stretch !important;
   gap: 12px !important;
-  padding: 16px 18px !important;
+  padding: 18px 20px !important;
+}
+
+html .workspace-shell .ws-tools-group-section {
+  margin-bottom: 24px !important;
+}
+
+html .workspace-shell .ws-tools-group-section > .ws-section-heading {
+  padding: 18px 24px !important;
+}
+
+html .workspace-shell .ws-tools-quicklinks.ws-console-quicklinks {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 14px !important;
+  padding: 22px 24px 24px !important;
 }
 
 html .workspace-shell .ws-console-bottom .ws-console-quicklinks {
@@ -1122,31 +1527,90 @@ html .workspace-shell .yp-plesk-tool-group > .ws-console-quicklinks {
   padding: 0 !important;
 }
 
-@media (max-width: 1023px) and (min-width: 641px) {
-  html .workspace-shell .ws-console-quicklinks {
+@media (max-width: 1080px) and (min-width: 641px) {
+  html .workspace-shell .ws-console-quicklinks,
+  html .workspace-shell .ws-tools-quicklinks.ws-console-quicklinks {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 }
 
 html .workspace-shell .ws-console-quicklink {
   display: flex !important;
+  flex-direction: row !important;
   align-items: center !important;
+  justify-content: flex-start !important;
   gap: 12px !important;
-  padding: 11px 14px !important;
-  min-height: 58px !important;
+  padding: 12px 14px !important;
+  min-height: 62px !important;
   height: 100% !important;
   border: 1px solid var(--ws-border) !important;
-  border-radius: 8px !important;
+  border-radius: 9px !important;
   background: var(--ws-surface-subtle) !important;
   color: var(--ws-ink) !important;
   text-decoration: none !important;
   transition: border-color 140ms ease, background-color 140ms ease, transform 140ms ease !important;
 }
 
+html .workspace-shell .ws-tools-card.ws-console-quicklink {
+  gap: 14px !important;
+  padding: 16px 18px !important;
+  min-height: 78px !important;
+  border-radius: 10px !important;
+}
+
 html .workspace-shell .ws-console-quicklink:hover {
-  border-color: var(--ws-brand) !important;
+  border-color: color-mix(in srgb, var(--ws-brand) 60%, var(--ws-border)) !important;
   background: var(--ws-surface-raised) !important;
   transform: translateY(-1px) !important;
+}
+
+html .workspace-shell .ws-quicklink-icon {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 40px !important;
+  height: 40px !important;
+  border-radius: 10px !important;
+  background: var(--ws-brand-soft) !important;
+  color: var(--ws-brand) !important;
+  flex-shrink: 0 !important;
+}
+
+html .workspace-shell .ws-quicklink-copy {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 3px !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+}
+
+html .workspace-shell .ws-quicklink-copy strong {
+  font-size: 13.5px !important;
+  font-weight: 600 !important;
+  color: var(--ws-text) !important;
+  line-height: 1.3 !important;
+}
+
+html .workspace-shell .ws-quicklink-copy small {
+  margin: 0 !important;
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  color: var(--ws-muted) !important;
+  line-height: 1.35 !important;
+}
+
+html .workspace-shell .ws-quicklink-arrow {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: var(--ws-muted) !important;
+  flex-shrink: 0 !important;
+  transition: transform 140ms ease, color 140ms ease !important;
+}
+
+html .workspace-shell .ws-tools-card:hover .ws-quicklink-arrow {
+  color: var(--ws-brand) !important;
+  transform: translateX(3px) !important;
 }
 
 html .workspace-shell .yp-plesk-tool-icon {
@@ -1302,7 +1766,14 @@ html .workspace-shell pre.ws-code-block {
   overflow-x: auto !important;
 }
 
-html .workspace-shell .yp-category-pills,
+html .workspace-shell .yp-category-pills {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 6px !important;
+  padding: 14px 18px 0 !important;
+  margin-bottom: 0 !important;
+}
+
 html .workspace-shell .yp-preset-grid {
   display: flex !important;
   flex-wrap: wrap !important;
@@ -1432,7 +1903,7 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
     flex-shrink: 1 !important;
   }
 
-  html .authenticated-panel .auth-sessionbar > div {
+  html .authenticated-panel .auth-sessionbar:not(.ws-topbar-account) > div {
     display: flex !important;
     align-items: center !important;
     justify-content: flex-end !important;
@@ -1461,6 +1932,19 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
     overflow-x: hidden !important;
     overflow-y: auto !important;
     box-shadow: var(--ws-overlay-shadow) !important;
+    border-radius: 0 !important;
+  }
+
+  html .workspace-shell .ws-nav-close {
+    display: inline-flex !important;
+    width: 34px !important;
+    min-width: 34px !important;
+    height: 34px !important;
+    min-height: 34px !important;
+    padding: 0 !important;
+    background: var(--ws-surface-subtle) !important;
+    border: 1px solid var(--ws-border) !important;
+    color: var(--ws-text) !important;
   }
 
   html .workspace-shell .ws-nav-backdrop {
@@ -1472,8 +1956,29 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   }
 
   html .workspace-shell .ws-toolbar {
-    padding: 8px 14px !important;
+    padding: 0 14px !important;
     gap: 8px !important;
+  }
+
+  html .authenticated-panel .workspace-shell .ws-toolbar .ws-topbar-account.auth-sessionbar {
+    padding: 0 !important;
+    width: auto !important;
+    min-height: 0 !important;
+    height: auto !important;
+    border: 0 !important;
+    background: transparent !important;
+  }
+
+  html .authenticated-panel .workspace-shell .ws-toolbar .ws-topbar-account.auth-sessionbar > .ws-topbar-identity {
+    display: none !important;
+  }
+
+  html .authenticated-panel .workspace-shell .ws-toolbar .ws-topbar-account.auth-sessionbar button {
+    width: 34px !important;
+    min-width: 34px !important;
+    height: 34px !important;
+    min-height: 34px !important;
+    padding: 0 !important;
   }
 
   html .workspace-shell .ws-content {
@@ -1622,13 +2127,13 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
     display: none !important;
   }
 
-  html .authenticated-panel .auth-sessionbar > div {
+  html .authenticated-panel .auth-sessionbar:not(.ws-topbar-account) > div {
     width: 100% !important;
     justify-content: space-between !important;
     gap: 6px !important;
   }
 
-  html .authenticated-panel .auth-sessionbar > div > span:first-child {
+  html .authenticated-panel .auth-sessionbar:not(.ws-topbar-account) > div > span:first-child {
     max-width: 125px !important;
     overflow: hidden !important;
     text-overflow: ellipsis !important;
@@ -1636,15 +2141,26 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
     font-weight: 600 !important;
   }
 
-  html .authenticated-panel .auth-sessionbar > div > .auth-role {
+  html .authenticated-panel .auth-sessionbar:not(.ws-topbar-account) > div > .auth-role {
     margin-right: auto !important;
     flex-shrink: 0 !important;
   }
 
   html .workspace-shell .ws-toolbar {
-    padding: 6px 10px !important;
+    padding: 0 10px !important;
     gap: 6px !important;
     flex-wrap: nowrap !important;
+    height: 52px !important;
+    min-height: 52px !important;
+  }
+
+  html .workspace-shell .ws-toolbar-left {
+    gap: 6px !important;
+  }
+
+  html .workspace-shell .ws-toolbar-divider {
+    margin: 0 2px !important;
+    height: 16px !important;
   }
 
   html .workspace-shell .ws-mobile-menu {
@@ -1657,7 +2173,7 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
 
   html .workspace-shell .ws-command-trigger {
     flex: 1 1 auto !important;
-    min-width: 0 !important;
+    min-width: 34px !important;
     height: 34px !important;
     min-height: 34px !important;
     padding: 0 10px !important;
@@ -1681,15 +2197,25 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
     display: inline-flex !important;
     flex-wrap: nowrap !important;
     align-items: center !important;
-    gap: 4px !important;
+    gap: 2px !important;
     flex-shrink: 0 !important;
   }
 
-  html .workspace-shell .ws-toolbar-actions .ws-button {
+  html .workspace-shell .ws-toolbar-actions .ws-button,
+  html .authenticated-panel .workspace-shell .ws-toolbar .ws-topbar-account.auth-sessionbar button {
+    width: 34px !important;
     min-width: 34px !important;
     min-height: 34px !important;
     height: 34px !important;
-    padding: 0 7px !important;
+    padding: 0 !important;
+  }
+
+  html .authenticated-panel .workspace-shell .ws-toolbar .ws-topbar-account.auth-sessionbar {
+    padding: 0 !important;
+    width: auto !important;
+    min-height: 0 !important;
+    height: auto !important;
+    gap: 2px !important;
   }
 
   html .workspace-shell .ws-toolbar-label {
@@ -1715,13 +2241,23 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   html .workspace-shell .ws-page-heading > .ws-actions {
     display: flex !important;
     flex-wrap: wrap !important;
+    align-items: center !important;
     gap: 6px !important;
     width: 100% !important;
   }
 
-  html .workspace-shell .ws-page-heading > .ws-actions > .ws-button {
+  html .workspace-shell .ws-page-heading > .ws-actions > .ws-button:not(.ws-icon-btn) {
     flex: 1 1 calc(50% - 6px) !important;
     min-width: 128px !important;
+  }
+
+  html .workspace-shell .ws-page-heading > .ws-actions > .ws-button.ws-icon-btn {
+    flex: 0 0 36px !important;
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    min-height: 36px !important;
+    padding: 0 !important;
   }
 
   html .workspace-shell .ws-section-heading {
@@ -1759,6 +2295,25 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
     text-align: center !important;
   }
 
+  html .workspace-shell .ws-content .ws-button.ws-icon-btn,
+  html .ws-modal .ws-button.ws-icon-btn {
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    min-height: 36px !important;
+    padding: 0 !important;
+    white-space: nowrap !important;
+  }
+
+  html .workspace-shell .ws-table .ws-actions-nowrap .ws-button,
+  html .workspace-shell .ws-firewall-table .ws-button,
+  html .workspace-shell .ws-firewall-bans-table .ws-button {
+    white-space: nowrap !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    padding: 0 10px !important;
+  }
+
   /* 7. Dashboard Metrics & Quicklinks */
   html .workspace-shell .ws-console-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
@@ -1782,7 +2337,22 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   }
 
   html .workspace-shell .ws-console-quicklinks {
-    padding: 12px 14px !important;
+    padding: 14px !important;
+  }
+
+  html .workspace-shell .ws-tools-group-section > .ws-section-heading {
+    padding: 14px 16px !important;
+  }
+
+  html .workspace-shell .ws-tools-quicklinks.ws-console-quicklinks {
+    grid-template-columns: 1fr !important;
+    padding: 14px 16px 16px !important;
+    gap: 10px !important;
+  }
+
+  html .workspace-shell .ws-tools-card.ws-console-quicklink {
+    padding: 13px 14px !important;
+    min-height: 68px !important;
   }
 
   html .workspace-shell .yp-plesk-tool-group > .ws-console-quicklinks {
@@ -1802,6 +2372,17 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   html .workspace-shell .ws-website-task-card.yp-subdomain-task-card {
     margin-inline-start: 10px !important;
     padding: 10px 12px !important;
+  }
+
+  html .workspace-shell .ws-website-task-card.yp-subdomain-task-card::before,
+  html .workspace-shell .ws-website-task-card.yp-subdomain-task-card::after {
+    display: none !important;
+  }
+
+  html .workspace-shell .ws-subdomain-accordion-group {
+    margin-left: auto !important;
+    padding-left: 0 !important;
+    border-left: 0 !important;
   }
 
   html .workspace-shell .ws-website-task-header {
@@ -2082,14 +2663,14 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
     padding: 14px !important;
   }
 
-  /* Symmetrical 2-column Siteyi aç / Yönet actions & odd-item span on /websites mobile */
-  html .workspace-shell .ws-website-task-status > button.ws-button {
+  /* Symmetrical 2-column actions & icon-btn preservation on /websites mobile */
+  html .workspace-shell .ws-website-task-status > button.ws-button:not(.ws-icon-btn):not(.ws-accordion-icon-btn) {
     flex: 1 1 100% !important;
     justify-content: center !important;
   }
 
-  html .workspace-shell .ws-website-task-status > a.ws-button {
-    flex: 1 1 calc(50% - 6px) !important;
+  html .workspace-shell .ws-website-task-status > a.ws-button:not(.ws-icon-btn) {
+    flex: 1 1 auto !important;
     justify-content: center !important;
   }
 
@@ -2110,9 +2691,57 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   }
 }
 
+@media (max-width: 440px) {
+  html .workspace-shell .ws-toolbar {
+    padding: 0 8px !important;
+    gap: 4px !important;
+  }
+
+  html .workspace-shell .ws-toolbar-divider {
+    display: none !important;
+  }
+
+  html .workspace-shell .ws-toolbar-actions {
+    gap: 2px !important;
+  }
+
+  html .workspace-shell .ws-toolbar .ws-button.ws-icon-btn,
+  html .authenticated-panel .workspace-shell .ws-toolbar .ws-topbar-account.auth-sessionbar button,
+  html .workspace-shell .ws-mobile-menu {
+    width: 32px !important;
+    min-width: 32px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+  }
+
+  html .workspace-shell .ws-command-trigger {
+    width: 32px !important;
+    min-width: 32px !important;
+    max-width: 110px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    padding: 0 8px !important;
+  }
+}
+
 @media (max-width: 360px) {
+  html .workspace-shell .ws-command-trigger {
+    flex: 0 0 32px !important;
+    width: 32px !important;
+    min-width: 32px !important;
+    padding: 0 !important;
+    justify-content: center !important;
+  }
+
   html .workspace-shell .ws-command-trigger span {
     display: none !important;
+  }
+
+  html .workspace-shell .ws-console-quicklink,
+  html .workspace-shell .ws-tools-card.ws-console-quicklink {
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 12px !important;
   }
 
   html .workspace-shell .ws-website-task-quick-primary,
@@ -2552,13 +3181,22 @@ html .auth-sessions button {
   height: 32px !important;
   min-height: 32px !important;
   padding: 0 12px !important;
-  border-radius: var(--ws-radius, 6px) !important;
+  border-radius: var(--ws-radius-small, 6px) !important;
   border: 1px solid var(--ws-control-border) !important;
   background: var(--ws-surface-raised) !important;
   color: var(--ws-text) !important;
   font-size: 12.5px !important;
   font-weight: 600 !important;
   cursor: pointer !important;
+}
+
+html .auth-dialog header button.auth-dialog-close {
+  width: 32px !important;
+  min-width: 32px !important;
+  padding: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
 }
 
 html .auth-dialog header button:hover:not(:disabled),
@@ -2757,6 +3395,11 @@ html .workspace-shell .ws-accordion-toggle[aria-expanded='true'] .ws-accordion-c
   html .workspace-shell .ws-website-task-quick > .ws-actions {
     flex-wrap: nowrap !important;
     align-items: center !important;
+    justify-content: flex-end !important;
+  }
+
+  html .workspace-shell .ws-notice:not(.ws-firewall-advisory) > div {
+    flex: 1 1 220px !important;
   }
 
   html .workspace-shell .ws-website-task-quick > .ws-actions > a.ws-button {
@@ -2770,12 +3413,12 @@ html .workspace-shell .ws-accordion-toggle[aria-expanded='true'] .ws-accordion-c
   }
 
   html .workspace-shell .ws-sidebar {
-    padding: 12px 12px 20px !important;
+    padding: 0 !important;
   }
 
   html .workspace-shell .ws-sidebar .ws-nav a {
-    min-height: 34px !important;
-    padding: 6px 10px !important;
+    min-height: 36px !important;
+    padding: 0 10px !important;
   }
 }
 
@@ -2898,6 +3541,154 @@ html .workspace-shell .domain-card,
 html .workspace-shell .update-package-row {
   background: var(--ws-surface-subtle) !important;
   border-color: var(--ws-border) !important;
+}
+
+/* Firewall Status Cards, Service Profiles & Responsive Forms */
+html .workspace-shell .ws-firewall-status-grid {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)) !important;
+  gap: 12px !important;
+}
+
+html .workspace-shell .ws-firewall-stat-card {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 6px !important;
+  padding: 14px 16px !important;
+  background: var(--ws-surface-subtle) !important;
+  border: 1px solid var(--ws-border) !important;
+  border-radius: 8px !important;
+}
+
+html .workspace-shell .ws-firewall-stat-label {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase !important;
+  color: var(--ws-muted) !important;
+}
+
+html .workspace-shell .ws-firewall-stat-value {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+}
+
+html .workspace-shell .ws-firewall-stat-detail {
+  font-size: 12px !important;
+  color: var(--ws-muted) !important;
+}
+
+html .workspace-shell .ws-firewall-summary-bar {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 8px 20px !important;
+  padding: 10px 14px !important;
+  background: var(--ws-surface-subtle) !important;
+  border: 1px solid var(--ws-border) !important;
+  border-radius: 8px !important;
+  font-size: 12.5px !important;
+}
+
+html .workspace-shell .ws-firewall-summary-time {
+  margin-left: auto !important;
+  color: var(--ws-muted) !important;
+}
+
+html .workspace-shell .ws-firewall-profiles-grid {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)) !important;
+  gap: 14px !important;
+}
+
+html .workspace-shell .ws-firewall-profile-card {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+  padding: 16px !important;
+  background: var(--ws-surface-subtle) !important;
+  border: 1px solid var(--ws-border) !important;
+  border-radius: 8px !important;
+}
+
+html .workspace-shell .ws-firewall-profile-card > p {
+  margin: 0 !important;
+  font-size: 13px !important;
+  line-height: 1.5 !important;
+}
+
+html .workspace-shell .ws-firewall-profile-card > .ws-button {
+  align-self: flex-start !important;
+  margin-top: auto !important;
+}
+
+html .workspace-shell .ws-firewall-profile-head {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  flex-wrap: wrap !important;
+  gap: 8px !important;
+}
+
+html .workspace-shell .ws-firewall-subcard {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 12px !important;
+  padding: 16px !important;
+  background: var(--ws-surface-subtle) !important;
+  border: 1px solid var(--ws-border) !important;
+  border-radius: 8px !important;
+}
+
+html .workspace-shell .ws-firewall-subcard h4 {
+  margin: 0 !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+}
+
+html .workspace-shell .ws-firewall-form-row {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: flex-end !important;
+  gap: 12px !important;
+}
+
+html .workspace-shell .ws-firewall-field {
+  flex: 1 1 160px !important;
+  min-width: 0 !important;
+}
+
+html .workspace-shell .ws-firewall-field-sm {
+  flex: 0 1 130px !important;
+  min-width: 110px !important;
+}
+
+html .workspace-shell .ws-firewall-field-lg {
+  flex: 1.5 1 220px !important;
+  min-width: 0 !important;
+}
+
+/* Crisp UsageRing Unfilled Track Contrast in Both Light & Dark Themes */
+html .workspace-shell .ws-server-metrics .ws-usage-ring {
+  background: conic-gradient(var(--ws-brand) var(--usage, 0%), var(--ws-border) 0) !important;
+}
+
+html .workspace-shell .ws-server-metrics .ws-usage-ring.is-high {
+  background: conic-gradient(var(--ws-warning) var(--usage, 0%), var(--ws-border) 0) !important;
+}
+
+html .workspace-shell .ws-server-metrics .ws-usage-ring.is-critical {
+  background: conic-gradient(var(--ws-danger) var(--usage, 0%), var(--ws-border) 0) !important;
+}
+
+html .workspace-shell .ws-server-metrics .ws-usage-ring.is-unknown {
+  background: var(--ws-border) !important;
+}
+
+html .workspace-shell .ws-server-metrics .ws-usage-ring::before {
+  inset: 7px !important;
+  background: var(--ws-surface) !important;
 }
 
 /* Firewall Symmetric 2x2 Service Profiles Grid on Desktop */

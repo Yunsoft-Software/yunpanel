@@ -213,15 +213,14 @@ test('Criterion 3: Owner role has full server management context and all task sc
     '/tools-settings',
   ]);
 
-  // Owner branding and footer
+  // Owner branding and icon-first topbar actions
   const layout = await source('workspace/WorkspaceLayout.jsx');
   assert.match(layout, /isOwner \? 'SUNUCU YÖNETİMİ'/);
-  assert.match(layout, /isOwner \? \(canManage \? 'Sunucu yönetimi' : 'Salt okunur görünüm'\)/);
-  assert.match(layout, /isOwner \? \(canManage \? 'Yerel sunucu çalışma alanı'/);
+  assert.doesNotMatch(layout, /ws-sidebar-footer|ws-appearance/);
 
   // Owner actions in toolbar
   assert.doesNotMatch(layout, /<LinkButton to="\/websites\/new"/); // The Websites task page owns the single create action.
-  assert.match(layout, /isOwner && <Button icon="terminal" aria-label="AI asistanı aç"/);
+  assert.match(layout, /canManage && isOwner && \([\s\S]*?icon="sparkles"[\s\S]*?aria-label="AI asistanı aç"/);
 
   // Owner can access all tools in command palette
   const ownerCommands = commandEntries({ canManage: true, isOwner: true }).map((c) => c.to);
@@ -262,8 +261,6 @@ test('Criterion 3: Site User Role 1 (Reseller) has isolated Bayi Menüsü and cu
   // Reseller branding
   const layout = await source('workspace/WorkspaceLayout.jsx');
   assert.match(layout, /isReseller \? 'BAYİ PANELİ'/);
-  assert.match(layout, /isReseller \? 'Bayi yönetimi'/);
-  assert.match(layout, /isReseller \? 'Müşterileriniz ve izinli site araçları'/);
 
   // Websites page heading for Reseller
   const websitesPage = await source('workspace/WebsitesPage.jsx');
@@ -295,8 +292,6 @@ test('Criterion 3: Site User Role 2 (Customer) has isolated Müşteri Menüsü, 
   // Customer branding
   const layout = await source('workspace/WorkspaceLayout.jsx');
   assert.match(layout, /isCustomer \? 'MÜŞTERİ PANELİ'/);
-  assert.match(layout, /isCustomer \? 'Müşteri paneli'/);
-  assert.match(layout, /isCustomer \? 'Web siteleriniz ve barındırma araçları'/);
 
   // Customer quota and resource cards
   const websitesPage = await source('workspace/WebsitesPage.jsx');

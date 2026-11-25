@@ -68,6 +68,14 @@ export default function WebsitesPage() {
     const fromTree = tree.reduce((sum, row) => sum + ((row.depth ?? 0) > 0 ? 1 : (collapsed.has(row.domain?.id) ? (row.childCount ?? row.subdomainCount ?? row.childrenCount ?? 0) : 0)), 0);
     return fromTree > 0 ? fromTree : Math.max(0, visibleDomains.length - result.totalGroups);
   }, [tree, collapsed, visibleDomains.length, result.totalGroups]);
+  const parentIdsWithChildren = useMemo(
+    () => tree.filter((row) => (row.depth ?? 0) === 0 && (row.childCount ?? 0) > 0).map((row) => row.domain.id),
+    [tree],
+  );
+  const allParentsCollapsed = parentIdsWithChildren.length > 0 && parentIdsWithChildren.every((id) => collapsed.has(id));
+  function toggleAllSubdomains() {
+    setCollapsed(allParentsCollapsed ? new Set() : new Set(parentIdsWithChildren));
+  }
   const readable = ['ready', 'stale'].includes(domains.status);
   const resolveTasks = useMemo(() => createWebsiteTaskResolver({ domains, websites, applications, canManage, isOwner }), [domains, websites, applications, canManage, isOwner]);
   function filter(name, value) {
@@ -102,7 +110,7 @@ export default function WebsitesPage() {
   return <>
     {customerId && <p className="ws-notice" role="status">{customer ? `${customer.username} hesabının web siteleri` : customerError ? 'Müşteri siteleri doğrulanamadı.' : 'Müşterinin web siteleri yükleniyor…'} <Link to="/websites">Tüm siteler</Link></p>}
     <ErrorNotice error={customerError} />
-    <PageHeading title={isReseller ? 'Sitelerim' : 'Web Siteleri'} description={isReseller ? 'Müşterilerinize ait web sitelerini ve yayın araçlarını yönetin.' : isCustomer ? 'Web sitenizin dosya, e-posta ve veritabanı araçlarını buradan yönetin.' : 'Barındırılan web siteleri, alt alan adları ve yayın araçları.'} actions={<><Button icon="refresh" onClick={refreshAll}>Yenile</Button>{isOwner && canManage && <LinkButton to="/websites/new" icon="plus" variant="primary">Web sitesi ekle</LinkButton>}{isOwner && canManage && <LinkButton to="/websites/new?mode=subdomain" icon="plus">Alt alan adı ekle</LinkButton>}{isReseller && <LinkButton to="/customers" icon="user" variant="primary">Müşterilerim</LinkButton>}</>} />
+    <PageHeading title={isReseller ? 'Sitelerim' : 'Web Siteleri'} description={isReseller ? 'Müşterilerinize ait web sitelerini ve yayın araçlarını yönetin.' : isCustomer ? 'Web sitenizin dosya, e-posta ve veritabanı araçlarını buradan yönetin.' : 'Barındırılan web siteleri, alt alan adları ve yayın araçları.'} actions={<><Button className="ws-icon-btn" icon="refresh" aria-label="Yenile" title="Yenile" onClick={refreshAll} />{isOwner && canManage && <LinkButton to="/websites/new" icon="plus" variant="primary">Web sitesi ekle</LinkButton>}{isOwner && canManage && <LinkButton to="/websites/new?mode=subdomain" icon="plus">Alt alan adı ekle</LinkButton>}{isReseller && <LinkButton to="/customers" icon="user" variant="primary">Müşterilerim</LinkButton>}</>} />
     {isOwner && canManage && <WebsiteRemovalRecoveryPanel onChanged={refreshAll} />}
     {isOwner && canManage && ownerNextActions && (
       <Section
@@ -278,7 +286,7 @@ export default function WebsitesPage() {
         </div>
       </Section>
     )}
-    <Section className={`ws-site-table ws-site-table-${preferences.density} ws-site-list`} title="Siteler ve alt alan adları" description={readable ? `${result.totalGroups} ana alan adı · ${subdomainsCount} alt alan adı` : 'Site listesi hazırlanıyor.'}>
+    <Section className={`ws-site-table ws-site-table-${preferences.density} ws-site-list`} title="Siteler ve alt alan adları" description={readable ? `${result.totalGroups} ana alan adı · ${subdomainsCount} alt alan adı` : 'Site listesi hazırlanıyor.'} actions={parentIdsWithChildren.length > 0 && !filtering ? <Button icon="chevronsUpDown" onClick={toggleAllSubdomains}>{allParentsCollapsed ? 'Alt alan adlarını aç' : 'Alt alan adlarını daralt'}</Button> : undefined}>
       <div className="ws-filters">
         <label className="ws-filter-search">Site ara<input type="search" value={query} onChange={(event) => filter('q', event.target.value)} placeholder="Alan adı veya alias" /></label>
         <label>Durum<select value={status} onChange={(event) => filter('status', event.target.value)}><option value="all">Tüm durumlar</option><option value="active">Aktif</option><option value="draft">Taslak</option><option value="staged">Hazırlandı</option><option value="error">Hata</option></select></label>

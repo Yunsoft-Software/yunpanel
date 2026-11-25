@@ -57,8 +57,10 @@ test('WorkspaceLayout removes confusing /websites sidebar badge, renders Uygulam
   const layoutSource = fs.readFileSync(path.resolve(workspaceDir, 'WorkspaceLayout.jsx'), 'utf8');
   assert.equal(layoutSource.includes("to === '/websites' && sites !== null"), false);
   assert.match(layoutSource, /NotificationCenterDrawer/);
-  assert.match(layoutSource, /aria-label="Bildirim ve Görev Merkezi"/);
-  assert.match(layoutSource, /<span className="ws-toolbar-label">İşlemler<\/span>/);
+  assert.match(layoutSource, /title="Bildirim ve Görev Merkezi"/);
+  assert.match(layoutSource, /title="İşlemler"/);
+  assert.match(layoutSource, /aria-label="Hesabım"/);
+  assert.match(layoutSource, /aria-label="Çıkış yap"/);
   assert.match(layoutSource, /<span>Uygulama Marketi<\/span>/);
   assert.doesNotMatch(layoutSource, /Uygulama Marketi \(1-Click\)|1-Click Market/);
   assert.match(layoutSource, /const alertCount = computeWorkspaceAlerts\(\{ domains, websites, certificates, servers \}\)\.length;/);

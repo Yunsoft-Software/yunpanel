@@ -353,8 +353,33 @@ test('Real browser acceptance: Files auto-reopen fix, PanelKit modal dirty guard
     await page.getByRole('navigation', { name: 'Panel bölümleri' }).waitFor({ timeout: 15_000 });
 
     // =========================================================================
-    // 2. TOOLBAR THEME CONTROL, LIGHT DASHBOARD CONTRAST, TOOLS & SETTINGS, SITE ACCORDION, MOBILE MENU
+    // 2. UNIFIED ICON-FIRST TOPBAR, SINGLE SIDEBAR TOGGLE, NO APPEARANCE FOOTER, TOOLS PADDING, SITE ACCORDION, MOBILE MENU
     // =========================================================================
+    const chromeAudit = await page.evaluate(() => {
+      const toolbar = document.querySelector('.ws-toolbar');
+      const visibleCount = (sel) => [...document.querySelectorAll(sel)].filter((el) => {
+        const s = getComputedStyle(el);
+        const r = el.getBoundingClientRect();
+        return s.display !== 'none' && s.visibility !== 'hidden' && r.width > 0 && r.height > 0;
+      }).length;
+      return {
+        toolbarHeight: toolbar ? Math.round(toolbar.getBoundingClientRect().height) : 0,
+        appearanceCount: document.querySelectorAll('.ws-appearance').length,
+        visibleMobileMenu: visibleCount('.ws-mobile-menu'),
+        visibleNavClose: visibleCount('.ws-nav-close'),
+        accountBtnText: (document.querySelector('button[aria-label="Hesabım"]')?.textContent ?? '').trim(),
+        logoutBtnText: (document.querySelector('button[aria-label="Çıkış yap"]')?.textContent ?? '').trim(),
+        aiBtnText: (document.querySelector('button[aria-label="AI asistanı aç"]')?.textContent ?? '').trim(),
+      };
+    });
+    assert.ok(chromeAudit.toolbarHeight > 0 && chromeAudit.toolbarHeight <= 60, `Desktop topbar must be a single crisp row: ${JSON.stringify(chromeAudit)}`);
+    assert.equal(chromeAudit.appearanceCount, 0, 'Sidebar must not render legacy Görünüm tercihleri disclosure');
+    assert.equal(chromeAudit.visibleMobileMenu, 1, 'Desktop must show exactly one sidebar toggle');
+    assert.equal(chromeAudit.visibleNavClose, 0, 'Desktop must NOT show mobile close button inside sidebar');
+    assert.equal(chromeAudit.accountBtnText, '', 'Account button in topbar must be icon-only');
+    assert.equal(chromeAudit.logoutBtnText, '', 'Logout button in topbar must be icon-only');
+    assert.equal(chromeAudit.aiBtnText, '', 'AI assistant button in topbar must be icon-only');
+
     const toolbarThemeBtn = page.locator('.ws-toolbar-actions button.ws-theme-toggle');
     await toolbarThemeBtn.waitFor({ timeout: 5_000 });
     assert.equal((await toolbarThemeBtn.innerText()).trim(), '', 'Workspace theme toggle must be icon-only');
@@ -388,7 +413,7 @@ test('Real browser acceptance: Files auto-reopen fix, PanelKit modal dirty guard
         overflowX: document.documentElement.scrollWidth - window.innerWidth,
       };
     });
-    assert.ok(toolsLayout.paddingTop >= 12 && toolsLayout.paddingLeft >= 12, `Tools & Settings quicklinks must have visible section padding: ${JSON.stringify(toolsLayout)}`);
+    assert.ok(toolsLayout.paddingTop >= 20 && toolsLayout.paddingLeft >= 20, `Tools & Settings quicklinks must have generous section padding: ${JSON.stringify(toolsLayout)}`);
     assert.equal(toolsLayout.overflowX, 0);
 
     // Site accordion single prominent icon-only buttons + aria-expanded + subdomain info kept

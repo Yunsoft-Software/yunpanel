@@ -41,9 +41,14 @@ export default function WebsiteTaskCard({ row, tasks, certificates, filtering, o
         <Badge state={ssl.state}>{ssl.label}</Badge>
         {isSuspended && <LinkButton to={`${siteHref(domain.id, 'settings')}?quickResume=1`} variant="primary" icon="check" aria-label={`${domain.primaryDomain} yayınını etkinleştir`}>Yayını Etkinleştir</LinkButton>}
         {nextStep && <LinkButton to={nextStep.to} variant="primary" icon={nextStep.icon} aria-label={`${domain.primaryDomain} · ${nextStep.label}`}>{nextStep.label}</LinkButton>}
-        {url && <a href={url} target="_blank" rel="noopener noreferrer" className="ws-button" aria-label={`${domain.primaryDomain} sitesini yeni sekmede aç`}><Icon name="external" />Siteyi aç</a>}
+        {url && <a href={url} target="_blank" rel="noopener noreferrer" className="ws-button ws-icon-btn" aria-label={`${domain.primaryDomain} sitesini yeni sekmede aç`} title="Siteyi yeni sekmede aç"><Icon name="external" size={15} /></a>}
         <LinkButton to={siteHref(domain.id)} icon="arrow" aria-label={`${domain.primaryDomain} site genel bakışını aç`}>Yönet</LinkButton>
-        {!isSubdomain && childCount > 0 && <Button className="ws-accordion-toggle ws-accordion-icon-btn ws-website-subdomains-toggle" disabled={filtering} aria-expanded={expanded} aria-label={`${domain.primaryDomain} · ${childCount} alt alan adını ${expanded ? 'daralt' : 'göster'}`} title={`${childCount} alt alan adını ${expanded ? 'daralt' : 'göster'}`} onClick={() => onToggle(domain.id)}><span className="ws-accordion-chevron" aria-hidden="true"><Icon name="chevron" size={18} /></span></Button>}
+        {!isSubdomain && childCount > 0 && (
+          <div className="ws-subdomain-accordion-group">
+            <span className="ws-subdomain-count-pill" aria-hidden="true">{childCount} alt alan</span>
+            <Button className="ws-accordion-toggle ws-accordion-icon-btn ws-website-subdomains-toggle" disabled={filtering} aria-expanded={expanded} aria-label={`${domain.primaryDomain} · ${childCount} alt alan adını ${expanded ? 'daralt' : 'göster'}`} title={`${childCount} alt alan adını ${expanded ? 'daralt' : 'göster'}`} onClick={() => onToggle(domain.id)}><span className="ws-accordion-chevron" aria-hidden="true"><Icon name="chevron" size={17} /></span></Button>
+          </div>
+        )}
       </div>
     </header>
     {warning && <p className="ws-website-task-warning"><Icon name="alert" />Üst alan adı bağlantısını kontrol edin.</p>}
@@ -53,8 +58,8 @@ export default function WebsiteTaskCard({ row, tasks, certificates, filtering, o
         {tasks.tools.filter((tool) => ['files', 'databases', 'ssl', 'dns', 'wordpress'].includes(tool.key)).map((tool) => <TaskLink key={tool.key} tool={tool} domainName={domain.primaryDomain} id={id} />)}
       </div>
       <div className="ws-actions">
-        {!isSubdomain && tasks.createSubdomainHref && <LinkButton to={tasks.createSubdomainHref} icon="plus" aria-label={`${domain.primaryDomain} altında alan adı ekle`}>Alt alan adı ekle</LinkButton>}
-        <Button className="ws-website-task-toggle ws-accordion-toggle ws-accordion-icon-btn" aria-expanded={toolsOpen} aria-controls={`${id}-tools`} aria-label={`${domain.primaryDomain} · ${toolsOpen ? 'Araçları daralt' : 'Tüm araçları göster'}`} title={toolsOpen ? 'Araçları daralt' : 'Tüm araçları göster'} onClick={() => setToolsOpen(!toolsOpen)}><span className="ws-accordion-chevron" aria-hidden="true"><Icon name="chevron" size={18} /></span></Button>
+        {!isSubdomain && tasks.createSubdomainHref && <LinkButton to={tasks.createSubdomainHref} icon="plus" aria-label={`${domain.primaryDomain} altında alan adı ekle`} title="Alt alan adı ekle">Alt alan adı</LinkButton>}
+        <Button className="ws-website-task-toggle ws-accordion-toggle ws-accordion-icon-btn" aria-expanded={toolsOpen} aria-controls={`${id}-tools`} aria-label={`${domain.primaryDomain} · ${toolsOpen ? 'Araçları daralt' : 'Tüm araçları göster'}`} title={toolsOpen ? 'Araçları daralt' : 'Tüm araçları göster'} onClick={() => setToolsOpen(!toolsOpen)}><span className="ws-accordion-chevron" aria-hidden="true"><Icon name="chevron" size={17} /></span></Button>
       </div>
     </nav>
     <div id={`${id}-tools`} className="yp-plesk-drawer" hidden={!toolsOpen}>

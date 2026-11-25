@@ -36,19 +36,23 @@ const glyphs = {
   bell: 'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0',
   sun: 'M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10ZM12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72 1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42',
   moon: 'M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z',
+  sidebar: 'M3 4h18v16H3zM9 4v16',
+  logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4m7 14 5-5-5-5m5 5H9',
+  sparkles: 'M12 3l1.7 4.7L18.5 9.5l-4.8 1.8L12 16l-1.7-4.7L5.5 9.5l4.8-1.8L12 3zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15z',
+  chevronsUpDown: 'm7 15 5 5 5-5M7 9l5-5 5 5',
 };
 export function Icon({ name, size = 18 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={glyphs[name] ?? glyphs.box} /></svg>;
 }
 export function Button({ children, icon, variant = 'secondary', className = '', type = 'button', ...props }) {
-  return <button type={type} className={`ws-button ws-button-${variant} ${className}`} {...props}>{icon && <Icon name={icon} />}{children}</button>;
+  return <button type={type} className={`ws-button ws-button-${variant} ${className}`.trim()} {...props}>{icon && <Icon name={icon} />}{children}</button>;
 }
-export function LinkButton({ to, children, icon, variant = 'secondary', ...props }) {
-  return <Link to={to} className={`ws-button ws-button-${variant}`} {...props}>{icon && <Icon name={icon} />}{children}</Link>;
+export function LinkButton({ to, children, icon, variant = 'secondary', className = '', ...props }) {
+  return <Link to={to} className={`ws-button ws-button-${variant} ${className}`.trim()} {...props}>{icon && <Icon name={icon} />}{children}</Link>;
 }
-const statusLabels = { active: 'Aktif', online: 'Çevrimiçi', succeeded: 'Tamamlandı', running: 'Çalışıyor', queued: 'Sırada', pending: 'Bekliyor', draft: 'Taslak', staged: 'Hazırlandı', saving: 'Kaydediliyor', saved: 'Kaydedildi', applying: 'Uygulanıyor', applied: 'Uygulandı', verifying: 'Doğrulanıyor', verified: 'Doğrulandı', partial: 'Kısmi başarılı', partial_success: 'Kısmi başarılı', error: 'Hata', failed: 'Başarısız', cancelled: 'İptal', expired: 'Süresi doldu', warning: 'Kontrol gerekli', offline: 'Çevrimdışı', off: 'Kapalı', staging: 'Test', unknown: 'Bilinmiyor', deploying: 'Dağıtılıyor', healthy: 'Sağlıklı', stale: 'Eski / Gecikmiş', synchronized: 'Uyumlu / Eşit', version_mismatch: 'Sürüm Uyuşmazlığı', stale_cache: 'Eski Önbellek', schema_mismatch: 'Şema Uyuşmazlığı', diverged: 'Farklılaşmış' };
+const statusLabels = { active: 'Aktif', online: 'Çevrimiçi', succeeded: 'Tamamlandı', running: 'Çalışıyor', queued: 'Sırada', pending: 'Bekliyor', draft: 'Taslak', staged: 'Hazırlandı', saving: 'Kaydediliyor', saved: 'Kaydedildi', applying: 'Uygulanıyor', applied: 'Uygulandı', verifying: 'Doğrulanıyor', verified: 'Doğrulandı', partial: 'Kısmi başarılı', partial_success: 'Kısmi başarılı', error: 'Hata', failed: 'Başarısız', cancelled: 'İptal', expired: 'Süresi doldu', suspended: 'Askıda', warning: 'Kontrol gerekli', offline: 'Çevrimdışı', off: 'Kapalı', staging: 'Test', unknown: 'Bilinmiyor', deploying: 'Dağıtılıyor', healthy: 'Sağlıklı', stale: 'Eski / Gecikmiş', synchronized: 'Uyumlu / Eşit', version_mismatch: 'Sürüm Uyuşmazlığı', stale_cache: 'Eski Önbellek', schema_mismatch: 'Şema Uyuşmazlığı', diverged: 'Farklılaşmış' };
 export function Badge({ state = 'unknown', children }) {
-  const tone = ['active', 'online', 'succeeded', 'verified', 'applied', 'saved', 'healthy', 'synchronized'].includes(state) ? 'good' : ['error', 'failed', 'expired', 'offline', 'version_mismatch', 'schema_mismatch'].includes(state) ? 'bad' : ['warning', 'pending', 'staging', 'partial', 'partial_success', 'stale', 'stale_cache', 'diverged'].includes(state) ? 'warn' : ['running', 'deploying', 'queued', 'staged', 'saving', 'applying', 'verifying'].includes(state) ? 'info' : 'neutral';
+  const tone = ['active', 'online', 'succeeded', 'verified', 'applied', 'saved', 'healthy', 'synchronized'].includes(state) ? 'good' : ['error', 'failed', 'expired', 'offline', 'version_mismatch', 'schema_mismatch'].includes(state) ? 'bad' : ['warning', 'pending', 'staging', 'suspended', 'partial', 'partial_success', 'stale', 'stale_cache', 'diverged'].includes(state) ? 'warn' : ['running', 'deploying', 'queued', 'staged', 'saving', 'applying', 'verifying'].includes(state) ? 'info' : 'neutral';
   return <span className={`ws-badge ws-badge-${tone}`}><span aria-hidden="true" />{children ?? statusLabels[state] ?? state}</span>;
 }
 export function PageHeading({ title, description, actions, eyebrow }) {
