@@ -4,10 +4,11 @@
 
 [Onaylanan plan](plan.md#20-kasım-2026--onaylanan-linux-hosting-pilotu-ve-plesk-geçişi) ve [yerel kanıt](docs/gorevler/linux-hosting-pilot.md#20-kasım-yerel-ubuntu-kanıtı) pilotu hazırlıyor. Aşağıdaki maddeler bağımsız ortamda sistem servisi, müşteri verisi ve canlı taşıma sonuçlarını izler.
 
-- [ ] Dış Restic/rclone yedeğinden izinli boş Ubuntu 24.04 VM’de panel hesabı/yetkisi, WordPress HTTP, gerçek SQL ve IMAP geri gelir. Kaynak makinenin kapalı olduğu varsayımıyla anahtar erişimi ve ölçülen kurtarma süresi kaydedilir.
+- [x] Debian kaynak kapalıyken bağımsız Restic/rclone deposundan boş Ubuntu 24.04 hedefine panel hesapları ve yetkileri, WordPress, SQL ve IMAP geri yüklendi. Anahtar erişimi ve 241,33 saniyelik kurtarma ölçüldü. [Kabul kaydı](docs/gorevler/contabo-cold-recovery-20261122.md)
+- [x] İki Contabo VPS’te Debian 12 ve Ubuntu 24.04 arasında YunPanel yedeğinden PHP sitesi, MariaDB ve Dovecot IMAP iki yönde geri yüklendi. [Kabul kaydı](docs/gorevler/contabo-cross-restore-20261122.md)
 - [ ] Tek veritabanlı PHP ve postalı WordPress pilotlarında izinli Plesk dışa aktarımı, dosya/SQL/posta bütünlüğü, aynı girdinin tekrar işlenmesi, DNS öncesi test ve son eşitleme doğrulanır. Prova sırasında hedefte yeni yazılmış içerik ve postalar korunarak geri dönülür.
-- [ ] Sieve Vacation ve Rspamd Multimap gerçek Linux bileşenlerinde normal, hatalı ve kardeş posta kutusu senaryolarıyla doğrulanır. TLS, teslimat ve DKIM kontrolleri yapılır.
-- [ ] İkinci ağdaki PowerDNS, doğrulanmış bölge kopyasıyla birincil erişilebilirken ve yokken yetkili yanıt verir.
+- [x] Debian 12 ve Ubuntu 24.04’te Sieve Vacation, Rspamd Multimap, SMTP STARTTLS, SASL, LMTP/IMAP teslimi ve DKIM gerçek servislerle doğrulandı. [Kabul kaydı](docs/gorevler/contabo-mail-dns-20261122.md#posta-ve-spam-politikası)
+- [x] İkinci ağdaki PowerDNS ikincil sunucusu NOTIFY/AXFR ile güncellendi ve birincil durduğunda güncel bölgeyi yetkili olarak sunmayı sürdürdü. [Kabul kaydı](docs/gorevler/contabo-mail-dns-20261122.md#powerdns-ikincil-sunucusu)
 - [x] .28 üzerinde CrowdSec AppSec gözlem trafiği, izole kural engellemesi ve ayar geri dönüşü doğrulandı. [Kabul kaydı](docs/gorevler/crowdsec-waf-20261121.md)
 - [x] .28 üzerinde aylık HTTP trafik ölçümü, müşteri veritabanı sınırı, panel dosya yazma kotası ve isteğe bağlı HTTP trafik engellemesi doğrulandı. Mevcut Nginx yapılandırmalarının kapsamı ve yeniden uygulama adımı kayıtlı. [Kabul kaydı](docs/gorevler/trafik-kota-20261122.md)
 - [ ] WordPress staging’den seçili tema ve eklenti dosyalarının panelde önizleme, kuyruk ve geri alma akışı gerçek Debian 12 PHP-FPM, MariaDB ve Chromium’da doğrulandı. Farklı tablo önekleri, canlı WordPress yazısı ve korunan dosyalar denetlendi. `.28` yayın kabulü bekleniyor. [Kabul kaydı](docs/gorevler/linux-hosting-pilot.md#22-kasım--wordpress-staging-dosyalarının-panelden-aktarımı)

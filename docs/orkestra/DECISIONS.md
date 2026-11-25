@@ -2,6 +2,12 @@
 
 > Sadece senior yazar, sadece İNSAN'ın onayladığı kararlar. Sohbette kalan karar yok sayılır. Önceki kararlar `agents.md`'de; burası 26 Ekim 2026 ve sonrası.
 
+## 2026-11-19 · Doğrulama tekrarını kaldırma
+
+- **Karar:** Görevde değişen davranış sınanır. İnceleyen ajan diff'i ve aynı kaynak/ortama ait geçerli kanıtı kullanır. Tam doğrulama yayın adayında, risk gerekçesiyle gerektiğinde veya kullanıcı istediğinde bir kez yapılır.
+- **Uygulama:** [PROJE.md §Doğrulama](PROJE.md#doğrulama). Bu karar önceki zamanlanmış tam doğrulama ve incelemede aynı kabulü tekrar koşma talimatlarının yerine geçer.
+- **Onaylayan:** İNSAN
+
 ## 2026-10-26 · Orkestra çalışma düzeni
 - **Karar:** YunPanel'de iş senior (Claude veya Codex) / junior (Antigravity, 6 yuva) düzeniyle yürür; görev ve kabul kaydı Code Factory yerine orkestradır (`docs/gorevler/`, `tasks/`).
 - **Gerekçe:** Durum diskte ve git'te kalsın; araç ya da ekip arkadaşı değişince kaldığı yerden devam edilsin; yapan ile doğrulayan ayrı olsun.

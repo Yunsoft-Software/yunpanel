@@ -12,10 +12,11 @@
 3. `.local/test-server.env` var mı? Yoksa canlı test işleri (`sunucu-28` kilidi gerektirenler) başlatılmaz; sadece kaynak/birim işleri yürür.
 
 ## Doğrulama
-- **Görev teslimi (zorunlu):** `npm run lint` + değiştirdiğin alanın birim/API testleri (`npm test --workspace <ilgili>` veya ilgili test dosyası). Görevin `Kabul` satırı ayrıca ne istiyorsa.
-- **Dalga sonu / tam:** `python3 orkestra/orchestrator.py verify` → lint, tüm birim testleri (~100 sn) ve `npm run build`. Kullanıcıya "tamamlandı" yalnız bu geçtikten sonra söylenir.
-- **Canlı test (`.28`, Playwright):** yalnız değişikliğin etkileyebileceği alanın testleri koşulur (ör. site silme değiştiyse ilgili `e2e/ozellik/*.spec.js`), `sunucu-28` kilidiyle; görev raporuna hangi testler koşulduğu yazılır. Tam e2e koşusu (543 test, ~1 sa 45 dk) rutin değildir; yalnız İNSAN istediğinde yapılır (İNSAN kararı, 06-11-2026).
-- Testler mock, stub HTTP cevabı veya sahte veri kullanmaz (agents.md 24 Ekim §1). Sadece kaynak metninde regex arayan test, test sayılmaz.
+
+- **Görev teslimi:** Değişen davranışı kapsayan birim, API veya Playwright senaryosunu çalıştır. Gerektiğinde lint/build ekle. `.28` üzerinde etkilenen gerçek akışı yalnız gerekli olduğunda, ilgili kilitle ve hedef sürümde doğrula. Mevcut görev kaydına komutu, kaynak commit'ini (commit öncesinde koşulduysa test edilen değişikliğe karşılık gelen görev commit'ini), ortamı ve sonucu yaz. Gerçek DB, API ve tarayıcı senaryoları kullanılır.
+- **Bağımsız inceleme:** Diff'i, senaryonun kabul ölçütünü ve koşu kanıtını incele. Aynı kaynak ile ilgili ortam ve davranış için geçerli kanıtı kullan. Kanıt eksikse, bulgu varsa, ilgili kaynak/ortam değiştiyse veya kullanıcı açıkça isterse yalnız etkilenen kontrolü yeniden çalıştır. Bu madde ortak `KURALLAR.md` §4'teki varsayılan yeniden koşturmanın ve önceki tarihli inceleme tekrarlarının yerine geçer.
+- **Toplu doğrulama:** Yayın adayında, risk gerekçesiyle bütünleşik doğrulama gerektiğinde veya kullanıcı istiyorsa `python3 orkestra/orchestrator.py verify` ile lint, tüm kaynak testleri ve build'i bir kez çalıştır. Aynı adayın geçerli sonucu incelemede de kullanılır. Saatlik, oturum açılışında ve rutin görev/dalga sonunda otomatik toplu koşu yapılmaz. `verify --quick` de tüm kaynak testlerini kapsar. Tam `.28` E2E yalnız kullanıcı istediğinde çalışır.
+- Bugfix veya özellik, ilgili görev kabulü geçince teslim edilebilir. Yayın veya henüz koşulmamış gerçek ortam kabulü için mevcut açık kaydı kullan.
 
 ## İzinli test hedefleri
 - **Yalnız** `.local/test-server.env` ile doğrulanan `.28` YunPanel test sunucusu; adres her oturumda bu dosyadan teyit edilir. Dosyanın içeriği (adres, kullanıcı, parola) rapora, loga, commit'e yazılmaz.
@@ -28,7 +29,7 @@
 
 ## Yasak alanlar ve sınırlar
 - **`.44` ile biten Plesk sunucusuna hiçbir amaçla dokunulmaz.** Junior ajanlar (Antigravity ve diğerleri) için istisnası yoktur: tarayıcı, SSH, API, ping, DNS sorgusu dahil hiçbir erişim yapılmaz; görev bunu gerektiriyorsa `block` edilir. Tek istisna 2026-10-27 DECISIONS kaydındaki senior salt okunur incelemesidir.
-- Junior ajanlar **asla push etmez.** Push yalnız senior tarafından, İNSAN'ın açık onayıyla, yalnız bugünün aktif dalına ve yalnız `python3 orkestra/orchestrator.py push` ile yapılır (KURALLAR §6). Push isteği agents.md 25 Ekim §9 toplu test koşturmasını tetiklemez; komut gerekiyorsa `verify --quick` çalıştırır. `main`'e push, merge, force push ve geçmiş silme yok. GitHub Actions yok.
+- Junior ajanlar **asla push etmez.** Push yalnız senior tarafından, İNSAN'ın açık onayıyla, yalnız bugünün aktif dalına ve yalnız `python3 orkestra/orchestrator.py push` ile yapılır (KURALLAR §6). Push komutu doğrulama durumunu bildirir ve test başlatmaz. `main`'e push, merge, force push ve geçmiş silme yok. GitHub Actions yok.
 - Deployment (paket kurulumu, `.28` dışında herhangi bir hedef) ayrı İNSAN onayı ister.
 - Parola, token, key, cookie, MFA ve private config repoya, loga, rapora veya ekran görüntüsüne yazılmaz.
 
@@ -37,4 +38,4 @@
 - React + JavaScript/JSX; TypeScript veya yeni UI motoru yok. UI yalnız merkezi tasarım sisteminden (`apps/web/src/workspace/design-system/`, `PanelKit.jsx`).
 - Mutation zinciri (RBAC → preview → onay → kilit → durable job → apply/configtest → health → reconcile) ve kimlik ayrımı (Website/Domain/Application) `docs/architecture.md`'deki gibi korunur.
 - Çalışan motorlar (Files/elFinder, ttyd, phpMyAdmin, Roundcube, PowerDNS…) yeniden yazılmaz.
-- Görev tamamlanınca `plan.md`/`todo.md` maddesi yalnız ilgili görevin `Kabul`'ü inceleme ve dalga sonu `verify` ile geçtikten sonra senior tarafından işaretlenir; junior bu dosyaları değiştirmez.
+- Görev kabul edilince ilgili `plan.md`/`todo.md` maddesini senior günceller. Bekleyen yayın veya gerçek ortam kabulü ilgili açık maddede kalır. Junior bu dosyaları değiştirmez.

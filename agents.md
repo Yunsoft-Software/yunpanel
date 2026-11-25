@@ -46,10 +46,7 @@
    - Üst barda **aaPanel tarzı Merkezi Bildirim ve Görev Merkezi (`NotificationCenterDrawer`)** bulunur; aktif/bekleyen/son görevleri, gerçek sistem/güvenlik uyarılarını (SSL, Disk/CPU/RAM, DB güvenliği, başarısız işler) ve bildirim geçmişini tek merkezden gösterir.
    - **Easypanel tarzı Tek Tıkla Uygulama Marketi (1-Click Apps):** n8n, PocketBase, Strapi, Directus, Umami, Ghost, WordPress, Uptime Kuma, Meilisearch, MinIO, Redis, PostgreSQL gibi şablonlar otomatik secret üretimi ve domain/subdomain proxy bağlantısıyla tek tıkla kurulabilir.
    - **JAMstack & Gelişmiş Nginx Ayarları:** Site detay araç kartlarında `Web Sunucusu & Nginx` doğrudan yer alır; CORS, Güvenlik Başlıkları, Immutable Cache ön-ayarları, alt yol (`/api`) reverse proxy bağlayıcısı ve Next.js/Astro/Vite/Nuxt/Remix/Node/Python framework presetleri sunulur.
-9. **25 Ekim 2026 — Sıfır Test-Dışı Özellik, Derin Gerçek Kullanıcı Senaryo Testleri ve Cevap Öncesi Zorunlu Toplu Koşturma Kuralı:**
-   - **Yüzeysel Test Yasağı:** Yalnızca kaynak kodda metin arayan (`fs.readFileSync` + regex) yüzeysel kontroller tek başına test kabul edilmez. Gerçek bir kullanıcının paneli kullanırken karşılaşabileceği **tüm olumlu akışlar (happy path), sınır değerler (edge cases), hatalı girdiler (validation/400/404/409), yetki sınırları (Owner/Reseller/Customer RBAC & CSRF) ve gerçek tarayıcı (Playwright) etkileşimleri** gerçek veritabanı, gerçek API ve gerçek DOM/tarayıcı üzerinde test edilmelidir.
-   - **Önce Yazılı Senaryo Matrisi ve Karşılaştırma:** Her geliştirme diliminde önce teorik ve pratik kullanıcı senaryoları yazılı olarak (`docs/test-scenarios-matrix.md` ve `plan.md`) çıkarılır, mevcut testlerle karşılaştırılır ve panelde **tek bir özellik, sekme, modal, form veya uç nokta bile testsiz bırakılmaz**.
-   - **Eşzamanlı Test Yazımı ve Cevap Öncesi Zorunlu Toplu Koşturma:** Geliştirmeler yapılırken testleri aynı anda (paralel) yazılır ve **her geliştirme bittiğinde, kullanıcıya cevap verilmeden hemen önce tüm ilgili birim, API/DB entegrasyon ve gerçek tarayıcı (Playwright) testleri topluca koşturulup %100 geçtiği kanıtlanır.** Testler koşturulmadan veya hata varken kullanıcıya "tamamlandı" cevabı kesinlikle verilmez.
+9. **Doğrulama değişikliğin riskiyle orantılıdır.** Rutin iş doğrudan uygulanır ve ilgili testle teslim edilir. Özellik, hata, yetki ve sınır durumları gerçek API, veritabanı ve gerektiğinde Playwright ile sınanır. Testi değiştiren çalışma mevcut kapsama bakar ve eksik senaryoyu tamamlar. Görev kabulü, bağımsız inceleme ve yayın adayı için [proje doğrulama kuralı](docs/orkestra/PROJE.md#doğrulama) geçerlidir.
 
 ### 11 Ekim 2026 — Test/geliştirme sunucusunda yedek kuralı
 
@@ -81,11 +78,11 @@
 
 ## Uygulama sırası
 
-Güncel dal/kod/kurallar → sade kapsam dokümanı → küçük kaynak dilimi → çalıştırılabilen test → `plan.md` ve ilgili alt planda kaynak işareti / açık kabul → küçük commit. Reseller erişimi bütün hedef API/job/tool/gateway yollarında güvenli kapsam uygulanmadan etkinleştirilmez. Tarihsel tam-parity reseller satırları yeni MVP'nin yayın engeli değildir; ertelenmiş kalır.
+Rutin işte güncel dalı kontrol et, değişikliği yap ve ilgili testi çalıştır. Birden çok bileşeni etkileyen değişiklikte gerektiği kadar kapsam çıkar. Mevcut görev kaydında uygulanan ve açık kabulü belirt. Reseller erişimi bütün hedef API/job/tool/gateway yollarında güvenli kapsam uygulanmadan etkinleştirilmez. Tarihsel tam-parity reseller satırları yeni MVP'nin yayın engeli değildir; ertelenmiş kalır.
 
 <!-- orkestra:start -->
 ## Orkestra (senior/junior çalışma düzeni)
-Bu projede iş `docs/orkestra/` ve `docs/gorevler/` üzerinden yürür. Durum diskte: `python3 orkestra/tasks.py status`.
+Orkestra ile yürütülen işler `docs/orkestra/` ve `docs/gorevler/` üzerinden izlenir. Durum diskte: `python3 orkestra/tasks.py status`.
 - Senior isen: `orkestra-senior` becerisini uygula (`.agents/skills/orkestra-senior/SKILL.md`).
 - Junior/orkestratör isen: `orkestra-devam` becerisini uygula (`.agents/skills/orkestra-devam/SKILL.md`).
 - Bağlayıcı kurallar: `docs/orkestra/KURALLAR.md` + `docs/orkestra/PROJE.md`.

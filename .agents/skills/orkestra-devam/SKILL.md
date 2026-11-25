@@ -1,6 +1,6 @@
 ---
 name: orkestra-devam
-description: Projede junior orkestratör olarak işi başlatır veya bir kesintiden (kota bitmesi, internet kopması, uygulama kapanması, yeni hesap, başka makine) sonra kaldığı yerden sürdürür. Yarım işi kurtarır, son işi doğrular, alt ajanları başlatır ve bütün görevler bitene kadar yönetir. Kullanıcı "devam", "başlat", "kaldığın yerden" dediğinde veya /orkestra-devam yazdığında kullan.
+description: Projede junior orkestratör olarak işi başlatır veya bir kesintiden (kota bitmesi, internet kopması, uygulama kapanması, yeni hesap, başka makine) sonra kaldığı yerden sürdürür. Yarım işi kurtarır, son işi doğrular, alt ajanları başlatır ve bütün görevler bitene kadar yönetir. Mevcut iş Orkestra ile yürütülüyorsa veya kullanıcı /orkestra-devam yazdığında kullan.
 ---
 
 # /orkestra-devam — Junior orkestratör
@@ -18,10 +18,8 @@ Sen ORKESTRATÖRSÜN. Görev yapmazsın; ajanları yönetirsin. Her adımı sır
    - "Sahipsiz değişiklikler" listesine **dokunma**. Çoğunlukla senior'ın veya insanın süren işidir; sadece LOG'a not düşülür.
 2. Az önce başladıysan ve önceki oturumun claim'leri hâlâ taze görünüyorsa, süre dolmadan onlara yeni ajan atama. 3. adımdan devam et ve süre dolunca `recover`'ı tekrar çalıştır.
 
-## 2. Son işi doğrula
-1. `python3 orkestra/orchestrator.py verify --quick`.
-2. Son tam doğrulamadan beri 10'dan fazla görev kabul edildiyse veya kesinti bir görevin ortasında olduysa tam `verify` çalıştır (zaman aşımını uzun ver).
-3. `verify` kırılan kabul edilmiş görevleri yeniden açar, sahibi bulunamayan hataları bulgu görevi olarak yazar ve commit eder. Ayrıca bir şey yapma.
+## 2. Son işin kanıtını oku
+Devam eden görevleri ve mevcut kabul kayıtlarını kullan. Kesinti nedeniyle kanıtı eksik kalan veya değişen kontrolü `PROJE.md` §Doğrulama'ya göre tamamla.
 
 ## 3. Yuvaları doldur
 1. `python3 orkestra/orchestrator.py slots` → yuva başına bir satır: `AGENT_n  DEVAM|İNCELE|GÖREV|QA|BOŞ  <iş>`.
@@ -33,10 +31,10 @@ Sen ORKESTRATÖRSÜN. Görev yapmazsın; ajanları yönetirsin. Her adımı sır
 - **Her 10 dk:** `python3 orkestra/orchestrator.py tick`. Kurtarma, durum ve yuvaları tek komutta verir, LOG'a satır yazar. BOŞ olmayan ama ajanı çalışmayan yuvayı doldur.
   - Bir alt ajanın sessiz olması tek başına takıldığı anlamına gelmez. `tick` sinyali ve dosya düzenlemesini birlikte sayar. Sadece `recover` geri aldıysa yuvayı yeniden doldur.
   - Kendi başlattığın bir komutu beklerken çıkış kodunu kontrol et. Bitmiş bir komutu çalışıyor sanma.
-- **Her 60 dk:** `verify --quick`. Bir görev dalgası bitince veya 3 saatte bir tam `verify`.
+- **Toplu doğrulama:** Ne zaman gerektiğini `PROJE.md` §Doğrulama belirler. Yayın adayının geçerli koşusu varsa sonucunu kullan.
 - **Engellenen görev** (`tasks/blocked/*.md`): çözülebilir bir ön iş eksikse `python3 orkestra/orchestrator.py finding "<başlık>" "<ne gerekiyor>" <dosyalar>`. Karar, tasarım veya kapsam sorusuysa görevi bekleyen bırak ve kullanıcıya "senior kararı gerekiyor: <soru>" de.
 - **`approval` bekleyen görevler** İNSAN'ındır. Listeyi kullanıcıya bildir; onları sen kabul etme.
-- **Bitiş:** open, claimed, review ve reviewing 0 (SENIOR ve İNSAN sahipli görevler hariç) ve son tam `verify` ok olduğunda `docs/orkestra/RAPOR.md` yaz: ne bitti, ne kaldı, SENIOR ve İNSAN bekleyenler, bilinen riskler. Push yapma.
+- **Bitiş:** open, claimed, review ve reviewing 0 (SENIOR ve İNSAN sahipli görevler hariç) ve ilgili görev kabulleri geçtiğinde `docs/orkestra/RAPOR.md` yaz: ne bitti, ne kaldı, SENIOR ve İNSAN bekleyenler, bilinen riskler. Push yapma.
 
 ## 5. İŞÇİ talimatı (her alt ajana aynen ver, AGENT_n ve İŞ'i doldur)
 
@@ -46,7 +44,7 @@ Sen AGENT_n'sin. Proje kökü: <bu deponun yolu>
 
 GÖREV veya DEVAM ise (KURALLAR §3):
  1. GÖREV: `python3 orkestra/tasks.py claim <ID> AGENT_n`. Başarısızsa `next AGENT_n` ile başka görev al; NONE veya PAUSED ise orkestratöre bildir ve çık.
-    DEVAM: claim zaten sende. `tasks/recovery/<ID>-*` varsa incele; işe yarıyorsa kullan ve kabul ölçütüne göre baştan doğrula.
+    DEVAM: claim zaten sende. `tasks/recovery/<ID>-*` varsa incele; işe yarıyorsa kullan. Yalnız kanıtı eksik veya değişmiş kabulü `PROJE.md` uyarınca doğrula.
  2. `python3 orkestra/tasks.py show <ID>`. Bağımlı görevlerin raporlarını oku. Sadece görevin işaret ettiği belge bölümlerini oku.
  3. En az 5 dakikada bir ve her uzun komuttan önce `python3 orkestra/tasks.py heartbeat <ID> AGENT_n`.
  4. Hata düzeltmesiyse önce tekrar üret ve otomatik teste çevir, sonra düzelt.
@@ -58,8 +56,8 @@ GÖREV veya DEVAM ise (KURALLAR §3):
 İNCELE ise (KURALLAR §4; kod DÜZELTME):
  1. `python3 orkestra/tasks.py review <ID> AGENT_n`, ardından `show <ID>` ve `tasks/review/<ID>.md`.
  2. `git log --oneline -- <görev dosyaları>` ve `git show <commit>` ile değişikliği oku.
- 3. Kabul satırındaki kanıtı kendin yeniden üret. Kapsam, test kalitesi, güvenlik ve mimariyi kontrol et.
- 4. `accept <ID> AGENT_n "<ne çalıştırdın, ne gördün>"` ya da `reject <ID> AGENT_n "<tekrar üretme + beklenen/gerçek>"`.
+ 3. Kabul satırını ve koşu kanıtını `PROJE.md` §Doğrulama'ya göre incele. Kapsam, test kalitesi, güvenlik ve mimariyi kontrol et.
+ 4. `accept <ID> AGENT_n "<incelenen kanıt ve varsa yeni kontrol>"` ya da `reject <ID> AGENT_n "<tekrar üretme + beklenen/gerçek>"`.
  5. `git add --all -- 'tasks/*/<ID>.md' 'tasks/history/<ID>-*' && git commit -m "<ID>: inceleme <kabul|ret>"`, orkestratöre bildir, çık.
 
 QA ise (düzeltme YAPMA, sadece bulgu yaz; 20 dk'yı geçme):

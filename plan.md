@@ -39,7 +39,7 @@ Bu kanıtlar özel test manifestlerinde sürüm ve kapsamıyla tutulur; aktif ku
 3. **Posta, DNS ve güvenlik.** Postfix ve Dovecot korunur. Otomatik yanıt Dovecot Sieve Vacation, izin ve engel listeleri kapsamlı Rspamd Multimap ile uygulanır. Kendi yetkili DNS’imiz için farklı ağda PowerDNS ikincil sunucu doğrulanır. WAF için mevcut Cloudflare yönetilen kuralları veya doğrudan barındırılan sitelerde gözlem modundan başlayan yerel CrowdSec AppSec seçilir.
 4. **Pilotun ardından genişleme.** WordPress staging’den canlıya seçici dosya ve tablo aktarımı. Sipariş ve üyelik verisi varsayılan olarak korunur. Çoklu DB, wildcard, ek SFTP ve gerçek müşteri kotaları doğrulanmış ihtiyaca göre genişletilir. Gelişmiş bayi ve abonelik, Windows ve geniş market ayrı fazlardır.
 
-Şu anda ayrı sunucu yok. [Yerel uygulama dilimleri](docs/gorevler/linux-hosting-pilot.md) ilerletilir. [Canlı kabul](todo.md#linux-hosting-pilotu-ve-plesk-geçişi) gerçek hedef ve ayrı dağıtım onayı geldiğinde tamamlanır. Son doğrulanmış `2003` kabulü [T883 kaydında](tasks/reopen/T883.md#8-docker-p2-canlı-kabulü--20-kasım-2026) durur.
+Debian 12 ve Ubuntu 24.04 Contabo VPS’lerinde kaynak kapalı kurtarma, posta ve ikinci DNS kabulü tamamlandı. [Kurtarma kanıtı](docs/gorevler/contabo-cold-recovery-20261122.md) ve [posta/DNS kanıtı](docs/gorevler/contabo-mail-dns-20261122.md) paket ve test kapsamını gösterir. Plesk pilotu için izinli çevrimdışı dışa aktarım gereksinimi [canlı kabul listesinde](todo.md#linux-hosting-pilotu-ve-plesk-geçişi) açık.
 
 ## 24 Ekim 2026 — Yeni Mimari, Merkezi Shadcn UI/UX, Plesk Docker, Çoklu Linux ve Test Kararları (`24-10-2026` dalı)
 

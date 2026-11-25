@@ -29,7 +29,7 @@ Sen SENIOR'sun. Kullanıcı ürün sahibidir (İNSAN). Junior ajanlar senin açt
 
 ## 3. Sonucu değerlendir
 1. `tasks.py status`, `tasks/done/*.md` ve inceleme notları, `docs/orkestra/LOG.md`, `RAPOR.md`.
-2. Rapora güvenme. `python3 orkestra/orchestrator.py verify` çalıştır ve en riskli kabulleri kendin yeniden üret (gerçek API, veritabanı, tarayıcı).
+2. Diff'i ve kabul kanıtını `PROJE.md` §Doğrulama'ya göre incele. Eksik veya geçersiz kanıt için ilgili kontrolü çalıştır. Yayın adayı için var olan geçerli tam doğrulamayı kullan.
 3. Eksik veya yanlışsa: kabul edilmiş görevi `tasks.py reopen <ID> "<neden>"` ile geri aç ya da yeni görev yaz. Kod düzeltmeyi junior'a bırak.
 4. `approval` bekleyenleri kullanıcıya kanıtıyla sun. Kullanıcı onaylarsa `tasks.py accept <ID> İNSAN "<kullanıcının sözü>"`, reddederse `reject <ID> İNSAN "<sebep>"`. İkisi de **yalnızca** kullanıcının sohbette açıkça söylediği karar üzerine yapılır.
 5. Kullanıcıya üç ayrı şeyi raporla: kod incelemesi sonucu, gerçek çalışma kanıtı, onayını bekleyenler.
