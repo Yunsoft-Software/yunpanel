@@ -29,8 +29,13 @@ p='/etc/nginx/sites-enabled/yunpanel-'+host+'.conf'
 print(json.dumps({'content':open(p,'r',encoding='utf-8',errors='replace').read() if os.path.isfile(p) else ''}))`, [hostname], { timeoutMs: 20_000 }).content;
   }
 
+  // Onay penceresi başlığı işlemin arayüz adını taşır (DockerLifecyclePanel: `Docker Compose: <etiket>`).
+  const LIFECYCLE_TITLES = { build: 'Derle', pull: 'İmajları indir', start: 'Başlat', stop: 'Durdur', restart: 'Yeniden başlat', remove: 'Projeyi kaldır' };
+
   async function confirmLifecycleAction(page, actionKey) {
-    const modal = page.locator('.ws-modal').filter({ hasText: `Docker Compose ${actionKey}` });
+    const title = LIFECYCLE_TITLES[actionKey];
+    expect(title, `Bilinmeyen Docker işlemi: ${actionKey}`).toBeTruthy();
+    const modal = page.locator('dialog.ws-modal').filter({ has: page.getByRole('heading', { name: `Docker Compose: ${title}`, exact: true }) });
     await expect(modal).toBeVisible({ timeout: 15000 });
 
     const confirmStr = await modal.locator('label strong').textContent();

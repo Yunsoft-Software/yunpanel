@@ -333,7 +333,9 @@ print(len(active))
     await expect(submitBtn).toBeEnabled({ timeout: 10000 });
     await submitBtn.click();
 
-    await expect(modal).not.toBeVisible({ timeout: 15000 });
+    // Yerel modda pencere, posta ayarı işi sunucuda uygulanıp doğrulanana kadar "Kaydediliyor…" durumunda açık kalır
+    // (MailDomainCreateDialog). İş kuyruğu doluysa 15 sn'yi aşabilir; hata bildirimi çıkmadan kapanması beklenir.
+    await expect(modal).not.toBeVisible({ timeout: 120000 });
 
     await page.waitForURL((url) => url.pathname.startsWith('/mail/') && url.pathname.length > 6, { timeout: 20000 });
     const urlMatch = page.url().match(/\/mail\/([^/?]+)/);
@@ -344,25 +346,27 @@ print(len(active))
     await page.goto(`/mail/${localMailDomainId}?section=configuration`);
     await page.waitForURL(/section=configuration/, { timeout: 15000 });
 
-    // Host mail configuration panelini doğrula
-    await expect(page.locator('h2:has-text("Sunucu posta ayarları")')).toBeVisible({ timeout: 15000 });
+    // Host mail configuration panelini doğrula. Gizli Webmail sekmesinde de "Önizleme Oluştur" düğmesi
+    // bulunduğundan kontroller "Sunucu posta ayarları" paneline kapsanır.
+    const configSection = page.locator('section.ws-section').filter({ has: page.locator('h2', { hasText: 'Sunucu posta ayarları' }) });
+    await expect(configSection).toBeVisible({ timeout: 15000 });
 
     // 3. Posta servisini kapatma (Deactivate / Disabled) testi
-    const targetStatusSelect = page.locator('label:has-text("Hedef durum") select');
+    const targetStatusSelect = configSection.locator('label:has-text("Hedef durum") select');
     await expect(targetStatusSelect).toBeVisible({ timeout: 10000 });
     await targetStatusSelect.selectOption('disabled');
 
     // Preview oluştur
-    const previewBtn = page.locator('button:has-text("Önizleme oluştur")');
+    const previewBtn = configSection.getByRole('button', { name: 'Önizleme oluştur', exact: true });
     await expect(previewBtn).toBeEnabled({ timeout: 10000 });
     await previewBtn.click();
 
     // Preview ayrıntılarının geldiğini doğrula
-    await expect(page.locator('dl dt:has-text("Hedef durum") + dd:has-text("disabled")')).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('text=uygulanabilir').first()).toBeVisible({ timeout: 15000 });
+    await expect(configSection.locator('dl dt:has-text("Hedef durum") + dd:has-text("disabled")')).toBeVisible({ timeout: 15000 });
+    await expect(configSection.locator('text=uygulanabilir').first()).toBeVisible({ timeout: 15000 });
 
     // Preview'ı uygula
-    const applyPreviewBtn = page.locator('button:has-text("Önizlemeyi uygula")');
+    const applyPreviewBtn = configSection.locator('button:has-text("Önizlemeyi uygula")');
     await expect(applyPreviewBtn).toBeEnabled({ timeout: 10000 });
     await applyPreviewBtn.click();
 
@@ -383,20 +387,20 @@ print(len(active))
 
     // 4. Posta servisini tekrar açma (Re-activate / Enabled) testi
     await page.reload();
-    await expect(page.locator('h2:has-text("Sunucu posta ayarları")')).toBeVisible({ timeout: 15000 });
+    await expect(configSection).toBeVisible({ timeout: 15000 });
 
-    const reTargetStatusSelect = page.locator('label:has-text("Hedef durum") select');
+    const reTargetStatusSelect = configSection.locator('label:has-text("Hedef durum") select');
     await expect(reTargetStatusSelect).toBeVisible({ timeout: 10000 });
     await reTargetStatusSelect.selectOption('enabled');
 
-    const rePreviewBtn = page.locator('button:has-text("Önizleme oluştur")');
+    const rePreviewBtn = configSection.getByRole('button', { name: 'Önizleme oluştur', exact: true });
     await expect(rePreviewBtn).toBeEnabled({ timeout: 10000 });
     await rePreviewBtn.click();
 
-    await expect(page.locator('dl dt:has-text("Hedef durum") + dd:has-text("enabled")')).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('text=uygulanabilir').first()).toBeVisible({ timeout: 15000 });
+    await expect(configSection.locator('dl dt:has-text("Hedef durum") + dd:has-text("enabled")')).toBeVisible({ timeout: 15000 });
+    await expect(configSection.locator('text=uygulanabilir').first()).toBeVisible({ timeout: 15000 });
 
-    const reApplyPreviewBtn = page.locator('button:has-text("Önizlemeyi uygula")');
+    const reApplyPreviewBtn = configSection.locator('button:has-text("Önizlemeyi uygula")');
     await expect(reApplyPreviewBtn).toBeEnabled({ timeout: 10000 });
     await reApplyPreviewBtn.click();
 

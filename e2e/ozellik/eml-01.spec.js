@@ -6,6 +6,15 @@ test.describe('EML-01 Mailbox oluşturma/düzenleme/silme, parola ve kota', () =
   test.describe.configure({ mode: 'serial' });
   test.setTimeout(300000);
 
+  // 24 Kasım kirli form koruması: değiştirilmiş formda Vazgeç ortak PanelKit uyarısını açar;
+  // uyarı görünmeli ve taslak "Değişiklikleri bırak" ile bilinçli olarak atılmalıdır.
+  async function discardUnsavedChanges(page) {
+    const discardDialog = page.locator('dialog.ws-modal').filter({ has: page.getByRole('heading', { name: 'Kaydedilmemiş değişiklikler var', exact: true }) });
+    await expect(discardDialog).toBeVisible({ timeout: 5000 });
+    await discardDialog.getByRole('button', { name: 'Değişiklikleri bırak', exact: true }).click();
+    await expect(discardDialog).toHaveCount(0, { timeout: 5000 });
+  }
+
   const agentN = process.env.AGENT_N || '1';
   const prefix = `teml01-a${agentN}-${Date.now().toString(36)}`;
   const localPart = prefix;
@@ -305,6 +314,7 @@ print(len(active))
 
     // Modal vazgeçilerek kapatılır
     await createModal.locator('button:has-text("Vazgeç")').click();
+    await discardUnsavedChanges(page);
     await expect(createModal).not.toBeVisible({ timeout: 5000 });
 
     // Tabloda geçersiz hesap bulunmamalı

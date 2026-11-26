@@ -106,8 +106,11 @@ test.describe('BAK-01 Server, reseller/customer, subscription ve site düzeyleri
 
     await expect(page.locator('h2:has-text("Yedekleme ve Geri Yükleme")')).toBeVisible({ timeout: 15000 });
 
-    // Yedek seti özet bilgilerinin arayüzde görünürlüğü
-    await expect(page.locator('text=Yedek seti').or(page.locator('text=Veritabanı'))).toBeVisible({ timeout: 15000 });
+    // Yedek seti özet bilgilerinin arayüzde görünürlüğü ("Kapsam özeti": dosya yolu, veritabanı, posta ve DNS sayıları)
+    const backupSection = page.locator('section').filter({ has: page.locator('h2', { hasText: 'Yedekleme ve Geri Yükleme' }) });
+    const scopeSummary = backupSection.locator('dl.ws-keyvalues > div').filter({ has: page.locator('dt', { hasText: 'Kapsam özeti' }) }).locator('dd');
+    // Özet, depo/yedek listesi okunduktan sonra gelir ("Yedekleme bilgileri okunuyor…"); .28'de 15 sn'yi aşabiliyor.
+    await expect(scopeSummary).toHaveText(/^\d+ dosya yolu, \d+ veritabanı, \d+ posta, \d+ DNS$/, { timeout: 90000 });
 
     // 4. Fiziksel Sonuç Kanıtı: /api/panel/websites/:id/backups API yanıtını doğrula
     const backupRes = await page.request.get(`/api/panel/websites/${targetWebsiteId}/backups`);

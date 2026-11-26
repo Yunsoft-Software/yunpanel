@@ -20,6 +20,15 @@ test.describe('DOS-03 Dosya/klasör oluşturma, yeniden adlandırma ve silme', (
   test.describe.configure({ mode: 'serial' });
   test.setTimeout(180000);
 
+  // 24 Kasım kirli form koruması: değiştirilmiş formda Vazgeç ortak PanelKit uyarısını açar;
+  // uyarı görünmeli ve taslak "Değişiklikleri bırak" ile bilinçli olarak atılmalıdır.
+  async function discardUnsavedChanges(page) {
+    const discardDialog = page.locator('dialog.ws-modal').filter({ has: page.getByRole('heading', { name: 'Kaydedilmemiş değişiklikler var', exact: true }) });
+    await expect(discardDialog).toBeVisible({ timeout: 5000 });
+    await discardDialog.getByRole('button', { name: 'Değişiklikleri bırak', exact: true }).click();
+    await expect(discardDialog).toHaveCount(0, { timeout: 5000 });
+  }
+
   const agentN = process.env.AGENT_N || '4';
   const timestamp = Date.now().toString(36);
   const testFileInitial = `tdos03-a${agentN}-f-${timestamp}.txt`;
@@ -344,6 +353,7 @@ test.describe('DOS-03 Dosya/klasör oluşturma, yeniden adlandırma ve silme', (
 
     // Modalı kapat
     await createModal.locator('button:has-text("Vazgeç")').click();
+    await discardUnsavedChanges(page);
     await expect(createModal).toHaveCount(0, { timeout: 10000 });
 
     // 3. Yeni Klasör modalında doğrulama testleri
@@ -361,6 +371,7 @@ test.describe('DOS-03 Dosya/klasör oluşturma, yeniden adlandırma ve silme', (
     expect(await folderSubmitBtn.isDisabled()).toBe(true);
 
     await createFolderModal.locator('button:has-text("Vazgeç")').click();
+    await discardUnsavedChanges(page);
     await expect(createFolderModal).toHaveCount(0, { timeout: 10000 });
 
     // 4. Backend API seviyesinde doğrudan yetkisiz/geçersiz oluşturma denemeleri (Fail-closed & 400 Bad Request)

@@ -8,6 +8,15 @@ test.describe('DKR-03 Port, environment, volume ve restart politikası', () => {
   test.describe.configure({ mode: 'serial' });
   test.setTimeout(240000);
 
+  // 24 Kasım kirli form koruması: değiştirilmiş formda Vazgeç ortak PanelKit uyarısını açar;
+  // uyarı görünmeli ve taslak "Değişiklikleri bırak" ile bilinçli olarak atılmalıdır.
+  async function discardUnsavedChanges(page) {
+    const discardDialog = page.locator('dialog.ws-modal').filter({ has: page.getByRole('heading', { name: 'Kaydedilmemiş değişiklikler var', exact: true }) });
+    await expect(discardDialog).toBeVisible({ timeout: 5000 });
+    await discardDialog.getByRole('button', { name: 'Değişiklikleri bırak', exact: true }).click();
+    await expect(discardDialog).toHaveCount(0, { timeout: 5000 });
+  }
+
   const agentN = process.env.AGENT_N || '3';
   const timestamp = Date.now().toString(36);
   const projectName = `tdkr03_a${agentN}_${timestamp}`;
@@ -41,8 +50,13 @@ test.describe('DKR-03 Port, environment, volume ve restart politikası', () => {
     return { success: false, output: finalCheck };
   }
 
+  // Onay penceresi başlığı işlemin arayüz adını taşır (DockerLifecyclePanel: `Docker Compose: <etiket>`).
+  const LIFECYCLE_TITLES = { build: 'Derle', pull: 'İmajları indir', start: 'Başlat', stop: 'Durdur', restart: 'Yeniden başlat', remove: 'Projeyi kaldır' };
+
   async function confirmLifecycleAction(page, actionKey) {
-    const modal = page.locator('.ws-modal').filter({ hasText: `Docker Compose ${actionKey}` });
+    const title = LIFECYCLE_TITLES[actionKey];
+    expect(title, `Bilinmeyen Docker işlemi: ${actionKey}`).toBeTruthy();
+    const modal = page.locator('dialog.ws-modal').filter({ has: page.getByRole('heading', { name: `Docker Compose: ${title}`, exact: true }) });
     await expect(modal).toBeVisible({ timeout: 15000 });
 
     const confirmStr = await modal.locator('label strong').textContent();
@@ -126,6 +140,7 @@ test.describe('DKR-03 Port, environment, volume ve restart politikası', () => {
 
     const cancelBtn = modal.locator('button:has-text("Vazgeç")');
     await cancelBtn.click();
+    await discardUnsavedChanges(page);
     await expect(modal).not.toBeVisible({ timeout: 5000 });
   });
 
@@ -195,7 +210,7 @@ test.describe('DKR-03 Port, environment, volume ve restart politikası', () => {
     // b) Depolama (Volume) doğrulaması
     const storageSection = page.locator('section').filter({ has: page.locator('h2:text-is("Depolama")') });
     await expect(storageSection).toBeVisible({ timeout: 10000 });
-    await expect(storageSection).toContainText('Named volume');
+    await expect(storageSection).toContainText('Adlandırılmış volume');
     await expect(storageSection).toContainText(volumeName);
     await expect(storageSection).toContainText('/usr/share/nginx/html');
 

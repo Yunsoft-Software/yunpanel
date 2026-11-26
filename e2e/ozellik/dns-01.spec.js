@@ -6,6 +6,15 @@ test.describe('DNS-01 Domain zone ve DNS kayıt CRUD; desteklenen RR türleri ma
   test.describe.configure({ mode: 'serial' });
   test.setTimeout(180000);
 
+  // 24 Kasım kirli form koruması: değiştirilmiş formda Vazgeç ortak PanelKit uyarısını açar;
+  // uyarı görünmeli ve taslak "Değişiklikleri bırak" ile bilinçli olarak atılmalıdır.
+  async function discardUnsavedChanges(page) {
+    const discardDialog = page.locator('dialog.ws-modal').filter({ has: page.getByRole('heading', { name: 'Kaydedilmemiş değişiklikler var', exact: true }) });
+    await expect(discardDialog).toBeVisible({ timeout: 5000 });
+    await discardDialog.getByRole('button', { name: 'Değişiklikleri bırak', exact: true }).click();
+    await expect(discardDialog).toHaveCount(0, { timeout: 5000 });
+  }
+
   const agentN = process.env.AGENT_N || '4';
   const prefix = `tdns01-a${agentN}-${Date.now().toString(36)}`;
   let domainId = null;
@@ -76,14 +85,14 @@ test.describe('DNS-01 Domain zone ve DNS kayıt CRUD; desteklenen RR türleri ma
     await dnsTab.click();
 
     // 2. Zone görüntüleme doğrulaması
-    const zoneSection = page.locator('section').filter({ has: page.locator('h2', { hasText: 'Authoritative DNS zone' }) });
+    const zoneSection = page.locator('section').filter({ has: page.locator('h2', { hasText: 'Yetkili DNS Bölgesi' }) });
     await expect(zoneSection).toBeVisible({ timeout: 15000 });
 
     const dnsTable = zoneSection.locator('.dns-table');
     await expect(dnsTable).toBeVisible({ timeout: 15000 });
 
-    await expect(zoneSection.locator('dt', { hasText: 'Zone' }).first()).toBeVisible();
-    await expect(zoneSection.locator('dt', { hasText: 'SOA serial' })).toBeVisible();
+    await expect(zoneSection.locator('dt', { hasText: 'Bölge' }).first()).toBeVisible();
+    await expect(zoneSection.locator('dt', { hasText: 'SOA seri numarası' })).toBeVisible();
 
     await expect(dnsTable.locator('th:has-text("Ad")')).toBeVisible();
     await expect(dnsTable.locator('th:has-text("Tür")')).toBeVisible();
@@ -92,11 +101,11 @@ test.describe('DNS-01 Domain zone ve DNS kayıt CRUD; desteklenen RR türleri ma
     await expect(dnsTable.locator('th:has-text("Değer")')).toBeVisible();
 
     // 3. Desteklenen RR türleri matrisi doğrulaması
-    const addBtn = page.locator('button:has-text("Manual kayıt ekle")');
+    const addBtn = page.locator('button:has-text("Özel kayıt ekle")');
     await expect(addBtn).toBeVisible({ timeout: 10000 });
     await addBtn.click();
 
-    const recordDialog = page.locator('.ws-modal', { hasText: 'Manual DNS kaydı ekle' });
+    const recordDialog = page.locator('.ws-modal', { hasText: 'Özel DNS kaydı ekle' });
     await expect(recordDialog).toBeVisible({ timeout: 5000 });
 
     const expectedTypes = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'CAA', 'SRV', 'NS', 'SOA'];
@@ -173,7 +182,7 @@ test.describe('DNS-01 Domain zone ve DNS kayıt CRUD; desteklenen RR türleri ma
     const editBtn = rowA.locator('button:has-text("Düzenle")');
     await editBtn.click();
 
-    const editDialog = page.locator('.ws-modal', { hasText: 'Manual DNS kaydını düzenle' });
+    const editDialog = page.locator('.ws-modal', { hasText: 'Özel DNS kaydını düzenle' });
     await expect(editDialog).toBeVisible({ timeout: 5000 });
     const editValInput = editDialog.locator('label:has-text("Değerler") textarea');
     await editValInput.fill('157.180.11.105');
@@ -210,7 +219,7 @@ test.describe('DNS-01 Domain zone ve DNS kayıt CRUD; desteklenen RR türleri ma
       const deleteBtn = rec.row.locator('button:has-text("Sil")');
       await deleteBtn.click();
 
-      const confirmDialog = page.locator('.ws-modal', { hasText: 'Manual DNS kaydını sil' });
+      const confirmDialog = page.locator('.ws-modal', { hasText: 'Özel DNS kaydını sil' });
       await expect(confirmDialog).toBeVisible({ timeout: 5000 });
 
       const confirmCode = await confirmDialog.locator('label strong').textContent();
@@ -235,11 +244,11 @@ test.describe('DNS-01 Domain zone ve DNS kayıt CRUD; desteklenen RR türleri ma
     await page.goto(`/websites/${encodeURIComponent(domainId)}/dns`);
     await page.waitForLoadState('networkidle').catch(() => {});
 
-    const addBtn = page.locator('button:has-text("Manual kayıt ekle")');
+    const addBtn = page.locator('button:has-text("Özel kayıt ekle")');
     await expect(addBtn).toBeVisible({ timeout: 15000 });
     await addBtn.click();
 
-    const recordDialog = page.locator('.ws-modal', { hasText: 'Manual DNS kaydı ekle' });
+    const recordDialog = page.locator('.ws-modal', { hasText: 'Özel DNS kaydı ekle' });
     await expect(recordDialog).toBeVisible({ timeout: 5000 });
 
     const ownerInput = recordDialog.locator('label:has-text("Kayıt adı") input');
@@ -263,6 +272,7 @@ test.describe('DNS-01 Domain zone ve DNS kayıt CRUD; desteklenen RR türleri ma
     // Modal vazgeç butonu ile kapatılır
     const cancelBtn = recordDialog.locator('button:has-text("Vazgeç")');
     await cancelBtn.click();
+    await discardUnsavedChanges(page);
     await expect(recordDialog).not.toBeVisible({ timeout: 5000 });
 
     // Tabloda bu hatalı kaydın oluşmadığı doğrulanır

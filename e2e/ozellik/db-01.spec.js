@@ -19,6 +19,15 @@ test.describe('DB-01 MySQL/MariaDB oluşturma, silme, site ilişkisi ve boyut', 
   test.describe.configure({ mode: 'serial' });
   test.setTimeout(180000);
 
+  // 24 Kasım kirli form koruması: değiştirilmiş formda Vazgeç ortak PanelKit uyarısını açar;
+  // uyarı görünmeli ve taslak "Değişiklikleri bırak" ile bilinçli olarak atılmalıdır.
+  async function discardUnsavedChanges(page) {
+    const discardDialog = page.locator('dialog.ws-modal').filter({ has: page.getByRole('heading', { name: 'Kaydedilmemiş değişiklikler var', exact: true }) });
+    await expect(discardDialog).toBeVisible({ timeout: 5000 });
+    await discardDialog.getByRole('button', { name: 'Değişiklikleri bırak', exact: true }).click();
+    await expect(discardDialog).toHaveCount(0, { timeout: 5000 });
+  }
+
   const agentN = process.env.AGENT_N || '1';
   const prefix = `tdb01_a${agentN}_${Date.now().toString(36)}`;
   let testServerId = null;
@@ -540,6 +549,7 @@ test.describe('DB-01 MySQL/MariaDB oluşturma, silme, site ilişkisi ve boyut', 
     // Modalı kapat
     const cancelBtn = dialog.locator('button:has-text("Vazgeç")');
     await cancelBtn.click();
+    await discardUnsavedChanges(page);
     await expect(dialog).toHaveCount(0, { timeout: 5000 });
 
     // Hatalı girdi 3: Sistem şeması adı ('mysql') ile oluşturma API düzeyinde 400 ile engellenir
@@ -628,9 +638,9 @@ test.describe('DB-01 MySQL/MariaDB oluşturma, silme, site ilişkisi ve boyut', 
     }
   });
 
-  test('bilinen hata: site kaynak tüketimi ekranında veritabanı depolama ve sayısı ölçülemedi kalır', async ({ page }) => {
-    test.fail(true, 'BULGU DB-01: Site kaynak tüketimi ekranında veritabanı depolama ve sayısı ölçülemedi kalır');
-
+  // Eski BULGU DB-01 (veritabanı sayısı "Ölçülemedi" kalıyordu) giderildi: .28'de satır ölçülen sayıyı gösteriyor
+  // (test.fail "Expected to fail, but passed" verdi). Test artık düzeltilmiş davranışı ölçer.
+  test('site kaynak tüketimi ekranında veritabanı sayısı ölçülür', async ({ page }) => {
     // Hedef sitenin kaynak tüketimi sekmesine git
     await page.goto(`/websites/${encodeURIComponent(testDomainId)}/resources`);
 
@@ -642,9 +652,10 @@ test.describe('DB-01 MySQL/MariaDB oluşturma, silme, site ilişkisi ve boyut', 
     const dbCountRow = consumptionTable.locator('tr[role="row"]').filter({ hasText: 'Veritabanı Sayısı' });
     await expect(dbCountRow).toBeVisible({ timeout: 5000 });
 
-    // Beklenen davranış (Plesk eşdeğerliği): Sitede en az 1 veritabanı olduğu için ölçülen kullanımın '— (Ölçülemedi)' olmaması
-    // Gerçek davranış (HATA): siteConsumptionInspector bağlanmadığı için '— (Ölçülemedi)' döner. test.fail ile işaretlenmiştir.
+    // Beklenen davranış (Plesk eşdeğerliği): Sitede en az 1 veritabanı (bu testin bağladığı) olduğu için ölçülen kullanım
+    // "Ölçülemedi"/"Ölçülemiyor" değil, pozitif bir sayıdır.
     const measuredCell = dbCountRow.locator('td[data-label="Ölçülen Kullanım"]');
-    await expect(measuredCell).not.toHaveText('— (Ölçülemedi)', { timeout: 5000 });
+    await expect(measuredCell).toBeVisible({ timeout: 5000 });
+    await expect(measuredCell.locator('> div').first()).toHaveText(/^[1-9]\d*$/, { timeout: 5000 });
   });
 });
