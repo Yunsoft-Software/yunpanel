@@ -72,3 +72,7 @@
 - **Karar:** yunsoft.com `.44` Plesk sunucusunda yayında. Yalnız senior Claude, yalnız T959 kapsamında, yunsoft.com sitesinin YunPanel ürün dokümanı dosyalarını yayımlamak için `.44`'e erişebilir. Plesk ayarı, başka site/domain, posta, DNS, servis veya paket değiştirilmez; müşteri verisi okunmaz. Yayından önce değişen dosyaların geri dönüş kopyası alınır, yayından sonra HTTP ve içerik doğrulanır. Junior ajanlar için `.44` yasağı istisnasız sürer.
 - **Gerekçe:** Ürün dokümanının yunsoft.com'da güncellenmesi isteniyor ve site bu sunucuda.
 - **Onaylayan:** İNSAN (26-11-2026 sohbet: ".44 için izin ver")
+
+## 2026-11-26 · T958 `.28` kurulum onayı
+- **Karar:** Temizlik dalının (`26-11-2026`) paketi, `orchestrator.py verify` geçtikten sonra ayrıca onay beklemeden `.28` test sunucusuna kurulur ve T958 canlı testleri koşturulur. Yalnız `.28`; Contabo VPS'ler ve `.44` bu onaya dahil değil. Kurulum `docs/DEVIR.md` paket yöntemiyle yapılır, önceki paket geri dönüş için yerinde kalır.
+- **Onaylayan:** İNSAN (26-11-2026 sohbet: "testlerden sonra kur onayımı isteme")
