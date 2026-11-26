@@ -62,3 +62,8 @@
 - **Karar:** Yalnız senior Claude, Plesk'te olup YunPanel'de olmayan özellikleri çıkarmak için gerçek Plesk paneline (`.44`) bakabilir. Erişim İNSAN'ın kendi açtığı ve giriş yaptığı tarayıcı oturumu üzerinden olur; Claude parola girmez, parola hiçbir dosyada saklanmaz. Yalnız menü, eklenti, ayar ekranı ve özellik listesi okunur; kaydet/uygula/sil/kur/oluştur yapılmaz, müşteri ve site verisi (ad, e-posta, içerik) not edilmez, SSH kullanılmaz.
 - **Junior ajanlar:** `.44` yasağı istisnasız sürer (PROJE.md).
 - **Onaylayan:** İNSAN
+
+## 2026-11-26 · Kod ve doküman temizliği önce gelir
+- **Karar:** Yeni özellikten önce kod ve doküman karmaşası temizlenir. Hedef: clean code, frontend ve backend'de modüler, tekrar kullanılabilir fonksiyon ve bileşenler, aşırı mühendislik olmadan okunabilir ve kolay geliştirilebilir kod. Testler işle paralel yazılır. Görevler `docs/gorevler/temizlik-20261126.md` (T951–T959). İşi senior'ın başlattığı Claude alt ajanları ayrı worktree'lerde yapar; senior birleştirir ve doğrular. Canlı testler `.28`'de; Contabo VPS 10 (`.14`) ve VPS 20 (`.212`) çapraz işletim sistemi testleri için izinli; `.44` Plesk sunucusuna dokunulmaz. Ürün dokümanı yunsoft.com'da güncellenir.
+- **Gerekçe:** 26-11-2026 incelemesi: 544 düz API dosyası, ~8k satır ölü/sahte kod, 36 kopya atomik yazma fonksiyonu, 8 katmanlı CSS ve 1.938 `!important`, 630 belge/görev dosyası.
+- **Onaylayan:** İNSAN (26-11-2026 sohbet: "kod ve döküman karmaşasını temizleyecek bir plan yap subagentlara bu işleri dağıt")

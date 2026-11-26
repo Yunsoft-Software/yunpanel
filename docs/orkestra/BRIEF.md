@@ -1,6 +1,6 @@
 # BRIEF — YunPanel
 
-**Şu anki senior:** Claude Code (Opus 5.5) · 2026-11-07
+**Şu anki senior:** Claude Code (Opus 5.5) · 2026-11-26
 **Junior:** Antigravity/Gemini (4 yuva, `/orkestra-devam`) — pano açık
 
 > Güncel durumun tamamı, test sunucusu, kurulum ve bilinen tuzaklar: `docs/DEVIR.md`. Aşağıdaki tarihli notlar geçmiştir.
