@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { jobRecoveryCliInternals, parseJobRecoveryArguments } from '../../../scripts/job-recovery.mjs';
 
 const apiSource = (name) => new URL(`../src/${name}`, import.meta.url);
 const jobRegistryUrl = apiSource('job-registry.js');
-const cliUrl = new URL('../../../scripts/job-recovery.mjs', import.meta.url);
 const recoverySources = [
   'job-running-recovery.js',
   'job-running-domain-recovery.js',
@@ -67,9 +67,9 @@ test('every durable async queue operation is referenced by an explicit recovery 
   assert.deepEqual([...recovered].sort(), [...queued].sort());
 });
 
-test('packaged recovery CLI exposes only explicit operation families and no force/retry escape hatch', async () => {
-  const source = await readFile(cliUrl, 'utf8');
-  for (const action of [
+test('packaged recovery CLI exposes only explicit operation families and no force/retry escape hatch', () => {
+  const expected = [
+    'reconcile',
     'recover-readonly',
     'recover-domain-stage',
     'recover-domain-activate',
@@ -82,6 +82,9 @@ test('packaged recovery CLI exposes only explicit operation families and no forc
     'recover-node-process',
     'recover-node-runtime-install',
     'recover-node-rollback',
+    'recover-python-deploy',
+    'recover-python-rollback',
+    'recover-python-restart',
     'recover-system-upgrade',
     'recover-certificate',
     'recover-database-create',
@@ -96,9 +99,14 @@ test('packaged recovery CLI exposes only explicit operation families and no forc
     'recover-mail-dkim',
     'recover-mail-data',
     'recover-roundcube-config',
+    'recover-php-tool',
     'recover-cron',
-  ]) {
-    assert.match(source, new RegExp(`['\"]${action}['\"]`));
+  ];
+  assert.deepEqual([...jobRecoveryCliInternals.recoveryActions].sort(), [...expected].sort());
+  for (const action of expected) {
+    assert.deepEqual(parseJobRecoveryArguments([action, 'server-1', 'job-00000001', '--confirm']).action, action);
   }
-  assert.doesNotMatch(source, /force-success|force-failed|retry-mutation|clear-journal/);
+  for (const action of ['force-success', 'force-failed', 'retry-mutation', 'clear-journal']) {
+    assert.throws(() => parseJobRecoveryArguments([action, 'server-1', 'job-00000001', '--confirm']), /Usage:/);
+  }
 });

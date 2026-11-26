@@ -13,6 +13,73 @@ export class JobRunningPythonRecoveryError extends Error {
   }
 }
 
+// Each kind names the queued operation, the application state the API left
+// behind when it stopped, and how the verified receipt becomes a job result.
+const KINDS = Object.freeze({
+  deployment: Object.freeze({
+    operation: OPERATIONS.APP_PYTHON_DEPLOY,
+    receiptReader: 'readDeploymentReceipt',
+    recoveryMethod: 'verified_python_deployment_receipt_and_status',
+    assertContext: (context, jobId) => context.payload?.deploymentId === jobId,
+    assertApplication: (application, context, jobId) => application.state === 'deploying' && application.activeDeploymentId === jobId,
+    assertReceipt: (receipt, context, jobId, application) => receipt.releaseId === jobId
+      && receipt.previousReleaseId === (application.currentReleaseId ?? null),
+    result: (receipt, jobId) => ({
+      deploymentId: jobId,
+      releaseId: receipt.releaseId,
+      previousReleaseId: receipt.previousReleaseId,
+      commitSha: receipt.commitSha,
+      serviceName: receipt.serviceName,
+      socketPath: receipt.socketPath,
+      port: receipt.port,
+      healthPath: receipt.healthPath,
+      healthy: true,
+    }),
+  }),
+  rollback: Object.freeze({
+    operation: OPERATIONS.APP_PYTHON_ROLLBACK,
+    receiptReader: 'readRollbackReceipt',
+    recoveryMethod: 'verified_python_rollback_receipt_and_status',
+    assertContext: (context) => typeof context.payload?.releaseId === 'string' && typeof context.payload?.currentReleaseId === 'string',
+    assertApplication: (application, context, jobId) => application.state === 'rolling_back' && application.activeDeploymentId === jobId
+      && application.pendingRollbackReleaseId === context.payload.releaseId && application.currentReleaseId === context.payload.currentReleaseId,
+    assertReceipt: (receipt, context) => receipt.releaseId === context.payload.releaseId
+      && receipt.previousReleaseId === context.payload.currentReleaseId,
+    result: (receipt) => ({
+      releaseId: receipt.releaseId,
+      previousReleaseId: receipt.previousReleaseId,
+      serviceName: receipt.serviceName,
+      socketPath: receipt.socketPath,
+      port: receipt.port,
+      healthPath: receipt.healthPath,
+      healthy: true,
+      active: true,
+    }),
+  }),
+  restart: Object.freeze({
+    operation: OPERATIONS.APP_PYTHON_RESTART,
+    receiptReader: 'readRestartReceipt',
+    recoveryMethod: 'verified_python_restart_receipt_and_status',
+    assertContext: (context) => typeof context.payload?.releaseId === 'string',
+    assertApplication: (application, context) => application.state === 'active' && application.activeDeploymentId === null
+      && application.currentReleaseId === context.payload.releaseId,
+    assertReceipt: (receipt, context) => receipt.releaseId === context.payload.releaseId,
+    result: (receipt) => ({
+      releaseId: receipt.releaseId,
+      serviceName: receipt.serviceName,
+      socketPath: receipt.socketPath,
+      port: receipt.port,
+      healthPath: receipt.healthPath,
+      healthy: true,
+      restarted: true,
+    }),
+  }),
+});
+
+function fail(kind, reason, message) {
+  return new JobRunningPythonRecoveryError(`job_python_${kind}_recovery_${reason}`, message);
+}
+
 function normalizeIdentity(serverId, jobId) {
   if (typeof serverId !== 'string' || !SERVER_ID_PATTERN.test(serverId)
     || typeof jobId !== 'string' || !JOB_ID_PATTERN.test(jobId)) {
@@ -33,291 +100,143 @@ async function requireStoppedConsumers(serviceStatus) {
   }
 }
 
-export async function recoverRunningPythonDeployment({
+function assertLiveStatus(kind, status, receipt) {
+  if (!status || status.serviceName !== receipt.serviceName || status.loadState !== 'loaded' || status.activeState !== 'active'
+    || status.healthy !== true || status.inspectionError !== false || !Number.isSafeInteger(status.mainPid) || status.mainPid <= 0) {
+    throw fail(kind, 'evidence_not_satisfied', `Python service no longer satisfies the recorded ${kind} state`);
+  }
+}
+
+async function recoverRunningPythonOperation(kind, {
   serverId,
   jobId,
   jobRegistry,
   applicationRegistry,
   serviceStatus,
   loadJobContext,
-  readDeploymentReceipt,
   inspectPythonStatus,
   inspect = inspectDurableJobRecovery,
   reconcile = reconcileCompletedJob,
+  ...rest
 } = {}) {
+  const spec = KINDS[kind];
+  const readReceipt = rest[spec.receiptReader];
   const identity = normalizeIdentity(serverId, jobId);
   if (!jobRegistry || typeof jobRegistry.getJob !== 'function' || typeof jobRegistry.beginReconciliation !== 'function'
     || typeof jobRegistry.complete !== 'function' || typeof jobRegistry.acknowledgeReconciliation !== 'function'
     || !applicationRegistry || typeof applicationRegistry.getApplication !== 'function'
     || typeof serviceStatus !== 'function' || typeof loadJobContext !== 'function'
-    || typeof readDeploymentReceipt !== 'function' || typeof inspectPythonStatus !== 'function'
+    || typeof readReceipt !== 'function' || typeof inspectPythonStatus !== 'function'
     || typeof inspect !== 'function' || typeof reconcile !== 'function') {
-    throw new JobRunningPythonRecoveryError('job_python_deployment_recovery_dependencies_invalid', 'Python deployment recovery dependencies are invalid');
+    throw fail(kind, 'dependencies_invalid', `Python ${kind} recovery dependencies are invalid`);
   }
 
   await requireStoppedConsumers(serviceStatus);
   let inspection;
   try { inspection = await inspect({ registry: jobRegistry }); }
-  catch { throw new JobRunningPythonRecoveryError('job_python_deployment_recovery_inspection_failed', 'Durable Python deployment recovery state could not be inspected'); }
+  catch { throw fail(kind, 'inspection_failed', `Durable Python ${kind} recovery state could not be inspected`); }
   if (!inspection || !Array.isArray(inspection.jobs)) {
-    throw new JobRunningPythonRecoveryError('job_python_deployment_recovery_inspection_invalid', 'Durable Python deployment recovery state is invalid');
+    throw fail(kind, 'inspection_invalid', `Durable Python ${kind} recovery state is invalid`);
   }
   const candidate = inspection.jobs.find((entry) => entry.jobId === identity.jobId && entry.serverId === identity.serverId) ?? null;
-  if (!candidate || candidate.status !== 'running' || candidate.operation !== OPERATIONS.APP_PYTHON_DEPLOY
+  if (!candidate || candidate.status !== 'running' || candidate.operation !== spec.operation
     || candidate.resourceType !== 'application' || typeof candidate.resourceId !== 'string' || !candidate.resourceId) {
-    throw new JobRunningPythonRecoveryError('job_python_deployment_recovery_job_mismatch', 'Running Python deployment recovery metadata is inconsistent');
+    throw fail(kind, 'job_mismatch', `Running Python ${kind} recovery metadata is inconsistent`);
   }
 
   let job;
   try { job = await jobRegistry.getJob(identity.jobId); }
-  catch { throw new JobRunningPythonRecoveryError('job_python_deployment_recovery_job_read_failed', 'Running Python deployment job could not be read'); }
+  catch { throw fail(kind, 'job_read_failed', `Running Python ${kind} job could not be read`); }
   if (!job || job.id !== identity.jobId || job.serverId !== identity.serverId || job.status !== 'running'
-    || job.operation !== OPERATIONS.APP_PYTHON_DEPLOY || job.resourceType !== 'application' || job.resourceId !== candidate.resourceId) {
-    throw new JobRunningPythonRecoveryError('job_python_deployment_recovery_job_mismatch', 'Running Python deployment no longer matches durable recovery state');
+    || job.operation !== spec.operation || job.resourceType !== 'application' || job.resourceId !== candidate.resourceId) {
+    throw fail(kind, 'job_mismatch', `Running Python ${kind} no longer matches durable recovery state`);
   }
 
   let context;
   try { context = await loadJobContext(identity.jobId); }
-  catch { throw new JobRunningPythonRecoveryError('job_python_deployment_recovery_context_failed', 'Private Python deployment context could not be read'); }
+  catch { throw fail(kind, 'context_failed', `Private Python ${kind} context could not be read`); }
   if (!context || context.id !== identity.jobId || context.serverId !== identity.serverId || context.status !== 'running'
-    || context.operation !== OPERATIONS.APP_PYTHON_DEPLOY || context.resourceType !== 'application'
-    || context.resourceId !== candidate.resourceId
-    || context.payload?.applicationId !== context.resourceId || context.payload?.deploymentId !== identity.jobId) {
-    throw new JobRunningPythonRecoveryError('job_python_deployment_recovery_context_mismatch', 'Private Python deployment context does not match durable job metadata');
+    || context.operation !== spec.operation || context.resourceType !== 'application'
+    || context.resourceId !== candidate.resourceId || context.payload?.applicationId !== context.resourceId
+    || !spec.assertContext(context, identity.jobId)) {
+    throw fail(kind, 'context_mismatch', `Private Python ${kind} context does not match durable job metadata`);
   }
+  const applicationId = context.payload.applicationId;
 
   let application;
-  try { application = await applicationRegistry.getApplication(context.payload.applicationId); }
-  catch { throw new JobRunningPythonRecoveryError('job_python_deployment_recovery_application_read_failed', 'Python application state could not be read'); }
-  if (!application || application.id !== context.payload.applicationId || application.serverId !== identity.serverId
-    || application.type !== 'python' || application.state !== 'deploying' || application.activeDeploymentId !== identity.jobId) {
-    throw new JobRunningPythonRecoveryError('job_python_deployment_recovery_application_mismatch', 'Python application state no longer matches the running deployment');
+  try { application = await applicationRegistry.getApplication(applicationId); }
+  catch { throw fail(kind, 'application_read_failed', 'Python application state could not be read'); }
+  if (!application || application.id !== applicationId || application.serverId !== identity.serverId
+    || application.type !== 'python' || !spec.assertApplication(application, context, identity.jobId)) {
+    throw fail(kind, 'application_mismatch', `Python application state no longer matches the running ${kind}`);
   }
 
   let receipt;
-  try { receipt = await readDeploymentReceipt(identity.serverId, identity.jobId); }
-  catch { throw new JobRunningPythonRecoveryError('job_python_deployment_recovery_receipt_failed', 'Python deployment receipt could not be read'); }
+  try { receipt = await readReceipt(identity.serverId, identity.jobId); }
+  catch { throw fail(kind, 'receipt_failed', `Python ${kind} receipt could not be read`); }
   if (!receipt) {
-    throw new JobRunningPythonRecoveryError('job_python_deployment_recovery_receipt_missing', 'Python deployment receipt is absent; the running job remains unresolved');
+    throw fail(kind, 'receipt_missing', `Python ${kind} receipt is absent; the running job remains unresolved`);
+  }
+  if (receipt.serverId !== identity.serverId || receipt.jobId !== identity.jobId || receipt.operation !== spec.operation
+    || receipt.applicationId !== applicationId || !spec.assertReceipt(receipt, context, identity.jobId, application)) {
+    throw fail(kind, 'receipt_mismatch', `Python ${kind} receipt does not match the running job`);
   }
 
-  const result = {
-    deploymentId: identity.jobId,
-    releaseId: receipt.releaseId,
-    previousReleaseId: receipt.previousReleaseId ?? null,
-    commitSha: receipt.commitSha,
-    serviceName: receipt.serviceName,
-    socketPath: receipt.socketPath ?? null,
-    port: receipt.port ?? null,
-    healthy: true,
-  };
+  let status;
+  try { status = await inspectPythonStatus({ applicationId, releaseId: receipt.releaseId }); }
+  catch { throw fail(kind, 'evidence_failed', `Python ${kind} host state could not be inspected`); }
+  assertLiveStatus(kind, status, receipt);
 
   let begun;
   try { begun = await jobRegistry.beginReconciliation(identity); }
-  catch { throw new JobRunningPythonRecoveryError('job_python_deployment_recovery_journal_failed', 'Python deployment recovery journal could not be opened'); }
+  catch { throw fail(kind, 'journal_failed', `Python ${kind} recovery journal could not be opened`); }
   if (!begun || begun.jobId !== identity.jobId || begun.serverId !== identity.serverId || begun.status !== 'running' || begun.pending !== true) {
-    throw new JobRunningPythonRecoveryError('job_python_deployment_recovery_journal_invalid', 'Python deployment recovery journal acknowledgement is inconsistent');
+    throw fail(kind, 'journal_invalid', `Python ${kind} recovery journal acknowledgement is inconsistent`);
   }
 
   let terminal;
-  try { terminal = await jobRegistry.complete({ serverId: identity.serverId, jobId: identity.jobId, status: 'succeeded', result }); }
-  catch { throw new JobRunningPythonRecoveryError('job_python_deployment_recovery_completion_failed', 'Python deployment evidence was verified but durable completion could not be confirmed'); }
+  try { terminal = await jobRegistry.complete({ serverId: identity.serverId, jobId: identity.jobId, status: 'succeeded', result: spec.result(receipt, identity.jobId) }); }
+  catch { throw fail(kind, 'completion_failed', `Python ${kind} evidence was verified but durable completion could not be confirmed`); }
+  if (!terminal || terminal.id !== identity.jobId || terminal.serverId !== identity.serverId || terminal.status !== 'succeeded'
+    || terminal.operation !== spec.operation || terminal.resourceType !== 'application' || terminal.resourceId !== applicationId) {
+    throw fail(kind, 'completion_invalid', `Python ${kind} recovery completion acknowledgement is inconsistent`);
+  }
 
   try {
     const reconciliation = await reconcile({ domainRegistry: {}, certificateRegistry: {}, applicationRegistry, job: terminal });
     if (!reconciliation || reconciliation.reconciled !== true) throw new Error('reconciliation not confirmed');
   } catch {
-    throw new JobRunningPythonRecoveryError('job_python_deployment_recovery_reconciliation_failed', 'Python deployment job is terminal but reconciliation remains pending');
+    throw fail(kind, 'reconciliation_failed', `Python ${kind} job is terminal but reconciliation remains pending`);
   }
 
   let acknowledgement;
   try { acknowledgement = await jobRegistry.acknowledgeReconciliation(identity); }
-  catch { throw new JobRunningPythonRecoveryError('job_python_deployment_recovery_acknowledgement_failed', 'Python deployment recovery could not be durably acknowledged'); }
-  if (!acknowledgement || acknowledgement.acknowledged !== true || acknowledgement.jobId !== identity.jobId) {
-    throw new JobRunningPythonRecoveryError('job_python_deployment_recovery_acknowledgement_invalid', 'Python deployment recovery acknowledgement is inconsistent');
+  catch { throw fail(kind, 'acknowledgement_failed', `Python ${kind} recovery could not be durably acknowledged`); }
+  if (!acknowledgement || acknowledgement.acknowledged !== true || acknowledgement.jobId !== identity.jobId
+    || acknowledgement.serverId !== identity.serverId || acknowledgement.status !== 'succeeded') {
+    throw fail(kind, 'acknowledgement_invalid', `Python ${kind} recovery acknowledgement is inconsistent`);
   }
 
-  return Object.freeze({ jobId: identity.jobId, serverId: identity.serverId, status: 'succeeded', recovered: true });
+  return Object.freeze({
+    serverId: identity.serverId,
+    jobId: identity.jobId,
+    operation: spec.operation,
+    applicationId,
+    releaseId: receipt.releaseId,
+    status: 'succeeded',
+    recoveryMethod: spec.recoveryMethod,
+    reconciled: true,
+  });
 }
 
-export async function recoverRunningPythonRollback({
-  serverId,
-  jobId,
-  jobRegistry,
-  applicationRegistry,
-  serviceStatus,
-  loadJobContext,
-  readRollbackReceipt,
-  inspectPythonStatus,
-  inspect = inspectDurableJobRecovery,
-  reconcile = reconcileCompletedJob,
-} = {}) {
-  const identity = normalizeIdentity(serverId, jobId);
-  if (!jobRegistry || typeof jobRegistry.getJob !== 'function' || typeof jobRegistry.beginReconciliation !== 'function'
-    || typeof jobRegistry.complete !== 'function' || typeof jobRegistry.acknowledgeReconciliation !== 'function'
-    || !applicationRegistry || typeof applicationRegistry.getApplication !== 'function'
-    || typeof serviceStatus !== 'function' || typeof loadJobContext !== 'function'
-    || typeof readRollbackReceipt !== 'function' || typeof inspectPythonStatus !== 'function'
-    || typeof inspect !== 'function' || typeof reconcile !== 'function') {
-    throw new JobRunningPythonRecoveryError('job_python_rollback_recovery_dependencies_invalid', 'Python rollback recovery dependencies are invalid');
-  }
-
-  await requireStoppedConsumers(serviceStatus);
-  let inspection;
-  try { inspection = await inspect({ registry: jobRegistry }); }
-  catch { throw new JobRunningPythonRecoveryError('job_python_rollback_recovery_inspection_failed', 'Durable Python rollback recovery state could not be inspected'); }
-  if (!inspection || !Array.isArray(inspection.jobs)) {
-    throw new JobRunningPythonRecoveryError('job_python_rollback_recovery_inspection_invalid', 'Durable Python rollback recovery state is invalid');
-  }
-  const candidate = inspection.jobs.find((entry) => entry.jobId === identity.jobId && entry.serverId === identity.serverId) ?? null;
-  if (!candidate || candidate.status !== 'running' || candidate.operation !== OPERATIONS.APP_PYTHON_ROLLBACK
-    || candidate.resourceType !== 'application' || typeof candidate.resourceId !== 'string' || !candidate.resourceId) {
-    throw new JobRunningPythonRecoveryError('job_python_rollback_recovery_job_mismatch', 'Running Python rollback recovery metadata is inconsistent');
-  }
-
-  let job;
-  try { job = await jobRegistry.getJob(identity.jobId); }
-  catch { throw new JobRunningPythonRecoveryError('job_python_rollback_recovery_job_read_failed', 'Running Python rollback job could not be read'); }
-  if (!job || job.id !== identity.jobId || job.serverId !== identity.serverId || job.status !== 'running'
-    || job.operation !== OPERATIONS.APP_PYTHON_ROLLBACK || job.resourceType !== 'application' || job.resourceId !== candidate.resourceId) {
-    throw new JobRunningPythonRecoveryError('job_python_rollback_recovery_job_mismatch', 'Running Python rollback no longer matches durable recovery state');
-  }
-
-  let context;
-  try { context = await loadJobContext(identity.jobId); }
-  catch { throw new JobRunningPythonRecoveryError('job_python_rollback_recovery_context_failed', 'Private Python rollback context could not be read'); }
-  if (!context || context.id !== identity.jobId || context.serverId !== identity.serverId || context.status !== 'running'
-    || context.operation !== OPERATIONS.APP_PYTHON_ROLLBACK || context.resourceType !== 'application'
-    || context.resourceId !== candidate.resourceId
-    || context.payload?.applicationId !== context.resourceId) {
-    throw new JobRunningPythonRecoveryError('job_python_rollback_recovery_context_mismatch', 'Private Python rollback context does not match durable job metadata');
-  }
-
-  let receipt;
-  try { receipt = await readRollbackReceipt(identity.serverId, identity.jobId); }
-  catch { throw new JobRunningPythonRecoveryError('job_python_rollback_recovery_receipt_failed', 'Python rollback receipt could not be read'); }
-  if (!receipt) {
-    throw new JobRunningPythonRecoveryError('job_python_rollback_recovery_receipt_missing', 'Python rollback receipt is absent; the running job remains unresolved');
-  }
-
-  const result = {
-    releaseId: receipt.releaseId,
-    previousReleaseId: receipt.previousReleaseId ?? null,
-    commitSha: receipt.commitSha,
-    serviceName: receipt.serviceName,
-    socketPath: receipt.socketPath ?? null,
-    port: receipt.port ?? null,
-    healthy: true,
-  };
-
-  let begun;
-  try { begun = await jobRegistry.beginReconciliation(identity); }
-  catch { throw new JobRunningPythonRecoveryError('job_python_rollback_recovery_journal_failed', 'Python rollback recovery journal could not be opened'); }
-
-  let terminal;
-  try { terminal = await jobRegistry.complete({ serverId: identity.serverId, jobId: identity.jobId, status: 'succeeded', result }); }
-  catch { throw new JobRunningPythonRecoveryError('job_python_rollback_recovery_completion_failed', 'Python rollback evidence was verified but durable completion could not be confirmed'); }
-
-  try {
-    const reconciliation = await reconcile({ domainRegistry: {}, certificateRegistry: {}, applicationRegistry, job: terminal });
-    if (!reconciliation || reconciliation.reconciled !== true) throw new Error('reconciliation not confirmed');
-  } catch {
-    throw new JobRunningPythonRecoveryError('job_python_rollback_recovery_reconciliation_failed', 'Python rollback job is terminal but reconciliation remains pending');
-  }
-
-  let acknowledgement;
-  try { acknowledgement = await jobRegistry.acknowledgeReconciliation(identity); }
-  catch { throw new JobRunningPythonRecoveryError('job_python_rollback_recovery_acknowledgement_failed', 'Python rollback recovery could not be durably acknowledged'); }
-
-  return Object.freeze({ jobId: identity.jobId, serverId: identity.serverId, status: 'succeeded', recovered: true });
+export function recoverRunningPythonDeployment(input) {
+  return recoverRunningPythonOperation('deployment', input);
 }
 
-export async function recoverRunningPythonRestart({
-  serverId,
-  jobId,
-  jobRegistry,
-  applicationRegistry,
-  serviceStatus,
-  loadJobContext,
-  readRestartReceipt,
-  inspectPythonStatus,
-  inspect = inspectDurableJobRecovery,
-  reconcile = reconcileCompletedJob,
-} = {}) {
-  const identity = normalizeIdentity(serverId, jobId);
-  if (!jobRegistry || typeof jobRegistry.getJob !== 'function' || typeof jobRegistry.beginReconciliation !== 'function'
-    || typeof jobRegistry.complete !== 'function' || typeof jobRegistry.acknowledgeReconciliation !== 'function'
-    || !applicationRegistry || typeof applicationRegistry.getApplication !== 'function'
-    || typeof serviceStatus !== 'function' || typeof loadJobContext !== 'function'
-    || typeof readRestartReceipt !== 'function' || typeof inspectPythonStatus !== 'function'
-    || typeof inspect !== 'function' || typeof reconcile !== 'function') {
-    throw new JobRunningPythonRecoveryError('job_python_restart_recovery_dependencies_invalid', 'Python restart recovery dependencies are invalid');
-  }
+export function recoverRunningPythonRollback(input) {
+  return recoverRunningPythonOperation('rollback', input);
+}
 
-  await requireStoppedConsumers(serviceStatus);
-  let inspection;
-  try { inspection = await inspect({ registry: jobRegistry }); }
-  catch { throw new JobRunningPythonRecoveryError('job_python_restart_recovery_inspection_failed', 'Durable Python restart recovery state could not be inspected'); }
-  if (!inspection || !Array.isArray(inspection.jobs)) {
-    throw new JobRunningPythonRecoveryError('job_python_restart_recovery_inspection_invalid', 'Durable Python restart recovery state is invalid');
-  }
-  const candidate = inspection.jobs.find((entry) => entry.jobId === identity.jobId && entry.serverId === identity.serverId) ?? null;
-  if (!candidate || candidate.status !== 'running' || candidate.operation !== OPERATIONS.APP_PYTHON_RESTART
-    || candidate.resourceType !== 'application' || typeof candidate.resourceId !== 'string' || !candidate.resourceId) {
-    throw new JobRunningPythonRecoveryError('job_python_restart_recovery_job_mismatch', 'Running Python restart recovery metadata is inconsistent');
-  }
-
-  let job;
-  try { job = await jobRegistry.getJob(identity.jobId); }
-  catch { throw new JobRunningPythonRecoveryError('job_python_restart_recovery_job_read_failed', 'Running Python restart job could not be read'); }
-  if (!job || job.id !== identity.jobId || job.serverId !== identity.serverId || job.status !== 'running'
-    || job.operation !== OPERATIONS.APP_PYTHON_RESTART || job.resourceType !== 'application' || job.resourceId !== candidate.resourceId) {
-    throw new JobRunningPythonRecoveryError('job_python_restart_recovery_job_mismatch', 'Running Python restart no longer matches durable recovery state');
-  }
-
-  let context;
-  try { context = await loadJobContext(identity.jobId); }
-  catch { throw new JobRunningPythonRecoveryError('job_python_restart_recovery_context_failed', 'Private Python restart context could not be read'); }
-  if (!context || context.id !== identity.jobId || context.serverId !== identity.serverId || context.status !== 'running'
-    || context.operation !== OPERATIONS.APP_PYTHON_RESTART || context.resourceType !== 'application'
-    || context.resourceId !== candidate.resourceId
-    || context.payload?.applicationId !== context.resourceId) {
-    throw new JobRunningPythonRecoveryError('job_python_restart_recovery_context_mismatch', 'Private Python restart context does not match durable job metadata');
-  }
-
-  let receipt;
-  try { receipt = await readRestartReceipt(identity.serverId, identity.jobId); }
-  catch { throw new JobRunningPythonRecoveryError('job_python_restart_recovery_receipt_failed', 'Python restart receipt could not be read'); }
-  if (!receipt) {
-    throw new JobRunningPythonRecoveryError('job_python_restart_recovery_receipt_missing', 'Python restart receipt is absent; the running job remains unresolved');
-  }
-
-  const result = {
-    releaseId: receipt.releaseId,
-    serviceName: receipt.serviceName,
-    socketPath: receipt.socketPath ?? null,
-    port: receipt.port ?? null,
-    healthy: true,
-  };
-
-  let begun;
-  try { begun = await jobRegistry.beginReconciliation(identity); }
-  catch { throw new JobRunningPythonRecoveryError('job_python_restart_recovery_journal_failed', 'Python restart recovery journal could not be opened'); }
-
-  let terminal;
-  try { terminal = await jobRegistry.complete({ serverId: identity.serverId, jobId: identity.jobId, status: 'succeeded', result }); }
-  catch { throw new JobRunningPythonRecoveryError('job_python_restart_recovery_completion_failed', 'Python restart evidence was verified but durable completion could not be confirmed'); }
-
-  try {
-    const reconciliation = await reconcile({ domainRegistry: {}, certificateRegistry: {}, applicationRegistry, job: terminal });
-    if (!reconciliation || reconciliation.reconciled !== true) throw new Error('reconciliation not confirmed');
-  } catch {
-    throw new JobRunningPythonRecoveryError('job_python_restart_recovery_reconciliation_failed', 'Python restart job is terminal but reconciliation remains pending');
-  }
-
-  let acknowledgement;
-  try { acknowledgement = await jobRegistry.acknowledgeReconciliation(identity); }
-  catch { throw new JobRunningPythonRecoveryError('job_python_restart_recovery_acknowledgement_failed', 'Python restart recovery could not be durably acknowledged'); }
-
-  return Object.freeze({ jobId: identity.jobId, serverId: identity.serverId, status: 'succeeded', recovered: true });
+export function recoverRunningPythonRestart(input) {
+  return recoverRunningPythonOperation('restart', input);
 }

@@ -19,11 +19,13 @@ import { createManagedServiceMutationReceiptStore } from './managed-service-muta
 import { createNodeDeploymentReceiptStore } from './node-deployment-receipt.js';
 import { createNodeRestartReceiptStore } from './node-restart-receipt.js';
 import { createNodeRollbackReceiptStore } from './node-rollback-receipt.js';
+import { createPythonOperationReceiptStore, pythonOperationReceiptInternals } from './python-operation-receipt.js';
 import { createRoundcubeConfigOperationReceiptStore } from './roundcube-config-operation-receipt.js';
 import { createSystemUpgradeReceiptStore } from './system-upgrade-receipt.js';
 import { createWebsitePhpToolOperationReceiptStore } from './website-php-tool-operation-receipt.js';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const PYTHON_RECEIPT_OPERATIONS = pythonOperationReceiptInternals.operations;
 
 export class ConfiguredLocalRuntimeError extends Error {
   constructor(code, message) {
@@ -74,6 +76,7 @@ export async function startConfiguredLocalRuntime({
   createNodeDeploymentReceipts = createNodeDeploymentReceiptStore,
   createNodeRestartReceipts = createNodeRestartReceiptStore,
   createNodeRollbackReceipts = createNodeRollbackReceiptStore,
+  createPythonOperationReceipts = createPythonOperationReceiptStore,
   createRoundcubeConfigOperationReceipts = createRoundcubeConfigOperationReceiptStore,
   createSystemUpgradeReceipts = createSystemUpgradeReceiptStore,
   createWebsitePhpToolReceipts = createWebsitePhpToolOperationReceiptStore,
@@ -128,6 +131,7 @@ export async function startConfiguredLocalRuntime({
     || typeof createNodeDeploymentReceipts !== 'function'
     || typeof createNodeRestartReceipts !== 'function'
     || typeof createNodeRollbackReceipts !== 'function'
+    || typeof createPythonOperationReceipts !== 'function'
     || typeof createRoundcubeConfigOperationReceipts !== 'function'
     || typeof createSystemUpgradeReceipts !== 'function'
     || typeof createWebsitePhpToolReceipts !== 'function'
@@ -249,6 +253,10 @@ export async function startConfiguredLocalRuntime({
   const nodeRollbackReceipts = createNodeRollbackReceipts();
   if (!nodeRollbackReceipts || typeof nodeRollbackReceipts.write !== 'function') {
     throw new ConfiguredLocalRuntimeError('local_node_rollback_receipts_invalid', 'Local runtime Node rollback receipt store is invalid');
+  }
+  const pythonOperationReceipts = createPythonOperationReceipts();
+  if (!pythonOperationReceipts || typeof pythonOperationReceipts.write !== 'function') {
+    throw new ConfiguredLocalRuntimeError('local_python_operation_receipts_invalid', 'Local runtime Python operation receipt store is invalid');
   }
   const systemUpgradeReceipts = createSystemUpgradeReceipts();
   if (!systemUpgradeReceipts || typeof systemUpgradeReceipts.write !== 'function') {
@@ -554,6 +562,18 @@ export async function startConfiguredLocalRuntime({
         applicationId: payload.applicationId,
         result,
       });
+      return;
+    }
+
+    if (PYTHON_RECEIPT_OPERATIONS.has(operation)) {
+      if (!result || result.healthy !== true || typeof payload?.applicationId !== 'string'
+        || (operation === OPERATIONS.APP_PYTHON_DEPLOY && (result.deploymentId !== jobId || result.releaseId !== jobId))
+        || (operation === OPERATIONS.APP_PYTHON_ROLLBACK && (result.active !== true || result.releaseId !== payload.releaseId
+          || result.previousReleaseId !== payload.currentReleaseId))
+        || (operation === OPERATIONS.APP_PYTHON_RESTART && (result.restarted !== true || result.releaseId !== payload.releaseId))) {
+        throw new Error('Python operation result is not safe recovery evidence');
+      }
+      await pythonOperationReceipts.write({ serverId, jobId, operation, applicationId: payload.applicationId, result });
       return;
     }
 
