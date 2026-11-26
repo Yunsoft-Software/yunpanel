@@ -57,8 +57,22 @@ test.describe('DKR-05 Compose stack oluşturma/yükleme/güncelleme/up/stop/down
     return { success: false, output: finalCheck };
   }
 
+  // 24 Kasım kirli form koruması: değiştirilmiş formda Vazgeç ortak PanelKit uyarısını açar;
+  // uyarı görünmeli ve taslak "Değişiklikleri bırak" ile bilinçli olarak atılmalıdır.
+  async function discardUnsavedChanges(page) {
+    const discardDialog = page.locator('dialog.ws-modal').filter({ has: page.getByRole('heading', { name: 'Kaydedilmemiş değişiklikler var', exact: true }) });
+    await expect(discardDialog).toBeVisible({ timeout: 5000 });
+    await discardDialog.getByRole('button', { name: 'Değişiklikleri bırak', exact: true }).click();
+    await expect(discardDialog).toHaveCount(0, { timeout: 5000 });
+  }
+
+  // Onay penceresi başlığı işlemin arayüz adını taşır (DockerLifecyclePanel: `Docker Compose: <etiket>`).
+  const LIFECYCLE_TITLES = { build: 'Derle', pull: 'İmajları indir', start: 'Başlat', stop: 'Durdur', restart: 'Yeniden başlat', remove: 'Projeyi kaldır' };
+
   async function confirmLifecycleAction(page, actionKey) {
-    const modal = page.locator('.ws-modal').filter({ hasText: `Docker Compose ${actionKey}` });
+    const title = LIFECYCLE_TITLES[actionKey];
+    expect(title, `Bilinmeyen Docker işlemi: ${actionKey}`).toBeTruthy();
+    const modal = page.locator('dialog.ws-modal').filter({ has: page.getByRole('heading', { name: `Docker Compose: ${title}`, exact: true }) });
     await expect(modal).toBeVisible({ timeout: 15000 });
 
     const confirmStr = await modal.locator('label strong').textContent();
@@ -160,6 +174,7 @@ test.describe('DKR-05 Compose stack oluşturma/yükleme/güncelleme/up/stop/down
 
     // Modalı kapat
     await modal.locator('button:has-text("Vazgeç")').click();
+    await discardUnsavedChanges(page);
     await expect(modal).not.toBeVisible({ timeout: 5000 });
   });
 
