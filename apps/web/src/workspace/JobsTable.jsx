@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router';
 import { panelRequest } from '../api.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
-import { Badge, Button, EmptyState, Table } from './PanelKit.jsx';
+import { Badge, Button, EmptyState } from './PanelKit.jsx';
 import {
   jobAttemptCount,
   jobHealthIndicator,
@@ -14,8 +14,6 @@ import {
   jobSupportsManualRetry,
 } from './job-presentation.js';
 import { formatDate } from './site-model.js';
-
-const JOB_COLUMNS = ['İşlem', 'Kaynak', 'Durum', 'Oluşturulma', { label: 'İşlemler', className: 'ws-row-end', hidden: true }];
 
 export default function JobsTable({ jobs, limit = 10, onCancel, onRetry, busy = false }) {
   const { observe, domains, websites, canManage, refreshAll } = useWorkspace();
@@ -34,7 +32,7 @@ export default function JobsTable({ jobs, limit = 10, onCancel, onRetry, busy = 
     }
   };
   if (!jobs.length) return <EmptyState title="Henüz işlem kaydı yok" detail="Deploy, SSL ve yapılandırma işlemleri çalıştırıldığında burada listelenir." icon="jobs" />;
-  return <Table label="İşlem kayıtları" className="ws-table ws-jobs-table" columns={JOB_COLUMNS}>{jobs.slice(0, limit).map((job) => {
+  return <div className="ws-table-scroll"><table className="ws-table ws-jobs-table" role="table" aria-label="İşlem kayıtları"><thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">İşlem</th><th scope="col" role="columnheader">Kaynak</th><th scope="col" role="columnheader">Durum</th><th scope="col" role="columnheader">Oluşturulma</th><th scope="col" role="columnheader" className="ws-row-end"><span className="ws-sr-only">İşlemler</span></th></tr></thead><tbody role="rowgroup">{jobs.slice(0, limit).map((job) => {
     const target = jobResourceTarget(job, { domains: domains.items, websites: websites.items });
     const lifecycle = jobLifecycle(job);
     const attempts = jobAttemptCount(job);
@@ -48,5 +46,5 @@ export default function JobsTable({ jobs, limit = 10, onCancel, onRetry, busy = 
       <td role="cell" data-label="Oluşturulma">{formatDate(job.createdAt)}</td>
       <td role="cell" className="ws-row-end" data-label="İşlemler"><div className="ws-actions"><Button onClick={() => observe(job)}>İncele</Button>{((onCancel && job.status === 'queued') || (!onCancel && canManage && job.status === 'queued')) && <Button disabled={busy || cancellingId === job.id} onClick={() => handleCancel(job)}>İptal et</Button>}{onRetry && jobSupportsManualRetry(job, { canManage: true }) && <Button disabled={busy} onClick={() => onRetry(job)}>Yeniden dene</Button>}</div></td>
     </tr>;
-  })}</Table>;
+  })}</tbody></table></div>;
 }

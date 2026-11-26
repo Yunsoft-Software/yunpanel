@@ -49,7 +49,48 @@ function MailboxCreateModal({ domain, onClose, onChanged }) {
     } catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { pending.current = false; setBusy(false); }
   }
-  return <Modal title="E-posta hesabı oluştur" onClose={onClose} busy={busy}><form className="ws-form" onSubmit={submit}><ErrorNotice error={error} /><fieldset disabled={busy}><label>Adres<div className="ws-inline-input"><input aria-label="Adres" disabled={change.pending} value={localPart} required autoCapitalize="none" spellCheck={false} onChange={(event) => setLocalPart(event.target.value)} /><span>@{domain.domainName}</span></div></label><label>İlk parola<input disabled={change.pending} type="password" value={password} required autoComplete="new-password" onChange={(event) => setPassword(event.target.value)} /></label><p className="ws-muted">Hesap oluşturulur ve posta hizmetine uygulanır. Sonuç bu pencerede doğrulanır.</p><footer className="ws-modal-footer"><ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton><Button type="submit" variant="primary" disabled={busy || !localPart || !password}>{busy ? 'Oluşturuluyor…' : 'E-posta hesabı oluştur'}</Button></footer></fieldset></form></Modal>;
+  return (
+    <Modal title="E-posta hesabı oluştur" onClose={onClose} busy={busy}>
+      <form className="ws-form" onSubmit={submit}>
+        <ErrorNotice error={error} />
+        <fieldset disabled={busy}>
+          <label>
+            Adres
+            <div className="ws-inline-input">
+              <input
+                aria-label="Adres"
+                disabled={change.pending}
+                value={localPart}
+                required
+                autoCapitalize="none"
+                spellCheck={false}
+                onChange={(event) => setLocalPart(event.target.value)}
+              />
+              <span>@{domain.domainName}</span>
+            </div>
+          </label>
+          <label>
+            İlk parola
+            <input
+              disabled={change.pending}
+              type="password"
+              value={password}
+              required
+              autoComplete="new-password"
+              onChange={(event) => setPassword(event.target.value)}
+            />
+          </label>
+          <p className="ws-muted">Hesap oluşturulur ve posta hizmetine uygulanır. Sonuç bu pencerede doğrulanır.</p>
+          <footer className="ws-modal-footer">
+            <ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton>
+            <Button type="submit" variant="primary" disabled={busy || !localPart || !password}>
+              {busy ? 'Oluşturuluyor…' : 'E-posta hesabı oluştur'}
+            </Button>
+          </footer>
+        </fieldset>
+      </form>
+    </Modal>
+  );
 }
 
 function PasswordModal({ mailbox, onClose, onChanged }) {
@@ -228,7 +269,112 @@ function PolicyPanel({ mailbox, onChanged }) {
     event.preventDefault();
     await mutate(() => setMailboxForwarding(mailbox.id, { expectedRevision: forwarding?.revision ?? 0, mode, destinations: destinationList(destinations), enabled: true }), 'forwarding');
   }
-  return <Section title={`Mailbox policy · ${mailbox.address}`} description="Kota ve yönlendirme değişiklikleri kaydettiğinizde posta hizmetine uygulanır."><div className="ws-section-body"><ErrorNotice error={error} /><div className="ws-form-grid"><form className="ws-form" onSubmit={saveQuota}><fieldset disabled={busy || quota === undefined}><Field label="Kota (MiB)"><input disabled={change.pending} type="number" min="1" value={quotaMiB} onChange={(event) => setQuotaMiB(event.target.value)} placeholder="1024" required /></Field><p className="ws-muted">Mevcut: {quota ? `${formatQuotaBytes(quota.quotaBytes)} · rev ${quota.revision}` : 'Yapılandırılmadı'}</p><div className="ws-actions"><Button type="submit" disabled={busy || !quotaMiB}>Kotayı kaydet</Button>{quota && <Button variant="danger" type="button" disabled={busy} onClick={() => setConfirm('quota')}>Kotayı kaldır</Button>}</div></fieldset></form><form className="ws-form" onSubmit={saveForwarding}><fieldset disabled={busy || forwarding === undefined}><Field label="Yönlendirme biçimi"><Select disabled={change.pending} value={mode} onChange={(event) => setMode(event.target.value)} options={FORWARDING_MODES} /></Field><Field label="Hedefler"><textarea disabled={change.pending} rows="4" value={destinations} onChange={(event) => setDestinations(event.target.value)} placeholder="user@example.com" /></Field><p className="ws-muted">Mevcut: {forwarding ? `${forwarding.destinations.join(', ')} · rev ${forwarding.revision}` : 'Yapılandırılmadı'}</p><div className="ws-actions"><Button type="submit" disabled={busy || destinationList(destinations).length === 0}>Yönlendirmeyi kaydet</Button>{forwarding && <Button variant="danger" type="button" disabled={busy} onClick={() => setConfirm('forwarding')}>Yönlendirmeyi kaldır</Button>}</div></fieldset></form></div></div>{confirm === 'quota' && quota && <ConfirmDialog title="Mailbox quota policy kaldır" message={`${mailbox.address} kota sınırı kaldırılacak ve posta hizmetine uygulanacak.`} confirmation={`clear-mailbox-quota:${mailbox.id}`} busy={busy} error={error} onCancel={() => setConfirm(null)} onConfirm={() => mutate(async () => { await clearMailboxQuota(mailbox.id, { expectedRevision: quota.revision }); }, 'quota')} confirmLabel="Quota policy kaldır" />}{confirm === 'forwarding' && forwarding && <ConfirmDialog title="Mailbox forwarding policy kaldır" message={`${mailbox.address} yönlendirmesi kaldırılacak ve posta hizmetine uygulanacak.`} confirmation={`clear-mailbox-forwarding:${mailbox.id}`} busy={busy} error={error} onCancel={() => setConfirm(null)} onConfirm={() => mutate(async () => { await clearMailboxForwarding(mailbox.id, { expectedRevision: forwarding.revision }); }, 'forwarding')} confirmLabel="Forwarding policy kaldır" />}</Section>;
+  return (
+    <Section
+      title={`Mailbox policy · ${mailbox.address}`}
+      description="Kota ve yönlendirme değişiklikleri kaydettiğinizde posta hizmetine uygulanır."
+    >
+      <div className="ws-section-body">
+        <ErrorNotice error={error} />
+        <div className="ws-form-grid">
+          <form className="ws-form" onSubmit={saveQuota}>
+            <fieldset disabled={busy || quota === undefined}>
+              <Field label="Kota (MiB)">
+                <input
+                  disabled={change.pending}
+                  type="number"
+                  min="1"
+                  value={quotaMiB}
+                  onChange={(event) => setQuotaMiB(event.target.value)}
+                  placeholder="1024"
+                  required
+                />
+              </Field>
+              <p className="ws-muted">
+                Mevcut: {quota ? `${formatQuotaBytes(quota.quotaBytes)} · rev ${quota.revision}` : 'Yapılandırılmadı'}
+              </p>
+              <div className="ws-actions">
+                <Button type="submit" disabled={busy || !quotaMiB}>
+                  Kotayı kaydet
+                </Button>
+                {quota && (
+                  <Button variant="danger" type="button" disabled={busy} onClick={() => setConfirm('quota')}>
+                    Kotayı kaldır
+                  </Button>
+                )}
+              </div>
+            </fieldset>
+          </form>
+          <form className="ws-form" onSubmit={saveForwarding}>
+            <fieldset disabled={busy || forwarding === undefined}>
+              <Field label="Yönlendirme biçimi">
+                <Select
+                  disabled={change.pending}
+                  value={mode}
+                  onChange={(event) => setMode(event.target.value)}
+                  options={FORWARDING_MODES}
+                />
+              </Field>
+              <Field label="Hedefler">
+                <textarea
+                  disabled={change.pending}
+                  rows="4"
+                  value={destinations}
+                  onChange={(event) => setDestinations(event.target.value)}
+                  placeholder="user@example.com"
+                />
+              </Field>
+              <p className="ws-muted">
+                Mevcut: {forwarding ? `${forwarding.destinations.join(', ')} · rev ${forwarding.revision}` : 'Yapılandırılmadı'}
+              </p>
+              <div className="ws-actions">
+                <Button type="submit" disabled={busy || destinationList(destinations).length === 0}>
+                  Yönlendirmeyi kaydet
+                </Button>
+                {forwarding && (
+                  <Button variant="danger" type="button" disabled={busy} onClick={() => setConfirm('forwarding')}>
+                    Yönlendirmeyi kaldır
+                  </Button>
+                )}
+              </div>
+            </fieldset>
+          </form>
+        </div>
+      </div>
+      {confirm === 'quota' && quota && (
+        <ConfirmDialog
+          title="Mailbox quota policy kaldır"
+          message={`${mailbox.address} kota sınırı kaldırılacak ve posta hizmetine uygulanacak.`}
+          confirmation={`clear-mailbox-quota:${mailbox.id}`}
+          busy={busy}
+          error={error}
+          onCancel={() => setConfirm(null)}
+          onConfirm={() =>
+            mutate(async () => {
+              await clearMailboxQuota(mailbox.id, { expectedRevision: quota.revision });
+            }, 'quota')
+          }
+          confirmLabel="Quota policy kaldır"
+        />
+      )}
+      {confirm === 'forwarding' && forwarding && (
+        <ConfirmDialog
+          title="Mailbox forwarding policy kaldır"
+          message={`${mailbox.address} yönlendirmesi kaldırılacak ve posta hizmetine uygulanacak.`}
+          confirmation={`clear-mailbox-forwarding:${mailbox.id}`}
+          busy={busy}
+          error={error}
+          onCancel={() => setConfirm(null)}
+          onConfirm={() =>
+            mutate(async () => {
+              await clearMailboxForwarding(mailbox.id, { expectedRevision: forwarding.revision });
+            }, 'forwarding')
+          }
+          confirmLabel="Forwarding policy kaldır"
+        />
+      )}
+    </Section>
+  );
 }
 
 export default function MailboxesPanel({ domain, mailboxes, onChanged }) {
@@ -247,10 +393,96 @@ export default function MailboxesPanel({ domain, mailboxes, onChanged }) {
     catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { setBusyId(null); }
   }
-  return <><Section title="E-posta hesapları" description="E-posta hesapları, parolalar, kota ve yönlendirme."><div className="ws-section-body"><ErrorNotice error={error} /><div className="ws-actions"><Button variant="primary" icon="plus" onClick={() => setCreating(true)}>E-posta hesabı oluştur</Button></div></div><Table label="E-posta hesapları" columns={MAILBOX_COLUMNS} empty={<EmptyState icon="mail" title="E-posta hesabı yok" detail="Bu local mail domain için ilk mailbox kaydını oluşturun." action={<Button variant="primary" icon="plus" onClick={() => setCreating(true)}>E-posta hesabı oluştur</Button>} />}>{mailboxes.map((mailbox) => <tr key={mailbox.id} role="row"><td role="cell"><strong>{mailbox.address}</strong><small>Parola tanımlı</small></td><td role="cell"><Badge state={mailbox.enabled ? 'active' : 'offline'}>{mailbox.enabled ? 'Açık' : 'Kapalı'}</Badge></td><td role="cell">{mailbox.revision}</td><td role="cell"><div className="ws-actions"><Button disabled={busyId === mailbox.id} onClick={() => toggle(mailbox)}>{mailbox.enabled ? 'Kapat' : 'Aç'}</Button><Button onClick={() => setDiagnosticsFor(mailbox)}>Tanılama</Button><Button onClick={() => setPasswordFor(mailbox)}>Parola</Button><Button onClick={() => setSelected((current) => current?.id === mailbox.id ? null : mailbox)}>Kota ve yönlendirme</Button>{canManage && domain.managementMode === 'local' && <Button variant="danger" icon="trash" disabled={busyId === mailbox.id || removing?.scope === removalScope} onClick={() => setRemoving({ scope: removalScope, mailbox: { id: mailbox.id, address: mailbox.address, mailDomainId: domain.id } })}>Sil…</Button>}</div></td></tr>)}</Table></Section>{selectedMailbox && <PolicyPanel key={`${selectedMailbox.id}:${selectedMailbox.revision}`} mailbox={selectedMailbox} onChanged={onChanged} />}
-    {canManageDeliveryPolicy && selectedMailbox && selectedMailbox.mailDomainId === domain.id && <MailboxDeliveryPolicyPanel
-      key={`${removalScope}:${selectedMailbox.id}`} mailbox={selectedMailbox} domainStatus={domain.status} onChanged={onChanged} />}
-    {removing?.scope === removalScope && <MailboxRemovalPanel mailbox={removing.mailbox} domain={domain} onChanged={onChanged} onClose={() => setRemoving(null)} onPolicy={() => setSelected(mailboxes.find((item) => item.id === removing.mailbox.id) ?? null)} />}{creating && <MailboxCreateModal domain={domain} onClose={() => setCreating(false)} onChanged={onChanged} />}{passwordFor && <PasswordModal mailbox={passwordFor} onClose={() => setPasswordFor(null)} onChanged={onChanged} />}{diagnosticsFor && <MailboxDiagnosticsModal mailbox={diagnosticsFor} onClose={() => setDiagnosticsFor(null)} />}</>;
+  return (
+    <>
+      <Section title="E-posta hesapları" description="E-posta hesapları, parolalar, kota ve yönlendirme.">
+        <div className="ws-section-body">
+          <ErrorNotice error={error} />
+          <div className="ws-actions">
+            <Button variant="primary" icon="plus" onClick={() => setCreating(true)}>
+              E-posta hesabı oluştur
+            </Button>
+          </div>
+        </div>
+        <Table
+          label="E-posta hesapları"
+          columns={MAILBOX_COLUMNS}
+          empty={
+            <EmptyState
+              icon="mail"
+              title="E-posta hesabı yok"
+              detail="Bu local mail domain için ilk mailbox kaydını oluşturun."
+              action={
+                <Button variant="primary" icon="plus" onClick={() => setCreating(true)}>
+                  E-posta hesabı oluştur
+                </Button>
+              }
+            />
+          }
+        >
+          {mailboxes.map((mailbox) => (
+            <tr key={mailbox.id} role="row">
+              <td role="cell">
+                <strong>{mailbox.address}</strong>
+                <small>Parola tanımlı</small>
+              </td>
+              <td role="cell">
+                <Badge state={mailbox.enabled ? 'active' : 'offline'}>{mailbox.enabled ? 'Açık' : 'Kapalı'}</Badge>
+              </td>
+              <td role="cell">{mailbox.revision}</td>
+              <td role="cell">
+                <div className="ws-actions">
+                  <Button disabled={busyId === mailbox.id} onClick={() => toggle(mailbox)}>
+                    {mailbox.enabled ? 'Kapat' : 'Aç'}
+                  </Button>
+                  <Button onClick={() => setDiagnosticsFor(mailbox)}>Tanılama</Button>
+                  <Button onClick={() => setPasswordFor(mailbox)}>Parola</Button>
+                  <Button onClick={() => setSelected((current) => (current?.id === mailbox.id ? null : mailbox))}>
+                    Kota ve yönlendirme
+                  </Button>
+                  {canManage && domain.managementMode === 'local' && (
+                    <Button
+                      variant="danger"
+                      icon="trash"
+                      disabled={busyId === mailbox.id || removing?.scope === removalScope}
+                      onClick={() =>
+                        setRemoving({ scope: removalScope, mailbox: { id: mailbox.id, address: mailbox.address, mailDomainId: domain.id } })
+                      }
+                    >
+                      Sil…
+                    </Button>
+                  )}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </Table>
+      </Section>
+      {selectedMailbox && (
+        <PolicyPanel key={`${selectedMailbox.id}:${selectedMailbox.revision}`} mailbox={selectedMailbox} onChanged={onChanged} />
+      )}
+      {canManageDeliveryPolicy && selectedMailbox && selectedMailbox.mailDomainId === domain.id && (
+        <MailboxDeliveryPolicyPanel
+          key={`${removalScope}:${selectedMailbox.id}`}
+          mailbox={selectedMailbox}
+          domainStatus={domain.status}
+          onChanged={onChanged}
+        />
+      )}
+      {removing?.scope === removalScope && (
+        <MailboxRemovalPanel
+          mailbox={removing.mailbox}
+          domain={domain}
+          onChanged={onChanged}
+          onClose={() => setRemoving(null)}
+          onPolicy={() => setSelected(mailboxes.find((item) => item.id === removing.mailbox.id) ?? null)}
+        />
+      )}
+      {creating && <MailboxCreateModal domain={domain} onClose={() => setCreating(false)} onChanged={onChanged} />}
+      {passwordFor && <PasswordModal mailbox={passwordFor} onClose={() => setPasswordFor(null)} onChanged={onChanged} />}
+      {diagnosticsFor && <MailboxDiagnosticsModal mailbox={diagnosticsFor} onClose={() => setDiagnosticsFor(null)} />}
+    </>
+  );
 }
 
 export const mailboxesPanelInternals = Object.freeze({ destinationList });

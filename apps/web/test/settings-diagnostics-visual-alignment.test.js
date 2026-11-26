@@ -59,7 +59,8 @@ test('/dashboard: metrics, SVG usage rings, safe cert warnings without undefined
 
 test('/databases: table scroll containment, search/access filters, safe phpMyAdmin handoff', async () => {
   const dbSource = await readSrc('workspace/DatabasesPage.jsx');
-  assert.match(dbSource, /<Table label="Veritabanları" className="ws-table ws-db-table"/);
+  assert.match(dbSource, /ws-table-scroll/);
+  assert.match(dbSource, /ws-db-table/);
   assert.match(dbSource, /openPhpMyAdmin/);
   assert.match(dbSource, /filterConsoleDatabases/);
   assert.match(dbSource, /paginateConsoleItems/);

@@ -6,7 +6,7 @@ const [list, panel, flow] = await Promise.all([source('MailboxesPanel.jsx'), sou
 
 // Source wiring checks only, not React rendering or browser acceptance.
 test('delete entry is visible beside existing mailbox actions and preserves their forms', () => {
-  assert.match(list, />Sil…<\/Button>/);
+  assert.match(list, />\s*Sil…\s*<\/Button>/);
   for (const action of ['setCreating(true)', 'setPasswordFor(mailbox)', 'setSelected((current)', 'setMailboxEnabled']) assert.ok(list.includes(action));
   for (const name of ['MailboxCreateModal', 'PasswordModal', 'PolicyPanel']) assert.ok(list.includes(`<${name}`));
   assert.match(list, /domain.managementMode === 'local'/);
@@ -14,7 +14,7 @@ test('delete entry is visible beside existing mailbox actions and preserves thei
 
 test('parent selection is actor scoped before rendering and is not discarded when mailbox leaves the list', () => {
   assert.match(list, /JSON\.stringify\(\[domain.id, session\?\.user\?\.id, session\?\.user\?\.role, sessionVersion\(\), canManage\]\)/);
-  assert.match(list, /removing\?\.scope === removalScope && <MailboxRemovalPanel/);
+  assert.match(list, /removing\?\.scope === removalScope && \(?\s*<MailboxRemovalPanel/);
   const entry = list.slice(list.indexOf('{removing?.scope'), list.indexOf('{creating && <MailboxCreateModal'));
   assert.doesNotMatch(entry, /mailboxes.some/);
 });

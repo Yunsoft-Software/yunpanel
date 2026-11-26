@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { createPhpMyAdminHandoff, deleteDatabase, getDatabases, hardenDatabaseSecurityBaseline, waitForJob } from '../api.js';
-import { Badge, Button, CollectionNotice, ConfirmDialog, EmptyState, ErrorNotice, Field, Icon, KeyValues, LinkButton, PageHeading, Section, Select, Table } from './PanelKit.jsx';
+import { Badge, Button, CollectionNotice, ConfirmDialog, EmptyState, ErrorNotice, Field, Icon, KeyValues, LinkButton, PageHeading, Section, Select } from './PanelKit.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import DatabaseSetupDialog, { DatabaseConnectionDialog } from './DatabaseSetupDialog.jsx';
 import { databaseInventoryView, formatDatabaseBytes } from './database-model.js';
@@ -36,7 +36,6 @@ const ACCESS_FILTERS = [
   { value: 'ready', label: 'Kullanıcı tanımlı' },
   { value: 'attention', label: 'Yapılandırma gerekli' },
 ];
-const DATABASE_COLUMNS = ['Veritabanı', 'Site / Kullanıcı', 'Boyut', 'Erişim', { label: 'İşlem', className: 'ws-row-end' }];
 
 export default function DatabasesPage() {
   const { servers, domains, websites, jobs, observe, updateJob } = useWorkspace();
@@ -220,14 +219,54 @@ export default function DatabasesPage() {
         {status === 'stale' && <div className="ws-notice ws-notice-warn"><div>Güncel liste alınamadı. Son alınan kayıtlar varsa gösteriliyor; değişiklikler ve phpMyAdmin erişimi kapalı.</div><Button onClick={load}>Yeniden dene</Button></div>}
         {status !== 'loading' && !hasInventory && <EmptyState title="Canlı veritabanı envanteri kullanılamıyor" detail="Servis ve yerel bağlantı hazır olduğunda liste burada görünür." icon="database" />}
         {hasInventory && status !== 'loading' && (page.count ? <>
-          <Table label="Veritabanları" className="ws-table ws-db-table" columns={DATABASE_COLUMNS}>{page.items.map((database) => {
+          <div className="ws-table-scroll"><table className="ws-table ws-db-table" role="table" aria-label="Veritabanları"><thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">Veritabanı</th><th scope="col" role="columnheader">Site / Kullanıcı</th><th scope="col" role="columnheader">Boyut</th><th scope="col" role="columnheader">Erişim</th><th scope="col" role="columnheader" className="ws-row-end">İşlem</th></tr></thead><tbody role="rowgroup">{page.items.map((database) => {
             const view = databaseAccessView(database, domains);
             return <tr key={database.name} role="row"><td role="cell" data-label="Veritabanı"><div className="ws-db-name"><Icon name="database" size={20} /><div><strong>{database.name}</strong><small>{engineLabel}</small></div></div></td>
               <td role="cell" data-label="Site / Kullanıcı"><strong>{view.siteLabel}</strong><small>{database.ownership?.credential?.username ?? 'Kullanıcı tanımlanmamış'}</small></td>
               <td role="cell" data-label="Boyut">{database.sizeLabel}</td>
-              <td role="cell" data-label="Erişim"><div className="ws-db-access">{view.canOpen ? <Button icon="external" disabled={!canAct} onClick={() => openPhpMyAdmin(database.ownership)} aria-label={`${database.name}: phpMyAdmin aç`}>phpMyAdmin</Button> : null}{view.canOpen ? <><Button disabled={!canAct} onClick={() => openPhpMyAdmin(database.ownership, 'import')}>SQL içe aktar</Button><Button disabled={!canAct} onClick={() => openPhpMyAdmin(database.ownership, 'export')}>SQL dışa aktar</Button></> : view.siteHref ? <><Button icon="settings" disabled={!canAct} onClick={() => setAccessTarget(database)}>Erişimi hazırla</Button><small>{view.detail}</small></> : <><Button icon="settings" disabled={!canAct} onClick={() => setAccessTarget(database)}>Siteye bağla</Button><small>{view.detail}</small></>}{database.ownership?.credential && websites.items.some((item) => item.id === database.ownership.websiteId) && <Button onClick={() => setConnectionTarget(database)}>Bağlantı bilgileri</Button>}</div></td>
+              <td role="cell" data-label="Erişim">
+                <div className="ws-db-access">
+                  {view.canOpen ? (
+                    <Button
+                      icon="external"
+                      disabled={!canAct}
+                      onClick={() => openPhpMyAdmin(database.ownership)}
+                      aria-label={`${database.name}: phpMyAdmin aç`}
+                    >
+                      phpMyAdmin
+                    </Button>
+                  ) : null}
+                  {view.canOpen ? (
+                    <>
+                      <Button disabled={!canAct} onClick={() => openPhpMyAdmin(database.ownership, 'import')}>
+                        SQL içe aktar
+                      </Button>
+                      <Button disabled={!canAct} onClick={() => openPhpMyAdmin(database.ownership, 'export')}>
+                        SQL dışa aktar
+                      </Button>
+                    </>
+                  ) : view.siteHref ? (
+                    <>
+                      <Button icon="settings" disabled={!canAct} onClick={() => setAccessTarget(database)}>
+                        Erişimi hazırla
+                      </Button>
+                      <small>{view.detail}</small>
+                    </>
+                  ) : (
+                    <>
+                      <Button icon="settings" disabled={!canAct} onClick={() => setAccessTarget(database)}>
+                        Siteye bağla
+                      </Button>
+                      <small>{view.detail}</small>
+                    </>
+                  )}
+                  {database.ownership?.credential && websites.items.some((item) => item.id === database.ownership.websiteId) && (
+                    <Button onClick={() => setConnectionTarget(database)}>Bağlantı bilgileri</Button>
+                  )}
+                </div>
+              </td>
               <td role="cell" className="ws-row-end" data-label="İşlem"><Button icon="trash" disabled={!canAct} aria-label={`${database.name} veritabanını sil`} title="Veritabanını sil" onClick={() => { setError(null); setDeleteTarget(database); }}><span className="ws-sr-only">Sil</span></Button></td></tr>;
-          })}</Table>
+          })}</tbody></table></div>
           <footer className="ws-pagination"><span>{page.count} sonuç · {engineLabel} · {formatDatabaseBytes(inventory.totalBytes)}</span><div className="ws-actions"><Button disabled={page.page <= 1} onClick={() => filter('page', String(page.page - 1))}>Önceki</Button><span>{page.page} / {page.pages}</span><Button disabled={page.page >= page.pages} onClick={() => filter('page', String(page.page + 1))}>Sonraki</Button></div></footer>
         </> : <EmptyState title={inventory.databases.length ? 'Eşleşen veritabanı yok' : 'Kullanıcı veritabanı yok'} detail={inventory.databases.length ? 'Aramayı veya erişim filtresini değiştirin.' : 'Yeni bir uygulama veritabanı oluşturarak başlayın.'} icon="database" action={inventory.databases.length ? <Button onClick={clearFilters}>Filtreleri temizle</Button> : <Button variant="primary" disabled={!canAct} onClick={startCreate}>Veritabanı oluştur</Button>} />)}
       </Section>

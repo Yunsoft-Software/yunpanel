@@ -269,7 +269,83 @@ export default function WebsiteIsolationPanel({ websiteId, onChanged = null }) {
       })}</tbody>
     </table></div>}
     {confirmation?.kind === 'passenger' && passengerPreview?.ready && <ConfirmDialog title="Direct-systemd uygulamayı Passenger’a geçir" message="Bu işlem mevcut source route ve release/environment evidence’ını yeniden doğrular, Passenger Nginx hedefini health-gated etkinleştirir ve ancak hedef sağlıklı olduktan sonra legacy systemd servisini durdurup disable etmeyi dener. Güvenli cutover kanıtlanamazsa mevcut route korunur veya operation actionable recovery state bırakır." confirmation={passengerPreview.confirmation} busy={busy} error={passengerError} onCancel={() => { setConfirmation(null); setPassengerError(null); }} onConfirm={queuePassengerMigration} confirmLabel="Passenger migration başlat" />}
-    {confirmation?.kind === 'apply' && audit?.migration?.applyAvailable && <ConfirmDialog title={identityApplyAvailable ? 'Unix identity izolasyon migration’ını uygula' : sftpApplyAvailable ? 'SFTP izolasyon migration’ını uygula' : phpApplyAvailable ? 'PHP-FPM pool migration’ını uygula' : phpContainerApplyAvailable ? 'PHP container metadata migration’ını uygula' : staticControlApplyAvailable ? 'Static control metadata migration’ını uygula' : 'Workspace izolasyon migration’ını uygula'} message={identityApplyAvailable ? 'Yalnız preview’da all-missing olduğu doğrulanan canonical Unix user/group/HOME durable receipt ile oluşturulacak. Önceden var olan identity/HOME state değiştirilmez; rollback HOME içeriğini recursive silmez.' : sftpApplyAvailable ? 'Yalnız preview’da all-missing olduğu doğrulanan site-specific SFTP chroot/mount/config/unit state durable receipt ile oluşturulacak. Foreign artifact varsa apply bloklanır; rollback yalnız receipt-owned artifact ve boş operation-created dizinleri kaldırır.' : phpApplyAvailable ? 'Yalnız container ownership, shared PHP-FPM service/package ve UMask zaten canonical iken eksik site-specific FPM pool receipt ile oluşturulacak. Migration shared runtime’ı kurmaz, enable etmez veya container ownership değiştirmez.' : phpContainerApplyAvailable ? 'Yalnız application root, releases dizini ve current symlink için preview’da kanıtlanan UID/GID/mode metadata’sı receipt ile düzeltilecek. Release içeriği site kullanıcısında kalır; recursive chown, chmod veya silme yapılmaz.' : staticControlApplyAvailable ? 'Yalnız static publish root, releases root ve current symlink control-plane UID/GID/mode metadata’sı receipt ile düzeltilecek. Release dosyaları ve Nginx ACL’leri zaten sağlıklı olmalı; migration recursive chown/chmod/setfacl çalıştırmaz.' : 'Yalnız preview’da listelenen eksik tmp/log direct-child dizinleri operation receipt ile oluşturulacak. Unix hesabı, mevcut veri, runtime ve SFTP değiştirilmeyecek.'} confirmation={audit.migration.confirmation} busy={busy} error={migrationError} onCancel={() => { setConfirmation(null); setMigrationError(null); }} onConfirm={() => mutate((signal) => applyWebsiteIsolationMigration(websiteId, audit.migration, { signal }))} confirmLabel="Migration’ı uygula" />}
-    {confirmation?.kind === 'rollback' && <ConfirmDialog title={identityMigrationOperation(confirmation.operation) ? 'Unix identity migration receipt’ini geri al' : sftpMigrationOperation(confirmation.operation) ? 'SFTP migration receipt’ini geri al' : phpMigrationOperation(confirmation.operation) ? 'PHP-FPM pool migration receipt’ini geri al' : phpContainerMigrationOperation(confirmation.operation) ? 'PHP container metadata migration receipt’ini geri al' : staticControlMigrationOperation(confirmation.operation) ? 'Static control metadata migration receipt’ini geri al' : 'Workspace migration receipt’ini geri al'} message={identityMigrationOperation(confirmation.operation) ? 'Yalnız bu operation’ın oluşturduğu canonical user/group geri alınır. HOME boşsa kaldırılır; veri içeriyorsa recursive silinmeden korunur.' : sftpMigrationOperation(confirmation.operation) ? 'Yalnız receipt-owned SSH config, systemd mount unit ve operation-created boş chroot/mount dizinleri geri alınır. Veri içeren dizinler korunur; key registry silinmez.' : phpMigrationOperation(confirmation.operation) ? 'Yalnız bu operation’ın oluşturduğu site-specific PHP-FPM pool kaldırılır. Shared PHP paketi, servis durumu, UMask ve container ownership değiştirilmez.' : phpContainerMigrationOperation(confirmation.operation) ? 'Yalnız receipt’in kaydettiği application root, releases dizini ve current symlink UID/GID/mode metadata’sı geri yüklenir. Release içeriğine recursive işlem yapılmaz; arada yabancı drift oluşursa rollback bloklanır.' : staticControlMigrationOperation(confirmation.operation) ? 'Yalnız receipt’in kaydettiği static publish root, releases root ve current symlink UID/GID/mode metadata’sı geri yüklenir. Release dosyaları ve ACL’lere dokunulmaz; current target veya yabancı metadata drift’i varsa rollback bloklanır.' : 'Yalnız bu operation’ın oluşturduğu ve hâlâ boş olan dizinler kaldırılacak. Veri içeren veya önceden var olan dizinler korunur.'} confirmation={websiteIsolationRollbackConfirmation(confirmation.operation)} busy={busy} error={migrationError} onCancel={() => { setConfirmation(null); setMigrationError(null); }} onConfirm={() => mutate((signal) => rollbackWebsiteIsolationMigration(websiteId, confirmation.operation, { signal }))} confirmLabel="Receipt rollback" />}
+    {confirmation?.kind === 'apply' && audit?.migration?.applyAvailable && (
+      <ConfirmDialog
+        title={
+          identityApplyAvailable
+            ? 'Unix identity izolasyon migration’ını uygula'
+            : sftpApplyAvailable
+              ? 'SFTP izolasyon migration’ını uygula'
+              : phpApplyAvailable
+                ? 'PHP-FPM pool migration’ını uygula'
+                : phpContainerApplyAvailable
+                  ? 'PHP container metadata migration’ını uygula'
+                  : staticControlApplyAvailable
+                    ? 'Static control metadata migration’ını uygula'
+                    : 'Workspace izolasyon migration’ını uygula'
+        }
+        message={
+          identityApplyAvailable
+            ? 'Yalnız preview’da all-missing olduğu doğrulanan canonical Unix user/group/HOME durable receipt ile oluşturulacak. Önceden var olan identity/HOME state değiştirilmez; rollback HOME içeriğini recursive silmez.'
+            : sftpApplyAvailable
+              ? 'Yalnız preview’da all-missing olduğu doğrulanan site-specific SFTP chroot/mount/config/unit state durable receipt ile oluşturulacak. Foreign artifact varsa apply bloklanır; rollback yalnız receipt-owned artifact ve boş operation-created dizinleri kaldırır.'
+              : phpApplyAvailable
+                ? 'Yalnız container ownership, shared PHP-FPM service/package ve UMask zaten canonical iken eksik site-specific FPM pool receipt ile oluşturulacak. Migration shared runtime’ı kurmaz, enable etmez veya container ownership değiştirmez.'
+                : phpContainerApplyAvailable
+                  ? 'Yalnız application root, releases dizini ve current symlink için preview’da kanıtlanan UID/GID/mode metadata’sı receipt ile düzeltilecek. Release içeriği site kullanıcısında kalır; recursive chown, chmod veya silme yapılmaz.'
+                  : staticControlApplyAvailable
+                    ? 'Yalnız static publish root, releases root ve current symlink control-plane UID/GID/mode metadata’sı receipt ile düzeltilecek. Release dosyaları ve Nginx ACL’leri zaten sağlıklı olmalı; migration recursive chown/chmod/setfacl çalıştırmaz.'
+                    : 'Yalnız preview’da listelenen eksik tmp/log direct-child dizinleri operation receipt ile oluşturulacak. Unix hesabı, mevcut veri, runtime ve SFTP değiştirilmeyecek.'
+        }
+        confirmation={audit.migration.confirmation}
+        busy={busy}
+        error={migrationError}
+        onCancel={() => {
+          setConfirmation(null);
+          setMigrationError(null);
+        }}
+        onConfirm={() => mutate((signal) => applyWebsiteIsolationMigration(websiteId, audit.migration, { signal }))}
+        confirmLabel="Migration’ı uygula"
+      />
+    )}
+    {confirmation?.kind === 'rollback' && (
+      <ConfirmDialog
+        title={
+          identityMigrationOperation(confirmation.operation)
+            ? 'Unix identity migration receipt’ini geri al'
+            : sftpMigrationOperation(confirmation.operation)
+              ? 'SFTP migration receipt’ini geri al'
+              : phpMigrationOperation(confirmation.operation)
+                ? 'PHP-FPM pool migration receipt’ini geri al'
+                : phpContainerMigrationOperation(confirmation.operation)
+                  ? 'PHP container metadata migration receipt’ini geri al'
+                  : staticControlMigrationOperation(confirmation.operation)
+                    ? 'Static control metadata migration receipt’ini geri al'
+                    : 'Workspace migration receipt’ini geri al'
+        }
+        message={
+          identityMigrationOperation(confirmation.operation)
+            ? 'Yalnız bu operation’ın oluşturduğu canonical user/group geri alınır. HOME boşsa kaldırılır; veri içeriyorsa recursive silinmeden korunur.'
+            : sftpMigrationOperation(confirmation.operation)
+              ? 'Yalnız receipt-owned SSH config, systemd mount unit ve operation-created boş chroot/mount dizinleri geri alınır. Veri içeren dizinler korunur; key registry silinmez.'
+              : phpMigrationOperation(confirmation.operation)
+                ? 'Yalnız bu operation’ın oluşturduğu site-specific PHP-FPM pool kaldırılır. Shared PHP paketi, servis durumu, UMask ve container ownership değiştirilmez.'
+                : phpContainerMigrationOperation(confirmation.operation)
+                  ? 'Yalnız receipt’in kaydettiği application root, releases dizini ve current symlink UID/GID/mode metadata’sı geri yüklenir. Release içeriğine recursive işlem yapılmaz; arada yabancı drift oluşursa rollback bloklanır.'
+                  : staticControlMigrationOperation(confirmation.operation)
+                    ? 'Yalnız receipt’in kaydettiği static publish root, releases root ve current symlink UID/GID/mode metadata’sı geri yüklenir. Release dosyaları ve ACL’lere dokunulmaz; current target veya yabancı metadata drift’i varsa rollback bloklanır.'
+                    : 'Yalnız bu operation’ın oluşturduğu ve hâlâ boş olan dizinler kaldırılacak. Veri içeren veya önceden var olan dizinler korunur.'
+        }
+        confirmation={websiteIsolationRollbackConfirmation(confirmation.operation)}
+        busy={busy}
+        error={migrationError}
+        onCancel={() => {
+          setConfirmation(null);
+          setMigrationError(null);
+        }}
+        onConfirm={() => mutate((signal) => rollbackWebsiteIsolationMigration(websiteId, confirmation.operation, { signal }))}
+        confirmLabel="Receipt rollback"
+      />
+    )}
   </Section>;
 }

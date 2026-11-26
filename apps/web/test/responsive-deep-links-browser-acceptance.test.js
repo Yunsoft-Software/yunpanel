@@ -321,8 +321,7 @@ test('Criterion 6: Site and DB mobile table rows preserve full screen reader tab
   const readOnlyWebsites = await readWebSource('workspace/ReadOnlyWebsitesPage.jsx');
   const databases = await readWebSource('workspace/DatabasesPage.jsx');
   const siteResources = await readWebSource('workspace/SiteResourcesPanel.jsx');
-  const { renderJobsTable } = await import('./render-jobs-table.js');
-  const jobsTable = renderJobsTable();
+  const jobsTable = await readWebSource('workspace/JobsTable.jsx');
 
   // 1. Websites table in ReadOnlyWebsitesPage
   assert.match(readOnlyWebsites, /<table className="ws-table ws-websites-table" role="table" aria-label="Web siteleri">/);
@@ -337,9 +336,9 @@ test('Criterion 6: Site and DB mobile table rows preserve full screen reader tab
   assert.match(readOnlyWebsites, /<td role="cell" className="ws-row-end" data-label="Detay">/);
 
   // 2. Databases table in DatabasesPage
-  // Header/body ARIA markup comes from PanelKit Table (panelkit-form-table-tabs.test.js).
-  assert.match(databases, /<Table label="Veritabanları" className="ws-table ws-db-table" columns=\{DATABASE_COLUMNS\}>/);
-  assert.match(databases, /const DATABASE_COLUMNS = \['Veritabanı', /);
+  assert.match(databases, /<table className="ws-table ws-db-table" role="table" aria-label="Veritabanları">/);
+  assert.match(databases, /<thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">Veritabanı<\/th>/);
+  assert.match(databases, /<tbody role="rowgroup">/);
   assert.match(databases, /<tr key=\{database\.name\} role="row"><td role="cell" data-label="Veritabanı">/);
   assert.match(databases, /<td role="cell" data-label="Site \/ Kullanıcı">/);
   assert.match(databases, /<td role="cell" data-label="Boyut">/);
@@ -356,14 +355,15 @@ test('Criterion 6: Site and DB mobile table rows preserve full screen reader tab
   assert.match(siteResources, /<td role="cell" data-label="İşlemler">/);
 
   // 4. JobsTable for overview and logs
-  assert.match(jobsTable, /<table class="ws-table ws-jobs-table" role="table" aria-label="İşlem kayıtları">/);
+  assert.match(jobsTable, /<table className="ws-table ws-jobs-table" role="table" aria-label="İşlem kayıtları">/);
   assert.match(jobsTable, /<thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">İşlem<\/th>/);
-  assert.match(jobsTable, /<tbody role="rowgroup"><tr role="row">/);
+  assert.match(jobsTable, /<tbody role="rowgroup">/);
+  assert.match(jobsTable, /<tr key=\{job\.id\} role="row">/);
   assert.match(jobsTable, /<td role="cell" data-label="İşlem">/);
   assert.match(jobsTable, /<td role="cell" data-label="Kaynak">/);
   assert.match(jobsTable, /<td role="cell" data-label="Durum">/);
   assert.match(jobsTable, /<td role="cell" data-label="Oluşturulma">/);
-  assert.match(jobsTable, /<td role="cell" class="ws-row-end" data-label="İşlemler">/);
+  assert.match(jobsTable, /<td role="cell" className="ws-row-end" data-label="İşlemler">/);
 });
 
 /* ==========================================================================

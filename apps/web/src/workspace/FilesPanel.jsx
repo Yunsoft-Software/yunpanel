@@ -524,12 +524,153 @@ function FileWorkspace({ websiteId, serverId, runtimeType, domainId = null }) {
       {notice && !editor && <div className="yf-feedback" role="status"><Icon name="check" size={16} />{notice}</div>}
       <div className="yf-body"><aside className="yf-folders">{tree}</aside><div className="yf-content">
         <div className="yf-tools"><Button className="yf-mobile-folders" icon="folder" onClick={() => setTreeOpen(true)}>Klasörler</Button><label className="yf-search"><Icon name="search" size={17} /><span className="ws-sr-only">Bu klasörde ara</span><input type="search" placeholder="Bu klasörde ara…" value={query} onChange={(event) => handleQueryChange(event.target.value)} /></label><label className="yf-sort"><span className="ws-sr-only">Dosya sıralaması</span><select value={sort} onChange={(event) => handleSortChange(event.target.value)}><option value="name">Ada göre</option><option value="modified">Son değişen</option><option value="size">Boyuta göre</option></select></label><div className="yf-view" aria-label="Dosya görünümü"><Button icon="jobs" aria-label="Liste görünümü" aria-pressed={layout === 'list'} onClick={() => setLayout('list')} /><Button icon="dashboard" aria-label="Izgara görünümü" aria-pressed={layout === 'grid'} onClick={() => setLayout('grid')} /></div></div>
-        <div className="yf-selection"><label><input ref={allBox} aria-label="Görünen öğeleri seç" type="checkbox" checked={allSelected} disabled={!entries.length || locked} onChange={() => setSelected((value) => toggleVisibleSelection(value, entries))} /><span>{selected.length ? `${selected.length} öğe seçili` : `${entries.length} öğe`}</span></label>{selected.length > 0 ? <div className="yf-selection-actions"><Button disabled={!mutable} icon="trash" onClick={() => openDialog({ kind: 'delete', paths: [...selected] })}>Seçilenleri Sil</Button><Button disabled={!mutable} icon="file" onClick={() => openDialog({ kind: 'copy', paths: [...selected], destination: view.path })}>Kopyala</Button><Button disabled={!mutable} icon="arrow" onClick={() => openDialog({ kind: 'move', paths: [...selected], destination: view.path })}>Taşı</Button><Button disabled={!mutable} icon="folder" onClick={() => openDialog({ kind: 'archive', paths: [...selected], name: `${view.path ? view.path.split('/').at(-1) : 'arsiv'}.zip`, format: 'zip' })}>Arşivle</Button><Button disabled={locked} onClick={() => setSelected([])}>Seçimi kaldır</Button></div> : <label className="yf-hidden"><input type="checkbox" checked={hidden} onChange={(event) => handleHiddenChange(event.target.checked)} /><span>Gizli dosyalar</span></label>}</div>
+        <div className="yf-selection">
+          <label>
+            <input
+              ref={allBox}
+              aria-label="Görünen öğeleri seç"
+              type="checkbox"
+              checked={allSelected}
+              disabled={!entries.length || locked}
+              onChange={() => setSelected((value) => toggleVisibleSelection(value, entries))}
+            />
+            <span>{selected.length ? `${selected.length} öğe seçili` : `${entries.length} öğe`}</span>
+          </label>
+          {selected.length > 0 ? (
+            <div className="yf-selection-actions">
+              <Button disabled={!mutable} icon="trash" onClick={() => openDialog({ kind: 'delete', paths: [...selected] })}>
+                Seçilenleri Sil
+              </Button>
+              <Button
+                disabled={!mutable}
+                icon="file"
+                onClick={() => openDialog({ kind: 'copy', paths: [...selected], destination: view.path })}
+              >
+                Kopyala
+              </Button>
+              <Button
+                disabled={!mutable}
+                icon="arrow"
+                onClick={() => openDialog({ kind: 'move', paths: [...selected], destination: view.path })}
+              >
+                Taşı
+              </Button>
+              <Button
+                disabled={!mutable}
+                icon="folder"
+                onClick={() =>
+                  openDialog({
+                    kind: 'archive',
+                    paths: [...selected],
+                    name: `${view.path ? view.path.split('/').at(-1) : 'arsiv'}.zip`,
+                    format: 'zip',
+                  })
+                }
+              >
+                Arşivle
+              </Button>
+              <Button disabled={locked} onClick={() => setSelected([])}>
+                Seçimi kaldır
+              </Button>
+            </div>
+          ) : (
+            <label className="yf-hidden">
+              <input type="checkbox" checked={hidden} onChange={(event) => handleHiddenChange(event.target.checked)} />
+              <span>Gizli dosyalar</span>
+            </label>
+          )}
+        </div>
         {view.error && <div className="yf-list-error" data-files-not-deployed={view.errorCode === 'site_files_not_deployed' ? 'true' : undefined}><ErrorNotice error={view.error} /><div className="ws-actions"><Button onClick={() => load(view.path)} disabled={locked}>Yeniden dene</Button>{view.errorCode === 'site_files_not_deployed' && domainId && <><LinkButton variant="primary" to={siteHref(domainId, 'overview')}>Site özetine dön</LinkButton><LinkButton to={siteHref(domainId, 'domains')}>Yayın durumunu incele</LinkButton></>}</div><p>{view.errorCode === 'site_files_not_deployed' ? 'İlk yayın tamamlandığında dosya listesi otomatik olarak erişilebilir hale gelir.' : 'Son liste korunuyor; güncel veri alınana kadar değişiklik yapılamaz.'}</p></div>}
         <div className="yf-results" aria-busy={view.loading || editorLoading}>
           {(view.loading || editorLoading) && <div className="yf-busy" role="status"><span className="ws-spinner" />{editorLoading ? 'Dosya açılıyor…' : 'Dosyalar yükleniyor…'}</div>}
           {view.loaded && !view.loading && entries.length === 0 && <EmptyState icon={query ? 'search' : 'folder'} title={query ? 'Eşleşen dosya yok' : 'Bu klasör boş'} detail={query ? 'Başka bir dosya adı arayın.' : 'Dosyalarınızı sürükleyin veya Yükle düğmesini kullanın.'} />}
-          {entries.length > 0 && (layout === 'list' ? <div className="ws-table-scroll"><table className="yf-table" role="table" aria-label="Site dosyaları"><thead><tr><th scope="col"><span className="ws-sr-only">Seçim</span></th><th scope="col">Ad</th><th scope="col">Boyut</th><th scope="col">İzinler</th><th scope="col">Son değişiklik</th><th scope="col"><span className="ws-sr-only">İşlemler</span></th></tr></thead><tbody>{visibleEntries.map((entry) => <tr key={entry.path} role="row" className={selected.includes(entry.path) ? 'is-selected' : ''}><td role="cell"><input type="checkbox" disabled={locked} checked={selected.includes(entry.path)} onChange={() => select(entry.path)} aria-label={`${entry.name} seç`} /></td><td role="cell"><button type="button" className={`yf-entry ${entry.type === 'directory' ? 'is-folder' : ''}`} disabled={locked || !['directory', 'file'].includes(entry.type)} onClick={() => entry.type === 'directory' ? navigate(entry.path) : openFile(entry)}><span className="yf-file-icon"><Icon name={entry.type === 'directory' ? 'folder' : isArchiveFile(entry) ? 'folder' : 'file'} size={21} /></span><span><strong>{entry.name}</strong><small>{fileKind(entry)}</small></span></button></td><td role="cell" className="yf-size">{entry.type === 'directory' ? '—' : formatBytes(entry.size)}</td><td role="cell" className="yf-size yf-perm-cell"><span className="yf-perm">{entry.mode ?? (entry.type === 'directory' ? '0750' : '0640')}</span></td><td role="cell" className="yf-date">{formatDate(entry.mtime)}</td><td role="cell">{actions(entry)}</td></tr>)}</tbody></table></div> : <div className="yf-grid">{visibleEntries.map((entry) => <article key={entry.path} className={selected.includes(entry.path) ? 'is-selected' : ''}><input type="checkbox" aria-label={`${entry.name} seç`} checked={selected.includes(entry.path)} disabled={locked} onChange={() => select(entry.path)} /><button type="button" className={`yf-tile ${entry.type === 'directory' ? 'is-folder' : ''}`} disabled={locked || !['directory', 'file'].includes(entry.type)} onClick={() => entry.type === 'directory' ? navigate(entry.path) : openFile(entry)}><Icon name={entry.type === 'directory' ? 'folder' : isArchiveFile(entry) ? 'folder' : 'file'} size={38} /><strong>{entry.name}</strong><small>{entry.type === 'directory' ? 'Klasör' : formatBytes(entry.size)}</small></button>{actions(entry)}</article>)}</div>)}
+          {entries.length > 0 &&
+            (layout === 'list' ? (
+              <div className="ws-table-scroll">
+                <table className="yf-table" role="table" aria-label="Site dosyaları">
+                  <thead>
+                    <tr>
+                      <th scope="col">
+                        <span className="ws-sr-only">Seçim</span>
+                      </th>
+                      <th scope="col">Ad</th>
+                      <th scope="col">Boyut</th>
+                      <th scope="col">İzinler</th>
+                      <th scope="col">Son değişiklik</th>
+                      <th scope="col">
+                        <span className="ws-sr-only">İşlemler</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleEntries.map((entry) => (
+                      <tr key={entry.path} role="row" className={selected.includes(entry.path) ? 'is-selected' : ''}>
+                        <td role="cell">
+                          <input
+                            type="checkbox"
+                            disabled={locked}
+                            checked={selected.includes(entry.path)}
+                            onChange={() => select(entry.path)}
+                            aria-label={`${entry.name} seç`}
+                          />
+                        </td>
+                        <td role="cell">
+                          <button
+                            type="button"
+                            className={`yf-entry ${entry.type === 'directory' ? 'is-folder' : ''}`}
+                            disabled={locked || !['directory', 'file'].includes(entry.type)}
+                            onClick={() => (entry.type === 'directory' ? navigate(entry.path) : openFile(entry))}
+                          >
+                            <span className="yf-file-icon">
+                              <Icon name={entry.type === 'directory' ? 'folder' : isArchiveFile(entry) ? 'folder' : 'file'} size={21} />
+                            </span>
+                            <span>
+                              <strong>{entry.name}</strong>
+                              <small>{fileKind(entry)}</small>
+                            </span>
+                          </button>
+                        </td>
+                        <td role="cell" className="yf-size">
+                          {entry.type === 'directory' ? '—' : formatBytes(entry.size)}
+                        </td>
+                        <td role="cell" className="yf-size yf-perm-cell">
+                          <span className="yf-perm">{entry.mode ?? (entry.type === 'directory' ? '0750' : '0640')}</span>
+                        </td>
+                        <td role="cell" className="yf-date">
+                          {formatDate(entry.mtime)}
+                        </td>
+                        <td role="cell">{actions(entry)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="yf-grid">
+                {visibleEntries.map((entry) => (
+                  <article key={entry.path} className={selected.includes(entry.path) ? 'is-selected' : ''}>
+                    <input
+                      type="checkbox"
+                      aria-label={`${entry.name} seç`}
+                      checked={selected.includes(entry.path)}
+                      disabled={locked}
+                      onChange={() => select(entry.path)}
+                    />
+                    <button
+                      type="button"
+                      className={`yf-tile ${entry.type === 'directory' ? 'is-folder' : ''}`}
+                      disabled={locked || !['directory', 'file'].includes(entry.type)}
+                      onClick={() => (entry.type === 'directory' ? navigate(entry.path) : openFile(entry))}
+                    >
+                      <Icon name={entry.type === 'directory' ? 'folder' : isArchiveFile(entry) ? 'folder' : 'file'} size={38} />
+                      <strong>{entry.name}</strong>
+                      <small>{entry.type === 'directory' ? 'Klasör' : formatBytes(entry.size)}</small>
+                    </button>
+                    {actions(entry)}
+                  </article>
+                ))}
+              </div>
+            ))}
         </div>
         {entries.length > 25 && <div className="yf-pagination">
           <div className="yf-pagination-controls">
@@ -551,16 +692,302 @@ function FileWorkspace({ websiteId, serverId, runtimeType, domainId = null }) {
       </div></div>{dragging && <div className="yf-drop"><Icon name="upload" size={36} /><strong>Bu klasöre yüklemek için bırakın</strong><span>Yüklemeden önce dosyaları onaylayacaksınız.</span></div>}
     </section>
     {treeOpen && <Modal title="Site klasörleri" onClose={() => setTreeOpen(false)}>{tree}</Modal>}
-    {dialog && ['file', 'folder', 'rename'].includes(dialog.kind) && <Modal title={dialog.kind === 'rename' ? 'Yeniden adlandır' : dialog.kind === 'folder' ? 'Yeni klasör' : 'Yeni dosya'} busy={busy} onClose={() => setDialog(null)}><ErrorNotice error={error} />{checkItemConflict(view.entries, dialog.name) && <div className="yf-conflict-warning"><Icon name="clock" size={15} /><span>Dikkat: Bu klasörde aynı adda bir öğe zaten mevcut. İşlem üzerine yazacaktır.</span></div>}<form onSubmit={createOrRename} className="ws-form"><label>Ad<input autoFocus autoComplete="off" spellCheck={false} value={dialog.name} maxLength={255} onChange={(event) => setDialog({ ...dialog, name: event.target.value })} required /></label><p className="ws-muted">Konum: Site kökü / {dialog.parent ?? fileParent(dialog.entry.path)}</p><footer className="ws-modal-footer"><ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton><Button type="submit" variant="primary" disabled={busy || !validFileName(dialog.name)}>{busy ? 'Kaydediliyor…' : dialog.kind === 'rename' ? 'Adı değiştir' : 'Oluştur'}</Button></footer></form></Modal>}
+    {dialog && ['file', 'folder', 'rename'].includes(dialog.kind) && (
+      <Modal
+        title={dialog.kind === 'rename' ? 'Yeniden adlandır' : dialog.kind === 'folder' ? 'Yeni klasör' : 'Yeni dosya'}
+        busy={busy}
+        onClose={() => setDialog(null)}
+      >
+        <ErrorNotice error={error} />
+        {checkItemConflict(view.entries, dialog.name) && (
+          <div className="yf-conflict-warning">
+            <Icon name="clock" size={15} />
+            <span>Dikkat: Bu klasörde aynı adda bir öğe zaten mevcut. İşlem üzerine yazacaktır.</span>
+          </div>
+        )}
+        <form onSubmit={createOrRename} className="ws-form">
+          <label>
+            Ad
+            <input
+              autoFocus
+              autoComplete="off"
+              spellCheck={false}
+              value={dialog.name}
+              maxLength={255}
+              onChange={(event) => setDialog({ ...dialog, name: event.target.value })}
+              required
+            />
+          </label>
+          <p className="ws-muted">Konum: Site kökü / {dialog.parent ?? fileParent(dialog.entry.path)}</p>
+          <footer className="ws-modal-footer">
+            <ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton>
+            <Button type="submit" variant="primary" disabled={busy || !validFileName(dialog.name)}>
+              {busy ? 'Kaydediliyor…' : dialog.kind === 'rename' ? 'Adı değiştir' : 'Oluştur'}
+            </Button>
+          </footer>
+        </form>
+      </Modal>
+    )}
     {dialog?.kind === 'copy' && <Modal title="Kopyala" busy={busy} onClose={() => setDialog(null)}><ErrorNotice error={error} /><form onSubmit={copyItems} className="ws-form"><p className="ws-muted">Kopyalanacak {dialog.paths.length} öğe: {dialog.paths.join(', ')}</p><label>Hedef Klasör (Site köküne göre bağıl yol)<input autoFocus value={dialog.destination} onChange={(event) => setDialog({ ...dialog, destination: event.target.value })} placeholder="Klasör yolu (boşluk site köküdür)" /></label><footer className="ws-modal-footer"><ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton><Button type="submit" variant="primary" disabled={busy}>Kopyala</Button></footer></form></Modal>}
     {dialog?.kind === 'move' && <Modal title="Taşı" busy={busy} onClose={() => setDialog(null)}><ErrorNotice error={error} /><form onSubmit={moveItems} className="ws-form"><p className="ws-muted">Taşınacak {dialog.paths.length} öğe: {dialog.paths.join(', ')}</p><label>Hedef Klasör (Site köküne göre bağıl yol)<input autoFocus value={dialog.destination} onChange={(event) => setDialog({ ...dialog, destination: event.target.value })} placeholder="Klasör yolu (boşluk site köküdür)" /></label><footer className="ws-modal-footer"><ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton><Button type="submit" variant="primary" disabled={busy}>Taşı</Button></footer></form></Modal>}
     {dialog?.kind === 'archive' && <Modal title="Arşivle (ZIP)" busy={busy} onClose={() => setDialog(null)}><ErrorNotice error={error} />{checkItemConflict(view.entries, dialog.name) && <div className="yf-conflict-warning"><Icon name="clock" size={15} /><span>Dikkat: Bu adda bir arşiv zaten var.</span></div>}<form onSubmit={archiveItems} className="ws-form"><p className="ws-muted">Arşivlenecek {dialog.paths.length} öğe: {dialog.paths.join(', ')}</p><label>Arşiv Adı<input autoFocus value={dialog.name} maxLength={255} onChange={(event) => setDialog({ ...dialog, name: event.target.value })} required /></label><p className="ws-muted">Konum: Site kökü / {view.path}</p><footer className="ws-modal-footer"><ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton><Button type="submit" variant="primary" disabled={busy || !validFileName(dialog.name)}>Arşivle</Button></footer></form></Modal>}
     {dialog?.kind === 'extract' && <Modal title="Arşivi Çıkart" busy={busy} onClose={() => setDialog(null)}><ErrorNotice error={error} /><form onSubmit={extractArchive} className="ws-form"><p className="ws-muted">Çıkartılacak arşiv: {dialog.entry.path}</p><div className="yf-conflict-warning"><Icon name="clock" size={15} /><span>Hedef klasördeki aynı adlı dosyaların üzerine yazılabilir.</span></div><label>Hedef Klasör (Site köküne göre bağıl yol)<input autoFocus value={dialog.destination} onChange={(event) => setDialog({ ...dialog, destination: event.target.value })} placeholder="Klasör yolu (boşluk site köküdür)" /></label><footer className="ws-modal-footer"><ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton><Button type="submit" variant="primary" disabled={busy}>Arşivi Çıkart</Button></footer></form></Modal>}
-    {dialog?.kind === 'permissions' && <Modal title={`İzinler: ${dialog.entry.name}`} busy={busy} onClose={() => setDialog(null)}><ErrorNotice error={error} /><form onSubmit={savePermissions} className="ws-form"><p className="ws-muted">Konum: /{dialog.entry.path} ({dialog.entry.type === 'directory' ? 'Klasör' : 'Dosya'})</p><table className="yf-permissions-grid" role="table" aria-label="Dosya izinleri"><thead><tr role="row"><th scope="col">Kullanıcı</th><th scope="col">Okuma (r)</th><th scope="col">Yazma (w)</th><th scope="col">Çalıştırma (x)</th></tr></thead><tbody><tr><td>Sahip</td><td><input type="checkbox" checked={dialog.permissions?.user?.read ?? true} onChange={(e) => { const next = { ...dialog.permissions, user: { ...dialog.permissions.user, read: e.target.checked } }; setDialog({ ...dialog, permissions: next, octal: formatPermissions(next) }); }} /></td><td><input type="checkbox" checked={dialog.permissions?.user?.write ?? true} onChange={(e) => { const next = { ...dialog.permissions, user: { ...dialog.permissions.user, write: e.target.checked } }; setDialog({ ...dialog, permissions: next, octal: formatPermissions(next) }); }} /></td><td><input type="checkbox" checked={dialog.permissions?.user?.execute ?? (dialog.entry.type === 'directory')} onChange={(e) => { const next = { ...dialog.permissions, user: { ...dialog.permissions.user, execute: e.target.checked } }; setDialog({ ...dialog, permissions: next, octal: formatPermissions(next) }); }} /></td></tr><tr><td>Grup</td><td><input type="checkbox" checked={dialog.permissions?.group?.read ?? true} onChange={(e) => { const next = { ...dialog.permissions, group: { ...dialog.permissions.group, read: e.target.checked } }; setDialog({ ...dialog, permissions: next, octal: formatPermissions(next) }); }} /></td><td><input type="checkbox" checked={dialog.permissions?.group?.write ?? false} onChange={(e) => { const next = { ...dialog.permissions, group: { ...dialog.permissions.group, write: e.target.checked } }; setDialog({ ...dialog, permissions: next, octal: formatPermissions(next) }); }} /></td><td><input type="checkbox" checked={dialog.permissions?.group?.execute ?? (dialog.entry.type === 'directory')} onChange={(e) => { const next = { ...dialog.permissions, group: { ...dialog.permissions.group, execute: e.target.checked } }; setDialog({ ...dialog, permissions: next, octal: formatPermissions(next) }); }} /></td></tr><tr><td>Diğer</td><td><input type="checkbox" checked={dialog.permissions?.others?.read ?? false} onChange={(e) => { const next = { ...dialog.permissions, others: { ...dialog.permissions.others, read: e.target.checked } }; setDialog({ ...dialog, permissions: next, octal: formatPermissions(next) }); }} /></td><td><input type="checkbox" checked={false} disabled title="Başkalarına yazma izni (world-writable) güvenlik gerekçesiyle yasaktır" /></td><td><input type="checkbox" checked={dialog.permissions?.others?.execute ?? false} onChange={(e) => { const next = { ...dialog.permissions, others: { ...dialog.permissions.others, execute: e.target.checked } }; setDialog({ ...dialog, permissions: next, octal: formatPermissions(next) }); }} /></td></tr></tbody></table><div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}><label>Sekizli (Octal): <code className="yf-permissions-octal">{dialog.octal ?? '0640'}</code></label></div><p className="ws-muted"><Icon name="shield" size={13} /> İzinler ayrılmış site Unix kullanıcısı yetkileriyle sınırlandırılmıştır; sunucu root yetkileri açılamaz.</p><footer className="ws-modal-footer"><ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton><Button type="submit" variant="primary" disabled={busy}>İzinleri Kaydet</Button></footer></form></Modal>}
-    {dialog?.kind === 'details' && <Modal title={dialog.entry.name} onClose={() => setDialog(null)}><dl className="yf-properties"><dt>Konum</dt><dd>/{dialog.entry.path}</dd><dt>Tür</dt><dd>{fileKind(dialog.entry)}</dd><dt>Boyut</dt><dd>{formatBytes(dialog.entry.size)}</dd><dt>Değişiklik</dt><dd>{formatDate(dialog.entry.mtime)}</dd><dt>İzinler</dt><dd><code>{dialog.entry.mode ?? (dialog.entry.type === 'directory' ? '0750' : '0640')}</code></dd></dl><footer className="ws-modal-footer">{dialog.entry.type === 'file' && <a className="ws-button" href={`/api/panel/websites/${encodeURIComponent(websiteId)}/files/download?path=${encodeURIComponent(dialog.entry.path)}`} download={dialog.entry.name}><Icon name="download" />İndir</a>}{dialog.entry.type === 'file' && <Button disabled={!mutable} onClick={() => { setDialog(null); void openFile(dialog.entry); }}>Düzenle</Button>}{isArchiveFile(dialog.entry) && <Button disabled={!mutable} onClick={() => openDialog({ kind: 'extract', entry: dialog.entry, destination: view.path })}>Arşivi Çıkart</Button>}<Button disabled={!mutable} onClick={() => openDialog({ kind: 'copy', paths: [dialog.entry.path], destination: view.path })}>Kopyala</Button><Button disabled={!mutable} onClick={() => openDialog({ kind: 'move', paths: [dialog.entry.path], destination: view.path })}>Taşı</Button><Button disabled={!mutable} onClick={() => openDialog({ kind: 'permissions', entry: dialog.entry, permissions: parsePermissions(dialog.entry.mode), octal: dialog.entry.mode ?? (dialog.entry.type === 'directory' ? '0750' : '0640') })}>İzinler</Button><Button disabled={!mutable} onClick={() => openDialog({ kind: 'rename', entry: dialog.entry, name: dialog.entry.name })}>Yeniden adlandır</Button><Button variant="danger" disabled={!mutable} onClick={() => openDialog({ kind: 'delete', paths: [dialog.entry.path] })}>Sil…</Button></footer></Modal>}
+    {dialog?.kind === 'permissions' && (
+      <Modal title={`İzinler: ${dialog.entry.name}`} busy={busy} onClose={() => setDialog(null)}>
+        <ErrorNotice error={error} />
+        <form onSubmit={savePermissions} className="ws-form">
+          <p className="ws-muted">
+            Konum: /{dialog.entry.path} ({dialog.entry.type === 'directory' ? 'Klasör' : 'Dosya'})
+          </p>
+          <table className="yf-permissions-grid" role="table" aria-label="Dosya izinleri">
+            <thead>
+              <tr role="row">
+                <th scope="col">Kullanıcı</th>
+                <th scope="col">Okuma (r)</th>
+                <th scope="col">Yazma (w)</th>
+                <th scope="col">Çalıştırma (x)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Sahip</td>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={dialog.permissions?.user?.read ?? true}
+                    onChange={(e) => {
+                      const next = { ...dialog.permissions, user: { ...dialog.permissions.user, read: e.target.checked } };
+                      setDialog({ ...dialog, permissions: next, octal: formatPermissions(next) });
+                    }}
+                  />
+                </td>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={dialog.permissions?.user?.write ?? true}
+                    onChange={(e) => {
+                      const next = { ...dialog.permissions, user: { ...dialog.permissions.user, write: e.target.checked } };
+                      setDialog({ ...dialog, permissions: next, octal: formatPermissions(next) });
+                    }}
+                  />
+                </td>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={dialog.permissions?.user?.execute ?? dialog.entry.type === 'directory'}
+                    onChange={(e) => {
+                      const next = { ...dialog.permissions, user: { ...dialog.permissions.user, execute: e.target.checked } };
+                      setDialog({ ...dialog, permissions: next, octal: formatPermissions(next) });
+                    }}
+                  />
+                </td>
+              </tr>
+              <tr>
+                <td>Grup</td>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={dialog.permissions?.group?.read ?? true}
+                    onChange={(e) => {
+                      const next = { ...dialog.permissions, group: { ...dialog.permissions.group, read: e.target.checked } };
+                      setDialog({ ...dialog, permissions: next, octal: formatPermissions(next) });
+                    }}
+                  />
+                </td>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={dialog.permissions?.group?.write ?? false}
+                    onChange={(e) => {
+                      const next = { ...dialog.permissions, group: { ...dialog.permissions.group, write: e.target.checked } };
+                      setDialog({ ...dialog, permissions: next, octal: formatPermissions(next) });
+                    }}
+                  />
+                </td>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={dialog.permissions?.group?.execute ?? dialog.entry.type === 'directory'}
+                    onChange={(e) => {
+                      const next = { ...dialog.permissions, group: { ...dialog.permissions.group, execute: e.target.checked } };
+                      setDialog({ ...dialog, permissions: next, octal: formatPermissions(next) });
+                    }}
+                  />
+                </td>
+              </tr>
+              <tr>
+                <td>Diğer</td>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={dialog.permissions?.others?.read ?? false}
+                    onChange={(e) => {
+                      const next = { ...dialog.permissions, others: { ...dialog.permissions.others, read: e.target.checked } };
+                      setDialog({ ...dialog, permissions: next, octal: formatPermissions(next) });
+                    }}
+                  />
+                </td>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={false}
+                    disabled
+                    title="Başkalarına yazma izni (world-writable) güvenlik gerekçesiyle yasaktır"
+                  />
+                </td>
+                <td>
+                  <input
+                    type="checkbox"
+                    checked={dialog.permissions?.others?.execute ?? false}
+                    onChange={(e) => {
+                      const next = { ...dialog.permissions, others: { ...dialog.permissions.others, execute: e.target.checked } };
+                      setDialog({ ...dialog, permissions: next, octal: formatPermissions(next) });
+                    }}
+                  />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <label>
+              Sekizli (Octal): <code className="yf-permissions-octal">{dialog.octal ?? '0640'}</code>
+            </label>
+          </div>
+          <p className="ws-muted">
+            <Icon name="shield" size={13} /> İzinler ayrılmış site Unix kullanıcısı yetkileriyle sınırlandırılmıştır; sunucu root
+            yetkileri açılamaz.
+          </p>
+          <footer className="ws-modal-footer">
+            <ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton>
+            <Button type="submit" variant="primary" disabled={busy}>
+              İzinleri Kaydet
+            </Button>
+          </footer>
+        </form>
+      </Modal>
+    )}
+    {dialog?.kind === 'details' && (
+      <Modal title={dialog.entry.name} onClose={() => setDialog(null)}>
+        <dl className="yf-properties">
+          <dt>Konum</dt>
+          <dd>/{dialog.entry.path}</dd>
+          <dt>Tür</dt>
+          <dd>{fileKind(dialog.entry)}</dd>
+          <dt>Boyut</dt>
+          <dd>{formatBytes(dialog.entry.size)}</dd>
+          <dt>Değişiklik</dt>
+          <dd>{formatDate(dialog.entry.mtime)}</dd>
+          <dt>İzinler</dt>
+          <dd>
+            <code>{dialog.entry.mode ?? (dialog.entry.type === 'directory' ? '0750' : '0640')}</code>
+          </dd>
+        </dl>
+        <footer className="ws-modal-footer">
+          {dialog.entry.type === 'file' && (
+            <a
+              className="ws-button"
+              href={`/api/panel/websites/${encodeURIComponent(websiteId)}/files/download?path=${encodeURIComponent(dialog.entry.path)}`}
+              download={dialog.entry.name}
+            >
+              <Icon name="download" />
+              İndir
+            </a>
+          )}
+          {dialog.entry.type === 'file' && (
+            <Button
+              disabled={!mutable}
+              onClick={() => {
+                setDialog(null);
+                void openFile(dialog.entry);
+              }}
+            >
+              Düzenle
+            </Button>
+          )}
+          {isArchiveFile(dialog.entry) && (
+            <Button disabled={!mutable} onClick={() => openDialog({ kind: 'extract', entry: dialog.entry, destination: view.path })}>
+              Arşivi Çıkart
+            </Button>
+          )}
+          <Button disabled={!mutable} onClick={() => openDialog({ kind: 'copy', paths: [dialog.entry.path], destination: view.path })}>
+            Kopyala
+          </Button>
+          <Button disabled={!mutable} onClick={() => openDialog({ kind: 'move', paths: [dialog.entry.path], destination: view.path })}>
+            Taşı
+          </Button>
+          <Button
+            disabled={!mutable}
+            onClick={() =>
+              openDialog({
+                kind: 'permissions',
+                entry: dialog.entry,
+                permissions: parsePermissions(dialog.entry.mode),
+                octal: dialog.entry.mode ?? (dialog.entry.type === 'directory' ? '0750' : '0640'),
+              })
+            }
+          >
+            İzinler
+          </Button>
+          <Button disabled={!mutable} onClick={() => openDialog({ kind: 'rename', entry: dialog.entry, name: dialog.entry.name })}>
+            Yeniden adlandır
+          </Button>
+          <Button variant="danger" disabled={!mutable} onClick={() => openDialog({ kind: 'delete', paths: [dialog.entry.path] })}>
+            Sil…
+          </Button>
+        </footer>
+      </Modal>
+    )}
     {dialog?.kind === 'delete' && <ConfirmDialog title={`${dialog.paths.length} öğe silinsin mi?`} message={`Kalıcı olarak silinecek: ${dialog.paths.join(', ')}. Klasörlerin içeriği de etkilenebilir. Bu işlem geri alınamaz.`} confirmation={dialog.paths.length === 1 ? dialog.paths[0] : 'SİL'} confirmLabel="Kalıcı olarak sil" busy={busy} error={error} onCancel={() => setDialog(null)} onConfirm={remove} />}
     {upload && <Modal title="Dosya yükle" busy={busy} onClose={() => setUpload(null)}><p className="ws-muted">Hedef: Site kökü / {upload.parent}. Aynı adlı dosyalar değiştirilebilir.</p><ul className="yf-upload-list">{upload.items.map((item, i) => <li key={i}><Icon name={item.state === 'uploaded' ? 'check' : 'file'} /><span>{item.file.name}<small>{formatBytes(item.file.size)}</small></span><strong>{item.state === 'uploaded' ? 'Yüklendi' : 'Bekliyor'}</strong></li>)}</ul><ErrorNotice error={error} /><p role="status" className="ws-muted">{upload.items.filter((item) => item.state === 'uploaded').length} / {upload.items.length} tamamlandı</p><footer className="ws-modal-footer"><Button disabled={busy} onClick={() => { setUpload(null); void load(view.path); }}>Kapat</Button><Button variant="primary" disabled={busy} onClick={startUpload}>{busy ? 'Yükleniyor…' : 'Yüklemeyi başlat'}</Button></footer></Modal>}
-    {editor && <Modal title={editor.name} wide busy={busy} onClose={closeEditor} dirty={editor.content !== editor.saved} unsavedGuard={false}><div className="yf-editor-meta"><code>/{editor.path}</code><span>{editor.content === editor.saved ? 'Kaydedildi' : 'Kaydedilmemiş değişiklikler'}</span></div><ErrorNotice error={error} /><form onSubmit={saveEditor} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void saveEditor(); } }}><div className="yf-editor"><pre ref={lineNumbers} aria-hidden="true">{editor.content.split('\n').map((_, i) => i + 1).join('\n')}</pre><textarea aria-label={`${editor.name} içeriği`} ref={editorTextareaRef} value={editor.content} readOnly={busy} spellCheck={false} autoCapitalize="none" wrap="off" onScroll={(event) => { if (lineNumbers.current) lineNumbers.current.scrollTop = event.target.scrollTop; }} onChange={(event) => setEditor({ ...editor, content: event.target.value })} /></div><footer className="ws-modal-footer"><span className="yf-editor-hint">Ctrl / ⌘ S · Sunucudaki sürüm değişirse üzerine yazılmaz.</span><Button disabled={busy} onClick={closeEditor}>Kapat</Button><Button variant="primary" type="submit" disabled={busy || editor.content === editor.saved}>{busy ? 'Kaydediliyor…' : 'Kaydet'}</Button></footer></form></Modal>}
+    {editor && (
+      <Modal title={editor.name} wide busy={busy} onClose={closeEditor} dirty={editor.content !== editor.saved} unsavedGuard={false}>
+        <div className="yf-editor-meta">
+          <code>/{editor.path}</code>
+          <span>{editor.content === editor.saved ? 'Kaydedildi' : 'Kaydedilmemiş değişiklikler'}</span>
+        </div>
+        <ErrorNotice error={error} />
+        <form
+          onSubmit={saveEditor}
+          onKeyDown={(event) => {
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+              event.preventDefault();
+              void saveEditor();
+            }
+          }}
+        >
+          <div className="yf-editor">
+            <pre ref={lineNumbers} aria-hidden="true">
+              {editor.content
+                .split('\n')
+                .map((_, i) => i + 1)
+                .join('\n')}
+            </pre>
+            <textarea
+              aria-label={`${editor.name} içeriği`}
+              ref={editorTextareaRef}
+              value={editor.content}
+              readOnly={busy}
+              spellCheck={false}
+              autoCapitalize="none"
+              wrap="off"
+              onScroll={(event) => {
+                if (lineNumbers.current) lineNumbers.current.scrollTop = event.target.scrollTop;
+              }}
+              onChange={(event) => setEditor({ ...editor, content: event.target.value })}
+            />
+          </div>
+          <footer className="ws-modal-footer">
+            <span className="yf-editor-hint">Ctrl / ⌘ S · Sunucudaki sürüm değişirse üzerine yazılmaz.</span>
+            <Button disabled={busy} onClick={closeEditor}>
+              Kapat
+            </Button>
+            <Button variant="primary" type="submit" disabled={busy || editor.content === editor.saved}>
+              {busy ? 'Kaydediliyor…' : 'Kaydet'}
+            </Button>
+          </footer>
+        </form>
+      </Modal>
+    )}
     {discard && <ConfirmDialog title="Kaydedilmemiş değişiklikler var" message="Dosyada kaydedilmemiş değişiklikler var. Pencereyi kapatırsanız bu değişiklikler kaybolur." cancelLabel="Düzenlemeye dön" confirmLabel="Değişiklikleri bırak" onCancel={() => setDiscard(false)} onConfirm={() => { editorReadRef.current?.abort(); pendingOpenFileRef.current = null; closingFileParamRef.current = searchParams.get('file') || editor?.name || editor?.path || '__closing__'; autoOpenedRef.current = true; setDiscard(false); setEditor(null); setError(null); const clearFileParam = () => setSearchParams((prev) => { const next = new URLSearchParams(prev); next.delete('file'); return next; }, { replace: true }); if (runWithoutSamePathBlock) runWithoutSamePathBlock(clearFileParam); else clearFileParam(); }} />}
   </>;
 }

@@ -50,7 +50,7 @@ test('database deletion modal preserves state on failure/cancellation and closes
 test('stale, refreshing or error states lock database mutations and phpMyAdmin handoff', () => {
   assert.match(source, /servers\.status === 'ready' && status === 'ready' && !busy && !loadError/);
   assert.match(source, /Button variant="primary" icon="plus" disabled=\{!canAct\}/);
-  assert.match(source, /Button icon="external" disabled=\{!canAct\} onClick=\{.*?openPhpMyAdmin/);
+  assert.match(source, /Button\s+icon="external"\s+disabled=\{!canAct\}\s+onClick=\{.*?openPhpMyAdmin/);
   assert.match(source, /Button icon="trash" disabled=\{!canAct\}/);
   assert.match(setupSource, /disabled=\{busy \|\| !selected\}/);
   assert.match(source, /disabled=\{!canAct\} error=\{error\}/);

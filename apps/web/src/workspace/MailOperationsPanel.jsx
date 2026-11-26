@@ -183,7 +183,84 @@ function QueuePanel({ serverId }) {
   }, [serverId, search]);
   useEffect(() => { load(); }, [serverId]);
   const items = queue?.entries ?? [];
-  return <Section title="Postfix mail queue" description="Bekleyen ve işlenen Postfix e-posta kuyruğu."><div className="ws-section-body"><ErrorNotice error={error} /><form className="ws-filters" onSubmit={(event) => { event.preventDefault(); load(); }}><label className="ws-filter-search">Queue ara<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="queue ID, sender veya recipient" /></label><Button type="submit" disabled={busy}>{busy ? 'Okunuyor…' : 'Ara'}</Button><Button type="button" icon="refresh" disabled={busy} onClick={load}>Yenile</Button></form></div>{items.length ? <div className="ws-table-scroll"><table className="ws-table" role="table" aria-label="Mail kuyruğu"><thead><tr role="row"><th scope="col">Queue ID</th><th scope="col">Queue</th><th scope="col">Yönlendirme</th><th scope="col">Gönderen</th><th scope="col">Alıcılar</th><th scope="col">Boyut</th><th scope="col">Geliş</th></tr></thead><tbody>{items.map((item) => <tr key={item.queueId} role="row"><td role="cell"><code>{item.queueId}</code></td><td role="cell">{item.queueName}</td><td role="cell"><Badge state={item.routing === 'local' ? 'active' : item.routing === 'external' ? 'warning' : 'neutral'}>{item.routing === 'local' ? 'Yerel' : item.routing === 'external' ? 'Dış' : item.routing ?? '—'}</Badge></td><td role="cell">{item.sender || '<>'}</td><td role="cell">{item.recipients.map((recipient) => <small key={recipient.address}>{recipient.address}{recipient.delayReason ? ` · ${recipient.delayReason}` : ''}</small>)}</td><td role="cell">{formatBinaryBytes(item.messageSize)}</td><td role="cell">{formatDate(item.arrivalTime)}</td></tr>)}</tbody></table></div> : queue && <EmptyState icon="mail" title="Queue boş" detail="Filtreye uyan bekleyen Postfix mesajı yok." />}{queue?.page && <div className="ws-section-body"><p className="ws-muted">{queue.page.count} kayıt · {queue.page.scanned} tarandı{queue.page.hasMore ? ' · daha fazla kayıt var' : ''}{queue.page.malformed ? ` · ${queue.page.malformed} bozuk kayıt atlandı` : ''}</p></div>}</Section>;
+  return (
+    <Section title="Postfix mail queue" description="Bekleyen ve işlenen Postfix e-posta kuyruğu.">
+      <div className="ws-section-body">
+        <ErrorNotice error={error} />
+        <form
+          className="ws-filters"
+          onSubmit={(event) => {
+            event.preventDefault();
+            load();
+          }}
+        >
+          <label className="ws-filter-search">
+            Queue ara
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="queue ID, sender veya recipient" />
+          </label>
+          <Button type="submit" disabled={busy}>
+            {busy ? 'Okunuyor…' : 'Ara'}
+          </Button>
+          <Button type="button" icon="refresh" disabled={busy} onClick={load}>
+            Yenile
+          </Button>
+        </form>
+      </div>
+      {items.length ? (
+        <div className="ws-table-scroll">
+          <table className="ws-table" role="table" aria-label="Mail kuyruğu">
+            <thead>
+              <tr role="row">
+                <th scope="col">Queue ID</th>
+                <th scope="col">Queue</th>
+                <th scope="col">Yönlendirme</th>
+                <th scope="col">Gönderen</th>
+                <th scope="col">Alıcılar</th>
+                <th scope="col">Boyut</th>
+                <th scope="col">Geliş</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <tr key={item.queueId} role="row">
+                  <td role="cell">
+                    <code>{item.queueId}</code>
+                  </td>
+                  <td role="cell">{item.queueName}</td>
+                  <td role="cell">
+                    <Badge state={item.routing === 'local' ? 'active' : item.routing === 'external' ? 'warning' : 'neutral'}>
+                      {item.routing === 'local' ? 'Yerel' : item.routing === 'external' ? 'Dış' : (item.routing ?? '—')}
+                    </Badge>
+                  </td>
+                  <td role="cell">{item.sender || '<>'}</td>
+                  <td role="cell">
+                    {item.recipients.map((recipient) => (
+                      <small key={recipient.address}>
+                        {recipient.address}
+                        {recipient.delayReason ? ` · ${recipient.delayReason}` : ''}
+                      </small>
+                    ))}
+                  </td>
+                  <td role="cell">{formatBinaryBytes(item.messageSize)}</td>
+                  <td role="cell">{formatDate(item.arrivalTime)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        queue && <EmptyState icon="mail" title="Queue boş" detail="Filtreye uyan bekleyen Postfix mesajı yok." />
+      )}
+      {queue?.page && (
+        <div className="ws-section-body">
+          <p className="ws-muted">
+            {queue.page.count} kayıt · {queue.page.scanned} tarandı{queue.page.hasMore ? ' · daha fazla kayıt var' : ''}
+            {queue.page.malformed ? ` · ${queue.page.malformed} bozuk kayıt atlandı` : ''}
+          </p>
+        </div>
+      )}
+    </Section>
+  );
 }
 
 function LogsPanel({ serverId }) {
@@ -195,7 +272,56 @@ function LogsPanel({ serverId }) {
     finally { setBusy(false); }
   }, [serverId, service, search]);
   useEffect(() => { load(); }, [serverId, service]);
-  return <Section title="Mail servis logları" description="Postfix, Dovecot ve Rspamd servis günlükleri."><div className="ws-section-body"><ErrorNotice error={error} /><form className="ws-filters" onSubmit={(event) => { event.preventDefault(); load(); }}><label>Servis<select value={service} onChange={(event) => { setService(event.target.value); setResult(undefined); }}><option value="postfix">Postfix</option><option value="dovecot">Dovecot</option><option value="rspamd">Rspamd</option></select></label><label className="ws-filter-search">Log ara<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="adres, hata veya event" /></label><Button type="submit" disabled={busy}>{busy ? 'Okunuyor…' : 'Ara'}</Button><Button type="button" icon="refresh" disabled={busy} onClick={load}>Yenile</Button></form>{result?.entries?.length ? <div className="ws-log-block"><pre>{result.entries.map((entry) => `${entry.timestamp} ${String(entry.level ?? 'info').toUpperCase()} ${entry.message}`).join('\n')}</pre></div> : result && <EmptyState icon="file" title="Log kaydı yok" detail="Seçili zaman aralığı ve filtre için kayıt bulunamadı." />}</div></Section>;
+  return (
+    <Section title="Mail servis logları" description="Postfix, Dovecot ve Rspamd servis günlükleri.">
+      <div className="ws-section-body">
+        <ErrorNotice error={error} />
+        <form
+          className="ws-filters"
+          onSubmit={(event) => {
+            event.preventDefault();
+            load();
+          }}
+        >
+          <label>
+            Servis
+            <select
+              value={service}
+              onChange={(event) => {
+                setService(event.target.value);
+                setResult(undefined);
+              }}
+            >
+              <option value="postfix">Postfix</option>
+              <option value="dovecot">Dovecot</option>
+              <option value="rspamd">Rspamd</option>
+            </select>
+          </label>
+          <label className="ws-filter-search">
+            Log ara
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="adres, hata veya event" />
+          </label>
+          <Button type="submit" disabled={busy}>
+            {busy ? 'Okunuyor…' : 'Ara'}
+          </Button>
+          <Button type="button" icon="refresh" disabled={busy} onClick={load}>
+            Yenile
+          </Button>
+        </form>
+        {result?.entries?.length ? (
+          <div className="ws-log-block">
+            <pre>
+              {result.entries
+                .map((entry) => `${entry.timestamp} ${String(entry.level ?? 'info').toUpperCase()} ${entry.message}`)
+                .join('\n')}
+            </pre>
+          </div>
+        ) : (
+          result && <EmptyState icon="file" title="Log kaydı yok" detail="Seçili zaman aralığı ve filtre için kayıt bulunamadı." />
+        )}
+      </div>
+    </Section>
+  );
 }
 
 export default function MailOperationsPanel() {

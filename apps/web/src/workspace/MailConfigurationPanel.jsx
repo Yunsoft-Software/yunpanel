@@ -43,17 +43,119 @@ export default function MailConfigurationPanel({ domain, onChanged }) {
   }
 
   const configuration = preview?.configuration ?? null;
-  return <Section title="Host mail configuration" description="Postfix, Dovecot, Rspamd ve ilgili managed artefactlar exact preview üzerinden uygulanır."><div className="ws-section-body"><ErrorNotice error={error} />{notice && <p role="status" className="ws-notice">{notice}</p>}<div className="ws-form-grid"><label>Hedef durum<select value={status} onChange={(event) => { setStatus(event.target.value); setPreview(null); }}><option value="enabled">Enabled</option><option value="disabled">Disabled</option></select></label><div className="ws-actions"><Button disabled={busy} onClick={buildPreview}>{busy ? 'Hazırlanıyor…' : 'Preview oluştur'}</Button></div></div>{preview && <><KeyValues items={[
-    ['Mevcut durum', preview.currentStatus],
-    ['Hedef durum', preview.desiredStatus],
-    ['Managed domain', preview.domains?.length ?? 0],
-    ['Hazır', <Badge key="ready" state={preview.readyToApply ? 'active' : 'warning'}>{preview.readyToApply ? 'apply edilebilir' : 'blocker var'}</Badge>],
-    ['Preview digest', preview.previewDigest],
-    ['Configuration SHA-256', configuration?.sha256 ?? '—'],
-    ['Artefact', configuration?.artifactDigests?.length ?? 0],
-    ['Mailbox', configuration?.counts?.mailboxes ?? configuration?.counts?.accounts ?? '—'],
-    ['Alias', configuration?.counts?.aliases ?? '—'],
-  ]} />{preview.blockers?.length > 0 && <div className="ws-notice ws-notice-warn" role="alert"><div><strong>Apply blocker</strong><ul>{preview.blockers.map((code) => <li key={code}>{blockerLabel(code)}</li>)}</ul></div></div>}{configuration?.artifactDigests?.length > 0 && <div className="ws-table-scroll"><table className="ws-table" role="table" aria-label="Konfigürasyon artefaktları"><thead><tr role="row"><th scope="col">Artefact</th><th scope="col">Digest</th><th scope="col">Hassas</th></tr></thead><tbody>{configuration.artifactDigests.map((item) => <tr key={item.path} role="row"><td role="cell"><code>{item.path}</code></td><td role="cell"><code>{item.sha256}</code></td><td role="cell">{item.sensitive ? 'Evet' : 'Hayır'}</td></tr>)}</tbody></table></div>}<p className="ws-muted">Protected configuration değerleri public response’da gösterilmez; yalnız hash/digest metadata kullanılır.</p><Button variant="primary" disabled={busy || !preview.readyToApply || !configuration} onClick={() => setConfirming(true)}>Bu preview’ı apply et</Button></>}</div>{confirming && preview && <ConfirmDialog title="Mail host konfigürasyonunu uygula" message={`${domain.domainName} için ${preview.currentStatus} → ${preview.desiredStatus} geçişi durable job olarak uygulanacak. Validator, reload ve health gate başarısız olursa job başarılı sayılmaz.`} confirmation={preview.confirmation} busy={busy} error={error} onCancel={() => setConfirming(false)} onConfirm={applyPreview} confirmLabel="Mail config apply" />}</Section>;
+  return (
+    <Section
+      title="Host mail configuration"
+      description="Postfix, Dovecot, Rspamd ve ilgili managed artefactlar exact preview üzerinden uygulanır."
+    >
+      <div className="ws-section-body">
+        <ErrorNotice error={error} />
+        {notice && (
+          <p role="status" className="ws-notice">
+            {notice}
+          </p>
+        )}
+        <div className="ws-form-grid">
+          <label>
+            Hedef durum
+            <select
+              value={status}
+              onChange={(event) => {
+                setStatus(event.target.value);
+                setPreview(null);
+              }}
+            >
+              <option value="enabled">Enabled</option>
+              <option value="disabled">Disabled</option>
+            </select>
+          </label>
+          <div className="ws-actions">
+            <Button disabled={busy} onClick={buildPreview}>
+              {busy ? 'Hazırlanıyor…' : 'Preview oluştur'}
+            </Button>
+          </div>
+        </div>
+        {preview && (
+          <>
+            <KeyValues
+              items={[
+                ['Mevcut durum', preview.currentStatus],
+                ['Hedef durum', preview.desiredStatus],
+                ['Managed domain', preview.domains?.length ?? 0],
+                [
+                  'Hazır',
+                  <Badge key="ready" state={preview.readyToApply ? 'active' : 'warning'}>
+                    {preview.readyToApply ? 'apply edilebilir' : 'blocker var'}
+                  </Badge>,
+                ],
+                ['Preview digest', preview.previewDigest],
+                ['Configuration SHA-256', configuration?.sha256 ?? '—'],
+                ['Artefact', configuration?.artifactDigests?.length ?? 0],
+                ['Mailbox', configuration?.counts?.mailboxes ?? configuration?.counts?.accounts ?? '—'],
+                ['Alias', configuration?.counts?.aliases ?? '—'],
+              ]}
+            />
+            {preview.blockers?.length > 0 && (
+              <div className="ws-notice ws-notice-warn" role="alert">
+                <div>
+                  <strong>Apply blocker</strong>
+                  <ul>
+                    {preview.blockers.map((code) => (
+                      <li key={code}>{blockerLabel(code)}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+            {configuration?.artifactDigests?.length > 0 && (
+              <div className="ws-table-scroll">
+                <table className="ws-table" role="table" aria-label="Konfigürasyon artefaktları">
+                  <thead>
+                    <tr role="row">
+                      <th scope="col">Artefact</th>
+                      <th scope="col">Digest</th>
+                      <th scope="col">Hassas</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {configuration.artifactDigests.map((item) => (
+                      <tr key={item.path} role="row">
+                        <td role="cell">
+                          <code>{item.path}</code>
+                        </td>
+                        <td role="cell">
+                          <code>{item.sha256}</code>
+                        </td>
+                        <td role="cell">{item.sensitive ? 'Evet' : 'Hayır'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <p className="ws-muted">
+              Protected configuration değerleri public response’da gösterilmez; yalnız hash/digest metadata kullanılır.
+            </p>
+            <Button variant="primary" disabled={busy || !preview.readyToApply || !configuration} onClick={() => setConfirming(true)}>
+              Bu preview’ı apply et
+            </Button>
+          </>
+        )}
+      </div>
+      {confirming && preview && (
+        <ConfirmDialog
+          title="Mail host konfigürasyonunu uygula"
+          message={`${domain.domainName} için ${preview.currentStatus} → ${preview.desiredStatus} geçişi durable job olarak uygulanacak. Validator, reload ve health gate başarısız olursa job başarılı sayılmaz.`}
+          confirmation={preview.confirmation}
+          busy={busy}
+          error={error}
+          onCancel={() => setConfirming(false)}
+          onConfirm={applyPreview}
+          confirmLabel="Mail config apply"
+        />
+      )}
+    </Section>
+  );
 }
 
 export const mailConfigurationPanelInternals = Object.freeze({ blockerLabel });

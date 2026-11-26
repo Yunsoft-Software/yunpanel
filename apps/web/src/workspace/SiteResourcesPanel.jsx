@@ -532,11 +532,56 @@ function DatabaseWorkspace({ domain, website, application, server, activeTab }) 
       <div className="ys-resource-summary"><span><strong>{databaseResources === undefined ? '—' : databases.length}</strong> veritabanı</span><span><strong>{databaseResources === undefined ? '—' : databases.filter((entry) => entry.credential).length}</strong> erişim kullanıcısı</span><span><Icon name="shield" size={14} /> Bu siteye özel</span></div>
       <div className="ys-resource-search"><Icon name="search" /><label><span className="ws-sr-only">Site veritabanlarında ara</span><input type="search" placeholder="Veritabanı veya kullanıcı ara…" value={query} onChange={(event) => setQuery(event.target.value)} /></label></div>
       {busy && databaseResources === undefined && <div className="ws-loading" role="status"><span className="ws-spinner" />Veritabanları yükleniyor…</div>}
-      {filtered.length > 0 ? <div className="ws-table-scroll"><table className="ys-resource-table" role="table" aria-label="Bu sitenin veritabanları"><thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">Veritabanı</th><th scope="col" role="columnheader">Kullanıcı</th><th scope="col" role="columnheader">Erişim</th><th scope="col" role="columnheader">İşlemler</th></tr></thead><tbody role="rowgroup">{filtered.map(({binding,credential}) => <tr key={binding.id} role="row"><td role="cell" data-label="Veritabanı"><div className="ys-db-title"><span><Icon name="database" size={21} /></span><div><strong>{binding.databaseName}</strong><small>{domain.primaryDomain}</small></div></div></td><td role="cell" data-label="Kullanıcı"><code>{credential?.username ?? 'Henüz oluşturulmadı'}</code></td><td role="cell" data-label="Erişim"><Badge state={credential ? 'staged' : 'warning'}>{credential ? 'Kullanıcı tanımlı' : 'Erişim gerekli'}</Badge></td><td role="cell" data-label="İşlemler"><div className="ys-resource-actions">{credential ? <Button icon="external" disabled={busy || !canManage || resourceBusy('database', binding.databaseName)} onClick={() => openPhpMyAdmin(credential)}>{phpMyAdminOpeningCredentialId === credential.id ? 'phpMyAdmin açılıyor…' : 'phpMyAdmin aç'}</Button> : <Button icon="user" disabled={busy || !canManage || resourceBusy('database', binding.databaseName)} onClick={() => createAccess(binding)}>Erişimi oluştur</Button>}{credential && <Button disabled={busy} onClick={() => setConnectionBinding(binding)}>Bağlantı bilgileri</Button>}{credential && <><Button disabled={busy || !canManage || resourceBusy('database', binding.databaseName)} onClick={() => openPhpMyAdmin(credential, 'import')}>SQL içe aktar</Button><Button disabled={busy || !canManage || resourceBusy('database', binding.databaseName)} onClick={() => openPhpMyAdmin(credential, 'export')}>SQL dışa aktar</Button></>}<Button icon="settings" disabled={busy} onClick={() => setSelectedBinding(binding.id)}>Yönet</Button></div></td></tr>)}</tbody></table></div> : databaseResources !== undefined && <EmptyState icon="database" title={query ? 'Eşleşen veritabanı yok' : 'Bu siteye bağlı veritabanı yok'} detail={query ? 'Aramanızı değiştirin.' : 'Site kurulumu sırasında oluşturulan veya yönetici tarafından bu siteye bağlanan veritabanları burada görünür.'} />}
+      {filtered.length > 0 ? <div className="ws-table-scroll">
+        <table className="ys-resource-table" role="table" aria-label="Bu sitenin veritabanları">
+          <thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">Veritabanı</th>
+              <th scope="col" role="columnheader">Kullanıcı</th>
+              <th scope="col" role="columnheader">Erişim</th>
+              <th scope="col" role="columnheader">İşlemler</th>
+            </tr>
+          </thead>
+          <tbody role="rowgroup">{filtered.map(({binding,credential}) => <tr key={binding.id} role="row"><td role="cell" data-label="Veritabanı">
+                <div className="ys-db-title">
+                  <span>
+                    <Icon name="database" size={21} />
+                  </span>
+                  <div>
+                    <strong>{binding.databaseName}</strong>
+                    <small>{domain.primaryDomain}</small>
+                  </div>
+                </div>
+              </td>
+              <td role="cell" data-label="Kullanıcı">
+                <code>{credential?.username ?? 'Henüz oluşturulmadı'}</code>
+              </td>
+              <td role="cell" data-label="Erişim">
+                <Badge state={credential ? 'staged' : 'warning'}>{credential ? 'Kullanıcı tanımlı' : 'Erişim gerekli'}</Badge>
+              </td>
+              <td role="cell" data-label="İşlemler">
+                <div className="ys-resource-actions">{credential ? <Button icon="external" disabled={busy || !canManage || resourceBusy('database', binding.databaseName)} onClick={() => openPhpMyAdmin(credential)}>{phpMyAdminOpeningCredentialId === credential.id ? 'phpMyAdmin açılıyor…' : 'phpMyAdmin aç'}</Button> : <Button icon="user" disabled={busy || !canManage || resourceBusy('database', binding.databaseName)} onClick={() => createAccess(binding)}>Erişimi oluştur</Button>}{credential && <Button disabled={busy} onClick={() => setConnectionBinding(binding)}>Bağlantı bilgileri</Button>}{credential && <>
+                    <Button disabled={busy || !canManage || resourceBusy('database', binding.databaseName)} onClick={() => openPhpMyAdmin(credential, 'import')}>SQL içe aktar</Button>
+                    <Button disabled={busy || !canManage || resourceBusy('database', binding.databaseName)} onClick={() => openPhpMyAdmin(credential, 'export')}>SQL dışa aktar</Button>
+                  </>}<Button icon="settings" disabled={busy} onClick={() => setSelectedBinding(binding.id)}>Yönet</Button>
+                </div>
+              </td>
+            </tr>)}</tbody>
+        </table>
+      </div> : databaseResources !== undefined && <EmptyState icon="database" title={query ? 'Eşleşen veritabanı yok' : 'Bu siteye bağlı veritabanı yok'} detail={query ? 'Aramanızı değiştirin.' : 'Site kurulumu sırasında oluşturulan veya yönetici tarafından bu siteye bağlanan veritabanları burada görünür.'} />}
     </Section>}
     {chosen && <Modal title={chosen.binding.databaseName} onClose={() => setSelectedBinding(null)} busy={busy}><KeyValues items={[
       ['Site',domain.primaryDomain],['Veritabanı kullanıcısı',chosen.credential?.username ?? 'Yok'],['İzinler',chosen.credential?.privileges.join(', ') ?? 'Yok'],
-    ]} /><div className="ys-database-controls"><Button icon="archive" disabled={busy || !canManage || resourceBusy('database', chosen.binding.databaseName)} onClick={() => openAction(() => setBackupTarget({binding:chosen.binding,backupJob:null}))}>Yedek al</Button><Button icon="refresh" disabled={busy || !canManage || resourceBusy('database',chosen.binding.databaseName) || !backupsByBinding.get(chosen.binding.id)?.length} onClick={() => openAction(() => { const choices=backupsByBinding.get(chosen.binding.id); setRestoreTarget({binding:chosen.binding,choices,backupId:choices[0].id,preview:null,restoreJob:null}); })}>Geri yükle</Button>{chosen.credential && <><Button icon="check" disabled={busy || !canManage || resourceBusy('database',chosen.binding.databaseName)} onClick={() => openAction(() => setAccessTarget({binding:chosen.binding,credential:chosen.credential,preview:null,job:null}))}>Erişimi uygula</Button><Button icon="user" disabled={busy || !canManage || resourceBusy('database',chosen.binding.databaseName)} onClick={() => openAction(() => setRotateTarget({binding:chosen.binding,credential:chosen.credential,rotatedCredential:null}))}>Parolayı değiştir</Button><Button disabled={busy || !canManage || resourceBusy('database',chosen.binding.databaseName)} onClick={() => openAction(() => setRevokeTarget({binding:chosen.binding,credential:chosen.credential,deleteJob:null}))}>Kullanıcıyı kaldır…</Button></>}<Button icon="trash" variant="danger" disabled={busy || !canManage || resourceBusy('database',chosen.binding.databaseName)} onClick={() => openAction(() => previewDatabaseDrop(chosen.binding))}>Silme önizleme</Button></div><details className="ys-technical"><summary>Teknik ayrıntılar</summary><KeyValues items={[
+    ]} />
+    <div className="ys-database-controls">
+      <Button icon="archive" disabled={busy || !canManage || resourceBusy('database', chosen.binding.databaseName)} onClick={() => openAction(() => setBackupTarget({binding:chosen.binding,backupJob:null}))}>Yedek al</Button>
+      <Button icon="refresh" disabled={busy || !canManage || resourceBusy('database',chosen.binding.databaseName) || !backupsByBinding.get(chosen.binding.id)?.length} onClick={() => openAction(() => { const choices=backupsByBinding.get(chosen.binding.id); setRestoreTarget({binding:chosen.binding,choices,backupId:choices[0].id,preview:null,restoreJob:null}); })}>Geri yükle</Button>{chosen.credential && <>
+        <Button icon="check" disabled={busy || !canManage || resourceBusy('database',chosen.binding.databaseName)} onClick={() => openAction(() => setAccessTarget({binding:chosen.binding,credential:chosen.credential,preview:null,job:null}))}>Erişimi uygula</Button>
+        <Button icon="user" disabled={busy || !canManage || resourceBusy('database',chosen.binding.databaseName)} onClick={() => openAction(() => setRotateTarget({binding:chosen.binding,credential:chosen.credential,rotatedCredential:null}))}>Parolayı değiştir</Button>
+        <Button disabled={busy || !canManage || resourceBusy('database',chosen.binding.databaseName)} onClick={() => openAction(() => setRevokeTarget({binding:chosen.binding,credential:chosen.credential,deleteJob:null}))}>Kullanıcıyı kaldır…</Button>
+      </>}<Button icon="trash" variant="danger" disabled={busy || !canManage || resourceBusy('database',chosen.binding.databaseName)} onClick={() => openAction(() => previewDatabaseDrop(chosen.binding))}>Silme önizleme</Button>
+    </div>
+    <details className="ys-technical">
+      <summary>Teknik ayrıntılar</summary>
+      <KeyValues items={[
       ['Bağlantı kimliği',chosen.binding.id],['Site kullanıcısı',chosen.binding.unixUser],['Revizyon',chosen.binding.revision],
     ]} /></details>{!backupsByBinding.get(chosen.binding.id)?.length && <p className="ws-muted">Geri yükleme için önce bu site bağlantısına ait doğrulanmış bir yedek alın.</p>}</Modal>}
     {accessTarget && <ConfirmDialog title={accessTarget.credential ? 'Veritabanı erişimini uygula' : 'Veritabanı erişimi oluştur'} message={`${accessTarget.binding.databaseName} için siteye özel bir kullanıcı hazırlanacak ve izinleri sunucuya uygulanacak. Parola sunucuda güvenle saklanır.`} confirmation={accessTarget.binding.databaseName} confirmLabel={accessTarget.credential ? 'Erişim uygulamasına devam et' : 'Erişimi oluştur'} busy={busy} error={error} onCancel={() => { if(!busy) {setAccessTarget(null);void load();} }} onConfirm={applyAccess} />}

@@ -108,13 +108,13 @@ test('File tree, editor, and modal accessibility with keyboard navigation & ARIA
   assert.match(filesPanel, /role="cell"/);
 
   // File editor: accessible textarea with aria-label, line numbers hidden from screen readers, keyboard save
-  assert.match(filesPanel, /<textarea aria-label=\{`\$\{editor\.name\} içeriği`\}/);
+  assert.match(filesPanel, /<textarea\s+aria-label=\{`\$\{editor\.name\} içeriği`\}/);
   assert.match(filesPanel, /<pre ref=\{lineNumbers\} aria-hidden="true">/);
   assert.match(filesPanel, /event\.key\.toLowerCase\(\) === 's'/);
 
   // Permissions modal table: role="table", aria-label, th scope="col"
   assert.match(filesPanel, /<table className="yf-permissions-grid" role="table" aria-label="Dosya izinleri">/);
-  assert.match(filesPanel, /<tr role="row"><th scope="col">Kullanıcı<\/th>/);
+  assert.match(filesPanel, /<tr role="row">\s*<th scope="col">Kullanıcı<\/th>/);
 
   // Modal dialog: aria-modal="true", Tab focus trap, Escape key handling, and focus return
   assert.match(panelKit, /aria-modal="true"/);
@@ -143,7 +143,6 @@ test('Site navigation: task groups and tools navigation wrap gracefully without 
 
 test('Mail and Database tables have full ARIA semantics and scroll containment', async () => {
   const mailboxes = await readSrc('workspace/MailboxesPanel.jsx');
-  const aliases = await readSrc('workspace/MailAliasesPanel.jsx');
   const mailOps = await readSrc('workspace/MailOperationsPanel.jsx');
   const mailConfig = await readSrc('workspace/MailConfigurationPanel.jsx');
   const mailDkim = await readSrc('workspace/MailDkimDiagnosticsPanel.jsx');
@@ -159,12 +158,14 @@ test('Mail and Database tables have full ARIA semantics and scroll containment',
   assert.match(rendered, /<table [^>]*role="table"[^>]*aria-label="E-posta hesapları"/);
   assert.match(rendered, /<thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">Adres<\/th>/);
   assert.match(rendered, /<td role="cell"><strong>owned@example.test<\/strong>/);
-  assert.match(mailboxes, /<tr key=\{mailbox\.id\} role="row"><td role="cell">/);
+  assert.match(mailboxes, /<tr key=\{mailbox\.id\} role="row">\s*<td role="cell">/);
 
   // Aliases table
-  assert.match(aliases, /<table className="ws-table" role="table" aria-label="Mail aliasları">/);
-  assert.match(aliases, /<tr role="row"><th scope="col">Kaynak<\/th>/);
-  assert.match(aliases, /<tr key=\{alias\.id\} role="row"><td role="cell">/);
+  const { default: MailAliasesPanel } = await import('../src/workspace/MailAliasesPanel.jsx');
+  const aliasesHtml = renderToStaticMarkup(createElement(PanelSessionProvider, { session: { user: { id: 'fixture-owner', role: 'owner' } } }, createElement(MailAliasesPanel, { domain: { id: 'fixture-domain', managementMode: 'local' }, aliases: [{ id: 'fixture-alias', source: 'info@example.test', destinations: ['owned@example.test'], enabled: true, revision: 2 }] })));
+  assert.match(aliasesHtml, /<table class="ws-table" role="table" aria-label="Mail aliasları">/);
+  assert.match(aliasesHtml, /<tr role="row"><th scope="col" role="columnheader">Kaynak<\/th>/);
+  assert.match(aliasesHtml, /<tr role="row"><td role="cell"><strong>info@example.test<\/strong>/);
 
   // Mail operations tables
   assert.match(mailOps, /<table className="ws-table" role="table" aria-label="Mail protokolleri">/);
@@ -175,9 +176,9 @@ test('Mail and Database tables have full ARIA semantics and scroll containment',
   assert.match(mailDkim, /<table className="ws-table" role="table" aria-label="DKIM tanılamaları">/);
 
   // Database table
-  // Table header/body ARIA markup comes from PanelKit Table (panelkit-form-table-tabs.test.js).
-  assert.match(databases, /<Table label="Veritabanları" className="ws-table ws-db-table" columns=\{DATABASE_COLUMNS\}>/);
-  assert.match(databases, /const DATABASE_COLUMNS = \['Veritabanı', /);
+  assert.match(databases, /<table className="ws-table ws-db-table" role="table" aria-label="Veritabanları">/);
+  assert.match(databases, /<thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">Veritabanı<\/th>/);
+  assert.match(databases, /<tbody role="rowgroup">/);
   assert.match(databases, /<tr key=\{database\.name\} role="row"><td role="cell" data-label="Veritabanı">/);
 
   // Site consumption resource table

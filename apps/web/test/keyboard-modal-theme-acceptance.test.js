@@ -145,7 +145,7 @@ test('Panels conform to common theme tokens and contain wide tables', () => {
 
   // File workspace styles use semantic tokens without raw hardcoded hex
   assert.doesNotMatch(fileWorkspaceCss, /#[0-9a-fA-F]{3,8}/);
-  assert.match(filesPanel, /<div className="ws-table-scroll"><table className="yf-table"/);
+  assert.match(filesPanel, /<div className="ws-table-scroll">\s*<table className="yf-table"/);
 
   // AI Drawer and Settings panel use semantic tokens
   assert.doesNotMatch(aiDrawer, /#[0-9a-fA-F]{3,8}/);

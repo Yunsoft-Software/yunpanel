@@ -113,6 +113,79 @@ export default function DockerConfigPanel({ data, onChanged }) {
   <Section title="Compose environment" description="Servis ortam değişkenlerini KEY=value biçiminde tanımlayın."><div className="ws-section-body"><KeyValues items={[
     ['Revizyon', environment.revision], ['Değişken', environment.variableCount ?? environment.keys?.length ?? 0], ['Anahtarlar', environment.keys?.join(', ') || '—'], ['Son değişiklik', environment.updatedAt ?? '—'],
   ]} /><form className="ws-form" onSubmit={requestEnvironmentReplace}><fieldset disabled={busy}><label>Tam environment listesi<textarea rows={9} value={environmentText} onChange={(event) => setEnvironmentText(event.target.value)} spellCheck={false} placeholder="NODE_ENV=production\nAPI_URL=https://example.test" /></label><Button type="submit" disabled={busy}>Environment’ı değiştir</Button></fieldset></form></div></Section>
-  <Section title="Registry credentials" description="Özel konteyner kayıt defterleri (GHCR, Docker Hub, özel registry) için erişim bilgileri."><div className="ws-section-body">{credentials.length > 0 && <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Registry</th><th>Durum</th><th>Revizyon</th><th>Güncellendi</th></tr></thead><tbody>{credentials.map((item) => <tr key={item.registryHost}><td><strong>{item.registryHost}</strong></td><td><Badge state={item.configured ? 'active' : 'unknown'}>{item.configured ? 'Yapılandırıldı' : 'Yok'}</Badge></td><td>{item.revision}</td><td>{item.updatedAt ?? '—'}</td></tr>)}</tbody></table></div>}<form className="ws-form" onSubmit={saveCredential}><fieldset disabled={busy}><div className="ws-form-grid"><label>Registry host<input value={credential.registryHost} onChange={(event) => setCredential({ ...credential, registryHost: event.target.value })} required placeholder="ghcr.io" autoCapitalize="none" spellCheck={false} /></label><label>Username<input value={credential.username} onChange={(event) => setCredential({ ...credential, username: event.target.value })} required autoComplete="off" /></label><label>Secret / token<input type="password" value={credential.secret} onChange={(event) => setCredential({ ...credential, secret: event.target.value })} required autoComplete="new-password" /></label></div><Button type="submit" disabled={busy}>Credential kaydet / rotate et</Button></fieldset></form></div></Section>
+  <Section
+    title="Registry credentials"
+    description="Özel konteyner kayıt defterleri (GHCR, Docker Hub, özel registry) için erişim bilgileri."
+  >
+    <div className="ws-section-body">
+      {credentials.length > 0 && (
+        <div className="ws-table-scroll">
+          <table className="ws-table">
+            <thead>
+              <tr>
+                <th>Registry</th>
+                <th>Durum</th>
+                <th>Revizyon</th>
+                <th>Güncellendi</th>
+              </tr>
+            </thead>
+            <tbody>
+              {credentials.map((item) => (
+                <tr key={item.registryHost}>
+                  <td>
+                    <strong>{item.registryHost}</strong>
+                  </td>
+                  <td>
+                    <Badge state={item.configured ? 'active' : 'unknown'}>{item.configured ? 'Yapılandırıldı' : 'Yok'}</Badge>
+                  </td>
+                  <td>{item.revision}</td>
+                  <td>{item.updatedAt ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <form className="ws-form" onSubmit={saveCredential}>
+        <fieldset disabled={busy}>
+          <div className="ws-form-grid">
+            <label>
+              Registry host
+              <input
+                value={credential.registryHost}
+                onChange={(event) => setCredential({ ...credential, registryHost: event.target.value })}
+                required
+                placeholder="ghcr.io"
+                autoCapitalize="none"
+                spellCheck={false}
+              />
+            </label>
+            <label>
+              Username
+              <input
+                value={credential.username}
+                onChange={(event) => setCredential({ ...credential, username: event.target.value })}
+                required
+                autoComplete="off"
+              />
+            </label>
+            <label>
+              Secret / token
+              <input
+                type="password"
+                value={credential.secret}
+                onChange={(event) => setCredential({ ...credential, secret: event.target.value })}
+                required
+                autoComplete="new-password"
+              />
+            </label>
+          </div>
+          <Button type="submit" disabled={busy}>
+            Credential kaydet / rotate et
+          </Button>
+        </fieldset>
+      </form>
+    </div>
+  </Section>
   {confirm && <ConfirmDialog title={confirm.title} message={confirm.message} confirmation={confirm.value} busy={busy} error={error} onCancel={() => setConfirm(null)} onConfirm={applyConfirmed} confirmLabel="Değişikliği uygula" />}</>;
 }

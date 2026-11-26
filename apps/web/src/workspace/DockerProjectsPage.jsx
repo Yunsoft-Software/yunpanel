@@ -18,9 +18,11 @@ import DockerLifecyclePanel from './DockerLifecyclePanel.jsx';
 import DockerProjectCreateDialog from './DockerProjectCreateDialog.jsx';
 import DockerVolumesPanel from './DockerVolumesPanel.jsx';
 import LazyTerminalPanel from './LazyTerminalPanel.jsx';
-import { Badge, Button, DEFAULT_DOCKER_STACK_TEMPLATES, EmptyState, KeyValues, LinkButton, PageHeading, Section } from './PanelKit.jsx';
+import { Badge, Button, DEFAULT_DOCKER_STACK_TEMPLATES, EmptyState, KeyValues, LinkButton, PageHeading, Section, Table } from './PanelKit.jsx';
 import { formatDate } from './site-model.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
+
+const HISTORY_COLUMNS = ['İşlem', 'Durum', 'Başlangıç', 'İş'];
 
 function useAsyncResource(loader, dependencies = [], { enabled = true } = {}) {
   const [state, setState] = useState({ status: enabled ? 'loading' : 'idle', data: null, error: null });
@@ -590,7 +592,7 @@ function LogsPanel({ project }) {
 function HistoryPanel({ projectId }) {
   const history = useAsyncResource(() => getDockerHistory(projectId), [projectId]);
   const items = Array.isArray(history.data) ? history.data : [];
-  return <Section title="Deploy / lifecycle geçmişi" actions={<Button icon="refresh" onClick={history.refresh}>Yenile</Button>}><LoadNotice resource={history} label="Docker geçmişi" />{items.length > 0 ? <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>İşlem</th><th>Durum</th><th>Başlangıç</th><th>İş</th></tr></thead><tbody>{items.slice(0, 30).map((job) => <tr key={job.id}><td>{job.operation ?? job.type}</td><td><Badge state={job.status}>{job.status}</Badge></td><td>{formatDate(job.createdAt)}</td><td><code>{job.id}</code></td></tr>)}</tbody></table></div> : history.status === 'ready' && <EmptyState icon="clock" title="Henüz lifecycle işi yok" detail="Build, pull, start, stop veya restart işlemleri burada görünecek." />}</Section>;
+  return <Section title="Deploy / lifecycle geçmişi" actions={<Button icon="refresh" onClick={history.refresh}>Yenile</Button>}><LoadNotice resource={history} label="Docker geçmişi" />{items.length > 0 ? <Table label="Docker işlem geçmişi" columns={HISTORY_COLUMNS}>{items.slice(0, 30).map((job) => <tr key={job.id} role="row"><td role="cell">{job.operation ?? job.type}</td><td role="cell"><Badge state={job.status}>{job.status}</Badge></td><td role="cell">{formatDate(job.createdAt)}</td><td role="cell"><code>{job.id}</code></td></tr>)}</Table> : history.status === 'ready' && <EmptyState icon="clock" title="Henüz lifecycle işi yok" detail="Build, pull, start, stop veya restart işlemleri burada görünecek." />}</Section>;
 }
 
 function DockerProjectDetail({ projectId }) {
@@ -604,9 +606,105 @@ function DockerProjectDetail({ projectId }) {
   );
   const storageCount = project?.services?.reduce((total, service) => total + storageMounts(service).length, 0) ?? 0;
   const refresh = () => { detail.refresh(); storageBackup.refresh(); };
-  return <><nav className="ws-breadcrumb"><Link to="/docker">Docker</Link><span>/ {project?.projectName ?? projectId}</span></nav><PageHeading title={project?.projectName ? project.projectName : 'Docker projesi'} description="Compose desired state, depolama yedekleme politikası, yayınlanan portlar, runtime ve işlem geçmişi." actions={<Button className="ws-icon-btn" icon="refresh" aria-label="Yenile" title="Yenile" onClick={refresh} />} /><LoadNotice resource={detail} label="Docker proje detayı" />{project && <><Section title="Desired state"><div className="ws-section-body"><KeyValues items={[
-    ['Revizyon', project.revision], ['Compose SHA-256', project.composeSha256], ['Servis', project.services?.length ?? 0], ['Network', project.networks?.length ?? 0], ['Named volume', project.volumes?.length ?? 0], ['Mount', storageCount], ['Env revizyonu', data.environment?.revision ?? 0], ['Registry credential', data.credentials?.length ?? 0],
-  ]} /><div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Servis</th><th>Kaynak</th><th>Inner Port (Container targetPort)</th><th>Outer Port (Host publishedPort)</th><th>Published ports</th><th>Domain / Subdomain Proxy Hedefi</th></tr></thead><tbody>{project.services?.map((service) => <tr key={service.name}><td><strong>{service.name}</strong></td><td>{service.imageConfigured ? 'image' : service.buildConfigured ? 'build' : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <span key={`in:${portLabel(port)}`} className="yp-port-mapping-badge">Inner: {port.targetPort}/{port.protocol ?? 'tcp'}</span>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <span key={`out:${portLabel(port)}`} className="yp-port-mapping-badge">Outer: {(port.hostIp ?? '127.0.0.1')}:{port.publishedPort}</span>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <small key={portLabel(port)}>{portLabel(port)}</small>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <code key={`proxy:${portLabel(port)}`}>{innerOuterPortLabel(port)}</code>) : '—'}</td></tr>)}</tbody></table></div></div></Section><LoadNotice resource={storageBackup} label="Docker storage backup policy" /><StoragePanel project={project} backup={storageBackup.data} /><DockerVolumesPanel project={project} onChanged={refresh} /><DockerConfigPanel data={data} onChanged={detail.refresh} /><DockerLifecyclePanel project={project} onChanged={detail.refresh} /><Section title="Website / Nginx diagnosis" description="Konteyner servislerinin web sitesi ve alan adı yönlendirme durumu."><DiagnosisPanel project={project} /></Section><RuntimePanel key={project.id} projectId={project.id} projectRevision={project.revision} /><LogsPanel project={project} /><HistoryPanel projectId={project.id} /></>}</>;
+  return (
+    <>
+      <nav className="ws-breadcrumb">
+        <Link to="/docker">Docker</Link>
+        <span>/ {project?.projectName ?? projectId}</span>
+      </nav>
+      <PageHeading
+        title={project?.projectName ? project.projectName : 'Docker projesi'}
+        description="Compose desired state, depolama yedekleme politikası, yayınlanan portlar, runtime ve işlem geçmişi."
+        actions={<Button className="ws-icon-btn" icon="refresh" aria-label="Yenile" title="Yenile" onClick={refresh} />}
+      />
+      <LoadNotice resource={detail} label="Docker proje detayı" />
+      {project && (
+        <>
+          <Section title="Desired state">
+            <div className="ws-section-body">
+              <KeyValues
+                items={[
+                  ['Revizyon', project.revision],
+                  ['Compose SHA-256', project.composeSha256],
+                  ['Servis', project.services?.length ?? 0],
+                  ['Network', project.networks?.length ?? 0],
+                  ['Named volume', project.volumes?.length ?? 0],
+                  ['Mount', storageCount],
+                  ['Env revizyonu', data.environment?.revision ?? 0],
+                  ['Registry credential', data.credentials?.length ?? 0],
+                ]}
+              />
+              <div className="ws-table-scroll">
+                <table className="ws-table">
+                  <thead>
+                    <tr>
+                      <th>Servis</th>
+                      <th>Kaynak</th>
+                      <th>Inner Port (Container targetPort)</th>
+                      <th>Outer Port (Host publishedPort)</th>
+                      <th>Published ports</th>
+                      <th>Domain / Subdomain Proxy Hedefi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {project.services?.map((service) => (
+                      <tr key={service.name}>
+                        <td>
+                          <strong>{service.name}</strong>
+                        </td>
+                        <td>{service.imageConfigured ? 'image' : service.buildConfigured ? 'build' : '—'}</td>
+                        <td>
+                          {publishedPorts(service).length
+                            ? publishedPorts(service).map((port) => (
+                                <span key={`in:${portLabel(port)}`} className="yp-port-mapping-badge">
+                                  Inner: {port.targetPort}/{port.protocol ?? 'tcp'}
+                                </span>
+                              ))
+                            : '—'}
+                        </td>
+                        <td>
+                          {publishedPorts(service).length
+                            ? publishedPorts(service).map((port) => (
+                                <span key={`out:${portLabel(port)}`} className="yp-port-mapping-badge">
+                                  Outer: {port.hostIp ?? '127.0.0.1'}:{port.publishedPort}
+                                </span>
+                              ))
+                            : '—'}
+                        </td>
+                        <td>
+                          {publishedPorts(service).length
+                            ? publishedPorts(service).map((port) => <small key={portLabel(port)}>{portLabel(port)}</small>)
+                            : '—'}
+                        </td>
+                        <td>
+                          {publishedPorts(service).length
+                            ? publishedPorts(service).map((port) => (
+                                <code key={`proxy:${portLabel(port)}`}>{innerOuterPortLabel(port)}</code>
+                              ))
+                            : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </Section>
+          <LoadNotice resource={storageBackup} label="Docker storage backup policy" />
+          <StoragePanel project={project} backup={storageBackup.data} />
+          <DockerVolumesPanel project={project} onChanged={refresh} />
+          <DockerConfigPanel data={data} onChanged={detail.refresh} />
+          <DockerLifecyclePanel project={project} onChanged={detail.refresh} />
+          <Section title="Website / Nginx diagnosis" description="Konteyner servislerinin web sitesi ve alan adı yönlendirme durumu.">
+            <DiagnosisPanel project={project} />
+          </Section>
+          <RuntimePanel key={project.id} projectId={project.id} projectRevision={project.revision} />
+          <LogsPanel project={project} />
+          <HistoryPanel projectId={project.id} />
+        </>
+      )}
+    </>
+  );
 }
 
 export default function DockerProjectsPage() {

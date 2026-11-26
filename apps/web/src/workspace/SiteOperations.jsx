@@ -186,7 +186,39 @@ export function DomainOperations({ domain }) {
       ['Yayın durumu', !pendingPublication ? 'Yayında (Güncel)' : 'Yapılandırma yayına uygulanmayı bekliyor'],
       ['Son etkinleştirme', formatDate(domain.lastAppliedAt)],
     ]} />
-    <div className="ws-section-body"><h3>Alt alan adları</h3>{children.length ? <div className="yp-subdomain-tree" role="tree" aria-label="Alt alan adları">{children.map((item, index) => <div key={item.id} className="yp-subdomain-branch" role="treeitem"><div className="yp-subdomain-branch-main"><span className="yp-tree-connector" aria-hidden="true">{index === children.length - 1 ? '└─' : '├─'}</span><Link to={siteHref(item.id)}>{item.primaryDomain}</Link><FileRootBadge path={resolveSubdomainSharedFileRoot(domain.primaryDomain, item.primaryDomain)} isSubdomain parentDomain={domain.primaryDomain} /></div><div className="ws-actions"><Link to={siteHref(item.id, 'files')}>Dosyalar</Link><Link to={siteHref(item.id, 'databases')}>Veritabanları</Link><Link to={siteHref(item.id, 'runtime')}>Uygulama / Docker</Link></div></div>)}</div> : <p className="ws-muted">Bu kayda bağlı alt alan adı bulunmuyor.</p>}<p className="ws-muted">Alt alan adlarının dosya kökleri ana domain dizini altında (<code>/subdomains/&lt;alt-alan&gt;</code>) ortak yönetilir. Bu işlem DNS sağlayıcınızda kayıt oluşturmaz. A/AAAA/CNAME kayıtları ayrı yönetilir.</p></div>
+    <div className="ws-section-body">
+      <h3>Alt alan adları</h3>
+      {children.length ? (
+        <div className="yp-subdomain-tree" role="tree" aria-label="Alt alan adları">
+          {children.map((item, index) => (
+            <div key={item.id} className="yp-subdomain-branch" role="treeitem">
+              <div className="yp-subdomain-branch-main">
+                <span className="yp-tree-connector" aria-hidden="true">
+                  {index === children.length - 1 ? '└─' : '├─'}
+                </span>
+                <Link to={siteHref(item.id)}>{item.primaryDomain}</Link>
+                <FileRootBadge
+                  path={resolveSubdomainSharedFileRoot(domain.primaryDomain, item.primaryDomain)}
+                  isSubdomain
+                  parentDomain={domain.primaryDomain}
+                />
+              </div>
+              <div className="ws-actions">
+                <Link to={siteHref(item.id, 'files')}>Dosyalar</Link>
+                <Link to={siteHref(item.id, 'databases')}>Veritabanları</Link>
+                <Link to={siteHref(item.id, 'runtime')}>Uygulama / Docker</Link>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="ws-muted">Bu kayda bağlı alt alan adı bulunmuyor.</p>
+      )}
+      <p className="ws-muted">
+        Alt alan adlarının dosya kökleri ana domain dizini altında (<code>/subdomains/&lt;alt-alan&gt;</code>) ortak yönetilir. Bu işlem
+        DNS sağlayıcınızda kayıt oluşturmaz. A/AAAA/CNAME kayıtları ayrı yönetilir.
+      </p>
+    </div>
     <details className="ws-section ws-disclosure"><summary>Tanılama ve teknik ayrıntılar</summary><KeyValues items={[
       ['Hedef revizyon', domain.desiredRevision ?? '—'],
       ['Uygulanan revizyon', domain.appliedRevision ?? '—'],

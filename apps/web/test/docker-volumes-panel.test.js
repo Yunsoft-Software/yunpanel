@@ -358,7 +358,7 @@ test('DockerVolumesPanel wires single-volume delete flow without bulk/prune/forc
   assert.match(pageSource, /import DockerVolumesPanel from '\.\/DockerVolumesPanel\.jsx';/);
   assert.match(
     pageSource,
-    /<StoragePanel project=\{project\} backup=\{storageBackup\.data\} \/><DockerVolumesPanel project=\{project\} onChanged=\{refresh\} \/>/,
+    /<StoragePanel project=\{project\} backup=\{storageBackup\.data\} \/>\s*<DockerVolumesPanel project=\{project\} onChanged=\{refresh\} \/>/,
   );
   assert.match(pageSource, /<DockerLifecyclePanel project=\{project\} onChanged=\{detail\.refresh\} \/>/);
 });

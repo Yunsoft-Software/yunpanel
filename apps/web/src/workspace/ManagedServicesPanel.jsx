@@ -159,7 +159,57 @@ export default function ManagedServicesPanel({ server }) {
         const serviceStatus = managedServiceStatus(service);
         const actions = managedServiceActions(service, services);
         const version = managedServiceVersion(service);
-        return <tr key={service.id}><td><strong>{service.label ?? service.id}</strong><small>{service.units?.map((unit) => typeof unit === 'string' ? unit : (unit?.unit || unit?.name || unit?.id || (typeof unit === 'object' ? JSON.stringify(unit) : '—'))).join(', ') ?? '—'}</small>{actions.conflict && <small>{actions.conflict}</small>}</td><td className="ws-col-nowrap">{managedServiceCategoryLabel(service.category)}</td><td className="ws-col-nowrap">{service.installed ? (version ?? 'Kurulu') : 'Kurulu değil'}</td><td className="ws-col-nowrap"><Badge state={serviceStatus.state}>{serviceStatus.label}</Badge></td><td className="ws-row-end ws-col-nowrap"><div className="ws-actions ws-actions-nowrap" style={{ justifyContent: 'flex-end' }}>{actions.install && <Button variant="primary" disabled={systemBusy} onClick={() => setSelection({ kind: 'install', service })}>Kur</Button>}{canManage && service.id === 'phpmyadmin' && service.installed && <Button disabled={systemBusy} onClick={() => setSelection({ kind: 'install', service })}>Giriş bağlantısını onar</Button>}{actions.start && <Button disabled={systemBusy} onClick={() => setSelection({ kind: 'control', action: 'start', service })}>Başlat</Button>}{actions.restart && <Button disabled={systemBusy} onClick={() => setSelection({ kind: 'control', action: 'restart', service })}>Yeniden başlat</Button>}{actions.stop && <Button variant="danger" disabled={systemBusy} onClick={() => setSelection({ kind: 'control', action: 'stop', service })}>Durdur</Button>}</div></td></tr>;
+        return (
+          <tr key={service.id}>
+            <td>
+              <strong>{service.label ?? service.id}</strong>
+              <small>
+                {service.units
+                  ?.map((unit) =>
+                    typeof unit === 'string'
+                      ? unit
+                      : unit?.unit || unit?.name || unit?.id || (typeof unit === 'object' ? JSON.stringify(unit) : '—'),
+                  )
+                  .join(', ') ?? '—'}
+              </small>
+              {actions.conflict && <small>{actions.conflict}</small>}
+            </td>
+            <td className="ws-col-nowrap">{managedServiceCategoryLabel(service.category)}</td>
+            <td className="ws-col-nowrap">{service.installed ? (version ?? 'Kurulu') : 'Kurulu değil'}</td>
+            <td className="ws-col-nowrap">
+              <Badge state={serviceStatus.state}>{serviceStatus.label}</Badge>
+            </td>
+            <td className="ws-row-end ws-col-nowrap">
+              <div className="ws-actions ws-actions-nowrap" style={{ justifyContent: 'flex-end' }}>
+                {actions.install && (
+                  <Button variant="primary" disabled={systemBusy} onClick={() => setSelection({ kind: 'install', service })}>
+                    Kur
+                  </Button>
+                )}
+                {canManage && service.id === 'phpmyadmin' && service.installed && (
+                  <Button disabled={systemBusy} onClick={() => setSelection({ kind: 'install', service })}>
+                    Giriş bağlantısını onar
+                  </Button>
+                )}
+                {actions.start && (
+                  <Button disabled={systemBusy} onClick={() => setSelection({ kind: 'control', action: 'start', service })}>
+                    Başlat
+                  </Button>
+                )}
+                {actions.restart && (
+                  <Button disabled={systemBusy} onClick={() => setSelection({ kind: 'control', action: 'restart', service })}>
+                    Yeniden başlat
+                  </Button>
+                )}
+                {actions.stop && (
+                  <Button variant="danger" disabled={systemBusy} onClick={() => setSelection({ kind: 'control', action: 'stop', service })}>
+                    Durdur
+                  </Button>
+                )}
+              </div>
+            </td>
+          </tr>
+        );
       })}</tbody></table></div>}
     </Section>
     {selection && copy && <ConfirmDialog title={copy.title} message={copy.message} busy={busy} error={error} onCancel={() => { if (!busy) setSelection(null); }} onConfirm={performSelection} confirmLabel={copy.confirmLabel} />}

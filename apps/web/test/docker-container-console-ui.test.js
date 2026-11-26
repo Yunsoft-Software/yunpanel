@@ -231,7 +231,7 @@ test('DockerProjectsPage wires Owner-only container console via LazyTerminalPane
   assert.match(source, /title="Konteyner konsolu"/);
 
   // Preserve existing panels untouched
-  assert.match(source, /<StoragePanel project=\{project\} backup=\{storageBackup\.data\} \/><DockerVolumesPanel project=\{project\} onChanged=\{refresh\} \/>/);
+  assert.match(source, /<StoragePanel project=\{project\} backup=\{storageBackup\.data\} \/>\s*<DockerVolumesPanel project=\{project\} onChanged=\{refresh\} \/>/);
   assert.match(source, /<DockerLifecyclePanel project=\{project\} onChanged=\{detail\.refresh\} \/>/);
 
   // Strictly no Cockpit fallback, host terminal fallback, or root exec option

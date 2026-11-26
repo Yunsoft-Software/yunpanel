@@ -362,7 +362,23 @@ function WebsiteForm({ parentId }) {
             </div>
           </div>
           <div className="ws-form-grid" style={{ marginTop: 16 }}>
-          <label>Site türü<select aria-label="Site türü" value={form.sourceMode} onChange={(event) => update('sourceMode', event.target.value)}><option value="new_php">PHP / WordPress — dosya yükleyerek başla</option><option value="new_static_upload">Statik site — dosya yükleyerek başla</option><option value="new_node">Node.js — Git ile yayınla</option><option value="new_static">Gelişmiş: statik siteyi Git ile yayınla</option><option value="new_python">Python (FastAPI / Django / Flask) — Git ile yayınla</option><option value="docker_compose">Docker / Compose Proxy</option><option value="existing_node">Kullanılmamış mevcut Node.js uygulaması</option><option value="existing_static">Kullanılmamış mevcut statik uygulama</option><option value="existing_managed_compose">Mevcut Compose Projesi</option><option value="existing_docker">Mevcut Docker Konteyner İş Yükü</option><option value="shared_website">Mevcut Website’i paylaş (shared-site)</option><option value="external_proxy">Gelişmiş: yerel proxy</option></select></label>
+          <label>
+            Site türü
+            <select aria-label="Site türü" value={form.sourceMode} onChange={(event) => update('sourceMode', event.target.value)}>
+              <option value="new_php">PHP / WordPress — dosya yükleyerek başla</option>
+              <option value="new_static_upload">Statik site — dosya yükleyerek başla</option>
+              <option value="new_node">Node.js — Git ile yayınla</option>
+              <option value="new_static">Gelişmiş: statik siteyi Git ile yayınla</option>
+              <option value="new_python">Python (FastAPI / Django / Flask) — Git ile yayınla</option>
+              <option value="docker_compose">Docker / Compose Proxy</option>
+              <option value="existing_node">Kullanılmamış mevcut Node.js uygulaması</option>
+              <option value="existing_static">Kullanılmamış mevcut statik uygulama</option>
+              <option value="existing_managed_compose">Mevcut Compose Projesi</option>
+              <option value="existing_docker">Mevcut Docker Konteyner İş Yükü</option>
+              <option value="shared_website">Mevcut Website’i paylaş (shared-site)</option>
+              <option value="external_proxy">Gelişmiş: yerel proxy</option>
+            </select>
+          </label>
           {['new_node', 'new_static', 'new_python'].includes(form.sourceMode) && <><label>GitHub repository<input type="url" required placeholder="https://github.com/organization/repository" value={form.repositoryUrl} onChange={(event) => update('repositoryUrl', event.target.value)} /></label><label>Branch<input value={form.branch} required onChange={(event) => update('branch', event.target.value)} /></label></>}
           {['new_node', 'new_python'].includes(form.sourceMode) && <><label>Başlangıç dosyası<input value={form.entryFile} required onChange={(event) => update('entryFile', event.target.value)} /></label><label>Sağlık kontrolü yolu<input value={form.healthPath} required onChange={(event) => update('healthPath', event.target.value)} /></label></>}
           {form.sourceMode === 'new_static' && <label>Build çıktı klasörü<input value={form.outputDir} required onChange={(event) => update('outputDir', event.target.value)} /><span className="ws-field-hint">npm ci ve npm run build kullanılır; index.html sağlık dosyasıdır.</span></label>}
@@ -373,7 +389,18 @@ function WebsiteForm({ parentId }) {
           {form.sourceMode === 'existing_docker' && <label>Docker iş yükü kimliği<input value={form.dockerWorkloadId} required placeholder="docker-workload-id" onChange={(event) => update('dockerWorkloadId', event.target.value)} /></label>}
           {form.sourceMode === 'new_static_upload' && <p className="ws-muted">HTML, CSS ve görsellerinizi Dosya Yöneticisi ile yükleyin. Git deposu veya derleme komutu gerekmez.</p>}
           {form.sourceMode === 'new_php' && <p className="ws-muted">Siteniz dosya yüklemeye hazır olarak açılır. Ardından Dosya Yöneticisi veya WordPress aracından devam edebilirsiniz.</p>}
-        </div>{['new_php', 'new_node', 'new_python', 'new_static', 'new_static_upload', 'existing_node', 'existing_static'].includes(form.sourceMode) && <label className="ws-check" style={{ marginTop: 12 }}><input type="checkbox" checked={Boolean(form.initialDatabase)} onChange={(event) => update('initialDatabase', event.target.checked)} /><span><strong>Bu {form.mode === 'subdomain' ? 'alt alan adı' : 'site'} için otomatik veritabanı oluştur</strong><small>Veritabanı ve kullanıcı bilgileri kurulum sırasında hazırlanır.</small></span></label>}{existingType && !eligible.length && applications.status === 'ready' && websites.status === 'ready' && <p className="ws-muted">Bu sunucuda kullanılmamış uygun uygulama bulunmuyor. Yeni Application oluşturma seçeneklerinden birini kullanın.</p>}{sharedMode && !sharedWebsites.length && applications.status === 'ready' && websites.status === 'ready' && <p className="ws-muted">Canonical routing hedefi paylaşılabilecek yerel Website bulunmuyor.</p>}{selectedSharedWebsite && <div className="ws-notice ws-notice-warn"><div><strong>{selectedSharedDomain?.primaryDomain ?? selectedSharedWebsite.name} Website bağı paylaşılacak</strong><p>Website <code>{selectedSharedWebsite.id}</code> · runtime {selectedSharedWebsite.runtimeType} · Unix kullanıcı {selectedSharedWebsite.unixUser ?? 'uygulanamaz'}. Bu seçim yeni Application, Unix user, SFTP scope veya mailbox oluşturmaz.</p></div></div>}</div>
+        </div>{['new_php', 'new_node', 'new_python', 'new_static', 'new_static_upload', 'existing_node', 'existing_static'].includes(form.sourceMode) && <label className="ws-check" style={{ marginTop: 12 }}>
+          <input type="checkbox" checked={Boolean(form.initialDatabase)} onChange={(event) => update('initialDatabase', event.target.checked)} />
+            <span>
+              <strong>Bu {form.mode === 'subdomain' ? 'alt alan adı' : 'site'} için otomatik veritabanı oluştur</strong>
+              <small>Veritabanı ve kullanıcı bilgileri kurulum sırasında hazırlanır.</small>
+            </span>
+          </label>}{existingType && !eligible.length && applications.status === 'ready' && websites.status === 'ready' && <p className="ws-muted">Bu sunucuda kullanılmamış uygun uygulama bulunmuyor. Yeni Application oluşturma seçeneklerinden birini kullanın.</p>}{sharedMode && !sharedWebsites.length && applications.status === 'ready' && websites.status === 'ready' && <p className="ws-muted">Canonical routing hedefi paylaşılabilecek yerel Website bulunmuyor.</p>}{selectedSharedWebsite && <div className="ws-notice ws-notice-warn">
+            <div>
+              <strong>{selectedSharedDomain?.primaryDomain ?? selectedSharedWebsite.name} Website bağı paylaşılacak</strong>
+              <p>Website <code>{selectedSharedWebsite.id}</code> · runtime {selectedSharedWebsite.runtimeType} · Unix kullanıcı {selectedSharedWebsite.unixUser ?? 'uygulanamaz'}. Bu seçim yeni Application, Unix user, SFTP scope veya mailbox oluşturmaz.</p>
+            </div>
+          </div>}</div>
         </>}
         {step === 3 && <>
         <KeyValues items={[["Alan adı", form.mode === 'subdomain' ? `${form.prefix}.${parent?.primaryDomain ?? ''}` : form.primaryDomain], ...(form.mode === 'subdomain' ? [["Dosya dizini", resolveSubdomainSharedFileRoot(parent?.primaryDomain, form.prefix)]] : []), ["Site sahibi", form.ownerMode === 'customer' ? customers.find(account => account.id === form.customerId)?.username : form.ownerMode === 'new_admin' ? form.adminEmail : 'Yönetim hesabım'], ["Barındırma", form.sourceMode === 'new_php' ? 'PHP / WordPress' : form.sourceMode === 'new_node' ? 'Node.js' : form.sourceMode === 'new_python' ? 'Python API' : ['new_static', 'new_static_upload'].includes(form.sourceMode) ? 'Statik site' : ['existing_managed_compose', 'docker_compose'].includes(form.sourceMode) ? `Docker Compose (${form.dockerServiceName}:${form.dockerTargetPort})` : 'Mevcut hedef']]} />
