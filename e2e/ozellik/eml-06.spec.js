@@ -367,12 +367,12 @@ print(len(active))
     await applyPreviewBtn.click();
 
     // Onay modalını doldur ve gönder
-    const confirmModal = page.locator('dialog.ws-modal, [role="dialog"]').filter({ hasText: 'Mail host konfigürasyonunu uygula' });
+    const confirmModal = page.locator('dialog.ws-modal, [role="dialog"]').filter({ hasText: 'Sunucu posta ayarlarını uygula' });
     await expect(confirmModal).toBeVisible({ timeout: 10000 });
     await fillAndConfirm(confirmModal);
 
     // Job kuyruğa alındı bildirimini ve job tamamlanmasını bekle
-    await expect(page.locator('text=Mail configuration işi kuyruğa alındı')).toBeVisible({ timeout: 20000 });
+    await expect(page.locator('text=Posta ayarı işlemi sıraya alındı')).toBeVisible({ timeout: 20000 });
     await waitForMailJobsIdle();
 
     // Fiziksel Sonuç Doğrulaması 1: Alan adı virtual_domains tablosunda devre dışı kalmıştır
@@ -403,7 +403,7 @@ print(len(active))
     await expect(confirmModal).toBeVisible({ timeout: 10000 });
     await fillAndConfirm(confirmModal);
 
-    await expect(page.locator('text=Mail configuration işi kuyruğa alındı')).toBeVisible({ timeout: 20000 });
+    await expect(page.locator('text=Posta ayarı işlemi sıraya alındı')).toBeVisible({ timeout: 20000 });
     await waitForMailJobsIdle();
 
     // Fiziksel Sonuç Doğrulaması 2: Alan adı virtual_domains tablosunda tekrar enabled = 1 olmuştur
