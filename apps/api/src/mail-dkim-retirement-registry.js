@@ -1,11 +1,10 @@
-import { randomBytes } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   managedDkimDnsRecord,
   mailDkimTemplatePolicy,
 } from '@yunpanel/config-templates';
 import { assertUuid } from '@yunpanel/shared';
+import { readJsonWithFallback, writeJsonAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 1;
 const STORE_MODE = 0o600;
@@ -195,16 +194,12 @@ export function createMailDkimRetirementRegistry({
 
   async function persist(nextState) {
     if (!filePath) return;
-    const directory = path.dirname(filePath);
-    const temporary = `${filePath}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
-    await mkdir(directory, { recursive: true, mode: DIRECTORY_MODE });
-    await chmod(directory, DIRECTORY_MODE);
-    await writeFile(temporary, `${JSON.stringify(nextState, null, 2)}\n`, {
-      encoding: 'utf8',
+    await writeJsonAtomic(filePath, nextState, {
+      trailingNewline: true,
       mode: STORE_MODE,
+      directoryMode: DIRECTORY_MODE,
+      enforceDirectoryMode: true,
     });
-    await rename(temporary, filePath);
-    await chmod(filePath, STORE_MODE);
   }
 
   async function currentKey(mailDomainId) {
@@ -294,7 +289,7 @@ export function createMailDkimRetirementRegistry({
     if (initialized) return;
     if (filePath) {
       try {
-        const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+        const parsed = await readJsonWithFallback(filePath);
         if (!parsed || parsed.version !== STORE_VERSION || !Array.isArray(parsed.retirements)
           || Object.keys(parsed).length !== 2
           || Object.keys(parsed).some((field) => !['version', 'retirements'].includes(field))) {

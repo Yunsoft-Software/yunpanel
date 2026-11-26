@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { normalizeDomainSet, sanitizeLogMessage } from '@yunpanel/shared';
 import { operationErrorDiagnosis } from './operation-diagnosis.js';
 import { createProcessStoreLock } from './process-store-lock.js';
+import { readJsonWithFallback, writeJsonAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 7;
 const SHA256_FINGERPRINT = /^(?:[A-F0-9]{2}:){31}[A-F0-9]{2}$/i;
@@ -483,18 +483,13 @@ export function createCertificateRegistry({
 
   async function persistDirect() {
     if (!filePath) return;
-    const snapshot = JSON.stringify(state, null, 2);
-    const directory = path.dirname(filePath);
-    const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
-    await mkdir(directory, { recursive: true });
-    await writeFile(temporaryPath, snapshot, { encoding: 'utf8', mode: 0o600 });
-    await rename(temporaryPath, filePath);
+    await writeJsonAtomic(filePath, state);
   }
 
   async function reloadFromDisk() {
     if (!filePath) return;
     try {
-      const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+      const parsed = await readJsonWithFallback(filePath);
       if (![1, 2, 3, 4, 5, 6, 7, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.certificates)) {
         throw new Error('unsupported or invalid certificate registry state');
       }

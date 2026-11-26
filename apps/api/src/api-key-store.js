@@ -1,7 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import { normalizeDomainSet } from '@yunpanel/shared';
+import { readJsonWithFallback, writeJsonAtomic } from '@yunpanel/shared/json-file-store';
 
 // Machine keys for the automation API. A key is scoped to one parent Domain and an
 // upstream port range; the secret is shown once and only its SHA-256 is stored.
@@ -60,7 +59,7 @@ export function createApiKeyStore({ filePath = null, now = () => Date.now() } = 
   async function load() {
     if (loaded) return;
     try {
-      const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+      const parsed = await readJsonWithFallback(filePath);
       if (parsed?.version !== 1 || !Array.isArray(parsed.keys)) throw new Error('invalid');
       state = parsed;
     } catch (error) {
@@ -71,10 +70,7 @@ export function createApiKeyStore({ filePath = null, now = () => Date.now() } = 
 
   async function persist() {
     if (!filePath) return;
-    await mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
-    const temporary = `${filePath}.${process.pid}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(state)}\n`, { encoding: 'utf8', mode: 0o600 });
-    await rename(temporary, filePath);
+    await writeJsonAtomic(filePath, state, { space: 0, trailingNewline: true, directoryMode: 0o700 });
   }
 
   async function create(input) {

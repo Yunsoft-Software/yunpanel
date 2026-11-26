@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createAiOrchestrator } from './ai-orchestrator.js';
 import { createProviderFromConfig } from './ai-provider-adapters.js';
@@ -12,6 +12,7 @@ import {
   UUID,
 } from './ai-conversation-history.js';
 import { createProcessStoreLock, ProcessStoreLockError } from './process-store-lock.js';
+import { writeTextAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 2;
 const MAX_TURNS = 5;
@@ -157,15 +158,7 @@ export function createAiConversationService({
       version: STORE_VERSION,
       conversations: Array.from(conversations.values()),
     }, null, 2);
-    const tempPath = `${filePath}.${randomUUID().slice(0, 8)}.tmp`;
-    try {
-      await writeFile(tempPath, payload, { encoding: 'utf8', mode: 0o600 });
-      await chmod(tempPath, 0o600);
-      await rename(tempPath, filePath);
-    } catch (err) {
-      await rm(tempPath, { force: true }).catch(() => {});
-      throw err;
-    }
+    await writeTextAtomic(filePath, payload, { directoryMode: 0o700 });
   }
 
   async function mutate(action) {

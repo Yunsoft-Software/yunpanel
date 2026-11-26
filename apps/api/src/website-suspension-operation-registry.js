@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { chmod, mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import { readJsonWithFallback, writeJsonAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 1;
 const STATUSES = new Set([
@@ -189,8 +190,7 @@ export function createWebsiteSuspensionOperationRegistry({ filePath } = {}) {
   async function ensureInitialized() {
     if (initialized) return;
     try {
-      const content = await readFile(filePath, 'utf8');
-      const parsed = JSON.parse(content);
+      const parsed = await readJsonWithFallback(filePath);
       if (!parsed || parsed.version !== STORE_VERSION || !Array.isArray(parsed.operations)) {
         throw new WebsiteSuspensionOperationRegistryError(
           'website_suspension_operation_store_invalid',
@@ -231,13 +231,10 @@ export function createWebsiteSuspensionOperationRegistry({ filePath } = {}) {
     const dir = path.dirname(filePath);
     await mkdir(dir, { recursive: true });
     await chmod(dir, 0o700).catch(() => {});
-    const tempFile = `${filePath}.${randomUUID()}.tmp`;
-    const payload = JSON.stringify({
+    await writeJsonAtomic(filePath, {
       version: STORE_VERSION,
       operations: [...operations.values()],
-    }, null, 2);
-    await writeFile(tempFile, payload, { encoding: 'utf8', mode: 0o600 });
-    await rename(tempFile, filePath);
+    });
   }
 
   async function create({

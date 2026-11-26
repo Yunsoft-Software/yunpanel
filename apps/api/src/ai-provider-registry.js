@@ -1,7 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import { normalizeEnvironmentMasterKey } from './application-environment-registry.js';
+import { readJsonWithFallback, writeTextAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 1;
 const ALGORITHM = 'aes-256-gcm';
@@ -160,8 +159,7 @@ export function createAiProviderRegistry({
   async function init() {
     if (initialized) return;
     try {
-      const raw = await readFile(filePath, 'utf8');
-      const data = JSON.parse(raw);
+      const data = await readJsonWithFallback(filePath);
       if (data && typeof data === 'object' && Array.isArray(data.providers)) {
         for (const item of data.providers) {
           if (item && typeof item.id === 'string' && SUPPORTED_TYPES.has(item.type)) {
@@ -191,17 +189,12 @@ export function createAiProviderRegistry({
   }
 
   async function persist() {
-    const dir = path.dirname(filePath);
-    await mkdir(dir, { recursive: true, mode: 0o700 });
     const payload = JSON.stringify({
       version: STORE_VERSION,
       activeProviderId,
       providers: Array.from(state.values()),
     }, null, 2);
-    const tempPath = `${filePath}.${randomBytes(8).toString('hex')}.tmp`;
-    await writeFile(tempPath, payload, { encoding: 'utf8', mode: 0o600 });
-    await chmod(tempPath, 0o600);
-    await rename(tempPath, filePath);
+    await writeTextAtomic(filePath, payload, { directoryMode: 0o700 });
   }
 
   async function listProviders() {

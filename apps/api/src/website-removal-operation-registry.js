@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { readFile, writeFile, mkdir, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { createProcessStoreLock } from './process-store-lock.js';
+import { readJsonWithFallback, writeJsonAtomic } from '@yunpanel/shared/json-file-store';
 
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -110,8 +110,7 @@ export function createWebsiteRemovalOperationRegistry({
   async function reload() {
     if (!filePath) { initialized = true; return; }
     try {
-      const raw = await readFile(filePath, 'utf8');
-      const list = JSON.parse(raw);
+      const list = await readJsonWithFallback(filePath);
       if (!Array.isArray(list)) throw new Error('invalid Website removal registry state');
       operations = new Map(list.map((op) => [op.id, op]));
     } catch (err) {
@@ -123,16 +122,7 @@ export function createWebsiteRemovalOperationRegistry({
 
   async function persist() {
     if (!filePath) return;
-    const data = `${JSON.stringify(Array.from(operations.values()), null, 2)}\n`;
-    const directory = path.dirname(filePath);
-    const temporary = `${filePath}.${process.pid}.tmp`;
-    await mkdir(directory, { recursive: true, mode: 0o700 });
-    try {
-      await writeFile(temporary, data, { encoding: 'utf8', mode: 0o600 });
-      await rename(temporary, filePath);
-    } finally {
-      await rm(temporary, { force: true }).catch(() => {});
-    }
+    await writeJsonAtomic(filePath, Array.from(operations.values()), { trailingNewline: true, directoryMode: 0o700 });
   }
 
   async function init() {

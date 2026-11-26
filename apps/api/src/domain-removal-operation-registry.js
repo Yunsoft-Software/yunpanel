@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createProcessStoreLock } from './process-store-lock.js';
+import { readJsonWithFallback, writeTextAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 1;
 const OPERATION_STATUSES = new Set(['pending', 'running', 'blocked', 'failed', 'removed']);
@@ -795,27 +795,15 @@ export function createDomainRemovalOperationRegistry({
 
   async function persist() {
     if (!filePath) return;
-    const directory = path.dirname(filePath);
-    const temporary = `${filePath}.${process.pid}.tmp`;
     const content = `${JSON.stringify(state, null, 2)}\n`;
-    writeChain = writeChain.then(async () => {
-      await mkdir(directory, { recursive: true, mode: 0o700 });
-      await chmod(directory, 0o700);
-      try {
-        await writeFile(temporary, content, { encoding: 'utf8', mode: 0o600 });
-        await rename(temporary, filePath);
-        await chmod(filePath, 0o600);
-      } finally {
-        await rm(temporary, { force: true }).catch(() => {});
-      }
-    });
+    writeChain = writeChain.then(() => writeTextAtomic(filePath, content, { directoryMode: 0o700, enforceDirectoryMode: true }));
     await writeChain;
   }
 
   async function reload() {
     if (!filePath) { initialized = true; return; }
     try {
-      const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+      const parsed = await readJsonWithFallback(filePath);
       if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.operations)
         || Object.keys(parsed).length !== 2
         || Object.keys(parsed).some((field) => !['version', 'operations'].includes(field))) {

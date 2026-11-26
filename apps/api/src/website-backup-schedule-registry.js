@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { createProcessStoreLock } from './process-store-lock.js';
 import { compileBackupSchedule } from './backup-schedule-time.js';
+import { readJsonWithFallback, writeJsonAtomic } from '@yunpanel/shared/json-file-store';
 
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const fail = (code, message) => Object.assign(new Error(message), { code, status: 409 });
@@ -20,7 +21,7 @@ export function createWebsiteBackupScheduleRegistry({ filePath, now = Date.now }
     try {
       const metadata = await lstat(filePath);
       if (!metadata.isFile() || metadata.isSymbolicLink() || (metadata.mode & 0o777) !== 0o600 || metadata.size > 8 * 1024 * 1024) throw fail('backup_schedule_store_invalid', 'Zamanlama deposu güvenli biçimde okunamadı');
-      const state = JSON.parse(await readFile(filePath, 'utf8'));
+      const state = await readJsonWithFallback(filePath);
       if (state.version !== 1 || !Array.isArray(state.schedules)) throw fail('backup_schedule_store_invalid', 'Zamanlama deposu geçersiz');
       const ids = new Set(), websites = new Set();
       for (const record of state.schedules) {
@@ -39,10 +40,7 @@ export function createWebsiteBackupScheduleRegistry({ filePath, now = Date.now }
     }
   }
   async function write(state) {
-    const parent = path.dirname(filePath); await mkdir(parent, { recursive: true, mode: 0o700 });
-    const temporary = `${filePath}.${randomUUID()}.tmp`;
-    try { await writeFile(temporary, JSON.stringify(state), { flag: 'wx', mode: 0o600 }); await chmod(temporary, 0o600); await rename(temporary, filePath); }
-    finally { await rm(temporary, { force: true }); }
+    await writeJsonAtomic(filePath, state, { space: 0, directoryMode: 0o700 });
   }
   async function getByWebsite(websiteId) { return lock.withLock(async () => structuredClone((await read()).schedules.find(record => record.websiteId === websiteId) ?? null)); }
   async function get(id) { return lock.withLock(async () => structuredClone((await read()).schedules.find(record => record.id === id) ?? null)); }

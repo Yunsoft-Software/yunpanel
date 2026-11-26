@@ -1,11 +1,10 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import {
   AI_TOOL_CONFIRMATION,
   AI_TOOL_RISKS,
   DEFAULT_AI_TOOL_DEFINITIONS,
 } from './ai-tool-catalog.js';
+import { readJsonWithFallback, writeJsonAtomic } from '@yunpanel/shared/json-file-store';
 
 const DEFAULT_STORE_PATH = '/var/lib/yunpanel/control-plane/ai-policy.json';
 const STORE_VERSION = 1;
@@ -135,7 +134,7 @@ export function createAiPolicyStore({ filePath = DEFAULT_STORE_PATH, now = () =>
   async function load() {
     if (cache) return cache;
     try {
-      cache = normalizePersisted(JSON.parse(await readFile(filePath, 'utf8')));
+      cache = normalizePersisted(await readJsonWithFallback(filePath));
       return cache;
     } catch (error) {
       if (error?.code !== 'ENOENT') {
@@ -153,11 +152,7 @@ export function createAiPolicyStore({ filePath = DEFAULT_STORE_PATH, now = () =>
   }
 
   async function persist(state) {
-    const directory = path.dirname(filePath);
-    await mkdir(directory, { recursive: true, mode: 0o700 });
-    const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-    await writeFile(tempPath, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
-    await rename(tempPath, filePath);
+    await writeJsonAtomic(filePath, state, { trailingNewline: true, directoryMode: 0o700 });
     cache = state;
   }
 

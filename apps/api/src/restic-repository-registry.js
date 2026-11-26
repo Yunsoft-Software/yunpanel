@@ -1,10 +1,10 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { assertUuid } from '@yunpanel/shared';
 import { assertResticRcloneTarget, createResticManager } from '@yunpanel/host-runtime';
 import { normalizeEnvironmentMasterKey } from './application-environment-registry.js';
 import { createProcessStoreLock } from './process-store-lock.js';
+import { readJsonWithFallback, writeJsonAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 1;
 const ALGORITHM = 'aes-256-gcm';
@@ -169,22 +169,13 @@ export function createResticRepositoryRegistry({
   }
 
   async function writeDiskState(nextState) {
-    await mkdir(path.dirname(resolvedFilePath), { recursive: true });
-    const temporaryPath = `${resolvedFilePath}.${randomUUID()}.tmp`;
-    const payload = JSON.stringify(nextState, null, 2);
-    try {
-      await writeFile(temporaryPath, payload, { encoding: 'utf8', mode: 0o600 });
-      await rename(temporaryPath, resolvedFilePath);
-      state = nextState;
-    } finally {
-      await rm(temporaryPath, { force: true }).catch(() => {});
-    }
+    await writeJsonAtomic(resolvedFilePath, nextState);
+    state = nextState;
   }
 
   async function syncFromDisk({ createIfMissing = false, strict = false } = {}) {
     try {
-      const raw = await readFile(resolvedFilePath, 'utf8');
-      const parsed = JSON.parse(raw);
+      const parsed = await readJsonWithFallback(resolvedFilePath);
       if (!parsed || parsed.version !== STORE_VERSION || !Array.isArray(parsed.repositories)) {
         if (strict) {
           throw new ResticRepositoryRegistryError('restic_repository_state_invalid', 'Restic repository store is invalid', 409);

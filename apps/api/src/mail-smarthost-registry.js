@@ -1,7 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import { normalizeEnvironmentMasterKey } from './application-environment-registry.js';
+import { readJsonWithFallback, writeJsonAtomic } from '@yunpanel/shared/json-file-store';
 
 // One outbound relay per local server. The password is sealed with the panel master
 // key (AES-256-GCM, bound to the record identity) and is never returned publicly.
@@ -34,7 +33,7 @@ export function createMailSmarthostRegistry({ filePath = null, masterKey: rawKey
   async function load() {
     if (loaded) return;
     try {
-      const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+      const parsed = await readJsonWithFallback(filePath);
       if (parsed?.version !== 1 || !parsed.servers || typeof parsed.servers !== 'object') throw new Error('invalid');
       state = parsed;
     } catch (error) {
@@ -45,10 +44,7 @@ export function createMailSmarthostRegistry({ filePath = null, masterKey: rawKey
 
   async function persist() {
     if (!filePath) return;
-    await mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
-    const temporary = `${filePath}.${process.pid}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(state)}\n`, { encoding: 'utf8', mode: 0o600 });
-    await rename(temporary, filePath);
+    await writeJsonAtomic(filePath, state, { space: 0, trailingNewline: true, directoryMode: 0o700 });
   }
 
   function publicView(record) {

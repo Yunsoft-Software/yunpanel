@@ -1,10 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import {
   BackupExecutionStateError,
   normalizeBackupExecutionPlan,
 } from './backup-execution-state.js';
+import { readJsonWithFallback, writeJsonAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 1;
 const OPERATION_STATUSES = new Set(['queued', 'running', 'succeeded', 'failed']);
@@ -203,11 +202,7 @@ export function createBackupOperationRegistry({ filePath = null, now = () => Dat
 
   async function persist(next) {
     if (filePath !== null) {
-      const directory = path.dirname(filePath);
-      const temporary = `${filePath}.${process.pid}.tmp`;
-      await mkdir(directory, { recursive: true });
-      await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-      await rename(temporary, filePath);
+      await writeJsonAtomic(filePath, next, { trailingNewline: true });
     }
     state = next;
   }
@@ -215,7 +210,7 @@ export function createBackupOperationRegistry({ filePath = null, now = () => Dat
   async function init() {
     if (initialized) return;
     if (filePath !== null) {
-      try { state = normalizeStore(JSON.parse(await readFile(filePath, 'utf8'))); }
+      try { state = normalizeStore(await readJsonWithFallback(filePath)); }
       catch (error) {
         if (error?.code !== 'ENOENT') {
           if (error instanceof BackupOperationRegistryError) throw error;

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { open, lstat, writeFile, mkdir, rename, rm } from 'node:fs/promises';
+import { open, lstat, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { createProcessStoreLock } from './process-store-lock.js';
 import { assertWebsiteSnapshotContent, resolveWebsiteRestoreSelection } from './website-restore-selection.js';
@@ -8,6 +8,7 @@ import {
   SAFE_RESTORE_ROLLBACK_PHASES,
   websiteRestoreTransactionId,
 } from './website-restore-service.js';
+import { writeTextAtomic } from '@yunpanel/shared/json-file-store';
 
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -221,11 +222,7 @@ export function createWebsiteBackupOperationRegistry({
       operations: Array.from(operations.values()),
     }, null, 2), 'utf8');
     if (persistedPayload !== null && payload.equals(persistedPayload) && await unchangedPrivateFile(loaded)) return;
-    const dir = path.dirname(filePath);
-    await mkdir(dir, { recursive: true, mode: 0o700 });
-    const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-    await writeFile(tmpPath, payload, { mode: 0o600 });
-    await rename(tmpPath, filePath);
+    await writeTextAtomic(filePath, payload.toString('utf8'), { directoryMode: 0o700 });
     persistedPayload = payload;
   }
 

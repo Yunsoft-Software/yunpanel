@@ -1,10 +1,11 @@
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { assertUuid } from '@yunpanel/shared';
 import { createRcloneManager, RcloneError } from '@yunpanel/host-runtime';
 import { normalizeEnvironmentMasterKey } from './application-environment-registry.js';
+import { readJsonWithFallback, writeJsonAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 1;
 const ALGORITHM = 'aes-256-gcm';
@@ -112,21 +113,14 @@ export function createRcloneRemoteRegistry({
   let writeQueue = Promise.resolve();
 
   async function persist() {
-    writeQueue = writeQueue.then(async () => {
-      await mkdir(path.dirname(filePath), { recursive: true });
-      const temporaryPath = `${filePath}.${randomUUID()}.tmp`;
-      const payload = JSON.stringify(state, null, 2);
-      await writeFile(temporaryPath, payload, { encoding: 'utf8', mode: 0o600 });
-      await rename(temporaryPath, filePath);
-    });
+    writeQueue = writeQueue.then(() => writeJsonAtomic(filePath, state));
     return writeQueue;
   }
 
   async function init() {
     if (!initialized) {
       try {
-        const raw = await readFile(filePath, 'utf8');
-        const parsed = JSON.parse(raw);
+        const parsed = await readJsonWithFallback(filePath);
         if (!parsed || parsed.version !== STORE_VERSION || !Array.isArray(parsed.remotes)) {
           throw new RcloneRemoteRegistryError('rclone_remote_state_invalid', 'Rclone remote store is invalid', 409);
         }

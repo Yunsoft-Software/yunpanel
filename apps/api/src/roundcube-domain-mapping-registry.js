@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { assertUuid, normalizeDomainSet } from '@yunpanel/shared';
+import { readJsonWithFallback, writeJsonAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 2;
 const LEGACY_STORE_VERSION = 1;
@@ -217,16 +217,7 @@ export function createRoundcubeDomainMappingRegistry({
       state = nextState;
       return;
     }
-    const directory = path.dirname(filePath);
-    const temporary = filePath + '.' + process.pid + '.tmp';
-    await mkdir(directory, { recursive: true, mode: 0o700 });
-    await chmod(directory, 0o700);
-    await writeFile(temporary, JSON.stringify(nextState, null, 2) + '\n', {
-      encoding: 'utf8',
-      mode: 0o600,
-    });
-    await rename(temporary, filePath);
-    await chmod(filePath, 0o600);
+    await writeJsonAtomic(filePath, nextState, { trailingNewline: true, directoryMode: 0o700, enforceDirectoryMode: true });
     state = nextState;
   }
 
@@ -247,7 +238,7 @@ export function createRoundcubeDomainMappingRegistry({
     if (initialized) return;
     if (filePath) {
       try {
-        const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+        const parsed = await readJsonWithFallback(filePath);
         if (!parsed || ![LEGACY_STORE_VERSION, STORE_VERSION].includes(parsed.version)
           || !Array.isArray(parsed.mappings)
           || Object.keys(parsed).length !== 2

@@ -1,5 +1,4 @@
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import path from 'node:path';
+import { readJsonWithFallback, writeJsonAtomic } from '@yunpanel/shared/json-file-store';
 
 const DEFAULT_STORE_PATH = '/var/lib/yunpanel/control-plane/panel-settings.json';
 const STORE_VERSION = 1;
@@ -84,8 +83,7 @@ export function createPanelSettingsRegistry({ filePath = DEFAULT_STORE_PATH } = 
   async function loadStore() {
     if (cache) return cache;
     try {
-      const raw = await readFile(filePath, 'utf8');
-      const parsed = JSON.parse(raw);
+      const parsed = await readJsonWithFallback(filePath);
       if (parsed?.version === STORE_VERSION && parsed?.settings) {
         cache = {
           version: STORE_VERSION,
@@ -119,12 +117,7 @@ export function createPanelSettingsRegistry({ filePath = DEFAULT_STORE_PATH } = 
   }
 
   async function persistStore(state) {
-    const dir = path.dirname(filePath);
-    await mkdir(dir, { recursive: true, mode: 0o700 });
-    const tempFile = `${filePath}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
-    const payload = JSON.stringify(state, null, 2);
-    await writeFile(tempFile, payload, { mode: 0o600 });
-    await rename(tempFile, filePath);
+    await writeJsonAtomic(filePath, state, { directoryMode: 0o700 });
     cache = state;
   }
 

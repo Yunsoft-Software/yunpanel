@@ -1,6 +1,6 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createProcessStoreLock } from './process-store-lock.js';
+import { readJsonWithFallback, writeJsonAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 1;
 const JOB_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
@@ -68,7 +68,7 @@ export function createJobRecoveryStore({
 
   async function reload() {
     try {
-      state = normalizeState(JSON.parse(await readFile(filePath, 'utf8')));
+      state = normalizeState(await readJsonWithFallback(filePath));
     } catch (error) {
       if (error?.code === 'ENOENT') state = emptyState();
       else if (error instanceof JobRecoveryStoreError) throw error;
@@ -89,12 +89,7 @@ export function createJobRecoveryStore({
   }
 
   async function persist(next) {
-    const snapshot = `${JSON.stringify(next, null, 2)}\n`;
-    const directory = path.dirname(filePath);
-    const temporaryPath = `${filePath}.${process.pid}.tmp`;
-    await mkdir(directory, { recursive: true });
-    await writeFile(temporaryPath, snapshot, { encoding: 'utf8', mode: 0o600 });
-    await rename(temporaryPath, filePath);
+    await writeJsonAtomic(filePath, next, { trailingNewline: true });
     state = next;
   }
 

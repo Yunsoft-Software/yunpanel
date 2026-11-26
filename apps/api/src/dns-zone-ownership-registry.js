@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import path from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { writeJsonAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 1;
 
@@ -52,11 +52,7 @@ export function createDnsZoneOwnershipRegistry({
 
   async function persist() {
     if (filePath === null) return;
-    await mkdir(path.dirname(filePath), { recursive: true });
-    const temporary = `${filePath}.tmp-${process.pid}`;
-    await writeFile(temporary, `${JSON.stringify({ version: STORE_VERSION, receipts }, null, 2)}\n`, { mode: 0o600 });
-    await chmod(temporary, 0o600);
-    await rename(temporary, filePath);
+    await writeJsonAtomic(filePath, { version: STORE_VERSION, receipts }, { trailingNewline: true });
   }
 
   // Writes run one at a time so a concurrent request cannot lose another request's receipt.

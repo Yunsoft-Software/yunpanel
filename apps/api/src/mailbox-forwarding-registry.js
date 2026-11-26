@@ -1,9 +1,7 @@
 import { exportScopedCatalog, restoreScopedCatalog } from './scoped-registry-backup.js';
-import { randomBytes } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import { MailTemplateError, normalizeMailboxAddress } from '@yunpanel/config-templates';
 import { assertUuid } from '@yunpanel/shared';
+import { readJsonWithFallback, writeJsonAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 1;
 const MAX_DESTINATIONS = 4;
@@ -162,13 +160,7 @@ export function createMailboxForwardingRegistry({
 
   async function persist(nextState) {
     if (!filePath) return;
-    const directory = path.dirname(filePath);
-    const temporary = `${filePath}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
-    await mkdir(directory, { recursive: true, mode: 0o700 });
-    await chmod(directory, 0o700);
-    await writeFile(temporary, `${JSON.stringify(nextState, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
-    await rename(temporary, filePath);
-    await chmod(filePath, 0o600);
+    await writeJsonAtomic(filePath, nextState, { trailingNewline: true, directoryMode: 0o700, enforceDirectoryMode: true });
   }
 
   async function mailbox(mailboxId) {
@@ -205,7 +197,7 @@ export function createMailboxForwardingRegistry({
     if (initialized) return;
     if (filePath) {
       try {
-        const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+        const parsed = await readJsonWithFallback(filePath);
         if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.forwardings)
           || Object.keys(parsed).length !== 2 || Object.keys(parsed).some((field) => !['version', 'forwardings'].includes(field))) {
           throw new MailboxForwardingRegistryError('mailbox_forwarding_state_invalid', 'Mailbox forwarding store is invalid', 409);

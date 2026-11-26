@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import { assertUuid } from '@yunpanel/shared';
+import { readJsonWithFallback, writeTextAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 1;
 const HOSTED_RUNTIME_TYPES = new Set(['static', 'node', 'php']);
@@ -230,26 +229,15 @@ export function createWebsiteSftpKeyRegistry({
 
   async function persist() {
     if (!filePath) return;
-    const directory = path.dirname(filePath);
-    const temporary = `${filePath}.${process.pid}.tmp`;
     const snapshot = JSON.stringify(state, null, 2);
-    writeChain = writeChain.then(async () => {
-      await mkdir(directory, { recursive: true, mode: 0o700 });
-      await rm(temporary, { force: true }).catch(() => {});
-      try {
-        await writeFile(temporary, snapshot, { encoding: 'utf8', mode: 0o600 });
-        await rename(temporary, filePath);
-      } finally {
-        await rm(temporary, { force: true }).catch(() => {});
-      }
-    });
+    writeChain = writeChain.then(() => writeTextAtomic(filePath, snapshot, { directoryMode: 0o700 }));
     return writeChain;
   }
 
   async function init() {
     if (initialized) return;
     try {
-      const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+      const parsed = await readJsonWithFallback(filePath);
       if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.keys)) throw new Error('invalid SFTP key registry state');
       const keys = parsed.keys.map(normalizePersisted);
       if (new Set(keys.map((entry) => entry.id)).size !== keys.length) throw new Error('duplicate SFTP key identity');
