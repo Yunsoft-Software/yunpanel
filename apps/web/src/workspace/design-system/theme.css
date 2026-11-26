@@ -722,7 +722,7 @@ body:has(.workspace-shell) { background: var(--ws-canvas); }
 .ws-alert-item p { color: var(--ws-muted); font-size: 12px; margin: 4px 0 0; }
 .authenticated-panel .auth-sessionbar { min-height: 44px; padding: 7px 28px 7px calc(var(--ws-sidebar-width) + 28px); border-bottom: 1px solid var(--ws-border); color: var(--ws-text); }
 .authenticated-panel .auth-sessionbar button { font-size: 12px; }
-.ws-sr-only { clip-path: inset(50%) !important; white-space: nowrap; border: 0; }
+.ws-sr-only { clip-path: inset(50%); white-space: nowrap; border: 0; }
 .ws-skip { position: fixed; z-index: 100; left: calc(var(--ws-sidebar-width) + 12px); top: -100px; padding: 12px; border: 2px solid var(--ws-focus); background: var(--ws-surface); }
 .ws-skip:focus { top: 8px; }
 .ws-mobile-menu, .ws-nav-close, .ws-nav-backdrop { display: none; }
@@ -790,7 +790,7 @@ body:has(.workspace-shell) { background: var(--ws-canvas); }
 }
 @media (pointer: coarse) { .ws-button, .ws-command-trigger, .workspace-shell select, .ws-modal select { min-height: 44px; } }
 @media (prefers-reduced-motion: reduce) {
-  .workspace-shell *, .workspace-shell *::before, .workspace-shell *::after, .ws-modal *, .ws-modal *::before, .ws-modal *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  .workspace-shell *, .workspace-shell *::before, .workspace-shell *::after, .ws-modal *, .ws-modal *::before, .ws-modal *::after { animation: none !important; transition: none !important; scroll-behavior: auto; }
 }
 @media (forced-colors: active) {
   .ws-section, .ws-metric, .ws-button, .ws-console-quicklink { border: 1px solid CanvasText; }
@@ -1016,15 +1016,15 @@ html .workspace-shell .ws-main {
 
 /* Standalone Session Bar (Non-workspace screens like OwnerEnrollment) */
 html .authenticated-panel .auth-sessionbar {
-  min-height: 44px !important;
-  height: 44px !important;
+  min-height: 44px;
+  height: 44px;
   padding: 0 24px 0 calc(var(--ws-sidebar-width, 236px) + 24px) !important;
   background: var(--ws-canvas) !important;
   border-bottom: 1px solid var(--ws-border) !important;
   font-size: 12px !important;
   display: flex !important;
-  align-items: center !important;
-  justify-content: space-between !important;
+  align-items: center;
+  justify-content: space-between;
   gap: 10px !important;
 }
 
@@ -1041,12 +1041,12 @@ html .authenticated-panel .auth-sessionbar button {
 }
 
 html .authenticated-panel .auth-sessionbar button.auth-icon-btn {
-  width: 32px !important;
-  min-width: 32px !important;
+  width: 32px;
+  min-width: 32px;
   padding: 0 !important;
   display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
+  align-items: center;
+  justify-content: center;
 }
 
 html .authenticated-panel .auth-sessionbar button:hover {
@@ -1055,34 +1055,34 @@ html .authenticated-panel .auth-sessionbar button:hover {
 
 /* Unified 56px Sticky Icon-First Topbar */
 html .workspace-shell .ws-toolbar {
-  position: sticky !important;
-  top: 0 !important;
-  z-index: 40 !important;
-  min-height: 56px !important;
-  height: 56px !important;
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  min-height: 56px;
+  height: 56px;
   padding: 0 24px !important;
   display: flex !important;
-  align-items: center !important;
-  justify-content: space-between !important;
-  flex-wrap: nowrap !important;
-  gap: 12px !important;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: nowrap;
+  gap: 12px;
   background: var(--ws-canvas) !important;
   border-bottom: 1px solid var(--ws-border) !important;
-  backdrop-filter: none !important;
+  backdrop-filter: none;
 }
 
 html .workspace-shell .ws-toolbar-left {
   display: flex !important;
-  align-items: center !important;
+  align-items: center;
   gap: 10px !important;
-  flex: 1 1 auto !important;
-  min-width: 0 !important;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 html .workspace-shell .ws-command-trigger {
-  flex: 0 1 340px !important;
-  width: 100% !important;
-  max-width: 340px !important;
+  flex: 0 1 340px;
+  width: 100%;
+  max-width: 340px;
   min-width: 0 !important;
   height: 34px !important;
   min-height: 34px !important;
@@ -1092,7 +1092,7 @@ html .workspace-shell .ws-command-trigger {
   background: var(--ws-surface) !important;
   color: var(--ws-muted) !important;
   font-size: 13px !important;
-  box-shadow: none !important;
+  box-shadow: none;
   transition: var(--ws-transition) !important;
 }
 
@@ -1100,25 +1100,25 @@ html .workspace-shell .ws-command-trigger:hover {
   border-color: var(--ws-control-border) !important;
   background: var(--ws-surface-raised) !important;
   color: var(--ws-text) !important;
-  box-shadow: none !important;
+  box-shadow: none;
 }
 
 html .workspace-shell .ws-command-trigger kbd {
   padding: 1px 6px !important;
-  border: 1px solid var(--ws-border) !important;
+  border: 1px solid var(--ws-border);
   border-radius: 4px !important;
   background: var(--ws-surface-subtle) !important;
-  font-size: 11px !important;
-  font-weight: 500 !important;
-  color: var(--ws-muted) !important;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ws-muted);
 }
 
 html .workspace-shell .ws-toolbar-actions {
   display: inline-flex !important;
-  align-items: center !important;
+  align-items: center;
   flex-wrap: nowrap !important;
   gap: 4px !important;
-  flex-shrink: 0 !important;
+  flex-shrink: 0;
 }
 
 html .workspace-shell .ws-toolbar-divider {
@@ -1126,8 +1126,8 @@ html .workspace-shell .ws-toolbar-divider {
   width: 1px !important;
   height: 18px !important;
   background: var(--ws-border) !important;
-  margin: 0 4px !important;
-  flex-shrink: 0 !important;
+  margin: 0 4px;
+  flex-shrink: 0;
 }
 
 /* Global Crisp Icon-Only Buttons (Topbar, PageHeading, Cards, Notices) */
@@ -1140,14 +1140,14 @@ html .ws-modal .ws-button.ws-icon-btn {
   padding: 0 !important;
   gap: 0 !important;
   justify-content: center !important;
-  align-items: center !important;
+  align-items: center;
   flex: 0 0 auto !important;
 }
 
 html .workspace-shell .ws-button.ws-icon-btn svg,
 html .ws-modal .ws-button.ws-icon-btn svg {
-  width: 16px !important;
-  height: 16px !important;
+  width: 16px;
+  height: 16px;
 }
 
 html .workspace-shell .ws-toolbar .ws-button.ws-icon-btn {
@@ -1170,15 +1170,15 @@ html .workspace-shell .ws-toolbar .ws-button.ws-icon-btn-logout:hover:not(:disab
 }
 
 html .workspace-shell .ws-icon-btn-badged {
-  position: relative !important;
+  position: relative;
   overflow: visible !important;
 }
 
 html .workspace-shell .ws-icon-badge {
-  position: absolute !important;
-  top: 2px !important;
-  right: 2px !important;
-  min-width: 15px !important;
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 15px;
   height: 15px !important;
   padding: 0 4px !important;
   border-radius: 999px !important;
@@ -1186,24 +1186,24 @@ html .workspace-shell .ws-icon-badge {
   color: #ffffff !important;
   font-size: 9.5px !important;
   font-weight: 700 !important;
-  line-height: 15px !important;
-  text-align: center !important;
-  pointer-events: none !important;
+  line-height: 15px;
+  text-align: center;
+  pointer-events: none;
   box-shadow: 0 0 0 2px var(--ws-canvas) !important;
 }
 
 /* Integrated Topbar Account Cluster (overrides standalone auth-sessionbar rules) */
 html .authenticated-panel .workspace-shell .ws-toolbar .ws-topbar-account.auth-sessionbar {
   display: inline-flex !important;
-  align-items: center !important;
+  align-items: center;
   justify-content: flex-end !important;
   flex-wrap: nowrap !important;
   gap: 4px !important;
   width: auto !important;
-  height: auto !important;
-  min-height: 0 !important;
+  height: auto;
+  min-height: 0;
   padding: 0 !important;
-  margin: 0 !important;
+  margin: 0;
   border: 0 !important;
   background: transparent !important;
   overflow: visible !important;
@@ -1236,25 +1236,25 @@ html .authenticated-panel .workspace-shell .ws-toolbar .ws-topbar-account.auth-s
 
 html .workspace-shell .ws-topbar-identity {
   display: inline-flex !important;
-  align-items: center !important;
+  align-items: center;
   gap: 6px !important;
   padding: 0 6px 0 2px !important;
-  max-width: 240px !important;
-  min-width: 0 !important;
+  max-width: 240px;
+  min-width: 0;
 }
 
 html .workspace-shell .ws-topbar-username {
   font-size: 12.5px !important;
   font-weight: 600 !important;
   color: var(--ws-text) !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  white-space: nowrap !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 html .workspace-shell .ws-topbar-identity .auth-role {
   display: inline-flex !important;
-  align-items: center !important;
+  align-items: center;
   height: 20px !important;
   padding: 0 7px !important;
   border-radius: 999px !important;
@@ -1263,7 +1263,7 @@ html .workspace-shell .ws-topbar-identity .auth-role {
   color: var(--ws-muted) !important;
   font-size: 10.5px !important;
   font-weight: 600 !important;
-  white-space: nowrap !important;
+  white-space: nowrap;
   flex-shrink: 0 !important;
 }
 
@@ -1275,40 +1275,40 @@ html .workspace-shell .ws-topbar-identity .auth-role {
 
 /* Sidebar — Sleek Shadcn Zinc Navigation (56px Header Aligned With Topbar) */
 html .workspace-shell .ws-sidebar {
-  width: var(--ws-sidebar-width, 244px) !important;
+  width: var(--ws-sidebar-width, 244px);
   padding: 0 !important;
   background: var(--ws-nav) !important;
   border-right: 1px solid var(--ws-border) !important;
-  box-shadow: none !important;
+  box-shadow: none;
   display: flex !important;
-  flex-direction: column !important;
+  flex-direction: column;
 }
 
 html .workspace-shell .ws-brand {
   display: flex !important;
-  align-items: center !important;
-  justify-content: space-between !important;
+  align-items: center;
+  justify-content: space-between;
   gap: 10px !important;
-  height: 56px !important;
-  min-height: 56px !important;
+  height: 56px;
+  min-height: 56px;
   padding: 0 16px !important;
-  margin: 0 !important;
+  margin: 0;
   border-bottom: 1px solid var(--ws-border) !important;
-  flex-shrink: 0 !important;
+  flex-shrink: 0;
 }
 
 html .workspace-shell .ws-brand-link {
   display: flex !important;
-  align-items: center !important;
-  gap: 10px !important;
+  align-items: center;
+  gap: 10px;
   min-width: 0 !important;
-  flex: 1 1 auto !important;
-  text-decoration: none !important;
+  flex: 1 1 auto;
+  text-decoration: none;
   color: inherit !important;
 }
 
 html .workspace-shell .ws-brand-link:hover {
-  text-decoration: none !important;
+  text-decoration: none;
 }
 
 html .workspace-shell .ws-brand-mark {
@@ -1320,7 +1320,7 @@ html .workspace-shell .ws-brand-mark {
   font-size: 14px !important;
   font-weight: 700 !important;
   box-shadow: 0 1px 4px rgba(99, 102, 241, 0.3) !important;
-  flex-shrink: 0 !important;
+  flex-shrink: 0;
 }
 
 html .workspace-shell .ws-brand strong {
@@ -1333,40 +1333,40 @@ html .workspace-shell .ws-brand strong {
 
 html .workspace-shell .ws-brand small {
   font-size: 9.5px !important;
-  font-weight: 600 !important;
-  letter-spacing: 0.9px !important;
-  line-height: 1.2 !important;
+  font-weight: 600;
+  letter-spacing: 0.9px;
+  line-height: 1.2;
   margin-top: 2px !important;
   color: var(--ws-nav-muted) !important;
 }
 
 html .workspace-shell .ws-sidebar-nav {
-  flex: 1 1 auto !important;
-  overflow-y: auto !important;
+  flex: 1 1 auto;
+  overflow-y: auto;
   padding: 14px 10px 20px !important;
   display: flex !important;
-  flex-direction: column !important;
-  gap: 16px !important;
+  flex-direction: column;
+  gap: 16px;
 }
 
 html .workspace-shell .ws-nav-group {
-  margin: 0 !important;
+  margin: 0;
 }
 
 html .workspace-shell .ws-nav-group + .ws-nav-group {
-  margin-top: 0 !important;
+  margin-top: 0;
   padding-top: 14px !important;
   border-top: 1px solid var(--ws-border) !important;
 }
 
 html .workspace-shell .ws-nav-label {
-  margin: 0 0 6px !important;
+  margin: 0 0 6px;
   padding: 0 10px !important;
   font-size: 10.5px !important;
-  font-weight: 600 !important;
-  letter-spacing: 0.08em !important;
-  text-transform: uppercase !important;
-  color: var(--ws-nav-muted) !important;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ws-nav-muted);
 }
 
 html .workspace-shell .ws-nav {
@@ -1403,8 +1403,8 @@ html .workspace-shell .ws-nav a.active {
 }
 
 html .workspace-shell .ws-nav a > svg {
-  width: 16px !important;
-  height: 16px !important;
+  width: 16px;
+  height: 16px;
   color: var(--ws-nav-muted) !important;
   transition: color 140ms ease !important;
 }
@@ -1418,9 +1418,9 @@ html .workspace-shell .ws-nav a.active > svg {
 }
 
 html .workspace-shell .ws-nav-premium {
-  margin-left: auto !important;
+  margin-left: auto;
   display: inline-flex !important;
-  align-items: center !important;
+  align-items: center;
   height: 18px !important;
   padding: 0 6px !important;
   border-radius: 999px !important;
@@ -1429,8 +1429,8 @@ html .workspace-shell .ws-nav-premium {
   color: var(--ws-brand) !important;
   font-size: 10px !important;
   font-weight: 600 !important;
-  line-height: 1 !important;
-  flex-shrink: 0 !important;
+  line-height: 1;
+  flex-shrink: 0;
 }
 
 html .workspace-shell .ws-nav-count {
@@ -1446,20 +1446,20 @@ html .workspace-shell .ws-nav-count {
 
 /* Content Area & Page Headings */
 html .workspace-shell .ws-content {
-  max-width: 1480px !important;
+  max-width: 1480px;
   padding: 24px 28px 48px !important;
 }
 
 html .workspace-shell .ws-page-heading {
-  margin-bottom: 20px !important;
-  gap: 16px !important;
+  margin-bottom: 20px;
+  gap: 16px;
 }
 
 html .workspace-shell .ws-page-heading h1 {
   font-size: 22px !important;
   font-weight: 650 !important;
   letter-spacing: -0.4px !important;
-  line-height: 1.25 !important;
+  line-height: 1.25;
 }
 
 html .workspace-shell .ws-page-heading p {
@@ -1475,7 +1475,7 @@ html .ws-modal .ws-button {
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  gap: 6px !important;
+  gap: 6px;
   min-height: 34px !important;
   height: 34px !important;
   padding: 0 12px !important;
@@ -1485,8 +1485,8 @@ html .ws-modal .ws-button {
   color: var(--ws-text) !important;
   font-size: 12.5px !important;
   font-weight: 500 !important;
-  line-height: 1 !important;
-  white-space: nowrap !important;
+  line-height: 1;
+  white-space: nowrap;
   box-shadow: none !important;
   transform: none !important;
   transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease !important;
@@ -1526,9 +1526,9 @@ html .ws-modal .ws-button-danger {
 
 html .workspace-shell .ws-button svg,
 html .ws-modal .ws-button svg {
-  width: 14px !important;
-  height: 14px !important;
-  flex-shrink: 0 !important;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }
 
 /* Inputs, Selects, Textareas — Clean 36px Shadcn Controls */
@@ -1548,7 +1548,7 @@ html .workspace-shell :is(input:not([type='checkbox']):not([type='radio']), sele
 html .ws-modal :is(input:not([type='checkbox']):not([type='radio']), select, textarea):focus {
   border-color: var(--ws-brand) !important;
   outline: 1px solid var(--ws-brand) !important;
-  outline-offset: 0 !important;
+  outline-offset: 0;
 }
 
 /* Sections, Cards, Metrics, File Browser — Crisp 1px Borders, 8px Radius */
@@ -1597,16 +1597,16 @@ html .workspace-shell .ws-section-body > :is(.ws-button, a.ws-button) {
 
 html .workspace-shell .ws-section-body.ws-actions {
   flex-direction: row !important;
-  flex-wrap: wrap !important;
-  align-items: center !important;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px !important;
 }
 
 html .workspace-shell .ws-section-body.ws-filters {
   flex-direction: row !important;
-  flex-wrap: wrap !important;
-  align-items: flex-end !important;
-  justify-content: flex-start !important;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: flex-start;
   gap: 12px !important;
 }
 
@@ -1627,7 +1627,7 @@ html .workspace-shell :is(.ws-equal-columns, .ws-two-columns, .ws-console-grid, 
 html .workspace-shell :is(.ws-equal-columns, .ws-two-columns, .ws-console-grid, .ws-console-bottom, .ws-metrics, .ws-quota-cards) > :is(.ws-section, .panel, .ws-metric, article) {
   height: 100% !important;
   display: flex !important;
-  flex-direction: column !important;
+  flex-direction: column;
   margin-bottom: 0 !important;
 }
 
@@ -1641,9 +1641,9 @@ html .ws-modal .ws-spinner {
   display: inline-block !important;
   width: 15px !important;
   height: 15px !important;
-  margin-right: 8px !important;
-  vertical-align: -2px !important;
-  flex-shrink: 0 !important;
+  margin-right: 8px;
+  vertical-align: -2px;
+  flex-shrink: 0;
   border-width: 2px !important;
 }
 
@@ -1651,7 +1651,7 @@ html .workspace-shell .ws-loading,
 html .workspace-shell .ws-section-body > p[role='status'],
 html .ws-modal .ws-loading {
   display: flex !important;
-  align-items: center !important;
+  align-items: center;
   gap: 10px !important;
   padding: 10px 14px !important;
   border: 1px solid var(--ws-border) !important;
@@ -1684,7 +1684,7 @@ html .workspace-shell .ws-nav-close {
 
 @media (min-width: 901px) {
   html .workspace-shell.is-sidebar-collapsed {
-    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   html .workspace-shell.is-sidebar-collapsed .ws-sidebar {
@@ -1716,36 +1716,36 @@ html .workspace-shell .ws-filters {
   padding: 12px 18px !important;
   border-bottom: 1px solid var(--ws-border) !important;
   gap: 12px !important;
-  align-items: flex-end !important;
+  align-items: flex-end;
 }
 
 /* Badges — Crisp Pill/Tag Badges */
 html .workspace-shell .ws-badge {
   display: inline-flex !important;
-  align-items: center !important;
+  align-items: center;
   align-self: flex-start !important;
   width: fit-content !important;
-  gap: 5px !important;
+  gap: 5px;
   height: 22px !important;
   padding: 0 8px !important;
   border: 1px solid var(--ws-border) !important;
   border-radius: 999px !important;
   font-size: 11px !important;
   font-weight: 600 !important;
-  line-height: 1 !important;
-  white-space: nowrap !important;
-  word-break: normal !important;
-  overflow-wrap: normal !important;
-  flex-shrink: 0 !important;
+  line-height: 1;
+  white-space: nowrap;
+  word-break: normal;
+  overflow-wrap: normal;
+  flex-shrink: 0;
 }
 
 /* Website & Subdomain Hierarchy Cards on /websites — Clean, Compact, Aligned */
 html .workspace-shell .ws-website-task-list {
   display: flex !important;
-  flex-direction: column !important;
-  gap: 8px !important;
+  flex-direction: column;
+  gap: 8px;
   padding: 16px 18px !important;
-  margin: 0 !important;
+  margin: 0;
 }
 
 html .workspace-shell .ws-website-task-card,
@@ -1766,8 +1766,8 @@ html .workspace-shell .ws-website-task-card:hover {
 }
 
 html .workspace-shell .ws-website-task-card.yp-subdomain-task-card {
-  position: relative !important;
-  margin-inline-start: calc(var(--ws-card-depth, 1) * 28px) !important;
+  position: relative;
+  margin-inline-start: calc(var(--ws-card-depth, 1) * 28px);
   border: 1px solid var(--ws-border) !important;
   border-left: 2.5px solid var(--ws-brand) !important;
   border-radius: 7px !important;
@@ -1776,39 +1776,39 @@ html .workspace-shell .ws-website-task-card.yp-subdomain-task-card {
 }
 
 html .workspace-shell .ws-website-task-card.yp-subdomain-task-card::before {
-  content: '' !important;
-  position: absolute !important;
-  left: -17px !important;
-  top: 24px !important;
-  width: 15px !important;
-  height: 1px !important;
-  background: var(--ws-border-strong) !important;
-  pointer-events: none !important;
+  content: '';
+  position: absolute;
+  left: -17px;
+  top: 24px;
+  width: 15px;
+  height: 1px;
+  background: var(--ws-border-strong);
+  pointer-events: none;
 }
 
 html .workspace-shell .ws-website-task-card.yp-subdomain-task-card::after {
-  content: '' !important;
-  position: absolute !important;
-  left: -17px !important;
-  top: -10px !important;
-  bottom: 0 !important;
-  width: 1px !important;
-  background: var(--ws-border) !important;
-  pointer-events: none !important;
+  content: '';
+  position: absolute;
+  left: -17px;
+  top: -10px;
+  bottom: 0;
+  width: 1px;
+  background: var(--ws-border);
+  pointer-events: none;
 }
 
 html .workspace-shell .ws-subdomain-accordion-group {
   display: inline-flex !important;
-  align-items: center !important;
+  align-items: center;
   gap: 6px !important;
-  margin-left: 2px !important;
+  margin-left: 2px;
   padding-left: 8px !important;
   border-left: 1px solid var(--ws-border) !important;
 }
 
 html .workspace-shell .ws-subdomain-count-pill {
   display: inline-flex !important;
-  align-items: center !important;
+  align-items: center;
   height: 24px !important;
   padding: 0 8px !important;
   border-radius: 999px !important;
@@ -1816,7 +1816,7 @@ html .workspace-shell .ws-subdomain-count-pill {
   color: var(--ws-brand) !important;
   font-size: 11px !important;
   font-weight: 600 !important;
-  white-space: nowrap !important;
+  white-space: nowrap;
 }
 
 html .workspace-shell .ws-website-subdomains-toggle.ws-accordion-icon-btn {
@@ -1833,10 +1833,10 @@ html .workspace-shell .ws-website-subdomains-toggle.ws-accordion-icon-btn:hover:
 
 html .workspace-shell .ws-website-task-header {
   display: flex !important;
-  flex-wrap: wrap !important;
-  align-items: center !important;
-  justify-content: space-between !important;
-  gap: 10px 16px !important;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
   margin-bottom: 10px !important;
   padding-bottom: 10px !important;
   border-bottom: 1px solid var(--ws-border) !important;
@@ -1844,18 +1844,18 @@ html .workspace-shell .ws-website-task-header {
 
 html .workspace-shell .ws-website-task-title {
   display: flex !important;
-  flex-wrap: wrap !important;
-  align-items: center !important;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 6px 10px !important;
-  flex: 1 1 260px !important;
-  min-width: 0 !important;
+  flex: 1 1 260px;
+  min-width: 0;
 }
 
 html .workspace-shell .ws-website-task-title h3 {
   margin: 0 !important;
   font-size: 14.5px !important;
   font-weight: 600 !important;
-  line-height: 1.3 !important;
+  line-height: 1.3;
 }
 
 html .workspace-shell .ws-website-task-title h3 a {
@@ -1875,37 +1875,37 @@ html .workspace-shell .ws-website-task-title p {
 
 html .workspace-shell .ws-website-task-status {
   display: inline-flex !important;
-  flex-wrap: wrap !important;
-  align-items: center !important;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 6px !important;
 }
 
 /* Symmetrical Quick-Action Bar & Accordion Grid in WebsiteTaskCard */
 html .workspace-shell .ws-website-task-quick {
   display: flex !important;
-  flex-wrap: wrap !important;
-  align-items: flex-start !important;
-  justify-content: space-between !important;
-  gap: 8px 12px !important;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 12px;
   padding: 0 !important;
-  margin: 0 !important;
+  margin: 0;
 }
 
 html .workspace-shell .ws-website-task-quick-primary {
   display: flex !important;
-  flex-wrap: wrap !important;
-  align-items: flex-start !important;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 6px !important;
-  flex: 1 1 auto !important;
+  flex: 1 1 auto;
 }
 
 html .workspace-shell .ws-website-task {
   display: inline-flex !important;
-  flex-direction: column !important;
-  align-items: flex-start !important;
-  width: auto !important;
-  min-width: 0 !important;
-  flex: 0 0 auto !important;
+  flex-direction: column;
+  align-items: flex-start;
+  width: auto;
+  min-width: 0;
+  flex: 0 0 auto;
   gap: 3px !important;
 }
 
@@ -1915,18 +1915,18 @@ html .workspace-shell .ws-website-task .ws-button {
   height: 32px !important;
   padding: 0 10px !important;
   font-size: 12px !important;
-  white-space: nowrap !important;
+  white-space: nowrap;
 }
 
 html .workspace-shell .ws-website-task small {
-  position: absolute !important;
+  position: absolute;
   width: 1px !important;
   height: 1px !important;
   padding: 0 !important;
   margin: -1px !important;
   overflow: hidden !important;
-  clip: rect(0, 0, 0, 0) !important;
-  white-space: nowrap !important;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
   border: 0 !important;
 }
 
@@ -1940,19 +1940,19 @@ html .workspace-shell .ws-website-task-quick .ws-actions .ws-button {
 
 html .workspace-shell .ws-website-task-grid {
   display: grid !important;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)) !important;
-  align-items: stretch !important;
-  gap: 8px !important;
-  margin-top: 10px !important;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 10px;
   padding-top: 10px !important;
   border-top: 1px solid var(--ws-border) !important;
 }
 
 html .workspace-shell .ws-website-task-grid .ws-website-task {
   display: flex !important;
-  flex-direction: column !important;
-  align-items: stretch !important;
-  width: 100% !important;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
 }
 
 html .workspace-shell .ws-website-task-grid .ws-website-task .ws-button {
@@ -1965,11 +1965,11 @@ html .workspace-shell .ws-website-task-grid .ws-website-task .ws-button {
 
 html .workspace-shell .ws-website-task-footer {
   display: flex !important;
-  flex-wrap: wrap !important;
-  align-items: center !important;
-  justify-content: space-between !important;
-  gap: 8px !important;
-  margin-top: 10px !important;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
   padding-top: 10px !important;
   border-top: 1px solid var(--ws-border) !important;
 }
@@ -1983,27 +1983,27 @@ html .workspace-shell .ws-website-task-footer .ws-button {
 /* Compact Horizontal Tab Bar (SiteNavigation) */
 html .workspace-shell .ws-plesk-site-navigation {
   display: flex !important;
-  flex-wrap: wrap !important;
-  align-items: center !important;
-  gap: 4px !important;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
   padding: 6px 8px !important;
-  margin-bottom: 16px !important;
-  border: 1px solid var(--ws-border) !important;
-  border-radius: 8px !important;
+  margin-bottom: 16px;
+  border: 1px solid var(--ws-border);
+  border-radius: 8px;
   background: var(--ws-surface) !important;
 }
 
 html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-mobile {
-  display: none !important;
+  display: none;
 }
 
 html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-group {
   display: inline-flex !important;
-  flex-wrap: wrap !important;
-  align-items: center !important;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 4px !important;
   padding: 0 !important;
-  margin: 0 !important;
+  margin: 0;
   border: 0 !important;
   background: transparent !important;
 }
@@ -2020,7 +2020,7 @@ html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-group-label {
 html .workspace-shell .ws-plesk-site-navigation .ws-tabs {
   display: inline-flex !important;
   flex-wrap: wrap !important;
-  align-items: center !important;
+  align-items: center;
   gap: 4px !important;
   margin: 0 !important;
   padding: 0 !important;
@@ -2037,7 +2037,7 @@ html .workspace-shell .ws-plesk-site-navigation .ws-tabs {
 
 html .workspace-shell .ws-plesk-site-navigation .ws-tabs a {
   display: inline-flex !important;
-  align-items: center !important;
+  align-items: center;
   gap: 5px !important;
   min-height: 30px !important;
   height: 30px !important;
@@ -2048,7 +2048,7 @@ html .workspace-shell .ws-plesk-site-navigation .ws-tabs a {
   color: var(--ws-muted) !important;
   font-size: 12px !important;
   font-weight: 500 !important;
-  white-space: nowrap !important;
+  white-space: nowrap;
   box-shadow: none !important;
   transition: var(--ws-transition) !important;
 }
@@ -2068,13 +2068,13 @@ html .workspace-shell .ws-plesk-site-navigation .ws-tabs a[aria-current='page'] 
 /* Horizontal Action Buttons in Tables (.ws-db-access, .ys-resource-actions) */
 html .workspace-shell :is(.ws-db-access, .ys-resource-actions) {
   display: flex !important;
-  flex-wrap: wrap !important;
-  align-items: center !important;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 6px !important;
 }
 
 html .workspace-shell details.ws-disclosure {
-  border: 1px solid var(--ws-border) !important;
+  border: 1px solid var(--ws-border);
   border-radius: 6px !important;
   background: var(--ws-surface-subtle) !important;
   padding: 8px 12px !important;
@@ -2209,15 +2209,15 @@ html .workspace-shell details.ws-disclosure > summary {
 /* Tables & Modals */
 html .workspace-shell .ws-table {
   border-collapse: collapse !important;
-  border-spacing: 0 !important;
+  border-spacing: 0;
   padding: 0 !important;
 }
 
 html .workspace-shell .ws-table caption {
-  caption-side: top !important;
+  caption-side: top;
   padding: 10px 16px !important;
-  text-align: left !important;
-  font-size: 12px !important;
+  text-align: left;
+  font-size: 12px;
   color: var(--ws-muted) !important;
   border-bottom: 1px solid var(--ws-border) !important;
   background: transparent !important;
@@ -2228,9 +2228,9 @@ html .workspace-shell .ws-table thead th {
   border-bottom: 1px solid var(--ws-border) !important;
   background: var(--ws-surface-subtle) !important;
   color: var(--ws-muted) !important;
-  font-size: 11.5px !important;
-  font-weight: 600 !important;
-  white-space: nowrap !important;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 html .workspace-shell .ws-table tbody th {
@@ -2238,54 +2238,54 @@ html .workspace-shell .ws-table tbody th {
   border-bottom: 1px solid var(--ws-border) !important;
   background: transparent !important;
   color: var(--ws-text) !important;
-  font-size: 13px !important;
-  font-weight: 600 !important;
-  vertical-align: middle !important;
+  font-size: 13px;
+  font-weight: 600;
+  vertical-align: middle;
 }
 
 html .workspace-shell .ws-table td {
   padding: 11px 16px !important;
   border-bottom: 1px solid var(--ws-border) !important;
   border-radius: 0 !important;
-  font-size: 13px !important;
-  word-break: normal !important;
+  font-size: 13px;
+  word-break: normal;
   overflow-wrap: break-word !important;
 }
 
 html .workspace-shell .ws-table .ws-col-nowrap,
 html .workspace-shell .ws-websites-table :is(td[data-label='Durum'], td[data-label='SSL']),
 html .workspace-shell .yf-table td.yf-date {
-  white-space: nowrap !important;
-  word-break: normal !important;
+  white-space: nowrap;
+  word-break: normal;
   overflow-wrap: normal !important;
 }
 
 html .workspace-shell .ws-actions-nowrap {
   flex-wrap: nowrap !important;
-  white-space: nowrap !important;
+  white-space: nowrap;
 }
 
 html .workspace-shell .ws-table-scroll > table.ws-services-table {
-  min-width: 680px !important;
+  min-width: 680px;
 }
 
 html .workspace-shell .ws-table-scroll > table.ws-users-table,
 html .workspace-shell .ws-table-scroll > table.ws-accounts-table {
-  min-width: 640px !important;
+  min-width: 640px;
 }
 
 html .workspace-shell .ws-table-scroll > table.ws-firewall-table {
-  min-width: 880px !important;
+  min-width: 880px;
 }
 
 html .workspace-shell .ws-table-scroll > table.ws-firewall-bans-table,
 html .workspace-shell .ws-table-scroll > table.ws-audit-table {
-  min-width: 680px !important;
+  min-width: 680px;
 }
 
 @media (min-width: 641px) and (max-width: 960px) {
   html .workspace-shell .ws-table-scroll > table:is(.ws-mail-table, .ws-jobs-table, .ys-resource-table) {
-    min-width: 620px !important;
+    min-width: 620px;
   }
 }
 
@@ -2314,14 +2314,14 @@ html .ws-modal-body {
 /* Plesk-Style Categorized Website Tools Dashboard on /websites/:id */
 html .workspace-shell .yp-plesk-tool-groups {
   display: flex !important;
-  flex-direction: column !important;
+  flex-direction: column;
   gap: 18px !important;
   padding: 16px 18px !important;
 }
 
 html .workspace-shell .yp-plesk-tool-group {
   display: flex !important;
-  flex-direction: column !important;
+  flex-direction: column;
   gap: 10px !important;
 }
 
@@ -2330,14 +2330,14 @@ html .workspace-shell .yp-plesk-tool-group-title {
   font-size: 11.5px !important;
   font-weight: 600 !important;
   letter-spacing: 0.04em !important;
-  text-transform: uppercase !important;
+  text-transform: uppercase;
   color: var(--ws-muted) !important;
 }
 
 html .workspace-shell .ws-console-quicklinks {
   display: grid !important;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-  align-items: stretch !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
   gap: 12px !important;
   padding: 18px 20px !important;
 }
@@ -2351,17 +2351,17 @@ html .workspace-shell .ws-tools-group-section > .ws-section-heading {
 }
 
 html .workspace-shell .ws-tools-quicklinks.ws-console-quicklinks {
-  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px !important;
   padding: 22px 24px 24px !important;
 }
 
 html .workspace-shell .ws-console-bottom .ws-console-quicklinks {
-  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 html .workspace-shell .yp-plesk-tool-group > .ws-console-quicklinks {
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)) !important;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   gap: 10px !important;
   padding: 0 !important;
 }
@@ -2369,24 +2369,24 @@ html .workspace-shell .yp-plesk-tool-group > .ws-console-quicklinks {
 @media (max-width: 1080px) and (min-width: 641px) {
   html .workspace-shell .ws-console-quicklinks,
   html .workspace-shell .ws-tools-quicklinks.ws-console-quicklinks {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 html .workspace-shell .ws-console-quicklink {
   display: flex !important;
-  flex-direction: row !important;
-  align-items: center !important;
+  flex-direction: row;
+  align-items: center;
   justify-content: flex-start !important;
-  gap: 12px !important;
+  gap: 12px;
   padding: 12px 14px !important;
   min-height: 62px !important;
-  height: 100% !important;
+  height: 100%;
   border: 1px solid var(--ws-border) !important;
   border-radius: 9px !important;
   background: var(--ws-surface-subtle) !important;
   color: var(--ws-ink) !important;
-  text-decoration: none !important;
+  text-decoration: none;
   transition: border-color 140ms ease, background-color 140ms ease, transform 140ms ease !important;
 }
 
@@ -2405,22 +2405,22 @@ html .workspace-shell .ws-console-quicklink:hover {
 
 html .workspace-shell .ws-quicklink-icon {
   display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
+  align-items: center;
+  justify-content: center;
   width: 40px !important;
   height: 40px !important;
   border-radius: 10px !important;
   background: var(--ws-brand-soft) !important;
   color: var(--ws-brand) !important;
-  flex-shrink: 0 !important;
+  flex-shrink: 0;
 }
 
 html .workspace-shell .ws-quicklink-copy {
   display: flex !important;
-  flex-direction: column !important;
-  gap: 3px !important;
-  flex: 1 1 auto !important;
-  min-width: 0 !important;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 html .workspace-shell .ws-quicklink-copy strong {
@@ -2433,17 +2433,17 @@ html .workspace-shell .ws-quicklink-copy strong {
 html .workspace-shell .ws-quicklink-copy small {
   margin: 0 !important;
   font-size: 12px !important;
-  font-weight: 400 !important;
+  font-weight: 400;
   color: var(--ws-muted) !important;
-  line-height: 1.35 !important;
+  line-height: 1.35;
 }
 
 html .workspace-shell .ws-quicklink-arrow {
   display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
+  align-items: center;
+  justify-content: center;
   color: var(--ws-muted) !important;
-  flex-shrink: 0 !important;
+  flex-shrink: 0;
   transition: transform 140ms ease, color 140ms ease !important;
 }
 
@@ -2454,21 +2454,21 @@ html .workspace-shell .ws-tools-card:hover .ws-quicklink-arrow {
 
 html .workspace-shell .yp-plesk-tool-icon {
   display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  width: 36px !important;
-  height: 36px !important;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
   border-radius: 8px !important;
   background: var(--ws-brand-soft) !important;
   color: var(--ws-brand) !important;
-  flex-shrink: 0 !important;
+  flex-shrink: 0;
 }
 
 html .workspace-shell .yp-plesk-tool-copy {
   display: flex !important;
-  flex-direction: column !important;
-  gap: 2px !important;
-  min-width: 0 !important;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
 html .workspace-shell .yp-plesk-tool-copy strong {
@@ -2481,7 +2481,7 @@ html .workspace-shell .yp-plesk-tool-copy strong {
 html .workspace-shell .yp-plesk-tool-copy small {
   font-size: 11.5px !important;
   color: var(--ws-muted) !important;
-  line-height: 1.25 !important;
+  line-height: 1.25;
 }
 
 /* Horizontal Database Actions Bar on /databases */
@@ -2495,9 +2495,9 @@ html .workspace-shell .yp-plesk-tool-copy small {
 
 html .workspace-shell .ws-db-access {
   display: flex !important;
-  flex-direction: row !important;
-  flex-wrap: wrap !important;
-  align-items: center !important;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 6px !important;
 }
 
@@ -2506,36 +2506,36 @@ html .workspace-shell .ws-db-access .ws-button {
   height: 30px !important;
   padding: 0 9px !important;
   font-size: 12px !important;
-  white-space: nowrap !important;
+  white-space: nowrap;
 }
 
 /* aaPanel-Style Notification & Task Center Drawer + JAMstack & Easypanel Presets */
 html .workspace-shell :is(.yp-notification-backdrop, .ws-drawer-backdrop) {
-  position: fixed !important;
-  inset: 0 !important;
-  z-index: 200 !important;
+  position: fixed;
+  inset: 0;
+  z-index: 200;
   background: rgba(9, 9, 11, 0.65) !important;
-  backdrop-filter: blur(5px) !important;
+  backdrop-filter: blur(5px);
   display: flex !important;
-  justify-content: flex-end !important;
+  justify-content: flex-end;
 }
 
 html .workspace-shell :is(.yp-notification-drawer, .ws-notification-drawer) {
-  width: min(520px, 94vw) !important;
-  height: 100vh !important;
+  width: min(520px, 94vw);
+  height: 100vh;
   background: var(--ws-surface) !important;
   border-left: 1px solid var(--ws-border-strong) !important;
   box-shadow: -16px 0 40px rgba(0, 0, 0, 0.55) !important;
   display: flex !important;
-  flex-direction: column !important;
-  overflow: hidden !important;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 html .workspace-shell :is(.yp-notification-header, .ws-drawer-header) {
   display: flex !important;
-  align-items: center !important;
-  justify-content: space-between !important;
-  gap: 12px !important;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 16px 20px !important;
   border-bottom: 1px solid var(--ws-border) !important;
   background: var(--ws-surface-raised) !important;
@@ -2552,7 +2552,7 @@ html .workspace-shell .yp-notification-tabs {
 
 html .workspace-shell .yp-notification-tabs .ws-tab {
   display: inline-flex !important;
-  align-items: center !important;
+  align-items: center;
   gap: 6px !important;
   padding: 6px 12px !important;
   border: 1px solid var(--ws-border) !important;
@@ -2561,7 +2561,7 @@ html .workspace-shell .yp-notification-tabs .ws-tab {
   color: var(--ws-muted) !important;
   font-size: 12.5px !important;
   font-weight: 500 !important;
-  cursor: pointer !important;
+  cursor: pointer;
 }
 
 html .workspace-shell .yp-notification-tabs .ws-tab.is-active {
@@ -2572,8 +2572,8 @@ html .workspace-shell .yp-notification-tabs .ws-tab.is-active {
 }
 
 html .workspace-shell :is(.yp-notification-body, .ws-drawer-body) {
-  flex: 1 1 auto !important;
-  overflow-y: auto !important;
+  flex: 1 1 auto;
+  overflow-y: auto;
   padding: 16px 20px !important;
   display: flex !important;
   flex-direction: column !important;
@@ -2587,16 +2587,16 @@ html .workspace-shell :is(.yp-notification-body, .ws-drawer-body) .ws-alert-item
   gap: 12px !important;
   padding: 12px 14px !important;
   border: 1px solid var(--ws-border) !important;
-  border-radius: 8px !important;
+  border-radius: 8px;
   background: var(--ws-surface-raised) !important;
 }
 
 html .workspace-shell .yp-category-pills {
   display: flex !important;
-  flex-wrap: wrap !important;
+  flex-wrap: wrap;
   gap: 6px !important;
   padding: 14px 18px 0 !important;
-  margin-bottom: 0 !important;
+  margin-bottom: 0;
 }
 
 html .workspace-shell .ws-button.yp-framework-preset-card {
@@ -2604,11 +2604,11 @@ html .workspace-shell .ws-button.yp-framework-preset-card {
   flex-direction: column !important;
   align-items: flex-start !important;
   justify-content: space-between !important;
-  gap: 4px !important;
+  gap: 4px;
   height: 100% !important;
   min-height: 60px !important;
   padding: 10px 12px !important;
-  white-space: normal !important;
+  white-space: normal;
   text-align: left !important;
 }
 
@@ -2618,25 +2618,25 @@ html .workspace-shell .ws-button.yp-framework-preset-card {
 
 html .workspace-shell :is(.ws-section, .ws-section-body, .ws-form, fieldset) {
   min-width: 0 !important;
-  max-width: 100% !important;
+  max-width: 100%;
 }
 
 html .workspace-shell > .ws-main > .ws-content > .ws-tabs {
   display: flex !important;
   flex-wrap: wrap !important;
-  align-items: center !important;
+  align-items: center;
   gap: 6px !important;
   padding: 6px 8px !important;
   margin-bottom: 16px !important;
   border: 1px solid var(--ws-border) !important;
-  border-radius: 8px !important;
+  border-radius: 8px;
   background: var(--ws-surface) !important;
-  max-width: 100% !important;
+  max-width: 100%;
 }
 
 html .workspace-shell > .ws-main > .ws-content > .ws-tabs a {
   display: inline-flex !important;
-  align-items: center !important;
+  align-items: center;
   min-height: 32px !important;
   padding: 4px 10px !important;
   border-radius: 6px !important;
@@ -2672,21 +2672,21 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
 @media (max-width: 900px) {
   /* 1. Top Session Bar — Reset desktop 260px sidebar offset & prevent vertical overflow */
   html .authenticated-panel .auth-sessionbar {
-    height: auto !important;
-    min-height: 38px !important;
+    height: auto;
+    min-height: 38px;
     padding: 4px 12px !important;
     display: flex !important;
-    align-items: center !important;
-    justify-content: space-between !important;
+    align-items: center;
+    justify-content: space-between;
     flex-wrap: nowrap !important;
     gap: 8px !important;
-    overflow: hidden !important;
+    overflow: hidden;
   }
 
   html .authenticated-panel .auth-sessionbar > span {
-    white-space: nowrap !important;
+    white-space: nowrap;
     overflow: hidden !important;
-    text-overflow: ellipsis !important;
+    text-overflow: ellipsis;
     min-width: 0 !important;
     flex-shrink: 1 !important;
   }
@@ -2705,20 +2705,20 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
     height: 28px !important;
     padding: 0 8px !important;
     font-size: 11.5px !important;
-    white-space: nowrap !important;
+    white-space: nowrap;
     flex-shrink: 0 !important;
   }
 
   /* 2. Mobile Slide-Over Sidebar Drawer */
   html .workspace-shell .ws-sidebar {
-    position: fixed !important;
-    inset: 0 auto 0 0 !important;
-    z-index: 160 !important;
-    width: min(280px, 88vw) !important;
-    max-width: 90vw !important;
-    height: 100dvh !important;
-    overflow-x: hidden !important;
-    overflow-y: auto !important;
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 160;
+    width: min(280px, 88vw);
+    max-width: 90vw;
+    height: 100dvh;
+    overflow-x: hidden;
+    overflow-y: auto;
     box-shadow: var(--ws-overlay-shadow) !important;
     border-radius: 0 !important;
   }
@@ -2736,23 +2736,23 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   }
 
   html .workspace-shell .ws-nav-backdrop {
-    position: fixed !important;
-    inset: 0 !important;
-    z-index: 150 !important;
+    position: fixed;
+    inset: 0;
+    z-index: 150;
     background: rgba(0, 0, 0, 0.65) !important;
-    backdrop-filter: blur(3px) !important;
+    backdrop-filter: blur(3px);
   }
 
   html .workspace-shell .ws-toolbar {
     padding: 0 14px !important;
-    gap: 8px !important;
+    gap: 8px;
   }
 
   html .authenticated-panel .workspace-shell .ws-toolbar .ws-topbar-account.auth-sessionbar {
     padding: 0 !important;
     width: auto !important;
-    min-height: 0 !important;
-    height: auto !important;
+    min-height: 0;
+    height: auto;
     border: 0 !important;
     background: transparent !important;
   }
@@ -2778,15 +2778,15 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   /* 3. SiteNavigation — Compact Single-Row Horizontal Scrollable Tab Bar on Mobile/Tablet */
   html .workspace-shell .ws-plesk-site-navigation {
     display: flex !important;
-    flex-direction: row !important;
-    flex-wrap: nowrap !important;
-    align-items: center !important;
-    gap: 6px !important;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 6px;
     padding: 8px 10px !important;
-    overflow-x: auto !important;
-    overscroll-behavior-x: contain !important;
-    -webkit-overflow-scrolling: touch !important;
-    max-width: 100% !important;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    max-width: 100%;
   }
 
   html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-select {
@@ -2796,8 +2796,8 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-group {
     display: inline-flex !important;
     flex-wrap: nowrap !important;
-    align-items: center !important;
-    flex-shrink: 0 !important;
+    align-items: center;
+    flex-shrink: 0;
     gap: 4px !important;
     padding-right: 8px !important;
   }
@@ -2805,14 +2805,14 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   html .workspace-shell .ws-plesk-site-navigation .ws-tabs {
     display: inline-flex !important;
     flex-wrap: nowrap !important;
-    align-items: center !important;
+    align-items: center;
     flex-shrink: 0 !important;
     gap: 4px !important;
   }
 
   html .workspace-shell .ws-plesk-site-navigation .ws-tabs a {
     flex-shrink: 0 !important;
-    white-space: nowrap !important;
+    white-space: nowrap;
     min-height: 34px !important;
     height: 34px !important;
     padding: 0 10px !important;
@@ -2822,17 +2822,17 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   html .workspace-shell .yp-category-pills {
     display: flex !important;
     flex-wrap: nowrap !important;
-    overflow-x: auto !important;
-    overscroll-behavior-x: contain !important;
-    -webkit-overflow-scrolling: touch !important;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
     gap: 6px !important;
     padding: 12px 14px 4px !important;
-    max-width: 100% !important;
+    max-width: 100%;
   }
 
   html .workspace-shell .yp-category-pills .ws-button {
     flex-shrink: 0 !important;
-    white-space: nowrap !important;
+    white-space: nowrap;
   }
 }
 
@@ -2840,11 +2840,11 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   /* 3b. Phone SiteNavigation: visible wrapping primary task bar + single 'Diğer site araçları' selector */
   html .workspace-shell .ws-plesk-site-navigation {
     display: grid !important;
-    grid-template-columns: minmax(0, 1fr) !important;
-    gap: 8px !important;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
     padding: 10px !important;
-    overflow-x: visible !important;
-    max-width: 100% !important;
+    overflow-x: visible;
+    max-width: 100%;
   }
 
   html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-desktop {
@@ -2853,21 +2853,21 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
 
   html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-mobile {
     display: grid !important;
-    gap: 8px !important;
-    width: 100% !important;
-    min-width: 0 !important;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
   }
 
   html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-mobile-primary {
     display: flex !important;
-    flex-wrap: wrap !important;
+    flex-wrap: wrap;
     gap: 6px !important;
-    min-width: 0 !important;
+    min-width: 0;
   }
 
   html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-mobile-primary a {
     display: inline-flex !important;
-    align-items: center !important;
+    align-items: center;
     gap: 5px !important;
     min-height: 36px !important;
     padding: 6px 10px !important;
@@ -2878,8 +2878,8 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
     font-size: 12.5px !important;
     font-weight: 500 !important;
     text-decoration: none !important;
-    white-space: normal !important;
-    max-width: 100% !important;
+    white-space: normal;
+    max-width: 100%;
   }
 
   html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-mobile-primary a[aria-current='page'] {
@@ -2891,24 +2891,24 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-select {
     display: grid !important;
     gap: 4px !important;
-    margin: 0 !important;
-    width: 100% !important;
-    min-width: 0 !important;
+    margin: 0;
+    width: 100%;
+    min-width: 0;
     font-size: 12px !important;
-    font-weight: 600 !important;
+    font-weight: 600;
     color: var(--ws-muted) !important;
   }
 
   html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-select select {
     width: 100% !important;
-    max-width: 100% !important;
+    max-width: 100%;
     min-height: 40px !important;
   }
 
   /* 5. Phone Session Bar & Single-Row Toolbar */
   html .authenticated-panel .auth-sessionbar {
     padding: 4px 10px !important;
-    min-height: 36px !important;
+    min-height: 36px;
   }
 
   html .authenticated-panel .auth-sessionbar > span {
@@ -2922,24 +2922,24 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   }
 
   html .authenticated-panel .auth-sessionbar:not(.ws-topbar-account) > div > span:first-child {
-    max-width: 125px !important;
+    max-width: 125px;
     overflow: hidden !important;
-    text-overflow: ellipsis !important;
-    white-space: nowrap !important;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-weight: 600 !important;
   }
 
   html .authenticated-panel .auth-sessionbar:not(.ws-topbar-account) > div > .auth-role {
-    margin-right: auto !important;
+    margin-right: auto;
     flex-shrink: 0 !important;
   }
 
   html .workspace-shell .ws-toolbar {
     padding: 0 10px !important;
-    gap: 6px !important;
-    flex-wrap: nowrap !important;
-    height: 52px !important;
-    min-height: 52px !important;
+    gap: 6px;
+    flex-wrap: nowrap;
+    height: 52px;
+    min-height: 52px;
   }
 
   html .workspace-shell .ws-toolbar-left {
@@ -2947,7 +2947,7 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   }
 
   html .workspace-shell .ws-toolbar-divider {
-    margin: 0 2px !important;
+    margin: 0 2px;
     height: 16px !important;
   }
 
@@ -2960,33 +2960,33 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   }
 
   html .workspace-shell .ws-command-trigger {
-    flex: 1 1 auto !important;
+    flex: 1 1 auto;
     min-width: 34px !important;
     height: 34px !important;
     min-height: 34px !important;
     padding: 0 10px !important;
     justify-content: flex-start !important;
-    gap: 6px !important;
+    gap: 6px;
   }
 
   html .workspace-shell .ws-command-trigger span {
     display: inline !important;
     overflow: hidden !important;
-    text-overflow: ellipsis !important;
-    white-space: nowrap !important;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-size: 12px !important;
   }
 
   html .workspace-shell .ws-command-trigger kbd {
-    display: none !important;
+    display: none;
   }
 
   html .workspace-shell .ws-toolbar-actions {
     display: inline-flex !important;
     flex-wrap: nowrap !important;
-    align-items: center !important;
+    align-items: center;
     gap: 2px !important;
-    flex-shrink: 0 !important;
+    flex-shrink: 0;
   }
 
   html .workspace-shell .ws-toolbar-actions .ws-button,
@@ -3001,8 +3001,8 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   html .authenticated-panel .workspace-shell .ws-toolbar .ws-topbar-account.auth-sessionbar {
     padding: 0 !important;
     width: auto !important;
-    min-height: 0 !important;
-    height: auto !important;
+    min-height: 0;
+    height: auto;
     gap: 2px !important;
   }
 
@@ -3012,8 +3012,8 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   }
 
   html .workspace-shell .ws-page-heading {
-    flex-direction: column !important;
-    align-items: stretch !important;
+    flex-direction: column;
+    align-items: stretch;
     gap: 10px !important;
     margin-bottom: 14px !important;
   }
@@ -3045,7 +3045,7 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   }
 
   html .workspace-shell .ws-section-heading {
-    flex-wrap: wrap !important;
+    flex-wrap: wrap;
     gap: 8px 12px !important;
     padding: 12px 14px !important;
   }
@@ -3058,8 +3058,8 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
 
   html .workspace-shell .ws-filters {
     padding: 12px 14px !important;
-    flex-direction: column !important;
-    align-items: stretch !important;
+    flex-direction: column;
+    align-items: stretch;
     gap: 10px !important;
   }
 
@@ -3074,8 +3074,8 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
     height: auto !important;
     min-height: 36px !important;
     padding: 7px 10px !important;
-    white-space: normal !important;
-    line-height: 1.25 !important;
+    white-space: normal;
+    line-height: 1.25;
     text-align: center !important;
   }
 
@@ -3086,13 +3086,13 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
     height: 36px !important;
     min-height: 36px !important;
     padding: 0 !important;
-    white-space: nowrap !important;
+    white-space: nowrap;
   }
 
   html .workspace-shell .ws-table .ws-actions-nowrap .ws-button,
   html .workspace-shell .ws-firewall-table .ws-button,
   html .workspace-shell .ws-firewall-bans-table .ws-button {
-    white-space: nowrap !important;
+    white-space: nowrap;
     height: 32px !important;
     min-height: 32px !important;
     padding: 0 10px !important;
@@ -3100,8 +3100,8 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
 
   /* 7. Dashboard Metrics & Quicklinks */
   html .workspace-shell .ws-console-metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    gap: 8px !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
   }
 
   html .workspace-shell .ws-console-metrics .ws-metric {
@@ -3110,13 +3110,13 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
 
   html .workspace-shell .ws-console-metrics .ws-metric > strong {
     font-size: 26px !important;
-    margin-top: 10px !important;
+    margin-top: 10px;
   }
 
   html .workspace-shell .ws-console-quicklinks,
   html .workspace-shell .ws-console-bottom .ws-console-quicklinks,
   html .workspace-shell .yp-plesk-tool-group > .ws-console-quicklinks {
-    grid-template-columns: 1fr !important;
+    grid-template-columns: 1fr;
     gap: 8px !important;
   }
 
@@ -3129,7 +3129,7 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   }
 
   html .workspace-shell .ws-tools-quicklinks.ws-console-quicklinks {
-    grid-template-columns: 1fr !important;
+    grid-template-columns: 1fr;
     padding: 14px 16px 16px !important;
     gap: 10px !important;
   }
@@ -3146,7 +3146,7 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   /* 8. Websites Page & Subdomain Cards (2-Column Symmetrical Quick Tools) */
   html .workspace-shell .ws-website-task-list {
     padding: 10px !important;
-    gap: 10px !important;
+    gap: 10px;
   }
 
   html .workspace-shell .ws-website-task-card {
@@ -3154,54 +3154,54 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   }
 
   html .workspace-shell .ws-website-task-card.yp-subdomain-task-card {
-    margin-inline-start: 10px !important;
+    margin-inline-start: 10px;
     padding: 10px 12px !important;
   }
 
   html .workspace-shell .ws-website-task-card.yp-subdomain-task-card::before,
   html .workspace-shell .ws-website-task-card.yp-subdomain-task-card::after {
-    display: none !important;
+    display: none;
   }
 
   html .workspace-shell .ws-subdomain-accordion-group {
-    margin-left: auto !important;
+    margin-left: auto;
     padding-left: 0 !important;
     border-left: 0 !important;
   }
 
   html .workspace-shell .ws-website-task-header {
-    flex-direction: column !important;
-    align-items: stretch !important;
-    gap: 8px !important;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
   }
 
   html .workspace-shell .ws-website-task-title {
-    flex: 1 1 auto !important;
+    flex: 1 1 auto;
   }
 
   html .workspace-shell .ws-website-task-status {
     display: flex !important;
-    flex-wrap: wrap !important;
-    align-items: center !important;
+    flex-wrap: wrap;
+    align-items: center;
     gap: 6px !important;
-    width: 100% !important;
+    width: 100%;
   }
 
   html .workspace-shell .ws-website-task-quick {
-    flex-direction: column !important;
-    align-items: stretch !important;
-    gap: 8px !important;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
   }
 
   html .workspace-shell .ws-website-task-quick-primary {
     display: grid !important;
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px !important;
-    width: 100% !important;
+    width: 100%;
   }
 
   html .workspace-shell .ws-website-task-quick-primary .ws-website-task {
-    width: 100% !important;
+    width: 100%;
     display: flex !important;
   }
 
@@ -3223,21 +3223,21 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   }
 
   html .workspace-shell .ws-website-task-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    gap: 6px !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
   }
 
   /* 9. File Manager (FilesPanel) 2x2 Action Grid & Non-Overlapping Size/Perm Cells */
   html .workspace-shell .yf-header {
     padding: 14px 12px !important;
-    gap: 10px !important;
+    gap: 10px;
   }
 
   html .workspace-shell .yf-main-actions {
     display: grid !important;
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px !important;
-    width: 100% !important;
+    width: 100%;
   }
 
   html .workspace-shell .yf-main-actions .ws-button {
@@ -3248,7 +3248,7 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   }
 
   html .workspace-shell .yf-location {
-    margin: 0 10px 10px !important;
+    margin: 0 10px 10px;
     padding: 6px 10px !important;
   }
 
@@ -3259,19 +3259,19 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   html .workspace-shell .yf-tools {
     padding: 0 0 10px !important;
     gap: 6px !important;
-    flex-wrap: wrap !important;
+    flex-wrap: wrap;
   }
 
   html .workspace-shell .yf-search {
-    order: -1 !important;
+    order: -1;
     flex: 1 1 100% !important;
-    width: 100% !important;
+    width: 100%;
   }
 
   html .workspace-shell .yf-sort {
     flex: 1 1 110px !important;
     min-width: 105px !important;
-    width: auto !important;
+    width: auto;
   }
 
   html .workspace-shell .yf-table,
@@ -3280,20 +3280,20 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   }
 
   html .workspace-shell .yf-table thead {
-    position: absolute !important;
-    width: 1px !important;
-    height: 1px !important;
-    overflow: hidden !important;
-    clip-path: inset(50%) !important;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
   }
 
   html .workspace-shell .yf-table tbody tr {
     display: grid !important;
-    grid-template-columns: 22px minmax(0, 1fr) auto !important;
+    grid-template-columns: 22px minmax(0, 1fr) auto;
     gap: 4px 8px !important;
     padding: 10px 12px !important;
     border: 1px solid var(--ws-border) !important;
-    border-radius: 8px !important;
+    border-radius: 8px;
     margin-bottom: 6px !important;
   }
 
@@ -3308,19 +3308,19 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   }
 
   html .workspace-shell .yf-table td:nth-child(2) {
-    grid-column: 2 !important;
-    grid-row: 1 !important;
+    grid-column: 2;
+    grid-row: 1;
   }
 
   html .workspace-shell .yf-table td:nth-child(3).yf-size {
-    grid-column: 2 !important;
-    grid-row: 2 !important;
+    grid-column: 2;
+    grid-row: 2;
     padding-left: 39px !important;
   }
 
   html .workspace-shell .yf-table td.yf-perm-cell {
-    grid-column: 2 !important;
-    grid-row: 2 !important;
+    grid-column: 2;
+    grid-row: 2;
     padding-left: 104px !important;
   }
 
@@ -3329,8 +3329,8 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   }
 
   html .workspace-shell .yf-table td:last-child {
-    grid-column: 3 !important;
-    grid-row: 1 / 3 !important;
+    grid-column: 3;
+    grid-row: 1 / 3;
     align-self: center !important;
   }
 
@@ -3349,19 +3349,19 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   }
 
   html .workspace-shell .ws-db-name {
-    min-width: 0 !important;
+    min-width: 0;
   }
 
   html .workspace-shell .ws-db-name strong {
-    overflow-wrap: anywhere !important;
+    overflow-wrap: anywhere;
     word-break: break-all !important;
   }
 
   html .workspace-shell .ws-db-access {
     display: grid !important;
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px !important;
-    width: 100% !important;
+    width: 100%;
   }
 
   html .workspace-shell .ws-db-access > .ws-button {
@@ -3370,12 +3370,12 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   }
 
   html .workspace-shell .ws-db-access > small {
-    grid-column: 1 / -1 !important;
+    grid-column: 1 / -1;
   }
 
   /* 11. Docker Catalog, Notification Drawer & Modals on Phones */
   html .workspace-shell .yp-docker-catalog-grid {
-    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   html .workspace-shell .yp-docker-catalog-card,
@@ -3389,13 +3389,13 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   }
 
   html .workspace-shell :is(.yp-notification-drawer, .ws-notification-drawer) {
-    width: 100vw !important;
-    max-width: 100vw !important;
+    width: 100vw;
+    max-width: 100vw;
   }
 
   html .workspace-shell :is(.yp-notification-header, .ws-drawer-header) {
     padding: 12px 14px !important;
-    flex-wrap: wrap !important;
+    flex-wrap: wrap;
   }
 
   html .workspace-shell .yp-notification-tabs {
@@ -3406,7 +3406,7 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
 
   html .workspace-shell .yp-notification-tabs .ws-tab {
     flex-shrink: 0 !important;
-    white-space: nowrap !important;
+    white-space: nowrap;
   }
 
   html .workspace-shell :is(.yp-notification-body, .ws-drawer-body) {
@@ -3414,7 +3414,7 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   }
 
   html .workspace-shell :is(.yp-notification-body, .ws-drawer-body) .ws-alert-item {
-    flex-direction: column !important;
+    flex-direction: column;
     align-items: stretch !important;
     gap: 8px !important;
   }
@@ -3427,8 +3427,8 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
 
   html .ws-modal {
     width: calc(100vw - 16px) !important;
-    max-width: calc(100vw - 16px) !important;
-    margin: auto 8px !important;
+    max-width: calc(100vw - 16px);
+    margin: auto 8px;
   }
 
   html .ws-modal > header {
@@ -3451,13 +3451,13 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   }
 
   html .workspace-shell .ws-website-task-quick-primary > :last-child:nth-child(odd) {
-    grid-column: 1 / -1 !important;
+    grid-column: 1 / -1;
   }
 }
 
 @media (max-width: 640px) {
   html .workspace-shell .ws-alert-item {
-    flex-direction: column !important;
+    flex-direction: column;
     align-items: flex-start !important;
     gap: 10px !important;
   }
@@ -3470,7 +3470,7 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
 @media (max-width: 440px) {
   html .workspace-shell .ws-toolbar {
     padding: 0 8px !important;
-    gap: 4px !important;
+    gap: 4px;
   }
 
   html .workspace-shell .ws-toolbar-divider {
@@ -3491,9 +3491,9 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   }
 
   html .workspace-shell .ws-command-trigger {
-    width: 32px !important;
+    width: 32px;
     min-width: 32px !important;
-    max-width: 110px !important;
+    max-width: 110px;
     height: 32px !important;
     min-height: 32px !important;
     padding: 0 8px !important;
@@ -3502,8 +3502,8 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
 
 @media (max-width: 360px) {
   html .workspace-shell .ws-command-trigger {
-    flex: 0 0 32px !important;
-    width: 32px !important;
+    flex: 0 0 32px;
+    width: 32px;
     min-width: 32px !important;
     padding: 0 !important;
     justify-content: center !important;
@@ -3515,15 +3515,15 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
 
   html .workspace-shell .ws-console-quicklink,
   html .workspace-shell .ws-tools-card.ws-console-quicklink {
-    flex-direction: row !important;
-    align-items: center !important;
+    flex-direction: row;
+    align-items: center;
     gap: 12px !important;
   }
 
   html .workspace-shell .ws-website-task-quick-primary,
   html .workspace-shell .ws-website-task-grid,
   html .workspace-shell .ws-db-access {
-    grid-template-columns: 1fr !important;
+    grid-template-columns: 1fr;
   }
 }
 
@@ -3532,36 +3532,36 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
    ========================================================================== */
 
 html .auth-page {
-  min-height: 100dvh !important;
+  min-height: 100dvh;
   display: grid !important;
-  grid-template-columns: minmax(360px, 0.95fr) minmax(420px, 1.05fr) !important;
+  grid-template-columns: minmax(360px, 0.95fr) minmax(420px, 1.05fr);
   background-color: var(--ws-bg) !important;
   background-image: none !important;
-  color: var(--ws-text) !important;
+  color: var(--ws-text);
   font-family: var(--ws-font-body) !important;
 }
 
 html .auth-intro {
-  position: relative !important;
+  position: relative;
   padding: clamp(32px, 5vw, 72px) !important;
   background: var(--ws-surface) !important;
   border-right: 1px solid var(--ws-border) !important;
-  color: var(--ws-text) !important;
+  color: var(--ws-text);
   display: flex !important;
-  flex-direction: column !important;
-  justify-content: space-between !important;
-  gap: 48px !important;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 48px;
 }
 
 html .auth-brand {
   display: inline-flex !important;
-  align-items: center !important;
-  gap: 12px !important;
+  align-items: center;
+  gap: 12px;
   font-family: var(--ws-font-display) !important;
-  font-size: 20px !important;
-  font-weight: 700 !important;
-  letter-spacing: -0.03em !important;
-  color: var(--ws-text) !important;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--ws-text);
 }
 
 html .auth-brand > span {
@@ -3575,14 +3575,14 @@ html .auth-brand > span {
   font-weight: 800 !important;
   font-size: 15px !important;
   display: grid !important;
-  place-items: center !important;
+  place-items: center;
 }
 
 html .auth-eyebrow {
   font-size: 11px !important;
-  font-weight: 700 !important;
-  letter-spacing: 0.12em !important;
-  text-transform: uppercase !important;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   color: var(--ws-primary-hover, #818cf8) !important;
   margin: 0 0 12px 0 !important;
 }
@@ -3591,10 +3591,10 @@ html .auth-intro h1 {
   font-family: var(--ws-font-display) !important;
   font-size: clamp(32px, 3.6vw, 48px) !important;
   font-weight: 700 !important;
-  line-height: 1.12 !important;
+  line-height: 1.12;
   letter-spacing: -0.035em !important;
-  color: var(--ws-text) !important;
-  margin: 0 0 16px 0 !important;
+  color: var(--ws-text);
+  margin: 0 0 16px 0;
 }
 
 html .auth-intro p:not(.auth-eyebrow) {
@@ -3611,28 +3611,28 @@ html .auth-intro small {
 }
 
 html .auth-form-panel {
-  position: relative !important;
+  position: relative;
   display: flex !important;
-  flex-direction: column !important;
-  align-items: center !important;
-  justify-content: center !important;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   padding: 48px 32px !important;
   background: transparent !important;
 }
 
 html .auth-form-topbar {
-  width: 100% !important;
-  max-width: 430px !important;
+  width: 100%;
+  max-width: 430px;
   display: flex !important;
-  justify-content: flex-end !important;
-  margin-bottom: 12px !important;
+  justify-content: flex-end;
+  margin-bottom: 12px;
 }
 
 html .auth-theme-toggle {
   display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  width: 34px !important;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
   min-width: 34px !important;
   height: 34px !important;
   min-height: 34px !important;
@@ -3651,8 +3651,8 @@ html .auth-theme-toggle:hover {
 }
 
 html .auth-form {
-  width: 100% !important;
-  max-width: 430px !important;
+  width: 100%;
+  max-width: 430px;
   padding: 32px !important;
   background: var(--ws-surface) !important;
   border: 1px solid var(--ws-border) !important;
@@ -3664,8 +3664,8 @@ html .auth-form h2 {
   font-family: var(--ws-font-display) !important;
   font-size: 24px !important;
   font-weight: 700 !important;
-  letter-spacing: -0.025em !important;
-  color: var(--ws-text) !important;
+  letter-spacing: -0.025em;
+  color: var(--ws-text);
   margin: 0 0 8px 0 !important;
 }
 
@@ -3676,7 +3676,7 @@ html .auth-muted {
 }
 
 html .auth-form > .auth-muted {
-  margin-bottom: 24px !important;
+  margin-bottom: 24px;
 }
 
 html :is(.auth-form, .auth-dialog, .owner-enrollment-card) label {
@@ -3716,8 +3716,8 @@ html .mfa-recovery textarea:focus-visible {
 
 html .auth-primary {
   display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
+  align-items: center;
+  justify-content: center;
   min-height: 40px !important;
   padding: 10px 18px !important;
   border-radius: var(--ws-radius, 6px) !important;
@@ -3738,8 +3738,8 @@ html .auth-primary:hover:not(:disabled) {
 
 html .auth-secondary {
   display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
+  align-items: center;
+  justify-content: center;
   min-height: 40px !important;
   padding: 10px 16px !important;
   border-radius: var(--ws-radius, 6px) !important;
@@ -3760,11 +3760,11 @@ html .auth-link {
   color: var(--ws-primary-hover, #818cf8) !important;
   font-size: 13px !important;
   font-weight: 600 !important;
-  text-decoration: none !important;
+  text-decoration: none;
 }
 
 html .auth-link:hover {
-  text-decoration: underline !important;
+  text-decoration: underline;
 }
 
 html .auth-help {
@@ -3777,19 +3777,19 @@ html .auth-help {
 }
 
 html .auth-setup-offer {
-  margin-top: 20px !important;
-  padding: 14px 16px !important;
+  margin-top: 20px;
+  padding: 14px 16px;
   border-radius: var(--ws-radius-md, 8px) !important;
   border: 1px solid var(--ws-border) !important;
   background: var(--ws-surface-subtle) !important;
   display: grid !important;
-  gap: 8px !important;
+  gap: 8px;
 }
 
 html .auth-setup-offer-title {
   margin: 0 !important;
   font-size: 13.5px !important;
-  font-weight: 600 !important;
+  font-weight: 600;
   color: var(--ws-text) !important;
 }
 
@@ -3802,15 +3802,15 @@ html .auth-setup-offer-copy {
 
 html .auth-setup-offer-actions {
   display: flex !important;
-  flex-wrap: wrap !important;
-  align-items: center !important;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 10px 14px !important;
-  margin-top: 4px !important;
+  margin-top: 4px;
 }
 
 html .auth-setup-offer-link {
   display: inline-flex !important;
-  align-items: center !important;
+  align-items: center;
   gap: 6px !important;
   min-height: 34px !important;
   padding: 6px 12px !important;
@@ -3837,7 +3837,7 @@ html .auth-setup-offer-doc:focus-visible {
 
 html .auth-setup-offer-doc {
   display: inline-flex !important;
-  align-items: center !important;
+  align-items: center;
   gap: 5px !important;
   font-size: 12.5px !important;
   font-weight: 600 !important;
@@ -3870,26 +3870,26 @@ html .auth-notice {
 }
 
 html .auth-expiry {
-  margin: 12px 24px 12px calc(var(--ws-sidebar-width, 236px) + 24px) !important;
+  margin: 12px 24px 12px calc(var(--ws-sidebar-width, 236px) + 24px);
   padding: 10px 14px !important;
   border-radius: var(--ws-radius, 6px) !important;
   border: 1px solid rgba(245, 158, 11, 0.35) !important;
   background: var(--ws-warning-soft) !important;
-  color: var(--ws-warning) !important;
-  font-size: 13px !important;
+  color: var(--ws-warning);
+  font-size: 13px;
   display: flex !important;
-  align-items: center !important;
+  align-items: center;
   justify-content: space-between !important;
-  flex-wrap: wrap !important;
+  flex-wrap: wrap;
   gap: 10px 14px !important;
-  position: relative !important;
-  z-index: 20 !important;
+  position: relative;
+  z-index: 20;
 }
 
 html .authenticated-panel .auth-banner {
   margin: 12px 24px 12px calc(var(--ws-sidebar-width, 236px) + 24px) !important;
-  position: relative !important;
-  z-index: 20 !important;
+  position: relative;
+  z-index: 20;
 }
 
 html .auth-expiry button.auth-secondary {
@@ -3898,23 +3898,23 @@ html .auth-expiry button.auth-secondary {
   padding: 0 12px !important;
   font-size: 12px !important;
   border-radius: 6px !important;
-  flex-shrink: 0 !important;
+  flex-shrink: 0;
 }
 
 html .auth-loading {
-  min-height: 100dvh !important;
+  min-height: 100dvh;
   background: var(--ws-bg) !important;
-  color: var(--ws-text) !important;
+  color: var(--ws-text);
   font-family: var(--ws-font-body) !important;
 }
 
 /* AccountDialog ("Hesabım") & OwnerEnrollment Shadcn Modal Styling */
 html .auth-dialog {
-  width: min(520px, calc(100vw - 24px)) !important;
-  max-height: calc(100dvh - 32px) !important;
+  width: min(520px, calc(100vw - 24px));
+  max-height: calc(100dvh - 32px);
   padding: 24px !important;
   background: var(--ws-surface) !important;
-  color: var(--ws-text) !important;
+  color: var(--ws-text);
   border-color: var(--ws-border);
   border-radius: var(--ws-radius-lg, 12px) !important;
   box-shadow: var(--ws-overlay-shadow) !important;
@@ -3922,8 +3922,8 @@ html .auth-dialog {
 }
 
 html .auth-dialog::backdrop {
-  background: rgba(0, 0, 0, 0.72) !important;
-  backdrop-filter: blur(4px) !important;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(4px);
 }
 
 html .auth-dialog header {
@@ -3936,7 +3936,7 @@ html .auth-dialog h2 {
   font-family: var(--ws-font-display) !important;
   font-size: 18px !important;
   font-weight: 700 !important;
-  color: var(--ws-text) !important;
+  color: var(--ws-text);
 }
 
 html .auth-dialog h3 {
@@ -3967,12 +3967,12 @@ html .auth-sessions button {
 }
 
 html .auth-dialog header button.auth-dialog-close {
-  width: 32px !important;
-  min-width: 32px !important;
+  width: 32px;
+  min-width: 32px;
   padding: 0 !important;
   display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
+  align-items: center;
+  justify-content: center;
 }
 
 html .auth-dialog header button:hover:not(:disabled),
@@ -3982,7 +3982,7 @@ html .auth-sessions button:hover:not(:disabled) {
 
 html .mfa-settings,
 html .auth-sessions {
-  margin-top: 24px !important;
+  margin-top: 24px;
   padding-top: 20px !important;
   border-top: 1px solid var(--ws-border) !important;
 }
@@ -3998,15 +3998,15 @@ html .auth-sessions small {
 }
 
 html .owner-enrollment {
-  min-height: calc(100dvh - 38px) !important;
+  min-height: calc(100dvh - 38px);
   background: var(--ws-bg) !important;
-  color: var(--ws-text) !important;
+  color: var(--ws-text);
   padding: 36px 20px !important;
 }
 
 html .owner-enrollment-card {
   background: var(--ws-surface) !important;
-  color: var(--ws-text) !important;
+  color: var(--ws-text);
   border: 1px solid var(--ws-border) !important;
   border-radius: var(--ws-radius-lg, 12px) !important;
   box-shadow: var(--ws-overlay-shadow) !important;
@@ -4018,18 +4018,18 @@ html .owner-enrollment-footer {
 
 @media (max-width: 900px) {
   html .auth-page {
-    grid-template-columns: minmax(0, 1fr) !important;
-    grid-template-rows: auto 1fr !important;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
   }
 
   html .auth-intro {
     padding: 16px 20px !important;
-    gap: 12px !important;
+    gap: 12px;
     border-right: 0 !important;
     border-bottom: 1px solid var(--ws-border) !important;
-    flex-direction: row !important;
-    align-items: center !important;
-    justify-content: space-between !important;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
   }
 
   html .auth-intro > div:nth-child(2),
@@ -4039,7 +4039,7 @@ html .owner-enrollment-footer {
 
   html .auth-form-panel {
     padding: 24px 16px 40px !important;
-    justify-content: flex-start !important;
+    justify-content: flex-start;
   }
 
   html .auth-form {
@@ -4058,7 +4058,7 @@ html .owner-enrollment-footer {
   }
 
   html .auth-dialog {
-    width: calc(100vw - 16px) !important;
+    width: calc(100vw - 16px);
     padding: 18px 16px !important;
   }
 
@@ -4085,7 +4085,7 @@ html .workspace-shell .ws-toolbar-actions .ws-theme-toggle {
 /* Fix Light-Mode First Dashboard KPI Card Contrast (overrides ember-theme white text) */
 html .workspace-shell .ws-console-metrics .ws-metric:first-child {
   background-color: var(--ws-surface) !important;
-  color: var(--ws-text) !important;
+  color: var(--ws-text);
 }
 
 html .workspace-shell .ws-console-metrics .ws-metric:first-child > strong {
@@ -4110,7 +4110,7 @@ html .workspace-shell .yf-view .ws-button[aria-pressed='true'] {
 /* Prominent Single-Direction Accordion Chevron (Icon-Only, Consistent Position & aria-expanded Rotation) */
 html .workspace-shell .ws-accordion-toggle {
   display: inline-flex !important;
-  align-items: center !important;
+  align-items: center;
   justify-content: center !important;
   gap: 0 !important;
 }
@@ -4140,17 +4140,17 @@ html .workspace-shell .ws-accordion-icon-btn[aria-expanded='true'] {
 
 html .workspace-shell .ws-accordion-chevron {
   display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  flex-shrink: 0 !important;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
   color: currentColor !important;
   transition: transform 150ms ease !important;
 }
 
 html .workspace-shell .ws-accordion-chevron svg {
-  width: 18px !important;
-  height: 18px !important;
-  stroke-width: 2.3 !important;
+  width: 18px;
+  height: 18px;
+  stroke-width: 2.3;
 }
 
 html .workspace-shell .ws-accordion-toggle[aria-expanded='true'] .ws-accordion-chevron {
@@ -4184,8 +4184,8 @@ html .workspace-shell .ws-accordion-toggle[aria-expanded='true'] .ws-accordion-c
   }
 
   html .workspace-shell .ws-filters > .ws-list-options {
-    flex: 0 0 auto !important;
-    width: 100% !important;
+    flex: 0 0 auto;
+    width: 100%;
   }
 
   html .workspace-shell .ws-sidebar {
@@ -4208,22 +4208,22 @@ html .workspace-shell .ws-list-options > summary {
   background: var(--ws-surface-subtle) !important;
   color: var(--ws-text) !important;
   font-size: 13px !important;
-  font-weight: 500 !important;
+  font-weight: 500;
   gap: 8px !important;
   justify-content: space-between !important;
 }
 
 html .workspace-shell .ws-list-options > summary::after {
-  content: '▾' !important;
-  margin-left: 6px !important;
-  color: var(--ws-text-secondary) !important;
-  font-size: 13px !important;
-  line-height: 1 !important;
+  content: '▾';
+  margin-left: 6px;
+  color: var(--ws-text-secondary);
+  font-size: 13px;
+  line-height: 1;
   transition: transform 150ms ease !important;
 }
 
 html .workspace-shell .ws-list-options[open] > summary::after {
-  content: '▾' !important;
+  content: '▾';
   transform: rotate(180deg) !important;
 }
 
@@ -4240,9 +4240,9 @@ html .workspace-shell label.yf-search,
 html .workspace-shell div.ys-resource-search,
 html .ws-modal div.ws-command-search {
   display: flex !important;
-  align-items: center !important;
+  align-items: center;
   gap: 8px !important;
-  min-height: 36px !important;
+  min-height: 36px;
   padding: 0 10px !important;
   border: 1px solid var(--ws-border) !important;
   border-radius: 6px !important;
@@ -4251,7 +4251,7 @@ html .ws-modal div.ws-command-search {
 }
 
 html .ws-modal div.ws-command-search {
-  width: 100% !important;
+  width: 100%;
 }
 
 html .workspace-shell div.ys-resource-search > label {
@@ -4272,7 +4272,7 @@ html .workspace-shell div.ys-resource-search input:not([type='checkbox']):not([t
 html .ws-modal div.ws-command-search > input:not([type='checkbox']):not([type='radio']) {
   flex: 1 1 auto !important;
   width: 100% !important;
-  min-width: 0 !important;
+  min-width: 0;
   min-height: 34px !important;
   height: 34px !important;
   padding: 0 !important;
@@ -4291,21 +4291,21 @@ html .workspace-shell .yp-docker-catalog-card > div {
 
 html .workspace-shell .yp-docker-catalog-card .yp-port-mapping-badge {
   display: inline-block !important;
-  vertical-align: middle !important;
-  max-width: 100% !important;
-  overflow: hidden !important;
-  text-overflow: ellipsis !important;
-  white-space: nowrap !important;
+  vertical-align: middle;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Read-Only Websites Table Domain Column & Checkbox Spacing */
 html .workspace-shell .ws-websites-table td:first-child {
-  min-width: 250px !important;
+  min-width: 250px;
 }
 
 html .workspace-shell .ws-websites-table .ws-domain-name a {
-  word-break: normal !important;
-  overflow-wrap: break-word !important;
+  word-break: normal;
+  overflow-wrap: break-word;
 }
 
 html .workspace-shell .ws-actions > label.ws-check {
@@ -4316,70 +4316,70 @@ html .workspace-shell .ws-actions > label.ws-check {
 /* Firewall Status Cards, Service Profiles & Responsive Forms */
 html .workspace-shell .ws-firewall-status-grid {
   display: grid !important;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)) !important;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
   gap: 12px !important;
 }
 
 html .workspace-shell .ws-firewall-stat-card {
   display: flex !important;
-  flex-direction: column !important;
+  flex-direction: column;
   gap: 6px !important;
   padding: 14px 16px !important;
   background: var(--ws-surface-subtle) !important;
   border: 1px solid var(--ws-border) !important;
-  border-radius: 8px !important;
+  border-radius: 8px;
 }
 
 html .workspace-shell .ws-firewall-stat-label {
   font-size: 11px !important;
-  font-weight: 600 !important;
-  letter-spacing: 0.04em !important;
-  text-transform: uppercase !important;
-  color: var(--ws-muted) !important;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ws-muted);
 }
 
 html .workspace-shell .ws-firewall-stat-value {
   display: flex !important;
-  align-items: center !important;
+  align-items: center;
   gap: 6px !important;
 }
 
 html .workspace-shell .ws-firewall-stat-detail {
   font-size: 12px !important;
-  color: var(--ws-muted) !important;
+  color: var(--ws-muted);
 }
 
 html .workspace-shell .ws-firewall-summary-bar {
   display: flex !important;
-  flex-wrap: wrap !important;
-  align-items: center !important;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px 20px !important;
   padding: 10px 14px !important;
   background: var(--ws-surface-subtle) !important;
   border: 1px solid var(--ws-border) !important;
-  border-radius: 8px !important;
+  border-radius: 8px;
   font-size: 12.5px !important;
 }
 
 html .workspace-shell .ws-firewall-summary-time {
-  margin-left: auto !important;
+  margin-left: auto;
   color: var(--ws-muted) !important;
 }
 
 html .workspace-shell .ws-firewall-profiles-grid {
   display: grid !important;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)) !important;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
   gap: 14px !important;
 }
 
 html .workspace-shell .ws-firewall-profile-card {
   display: flex !important;
-  flex-direction: column !important;
+  flex-direction: column;
   gap: 10px !important;
   padding: 16px !important;
   background: var(--ws-surface-subtle) !important;
   border: 1px solid var(--ws-border) !important;
-  border-radius: 8px !important;
+  border-radius: 8px;
 }
 
 html .workspace-shell .ws-firewall-profile-card > p {
@@ -4395,38 +4395,38 @@ html .workspace-shell .ws-firewall-profile-card > .ws-button {
 
 html .workspace-shell .ws-firewall-profile-head {
   display: flex !important;
-  justify-content: space-between !important;
-  align-items: center !important;
-  flex-wrap: wrap !important;
-  gap: 8px !important;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 html .workspace-shell .ws-firewall-subcard {
   display: flex !important;
-  flex-direction: column !important;
+  flex-direction: column;
   gap: 12px !important;
   padding: 16px !important;
   background: var(--ws-surface-subtle) !important;
   border: 1px solid var(--ws-border) !important;
-  border-radius: 8px !important;
+  border-radius: 8px;
 }
 
 html .workspace-shell .ws-firewall-subcard h4 {
   margin: 0 !important;
-  font-size: 14px !important;
-  font-weight: 600 !important;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 html .workspace-shell .ws-firewall-form-row {
   display: flex !important;
-  flex-wrap: wrap !important;
-  align-items: flex-end !important;
-  gap: 12px !important;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
 }
 
 html .workspace-shell .ws-firewall-field {
   flex: 1 1 160px !important;
-  min-width: 0 !important;
+  min-width: 0;
 }
 
 html .workspace-shell .ws-firewall-field-sm {
@@ -4436,7 +4436,7 @@ html .workspace-shell .ws-firewall-field-sm {
 
 html .workspace-shell .ws-firewall-field-lg {
   flex: 1.5 1 220px !important;
-  min-width: 0 !important;
+  min-width: 0;
 }
 
 /* Crisp UsageRing Unfilled Track Contrast in Both Light & Dark Themes */
@@ -4457,23 +4457,23 @@ html .workspace-shell .ws-server-metrics .ws-usage-ring.is-unknown {
 }
 
 html .workspace-shell .ws-server-metrics .ws-usage-ring::before {
-  inset: 7px !important;
-  background: var(--ws-surface) !important;
+  inset: 7px;
+  background: var(--ws-surface);
 }
 
 /* Firewall Symmetric 2x2 Service Profiles Grid on Desktop */
 @media (min-width: 760px) {
   html .workspace-shell .ws-firewall-profiles-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 /* Align Legacy .primary-button / .secondary-button Inside Workspace Pages */
 html .workspace-shell .primary-button {
   display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  gap: 6px !important;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   min-height: 34px !important;
   padding: 0 14px !important;
   border-radius: 6px !important;
@@ -4482,14 +4482,14 @@ html .workspace-shell .primary-button {
   color: var(--ws-on-brand) !important;
   font-size: 13px !important;
   font-weight: 500 !important;
-  cursor: pointer !important;
+  cursor: pointer;
 }
 
 html .workspace-shell .secondary-button {
   display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  gap: 6px !important;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   min-height: 34px !important;
   padding: 0 14px !important;
   border-radius: 6px !important;
@@ -4498,7 +4498,7 @@ html .workspace-shell .secondary-button {
   color: var(--ws-text) !important;
   font-size: 13px !important;
   font-weight: 500 !important;
-  cursor: pointer !important;
+  cursor: pointer;
 }
 
 html .workspace-shell .secondary-button:hover:not(:disabled) {
@@ -4853,14 +4853,14 @@ button::-moz-focus-inner, input::-moz-focus-inner {
   padding: 0;
 }
 .ws-sr-only {
-  position: absolute !important;
+  position: absolute;
   width: 1px !important;
   height: 1px !important;
   padding: 0 !important;
   margin: -1px !important;
-  overflow: hidden !important;
-  clip: rect(0, 0, 0, 0) !important;
-  white-space: nowrap !important;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
   border: 0 !important;
 }
 @media (pointer: coarse) {
@@ -4873,7 +4873,7 @@ button::-moz-focus-inner, input::-moz-focus-inner {
   .workspace-shell .ws-pagination button, .workspace-shell .ws-pagination a { min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .workspace-shell *, .workspace-shell *::before, .workspace-shell *::after, .ws-modal, .ws-modal *, .auth-dialog, .auth-dialog * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+  .workspace-shell *, .workspace-shell *::before, .workspace-shell *::after, .ws-modal, .ws-modal *, .auth-dialog, .auth-dialog * { transition: none !important; animation: none !important; scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
 @media (forced-colors: active) {

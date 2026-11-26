@@ -1,5 +1,5 @@
 .ws-mail-pane { min-width: 0; }
-.workspace-shell .ws-mail-pane[hidden] { display: none !important; }
+.workspace-shell .ws-mail-pane[hidden] { display: none; }
 .ws-mail-name { display: flex; align-items: center; gap: 10px; }
 .ws-mail-name > svg { color: var(--ws-accent); flex: none; }
 .ws-mail-name > strong { overflow-wrap: anywhere; }
