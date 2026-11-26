@@ -1,11 +1,13 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const ownedTransactions = new AsyncLocalStorage();
 
 const TOKEN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// The reclaim guard is held for one read and one unlink; an older guard was left by a crash.
+const ABANDONED_RECLAIM_GUARD_MS = 10_000;
 
 export class ProcessStoreLockError extends Error {
   constructor(code, message, status = 503) {
@@ -55,6 +57,57 @@ export function createProcessStoreLock({
     throw new ProcessStoreLockError('process_store_lock_invalid', 'Process store lock configuration is invalid');
   }
   const lockPath = `${filePath}.lock`;
+  const reclaimPath = `${lockPath}.reclaim`;
+
+  async function readLockRecord(target) {
+    try {
+      return parseRecord(await readFile(target, 'utf8'));
+    } catch (error) {
+      if (error?.code === 'ENOENT') return null;
+      throw error;
+    }
+  }
+
+  async function clearAbandonedReclaimGuard() {
+    let guard;
+    let ageMs;
+    try {
+      ageMs = Date.now() - (await stat(reclaimPath)).mtimeMs;
+      guard = await readLockRecord(reclaimPath);
+    } catch {
+      return;
+    }
+    if (ageMs < ABANDONED_RECLAIM_GUARD_MS || (guard && processAlive(guard.pid, signalProcess))) return;
+    if ((await readLockRecord(reclaimPath).catch(() => null))?.token !== guard?.token) return;
+    await rm(reclaimPath, { force: true }).catch(() => {});
+  }
+
+  // Waiters that both saw the same dead owner serialize here, and the lock is removed only
+  // while it still holds that owner's token. A lock another waiter has just taken is never removed;
+  // the O_EXCL create in withLock then picks exactly one new owner.
+  async function reclaimStaleLock(stale, guardRecord) {
+    let guard;
+    try {
+      guard = await open(reclaimPath, 'wx', 0o600);
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error;
+      await clearAbandonedReclaimGuard();
+      return false;
+    }
+    try {
+      await writeFile(guard, guardRecord, { encoding: 'utf8' });
+      await guard.close();
+      guard = null;
+      const current = await readLockRecord(lockPath);
+      if (current?.token === stale.token && current.pid === stale.pid && !processAlive(current.pid, signalProcess)) {
+        await rm(lockPath, { force: true });
+      }
+      return true;
+    } finally {
+      await guard?.close().catch(() => {});
+      await rm(reclaimPath, { force: true }).catch(() => {});
+    }
+  }
 
   async function withLock(action) {
     if (typeof action !== 'function') {
@@ -158,10 +211,17 @@ export function createProcessStoreLock({
           await new Promise((resolve) => setTimeout(resolve, retryMs));
           continue;
         }
+        let reclaimed;
         try {
-          await rm(lockPath, { force: true });
+          reclaimed = await reclaimStaleLock(existing, serialized);
         } catch {
           throw new ProcessStoreLockError('process_store_lock_failed', 'Process store lock could not be acquired');
+        }
+        if (!reclaimed) {
+          if (Date.now() >= deadline) {
+            throw new ProcessStoreLockError('process_store_locked', 'Timed out waiting for another process to finish mutating this durable store', 503);
+          }
+          await new Promise((resolve) => setTimeout(resolve, retryMs));
         }
       }
     }

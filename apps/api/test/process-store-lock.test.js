@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { spawn, spawnSync } from 'node:child_process';
+import { mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createProcessStoreLock } from '../src/process-store-lock.js';
 
 test('process store lock waits for a live writer and then runs the next transaction', async (t) => {
@@ -205,4 +207,71 @@ test('an outer transaction retains ownership until an unawaited nested writer co
   await Promise.all([outer, child, independent]);
   assert.equal(await readFile(filePath, 'utf8'), '2');
   await assert.rejects(readFile(first.lockPath), error => error.code === 'ENOENT');
+});
+
+const RACE_CHILD = `
+import { appendFile, access } from 'node:fs/promises';
+const [moduleUrl, filePath, logPath, goPath, stalePid, delayMs, name] = process.argv.slice(1);
+const { createProcessStoreLock } = await import(moduleUrl);
+// A slow liveness probe for the dead owner widens the window between seeing the stale lock and removing it.
+const signalProcess = (pid, signal) => {
+  if (pid === Number(stalePid)) { const until = Date.now() + Number(delayMs); while (Date.now() < until); }
+  return process.kill(pid, signal);
+};
+const lock = createProcessStoreLock({ filePath, signalProcess, waitMs: 10000, retryMs: 5 });
+process.stdout.write('ready\\n');
+while (true) { try { await access(goPath); break; } catch { await new Promise((r) => setTimeout(r, 2)); } }
+await lock.withLock(async () => {
+  await appendFile(logPath, 'enter ' + name + '\\n');
+  await new Promise((r) => setTimeout(r, 300));
+  await appendFile(logPath, 'exit ' + name + '\\n');
+});
+`;
+
+test('two real processes reclaiming the same dead-owner lock never hold it at the same time', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-store-lock-race-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const filePath = path.join(root, 'jobs.json');
+  const logPath = path.join(root, 'critical.log');
+  const goPath = path.join(root, 'go');
+  const deadPid = spawnSync(process.execPath, ['-e', '']).pid;
+  await writeFile(`${filePath}.lock`, JSON.stringify({
+    version: 1, pid: deadPid, token: '66666666-6666-4666-8666-666666666666', createdAt: new Date().toISOString(),
+  }));
+  const moduleUrl = pathToFileURL(fileURLToPath(new URL('../src/process-store-lock.js', import.meta.url))).href;
+  const children = [['fast', 30], ['slow', 150]].map(([name, delayMs]) => {
+    const child = spawn(process.execPath, [
+      '--input-type=module', '-e', RACE_CHILD, moduleUrl, filePath, logPath, goPath, String(deadPid), String(delayMs), name,
+    ], { stdio: ['ignore', 'pipe', 'inherit'] });
+    return {
+      ready: new Promise((resolve) => child.stdout.once('data', resolve)),
+      exited: new Promise((resolve) => child.once('exit', resolve)),
+    };
+  });
+  await Promise.all(children.map((child) => child.ready));
+  await writeFile(goPath, '');
+  assert.deepEqual(await Promise.all(children.map((child) => child.exited)), [0, 0]);
+
+  const events = (await readFile(logPath, 'utf8')).trim().split('\n').map((line) => line.split(' '));
+  assert.deepEqual(events.map(([kind]) => kind), ['enter', 'exit', 'enter', 'exit']);
+  assert.equal(events[0][1], events[1][1]);
+  assert.equal(events[2][1], events[3][1]);
+  assert.notEqual(events[0][1], events[2][1]);
+  await assert.rejects(readFile(`${filePath}.lock`), { code: 'ENOENT' });
+  await assert.rejects(readFile(`${filePath}.lock.reclaim`), { code: 'ENOENT' });
+});
+
+test('a reclaim guard left by a crashed process is cleared once it is old', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-store-lock-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const filePath = path.join(root, 'jobs.json');
+  const dead = () => { throw Object.assign(new Error('dead'), { code: 'ESRCH' }); };
+  const lock = createProcessStoreLock({ filePath, pid: 1111, signalProcess: dead, waitMs: 1000, retryMs: 5 });
+  await writeFile(lock.lockPath, JSON.stringify({
+    version: 1, pid: 9999, token: '77777777-7777-4777-8777-777777777777', createdAt: new Date().toISOString(),
+  }));
+  await writeFile(`${lock.lockPath}.reclaim`, '');
+  const old = new Date(Date.now() - 60_000);
+  await utimes(`${lock.lockPath}.reclaim`, old, old);
+  assert.equal(await lock.withLock(async () => 'recovered'), 'recovered');
 });
