@@ -11,7 +11,7 @@ import ApiKeysPanel from './ApiKeysPanel.jsx';
 import LicenseSettingsPanel from './LicenseSettingsPanel.jsx';
 import NotificationSettingsPanel from './NotificationSettingsPanel.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
-import { Button, CollectionNotice, ConfirmDialog, EmptyState, LinkButton, PageHeading, Section } from './PanelKit.jsx';
+import { Button, CollectionNotice, ConfirmDialog, EmptyState, Field, LinkButton, PageHeading, Section, Select } from './PanelKit.jsx';
 import { ServerSummary } from './DashboardPage.jsx';
 import JobsTable from './JobsTable.jsx';
 import TerminalPanel from './LazyTerminalPanel.jsx';
@@ -21,6 +21,15 @@ export function ServersPage() {
   const server = servers.items.length === 1 ? servers.items[0] : null;
   return <><PageHeading title="Sunucu" description="YunPanel yalnızca kurulu olduğu yerel sunucuyu yönetir." actions={<><LinkButton to="/firewall" icon="shield">Güvenlik duvarı</LinkButton><Button className="ws-icon-btn" icon="refresh" aria-label="Yenile" title="Yenile" onClick={servers.refresh} /></>} /><CollectionNotice resource={servers} label="Yerel sunucu" />{server && <><Section title="Sunucu kaynakları"><ServerSummary server={server} /></Section>{canManage && ['ready', 'stale'].includes(servers.status) && <ManagedServicesPanel server={server} />}{canManage && ['ready', 'stale'].includes(servers.status) && server.executionMode === 'local' && <TerminalPanel title="Sunucu terminali" description={`${server.displayName ?? server.name ?? server.hostname} üzerinde Owner root PTY. Bu oturum tam sunucu yetkisine sahiptir.`} target={{ scope: 'server', serverId: server.id }} />}{canManage && <details id="server-diagnostics" className="ws-section"><summary>Tanılama ve yazılım bilgileri</summary><SystemSettingsPanels diagnostics /></details>}</>}{!server && ['ready', 'stale'].includes(servers.status) && <Section title="Yerel sunucu"><EmptyState title="Yerel sunucu doğrulanamadı" detail="Panel uzak sunucu kaydı seçmez; kurulu olduğu hostun kimliği doğrulanmadan yönetim işlemi açılmaz." icon="server" /></Section>}</>;
 }
+const JOB_STATUS_FILTERS = [
+  { value: 'all', label: 'Tümü' },
+  { value: 'queued', label: 'Sırada' },
+  { value: 'running', label: 'Çalışıyor' },
+  { value: 'succeeded', label: 'Tamamlandı' },
+  { value: 'partial', label: 'Kısmi başarılı' },
+  { value: 'failed', label: 'Başarısız' },
+  { value: 'cancelled', label: 'İptal' },
+];
 export function JobsPage() {
   const { jobs, refreshAll } = useWorkspace(); const [params, setParams] = useSearchParams();
   const [selected, setSelected] = useState(null); const [busy, setBusy] = useState(false); const [error, setError] = useState(null); const pending = useRef(false);
@@ -41,7 +50,7 @@ export function JobsPage() {
     catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { pending.current = false; setBusy(false); }
   }
-  return <><PageHeading title="İşler" description="Sunucuda sıraya alınan ve tamamlanan işlemler." actions={<Button className="ws-icon-btn" icon="refresh" aria-label="Yenile" title="Yenile" onClick={jobs.refresh} />} /><Section title="İşlem geçmişi"><div className="ws-filters"><label className="ws-filter-search">İşlem ara<input type="search" value={query} onChange={(event) => filter('q', event.target.value)} placeholder="İşlem türü, iş veya kaynak kimliği" /></label><label>Durum<select value={status} onChange={(event) => filter('status', event.target.value)}><option value="all">Tümü</option><option value="queued">Sırada</option><option value="running">Çalışıyor</option><option value="succeeded">Tamamlandı</option><option value="partial">Kısmi başarılı</option><option value="failed">Başarısız</option><option value="cancelled">İptal</option></select></label>{(resourceType || resourceId) && <Button onClick={clearResourceFilter}>Filtreyi kaldır ({resourceType ? `${resourceType}: ` : ''}{resourceId})</Button>}</div><CollectionNotice resource={jobs} label="İşlem geçmişi" />{['ready', 'stale'].includes(jobs.status) && <JobsTable jobs={items.slice((page - 1) * 20, page * 20)} limit={20} onCancel={jobs.status === 'ready' ? (job) => { setError(null); setSelected(job); } : undefined} busy={busy} />}<footer className="ws-pagination"><span>{items.length} kayıt</span><div className="ws-actions"><Button disabled={page <= 1} onClick={() => filter('page', String(page - 1))}>Önceki</Button><span>{page} / {pages}</span><Button disabled={page >= pages} onClick={() => filter('page', String(page + 1))}>Sonraki</Button></div></footer></Section>{selected && <ConfirmDialog title="Sıradaki işi iptal et" message={`${selected.type ?? selected.operation} işlemi iptal edilecek. İş çalışmaya başladıysa sunucu iptali reddedebilir.`} busy={busy} error={error} onCancel={() => setSelected(null)} onConfirm={cancel} confirmLabel="İşi iptal et" />}</>;
+  return <><PageHeading title="İşler" description="Sunucuda sıraya alınan ve tamamlanan işlemler." actions={<Button className="ws-icon-btn" icon="refresh" aria-label="Yenile" title="Yenile" onClick={jobs.refresh} />} /><Section title="İşlem geçmişi"><div className="ws-filters"><Field className="ws-filter-search" label="İşlem ara"><input type="search" value={query} onChange={(event) => filter('q', event.target.value)} placeholder="İşlem türü, iş veya kaynak kimliği" /></Field><Field label="Durum"><Select value={status} onChange={(event) => filter('status', event.target.value)} options={JOB_STATUS_FILTERS} /></Field>{(resourceType || resourceId) && <Button onClick={clearResourceFilter}>Filtreyi kaldır ({resourceType ? `${resourceType}: ` : ''}{resourceId})</Button>}</div><CollectionNotice resource={jobs} label="İşlem geçmişi" />{['ready', 'stale'].includes(jobs.status) && <JobsTable jobs={items.slice((page - 1) * 20, page * 20)} limit={20} onCancel={jobs.status === 'ready' ? (job) => { setError(null); setSelected(job); } : undefined} busy={busy} />}<footer className="ws-pagination"><span>{items.length} kayıt</span><div className="ws-actions"><Button disabled={page <= 1} onClick={() => filter('page', String(page - 1))}>Önceki</Button><span>{page} / {pages}</span><Button disabled={page >= pages} onClick={() => filter('page', String(page + 1))}>Sonraki</Button></div></footer></Section>{selected && <ConfirmDialog title="Sıradaki işi iptal et" message={`${selected.type ?? selected.operation} işlemi iptal edilecek. İş çalışmaya başladıysa sunucu iptali reddedebilir.`} busy={busy} error={error} onCancel={() => setSelected(null)} onConfirm={cancel} confirmLabel="İşi iptal et" />}</>;
 }
 export function AdvancedDomainsPage() {
   const { domains, certificates, servers, refreshAll } = useWorkspace();

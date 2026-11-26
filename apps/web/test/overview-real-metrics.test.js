@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { usageThreshold, usagePercent } from '../src/workspace/ui/console-model.js';
 import { navigationGroups } from '../src/workspace/ui/ux-model.js';
+import { renderJobsTable } from './render-jobs-table.js';
 
 const source = (relPath) => readFile(new URL(`../src/${relPath}`, import.meta.url), 'utf8');
 
@@ -210,8 +211,7 @@ test('YP-16 / T-VISUAL: Long jobs and logs do not overflow the panel layout and 
   }
 
   // JobsTable and LogsPanel use .ws-table-scroll for contained scrolling
-  const jobsTableSrc = await source('workspace/JobsTable.jsx');
   const logsPanelSrc = await source('workspace/LogsPanel.jsx');
-  assert.match(jobsTableSrc, /className="ws-table-scroll"/);
+  assert.match(renderJobsTable(), /^<div class="ws-table-scroll"><table /);
   assert.match(logsPanelSrc, /className="ws-table-scroll"/);
 });

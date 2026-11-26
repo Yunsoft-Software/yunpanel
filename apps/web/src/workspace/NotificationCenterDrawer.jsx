@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { panelRequest } from '../api.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
-import { Badge, Button, EmptyState, hasOpenModalLayer, Icon, LinkButton } from './PanelKit.jsx';
+import { Badge, Button, EmptyState, hasOpenModalLayer, Icon, LinkButton, Tabs } from './PanelKit.jsx';
 import { certificateState, formatDate, jobActive, siteHref } from './site-model.js';
 import { usagePercent } from './ui/console-model.js';
 
@@ -304,38 +304,11 @@ export function NotificationCenterDrawer({ open = true, onClose, initialTab = 't
           <Button icon="close" aria-label="Bildirim merkezini kapat" onClick={() => onClose?.()} />
         </header>
 
-        <div className="ws-tabs yp-notification-tabs" role="tablist" aria-label="Merkez sekmeleri">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'tasks'}
-            className={`ws-tab ${activeTab === 'tasks' ? 'is-active' : ''}`}
-            onClick={() => setActiveTab('tasks')}
-          >
-            <span>Görev Kuyruğu</span>
-            {activeJobs.length > 0 && <span className="ws-nav-count" style={{ marginLeft: '0.35rem' }}>{activeJobs.length}</span>}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'alerts'}
-            className={`ws-tab ${activeTab === 'alerts' ? 'is-active' : ''}`}
-            onClick={() => setActiveTab('alerts')}
-          >
-            <span>Sistem Uyarıları</span>
-            {alerts.length + serverAlerts.length > 0 && <span className="ws-nav-count" style={{ marginLeft: '0.35rem' }}>{alerts.length + serverAlerts.length}</span>}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'notices'}
-            className={`ws-tab ${activeTab === 'notices' ? 'is-active' : ''}`}
-            onClick={() => setActiveTab('notices')}
-          >
-            <span>Bildirimler</span>
-            {notices.length > 0 && <span className="ws-nav-count" style={{ marginLeft: '0.35rem' }}>{notices.length}</span>}
-          </button>
-        </div>
+        <Tabs label="Merkez sekmeleri" className="yp-notification-tabs" value={activeTab} onChange={setActiveTab} items={[
+          { id: 'tasks', label: <><span>Görev Kuyruğu</span>{activeJobs.length > 0 && <span className="ws-nav-count" style={{ marginLeft: '0.35rem' }}>{activeJobs.length}</span>}</> },
+          { id: 'alerts', label: <><span>Sistem Uyarıları</span>{alerts.length + serverAlerts.length > 0 && <span className="ws-nav-count" style={{ marginLeft: '0.35rem' }}>{alerts.length + serverAlerts.length}</span>}</> },
+          { id: 'notices', label: <><span>Bildirimler</span>{notices.length > 0 && <span className="ws-nav-count" style={{ marginLeft: '0.35rem' }}>{notices.length}</span>}</> },
+        ]} />
 
         <div className="ws-drawer-body yp-notification-body">
           {activeTab === 'tasks' && (

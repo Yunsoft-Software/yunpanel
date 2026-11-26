@@ -157,9 +157,8 @@ test('Mail and Database tables have full ARIA semantics and scroll containment',
   const { PanelSessionProvider } = await import('../src/panel-session.jsx');
   const rendered = renderToStaticMarkup(createElement(PanelSessionProvider, { session: { user: { id: 'fixture-owner', role: 'owner' } } }, createElement(MailboxesPanel, { domain: { id: 'fixture-domain', managementMode: 'local' }, mailboxes: [{ id: 'fixture-box', address: 'owned@example.test', enabled: true, revision: 1 }] })));
   assert.match(rendered, /<table [^>]*role="table"[^>]*aria-label="E-posta hesapları"/);
-  assert.match(rendered, /<th scope="col">Adres<\/th>/);
+  assert.match(rendered, /<thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">Adres<\/th>/);
   assert.match(rendered, /<td role="cell"><strong>owned@example.test<\/strong>/);
-  assert.match(mailboxes, /<tr role="row"><th scope="col">Adres<\/th>/);
   assert.match(mailboxes, /<tr key=\{mailbox\.id\} role="row"><td role="cell">/);
 
   // Aliases table
@@ -176,9 +175,9 @@ test('Mail and Database tables have full ARIA semantics and scroll containment',
   assert.match(mailDkim, /<table className="ws-table" role="table" aria-label="DKIM tanılamaları">/);
 
   // Database table
-  assert.match(databases, /<table className="ws-table ws-db-table" role="table" aria-label="Veritabanları">/);
-  assert.match(databases, /<thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">Veritabanı<\/th>/);
-  assert.match(databases, /<tbody role="rowgroup">/);
+  // Table header/body ARIA markup comes from PanelKit Table (panelkit-form-table-tabs.test.js).
+  assert.match(databases, /<Table label="Veritabanları" className="ws-table ws-db-table" columns=\{DATABASE_COLUMNS\}>/);
+  assert.match(databases, /const DATABASE_COLUMNS = \['Veritabanı', /);
   assert.match(databases, /<tr key=\{database\.name\} role="row"><td role="cell" data-label="Veritabanı">/);
 
   // Site consumption resource table

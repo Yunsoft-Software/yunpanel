@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useId, useRef, useState } from 'react';
+import { Children, cloneElement, createContext, useContext, useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { formatDate } from './site-model.js';
 
@@ -82,6 +82,64 @@ export function KeyValues({ items }) {
     }
     return <div key={label}><dt>{label}</dt><dd>{display ?? '—'}</dd></div>;
   })}</dl>;
+}
+// Data table with the shared `ws-table` markup. `columns` items are strings or
+// `{ label, className, hidden }`; hidden labels stay readable for screen readers.
+// When `empty` is given and there are no rows, it is rendered instead.
+export function Table({ label, columns, className = 'ws-table', empty = null, children }) {
+  if (empty && Children.count(children) === 0) return empty;
+  return <div className="ws-table-scroll"><table className={className} role="table" aria-label={label}>
+    <thead role="rowgroup"><tr role="row">{columns.map((column) => {
+      const { label: text, className: columnClass, hidden = false } = typeof column === 'string' ? { label: column } : column;
+      return <th key={text} scope="col" role="columnheader" className={columnClass}>{hidden ? <span className="ws-sr-only">{text}</span> : text}</th>;
+    })}</tr></thead>
+    <tbody role="rowgroup">{children}</tbody>
+  </table></div>;
+}
+// Label + one form control + optional hint and error, linked with htmlFor and
+// aria-describedby. The label wraps the control, as in the existing forms.
+export function Field({ label, hint, error, className, children }) {
+  const id = useId();
+  const control = Children.only(children);
+  const controlId = control.props.id ?? `${id}control`;
+  const hintId = hint ? `${id}hint` : null;
+  const errorId = error ? `${id}error` : null;
+  const describedBy = [control.props['aria-describedby'], hintId, errorId].filter(Boolean).join(' ') || undefined;
+  return <label className={className} htmlFor={controlId}>{label}
+    {cloneElement(control, { id: controlId, 'aria-describedby': describedBy, ...(error ? { 'aria-invalid': true } : {}) })}
+    {hint && <span id={hintId} className="ws-field-hint">{hint}</span>}
+    {error && <span id={errorId} className="ws-field-hint" role="alert">{error}</span>}
+  </label>;
+}
+// Native select from `{ value, label, disabled }` options.
+export function Select({ options, ...props }) {
+  return <select {...props}>{options.map((option) => <option key={option.value} value={option.value} disabled={option.disabled}>{option.label}</option>)}</select>;
+}
+const TAB_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'Home', 'End']);
+export function nextTabIndex(key, index, count) {
+  if (!TAB_KEYS.has(key) || count < 1) return null;
+  if (key === 'Home') return 0;
+  if (key === 'End') return count - 1;
+  const current = index < 0 ? 0 : index;
+  return key === 'ArrowLeft' ? (current - 1 + count) % count : (current + 1) % count;
+}
+// Accessible tablist: one tab stop, arrow keys/Home/End move and select.
+export function Tabs({ label, items, value, onChange, className = '' }) {
+  function keyboard(event) {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const next = nextTabIndex(event.key, items.findIndex((item) => item.id === value), items.length);
+    if (next === null) return;
+    event.preventDefault();
+    onChange(items[next].id);
+    event.currentTarget.querySelectorAll('[role="tab"]')[next]?.focus();
+  }
+  return <div className={`ws-tabs ${className}`.trim()} role="tablist" aria-label={label} onKeyDown={keyboard}>
+    {items.map((item) => {
+      const selected = item.id === value;
+      return <button key={item.id} type="button" role="tab" aria-selected={selected} tabIndex={selected ? 0 : -1}
+        className={selected ? 'ws-tab is-active' : 'ws-tab'} onClick={() => onChange(item.id)}>{item.label}</button>;
+    })}
+  </div>;
 }
 const ModalVisibilityContext = createContext(true);
 const ModalCloseContext = createContext(null);
