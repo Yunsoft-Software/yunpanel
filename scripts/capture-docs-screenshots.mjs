@@ -17,7 +17,12 @@ import { createAuthStore } from '../apps/api/src/auth/auth-store.js';
 import { createBackupOperationRegistry } from '../apps/api/src/backup/backup-operation-registry.js';
 import { createCertificateRegistry } from '../apps/api/src/certificates/certificate-registry.js';
 import { createDatabaseBindingRegistry } from '../apps/api/src/databases/database-binding-registry.js';
+import { createDockerComposeApiHandler } from '../apps/api/src/docker/docker-compose-api-handler.js';
+import { createDockerComposeEnvironmentRegistry } from '../apps/api/src/docker/docker-compose-environment-registry.js';
+import { createDockerComposeOperationsService } from '../apps/api/src/docker/docker-compose-operations.js';
 import { createDockerComposeProjectRegistry } from '../apps/api/src/docker/docker-compose-project-registry.js';
+import { generateComposeFromCatalogInput } from '../apps/api/src/docker/docker-plesk-catalog.js';
+import { createDockerRegistryCredentialRegistry } from '../apps/api/src/docker/docker-registry-credential-registry.js';
 import { createDomainRegistry } from '../apps/api/src/domains/domain-registry.js';
 import { createJobRegistry } from '../apps/api/src/jobs/job-registry.js';
 import {
@@ -41,6 +46,7 @@ import { createSiteMutationLock } from '../apps/api/src/websites/site-mutation-l
 import { createWebsitePhpToolsService } from '../apps/api/src/php/website-php-tools-service.js';
 import { createWebsiteRegistry } from '../apps/api/src/websites/website-registry.js';
 import {
+  createDockerComposeObserver,
   createPhpCliToolManager,
   createPhpFpmSiteManager,
   createRcloneManager,
@@ -362,6 +368,45 @@ async function main() {
       serverExists: async (id) => Boolean(await serverRegistry.getServer(id)),
     });
     await dockerComposeProjectRegistry.init();
+    const dockerProjectExists = async (id) => Boolean(await dockerComposeProjectRegistry.getProject(id));
+    const dockerEnvironmentRegistry = createDockerComposeEnvironmentRegistry({
+      filePath: path.join(tmpDir, 'docker-environments.json'), masterKey, projectExists: dockerProjectExists,
+    });
+    await dockerEnvironmentRegistry.init();
+    const dockerCredentialRegistry = createDockerRegistryCredentialRegistry({
+      filePath: path.join(tmpDir, 'docker-credentials.json'), masterKey, projectExists: dockerProjectExists,
+    });
+    await dockerCredentialRegistry.init();
+    // Ekran görüntüsü ortamında Docker çalışmaz: örnek projenin doğrulama özeti elle kurulur.
+    const sampleComposeValidation = (projectName, document) => ({
+      version: 1,
+      projectName,
+      composeSha256: crypto.createHash('sha256').update(document).digest('hex'),
+      composeBytes: Buffer.byteLength(document),
+      validated: true,
+      sideEffects: false,
+      serviceCount: 1,
+      services: [{
+        name: 'n8n',
+        imageConfigured: true,
+        buildConfigured: false,
+        publishedPorts: [{ hostIp: '127.0.0.1', publishedPort: 15678, targetPort: 5678, protocol: 'tcp' }],
+        storageMounts: [{ kind: 'named_volume', source: 'n8n_data', sourceScope: 'project', target: '/home/node/.n8n', readOnly: false }],
+      }],
+      networks: ['default'],
+      volumes: ['n8n_data'],
+      secretCount: 0,
+      configCount: 0,
+    });
+    const sampleCompose = generateComposeFromCatalogInput({
+      projectName: 'n8n_stack', image: 'n8n', tag: 'latest', innerPort: 5678, outerPort: 15678, bindHost: '127.0.0.1',
+    });
+    await dockerComposeProjectRegistry.createProject({
+      serverId: localServerId,
+      projectName: 'n8n_stack',
+      document: sampleCompose.document,
+      validation: sampleComposeValidation('n8n_stack', sampleCompose.document),
+    });
 
     const resticManager = createResticManager();
     const rcloneManager = createRcloneManager();
@@ -537,7 +582,26 @@ async function main() {
       proxyToken,
       trustedProxyIps: '127.0.0.1',
       licenseEntitlementService: licenseService,
-      createHandler: () => createApp({
+      createHandler: () => createDockerComposeApiHandler({
+        runtime: {
+          projectRegistry: dockerComposeProjectRegistry,
+          environmentRegistry: dockerEnvironmentRegistry,
+          credentialRegistry: dockerCredentialRegistry,
+          operationsService: createDockerComposeOperationsService({
+            projectRegistry: dockerComposeProjectRegistry,
+            environmentRegistry: dockerEnvironmentRegistry,
+            credentialRegistry: dockerCredentialRegistry,
+            jobRegistry,
+            projectBackupLocked: async () => false,
+          }),
+          observer: createDockerComposeObserver(),
+          validateDockerCompose: async ({ projectName, document }) => sampleComposeValidation(projectName, document),
+        },
+        domainRegistry,
+        jobRegistry,
+        siteMutationLock,
+        localServerId,
+        baseHandler: createApp({
         registry: serverRegistry,
         localServerId,
         applicationRegistry,
@@ -564,6 +628,7 @@ async function main() {
         userAdminStore: authStore.users,
         authStore,
         licenseEntitlementService: licenseService,
+        }),
       }),
     });
     const apiServer = await listenServer(http.createServer(apiListener));
