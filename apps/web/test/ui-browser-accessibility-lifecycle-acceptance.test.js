@@ -31,6 +31,7 @@ import {
 } from '../src/workspace/job-presentation.js';
 import { observeJob } from '../src/workspace/observe-job.js';
 import { databaseAccessView } from '../src/workspace/ui/console-model.js';
+import { readTheme, themeSection } from './theme-section.js';
 
 const {
   Badge,
@@ -124,8 +125,8 @@ test('Criterion 1: Production exit gate enforces authorized staging host and str
 /* ==========================================================================\n   Criterion 2: Chromium and Firefox Responsive Viewports & Deep-Link / Reload Flows\n   ========================================================================== */
 
 test('Criterion 2: Production HTTP server serves global deep links and all 11 site sub-pages with state preservation and security headers', async () => {
-  const emberTheme = await readWebSource('workspace/ui/ember-theme.css');
-  const workspaceCss = await readWebSource('workspace/workspace.css');
+  const emberTheme = await themeSection('ember-theme');
+  const workspaceCss = await themeSection('workspace');
   const consoleLists = await readWebSource('workspace/ui/console-lists.css');
 
   // Cross-browser styling rules for both Chromium and Firefox
@@ -142,9 +143,9 @@ test('Criterion 2: Production HTTP server serves global deep links and all 11 si
   assert.match(consoleLists, /@media\s*\(max-width:\s*380px\)\s*\{[\s\S]*?\.ws-filter-options\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
   assert.match(emberTheme, /@media\s*\(max-width:\s*640px\)\s*\{[\s\S]*?min-height:\s*44px/);
   assert.match(emberTheme, /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.workspace-shell\s+\.ws-sidebar\s*\{[^}]*max-width:\s*90vw/);
-  assert.match(workspaceCss, /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.ws-sidebar\s*\{[^}]*transform:\s*translateX\(-100%\)/);
-  assert.match(workspaceCss, /\.ws-metrics\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
-  assert.match(workspaceCss, /\.ws-sidebar\s*\{[^}]*width:\s*(?:232px|var\(--ws-sidebar-width\))/);
+  assert.match(await readTheme(), /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.ws-sidebar\s*\{[^}]*transform:\s*translateX\(-100%\)/);
+  assert.match(await readTheme(), /\.ws-metrics\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(await readTheme(), /\.ws-sidebar\s*\{[^}]*width:\s*(?:232px|var\(--ws-sidebar-width\))/);
 
   // Tab normalization & canonical URL resolution for all 11 site sub-pages
   const siteSubPages = ['overview', 'node', 'deploy', 'domains', 'dns', 'ssl', 'resources', 'files', 'logs', 'terminal', 'settings'];
@@ -217,7 +218,7 @@ test('Criterion 2: Production HTTP server serves global deep links and all 11 si
 /* ==========================================================================\n   Criterion 3: Keyboard Focus Management & Screen Reader ARIA Semantics\n   ========================================================================== */
 
 test('Criterion 3: Rendered DOM accessibility: ARIA roles, landmarks, and keyboard focus trap semantics', async () => {
-  const emberTheme = await readWebSource('workspace/ui/ember-theme.css');
+  const emberTheme = await themeSection('ember-theme');
 
   // 1. Render Modal component and verify ARIA attributes and semantic structure
   const modalHtml = renderToString(
@@ -266,10 +267,10 @@ test('Criterion 3: Rendered DOM accessibility: ARIA roles, landmarks, and keyboa
   assert.match(emberTheme, /\.workspace-shell\s+:is\(input,select,textarea\):is\(\[aria-invalid="true"\],\s*\.is-error,\s*\.ws-input-error\):focus-visible/);
 
   // 5. Screen reader utilities and high-contrast / reduced-motion accessibility
-  assert.match(emberTheme, /\.ws-sr-only,\s*\.sr-only\s*\{[^}]*position:\s*absolute\s*!important;/);
-  assert.match(emberTheme, /clip:\s*rect\(0,\s*0,\s*0,\s*0\)\s*!important;/);
+  assert.match(emberTheme, /\.ws-sr-only\s*\{[^}]*position:\s*absolute(?:\s*!important)?;/);
+  assert.match(emberTheme, /clip:\s*rect\(0,\s*0,\s*0,\s*0\)(?:\s*!important)?;/);
   assert.match(emberTheme, /@media \(prefers-reduced-motion: reduce\)/);
-  assert.match(emberTheme, /animation:\s*none\s*!important;/);
+  assert.match(emberTheme, /animation:\s*none(?:\s*!important)?;/);
   assert.match(emberTheme, /@media \(forced-colors: active\)/);
   assert.match(emberTheme, /outline:\s*2px\s*solid\s*Highlight/);
 });

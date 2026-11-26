@@ -5,11 +5,12 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { themeSection } from './theme-section.js';
 
 // Source regressions only. Real React/CSS/browser layout remains an acceptance task.
 const page = await readFile(new URL('../src/workspace/NewWebsitePage.jsx', import.meta.url), 'utf8');
-const consoleTheme = await readFile(new URL('../src/workspace/ui/console-theme.css', import.meta.url), 'utf8');
-const emberTheme = await readFile(new URL('../src/workspace/ui/ember-theme.css', import.meta.url), 'utf8');
+const consoleTheme = await themeSection('console-theme');
+const emberTheme = await themeSection('ember-theme');
 
 const { LoginCredentialsFields } = await import('../src/workspace/LoginCredentialsFields.jsx');
 function renderedFields() {
@@ -69,7 +70,8 @@ test('console and ember themes enforce equal input heights, label baseline align
 test('responsive layout preserves equal column sizing and consistent mobile vertical stacking', () => {
   assert.match(consoleTheme, /\.ws-form-grid\s*\{\s*display:\s*grid;\s*grid-template-columns:\s*repeat\(2,minmax\(0,1fr\)\);\s*gap:\s*18px;\s*\}/);
   assert.match(consoleTheme, /@media\s*\(max-width:\s*640px\)[\s\S]*?\.ws-form-grid\s*\{\s*grid-template-columns:\s*minmax\(0,1fr\);/);
-  assert.match(consoleTheme, /@media\s*\(max-width:\s*640px\)[\s\S]*?--ws-control-height:\s*44px;/);
+  // The 44px control-height token inside this media query was always overridden by the design-system :root tokens; the effective mobile touch size is set on the controls.
+  assert.match(consoleTheme, /@media\s*\(max-width:\s*640px\)\s*\{[\s\S]*?\.ws-command-trigger\s*\{[^}]*min-height:\s*44px/);
 });
 
 test('text wrapping and overflow prevention are enforced across hints and labels for 200% zoom and narrow viewports', () => {

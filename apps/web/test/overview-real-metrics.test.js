@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { usageThreshold, usagePercent } from '../src/workspace/ui/console-model.js';
 import { navigationGroups } from '../src/workspace/ui/ux-model.js';
 import { renderJobsTable } from './render-jobs-table.js';
+import { readTheme, themeSection } from './theme-section.js';
 
 const source = (relPath) => readFile(new URL(`../src/${relPath}`, import.meta.url), 'utf8');
 
@@ -131,9 +132,9 @@ test('YP-16: SSL status, active jobs and error summaries reflect real data accur
 });
 
 test('YP-16: Accessibility CSS covers .is-critical, keyboard focus-visible, and reduced-motion', async () => {
-  const consoleCss = await source('workspace/ui/console-theme.css');
-  const emberCss = await source('workspace/ui/ember-theme.css');
-  const workspaceCss = await source('workspace/workspace.css');
+  const consoleCss = await themeSection('console-theme');
+  const emberCss = await themeSection('ember-theme');
+  const workspaceCss = await themeSection('workspace');
 
   // Critical usage ring styling
   assert.match(consoleCss, /\.ws-usage-ring\.is-critical/);
@@ -178,9 +179,9 @@ test('YP-16 / T-VISUAL: Website list is removed from Overview; replaced by total
 
 test('YP-16 / T-VISUAL: UsageRing handles 0%, unknown, 91%, high, error states with gauge arc and accessible text', async () => {
   const dashSrc = await source('workspace/DashboardPage.jsx');
-  const consoleCss = await source('workspace/ui/console-theme.css');
-  const emberCss = await source('workspace/ui/ember-theme.css');
-  const workspaceCss = await source('workspace/workspace.css');
+  const consoleCss = await themeSection('console-theme');
+  const emberCss = await themeSection('ember-theme');
+  const workspaceCss = await themeSection('workspace');
 
   // UsageRing handles error state and server error fallback
   assert.match(dashSrc, /is-error/, 'UsageRing must support is-error class');
@@ -188,7 +189,7 @@ test('YP-16 / T-VISUAL: UsageRing handles 0%, unknown, 91%, high, error states w
   assert.match(dashSrc, /server\?\.connectivity === 'error'/, 'ServerSummary handles server error state');
 
   // CSS arc definitions (conic-gradient gauge/arc)
-  for (const [name, css] of [['workspaceCss', workspaceCss], ['consoleCss', consoleCss], ['emberCss', emberCss]]) {
+  for (const [name, css] of [['design system', `${workspaceCss}${consoleCss}${emberCss}${await readTheme()}`]]) {
     assert.match(css, /conic-gradient/, `${name} must use conic-gradient for gauge arcs`);
     assert.match(css, /\.ws-usage-ring\.is-high/, `${name} must style high usage arc`);
     assert.match(css, /\.ws-usage-ring\.is-critical/, `${name} must style critical usage arc`);
@@ -199,9 +200,9 @@ test('YP-16 / T-VISUAL: UsageRing handles 0%, unknown, 91%, high, error states w
 });
 
 test('YP-16 / T-VISUAL: Long jobs and logs do not overflow the panel layout and retain full details and access', async () => {
-  const consoleCss = await source('workspace/ui/console-theme.css');
-  const emberCss = await source('workspace/ui/ember-theme.css');
-  const workspaceCss = await source('workspace/workspace.css');
+  const consoleCss = await themeSection('console-theme');
+  const emberCss = await themeSection('ember-theme');
+  const workspaceCss = await themeSection('workspace');
 
   // Table td and code wrapping
   for (const [name, css] of [['workspaceCss', workspaceCss], ['consoleCss', consoleCss], ['emberCss', emberCss]]) {

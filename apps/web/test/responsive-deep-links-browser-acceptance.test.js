@@ -4,6 +4,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { execSync } from 'node:child_process';
 import path from 'node:path';
 import { createPanelServer } from '../server.js';
+import { readTheme, themeSection } from './theme-section.js';
 import {
   assertNoDot44Host,
   ProductionExitGateError,
@@ -239,9 +240,9 @@ test('Criterion 3: Deep link routes exist and resolve correctly for global pages
    ========================================================================== */
 
 test('Criterion 4: Responsive viewports (320, 390, 834, 1440 CSS px) and Chromium/Firefox compatibility', async () => {
-  const styles = await readWebSource('styles.css');
-  const emberTheme = await readWebSource('workspace/ui/ember-theme.css');
-  const workspaceCss = await readWebSource('workspace/workspace.css');
+  const styles = await themeSection('styles');
+  const emberTheme = await themeSection('ember-theme');
+  const workspaceCss = await themeSection('workspace');
   const consoleLists = await readWebSource('workspace/ui/console-lists.css');
 
   // 320px viewport: min-width constraint prevents layout breaking
@@ -259,11 +260,11 @@ test('Criterion 4: Responsive viewports (320, 390, 834, 1440 CSS px) and Chromiu
 
   // 834px viewport: mobile drawer width bounded
   assert.match(emberTheme, /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.workspace-shell\s+\.ws-sidebar\s*\{[^}]*max-width:\s*90vw/);
-  assert.match(workspaceCss, /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.ws-sidebar\s*\{[^}]*transform:\s*translateX\(-100%\)/);
+  assert.match(await readTheme(), /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.ws-sidebar\s*\{[^}]*transform:\s*translateX\(-100%\)/);
 
   // 1440px viewport: 4-column metrics & fixed sidebar
-  assert.match(workspaceCss, /\.ws-metrics\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
-  assert.match(workspaceCss, /\.ws-sidebar\s*\{[^}]*width:\s*(?:232px|var\(--ws-sidebar-width\)\))/);
+  assert.match(await readTheme(), /\.ws-metrics\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(await readTheme(), /\.ws-sidebar\s*\{[^}]*width:\s*(?:232px|var\(--ws-sidebar-width\))/);
 
   // Firefox scrollbar styling
   assert.match(emberTheme, /scrollbar-width:\s*thin;/);
@@ -286,9 +287,9 @@ test('Criterion 4: Responsive viewports (320, 390, 834, 1440 CSS px) and Chromiu
    ========================================================================== */
 
 test('Criterion 5: 200% Zoom reflow, text wrapping, empty states, 100+ pagination, and notices', async () => {
-  const emberTheme = await readWebSource('workspace/ui/ember-theme.css');
-  const workspaceCss = await readWebSource('workspace/workspace.css');
-  const consoleTheme = await readWebSource('workspace/ui/console-theme.css');
+  const emberTheme = await themeSection('ember-theme');
+  const workspaceCss = await themeSection('workspace');
+  const consoleTheme = await themeSection('console-theme');
 
   // 200% zoom text-size-adjust: 100% across WebKit and standards
   assert.match(emberTheme, /-webkit-text-size-adjust:\s*100%;/);
@@ -297,13 +298,13 @@ test('Criterion 5: 200% Zoom reflow, text wrapping, empty states, 100+ paginatio
   // Long domain names, deep subdomains, badges, and metrics wrap without clipping
   assert.match(
     emberTheme,
-    /\.workspace-shell\s+\.ws-domain-name,\s*\.workspace-shell\s+\.ws-domain-name\s+a,\s*\.workspace-shell\s+\.yf-tree-name,\s*\.workspace-shell\s+\.yf-name\s*\{[^}]*overflow-wrap:\s*anywhere;\s*word-break:\s*break-word;\s*min-width:\s*0;/,
+    /\.workspace-shell\s+\.ws-domain-name,\s*\.workspace-shell\s+\.ws-domain-name\s+a,\s*\.workspace-shell\s+\.yf-tree-name\s*\{[^}]*overflow-wrap:\s*anywhere;\s*word-break:\s*break-word;\s*min-width:\s*0;/,
   );
   assert.match(emberTheme, /\.workspace-shell\s+\.ws-metric\s*\{[^}]*overflow-wrap:\s*anywhere;\s*word-break:\s*break-word;/);
   assert.match(emberTheme, /\.workspace-shell\s+\.ws-badge\s*\{[^}]*overflow-wrap:\s*anywhere;/);
 
   // Table horizontal scroll container strictly contained
-  assert.match(workspaceCss, /\.ws-table-scroll\s*\{[^}]*overscroll-behavior-x:\s*contain;/);
+  assert.match(await readTheme(), /\.ws-table-scroll\s*\{[^}]*overscroll-behavior-x:\s*contain;/);
   assert.match(emberTheme, /\.workspace-shell\s+\.ws-table-scroll\s*\{[^}]*overscroll-behavior-x:\s*contain;/);
 
   // Pagination flex wraps for 100+ records navigation

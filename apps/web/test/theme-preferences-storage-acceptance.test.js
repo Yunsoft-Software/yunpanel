@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { register } from 'node:module';
+import { readTheme, themeSection } from './theme-section.js';
 
 register('./jsx-loader.js', import.meta.url);
 
@@ -210,9 +211,9 @@ test('Criterion 4: Cross-tab storage event synchronizes preferences between tabs
 
 test('Criterion 5: Mobile top bar has search, menu, AI, and active jobs buttons with accessible attributes', async () => {
   const layoutSrc = await readWebSource('workspace/WorkspaceLayout.jsx');
-  const consoleTheme = await readWebSource('workspace/ui/console-theme.css');
-  const emberTheme = await readWebSource('workspace/ui/ember-theme.css');
-  const workspaceCss = await readWebSource('workspace/workspace.css');
+  const consoleTheme = await themeSection('console-theme');
+  const emberTheme = await themeSection('ember-theme');
+  const workspaceCss = await themeSection('workspace');
 
   // 1. Single menu/sidebar toggle button: .ws-mobile-menu in toolbar
   assert.match(layoutSrc, /className="ws-mobile-menu ws-icon-btn"[\s\S]*?icon=\{narrow \? 'menu' : 'sidebar'\}[\s\S]*?aria-label="Ana menüyü aç"/);
@@ -229,7 +230,7 @@ test('Criterion 5: Mobile top bar has search, menu, AI, and active jobs buttons 
   assert.match(layoutSrc, /\{jobCount > 0 && <span className="ws-icon-badge" aria-hidden="true">\{jobCount\}<\/span>\}/);
 
   // Mobile menu button is displayed on narrow viewports (<= 900px)
-  assert.match(workspaceCss, /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.ws-mobile-menu,\s*\.ws-nav-close\s*\{[^}]*display:\s*inline-flex/);
+  assert.match(await readTheme(), /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.ws-mobile-menu,\s*\.ws-nav-close\s*\{[^}]*display:\s*inline-flex/);
   assert.match(consoleTheme, /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.ws-mobile-menu,\s*\.ws-nav-close\s*\{[^}]*display:\s*inline-flex/);
 
   // Toolbar actions and touch target accessibility (>= 44px min-height/min-width)

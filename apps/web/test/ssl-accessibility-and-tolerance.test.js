@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { readTheme, themeSection } from './theme-section.js';
 
 const source = (name) => readFile(new URL(`../src/${name}`, import.meta.url), 'utf8');
 
@@ -8,8 +9,8 @@ const [panelKit, siteOps, certList, emberTheme, workspaceCss, sslRenewal] = awai
   source('workspace/PanelKit.jsx'),
   source('workspace/SiteOperations.jsx'),
   source('CertificateList.jsx'),
-  source('workspace/ui/ember-theme.css'),
-  source('workspace/workspace.css'),
+  themeSection('ember-theme'),
+  themeSection('workspace'),
   source('workspace/SslRenewalPanel.jsx'),
 ]);
 
@@ -162,10 +163,10 @@ test('Modal focus trap and Escape key functional simulation', () => {
    2. Responsive Viewport Widths (320px, 390px, 834px, 1440px) & Overflow Prevention
    ========================================================================== */
 
-test('Modal layout and form containers prevent overflow across 320px, 390px, 834px, 1440px', () => {
+test('Modal layout and form containers prevent overflow across 320px, 390px, 834px, 1440px', async () => {
   // Modal width rule uses min with viewport-bound calc
-  assert.match(workspaceCss, /\.ws-modal\s*\{[^}]*width:\s*min\(560px,\s*calc\(100vw\s*-\s*32px\)\)/);
-  assert.match(workspaceCss, /\.ws-modal-wide\s*\{[^}]*width:\s*min\(840px,\s*calc\(100vw\s*-\s*32px\)\)/);
+  assert.match(await readTheme(), /\.ws-modal\s*\{[^}]*width:\s*min\(560px,\s*calc\(100vw\s*-\s*32px\)\)/);
+  assert.match(await readTheme(), /\.ws-modal-wide\s*\{[^}]*width:\s*min\(900px,\s*calc\(100vw\s*-\s*32px\)\)/);
 
   // Calculate modal pixel widths across target viewports
   const modalWidth = (viewportWidth, maxCap = 560) => Math.min(maxCap, viewportWidth - 32);

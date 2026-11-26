@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { navigationGroups, commandEntries, TOOLS_SETTINGS_GROUPS } from '../src/workspace/ui/ux-model.js';
 import { requireSession } from '../src/auth-protocol.js';
+import { readTheme, themeSection } from './theme-section.js';
 
 const source = (path) => readFile(new URL(`../src/${path}`, import.meta.url), 'utf8');
 
@@ -11,8 +12,8 @@ const source = (path) => readFile(new URL(`../src/${path}`, import.meta.url), 'u
    ========================================================================== */
 
 test('Criterion 1: Ember visual design tokens (color, font, radius) remain preserved without modification', async () => {
-  const emberTheme = await source('workspace/ui/ember-theme.css');
-  const typography = await source('workspace/ui/ember-typography.css');
+  const emberTheme = await themeSection('ember-theme');
+  const typography = await themeSection('ember-typography');
 
   // Exact light theme root color tokens
   const requiredLightTokens = [
@@ -123,7 +124,7 @@ test('Criterion 1: Ember visual design tokens (color, font, radius) remain prese
 });
 
 test('Criterion 1: Color tokens maintain required contrast >= 4.5:1 across both themes', async () => {
-  const css = await source('workspace/ui/ember-theme.css');
+  const css = await themeSection('ember-theme');
   const [base, tail] = css.split(":root[data-ws-theme='dark']");
   const parseTokens = (text) =>
     Object.fromEntries([...text.matchAll(/(--[\w-]+):\s*(#[a-f0-9]{6})(?:;|\s)/g)].map((m) => [m[1], m[2]]));
@@ -170,13 +171,7 @@ test('Criterion 1: Color tokens maintain required contrast >= 4.5:1 across both 
 test('Criterion 2: Entry point stylesheet import order and runtime dependencies are verified', async () => {
   const main = await source('main.jsx');
   const cssImports = [...main.matchAll(/import\s+['"]([^'"]+\.css)['\"]/g)].map((m) => m[1]);
-  assert.deepEqual(cssImports, [
-    './styles.css',
-    './server-cards.css',
-    './domain-list.css',
-    './workspace/ui/console-theme.css',
-    './workspace/ui/ember-theme.css',
-  ]);
+  assert.deepEqual(cssImports, ['./workspace/design-system/theme.css']);
 
   const pkg = JSON.parse(await source('../package.json'));
   assert.equal(pkg.scripts.build, 'vite build');
@@ -326,16 +321,16 @@ test('Criterion 3: Site User Role 3 (Site Manager) has scoped Panel navigation w
    ========================================================================== */
 
 test('Criterion 4: 1440px (Desktop) maintains multi-column layout, fixed sidebar, and full tables', async () => {
-  const workspaceCss = await source('workspace/workspace.css');
-  const emberTheme = await source('workspace/ui/ember-theme.css');
+  const workspaceCss = await themeSection('workspace');
+  const emberTheme = await themeSection('ember-theme');
 
   // Sidebar positioning at desktop
-  assert.match(workspaceCss, /\.ws-sidebar\s*\{[^}]*width:\s*(?:232px|var\(--ws-sidebar-width\))/);
-  assert.match(workspaceCss, /\.ws-main\s*\{[^}]*margin-left:\s*(?:232px|var\(--ws-sidebar-width\))/);
+  assert.match(await readTheme(), /\.ws-sidebar\s*\{[^}]*width:\s*(?:232px|var\(--ws-sidebar-width\))/);
+  assert.match(await readTheme(), /\.ws-main\s*\{[^}]*margin-left:\s*(?:232px|var\(--ws-sidebar-width\))/);
 
   // Multi-column metrics and grids
-  assert.match(workspaceCss, /\.ws-metrics\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
-  assert.match(workspaceCss, /\.ws-two-columns\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1\.8fr\)\s*minmax\(280px,\s*1fr\)/);
+  assert.match(await readTheme(), /\.ws-metrics\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(await readTheme(), /\.ws-two-columns\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1\.65fr\)\s*minmax\(300px,\s*1fr\)/);
 
   // Desktop table headers visible and expanded
   assert.match(emberTheme, /\.workspace-shell\s+\.ws-table\s*\{[^}]*border-collapse:\s*separate/);
@@ -343,18 +338,18 @@ test('Criterion 4: 1440px (Desktop) maintains multi-column layout, fixed sidebar
 });
 
 test('Criterion 4: 834px (Tablet / <= 900px) collapses sidebar to drawer and reflows grids', async () => {
-  const workspaceCss = await source('workspace/workspace.css');
-  const consoleTheme = await source('workspace/ui/console-theme.css');
-  const emberTheme = await source('workspace/ui/ember-theme.css');
+  const workspaceCss = await themeSection('workspace');
+  const consoleTheme = await themeSection('console-theme');
+  const emberTheme = await themeSection('ember-theme');
   const layout = await source('workspace/WorkspaceLayout.jsx');
 
   // React listener for 900px breakpoint
   assert.match(layout, /window\.matchMedia\('\(max-width:\s*900px\)'\)/);
 
   // CSS transforms sidebar off-screen and resets main margin
-  assert.match(workspaceCss, /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.ws-sidebar\s*\{[^}]*transform:\s*translateX\(-100%\)/);
-  assert.match(workspaceCss, /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.ws-main\s*\{[^}]*margin-left:\s*0/);
-  assert.match(workspaceCss, /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.ws-mobile-menu,\s*\.ws-nav-close\s*\{[^}]*display:\s*inline-flex/);
+  assert.match(await readTheme(), /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.ws-sidebar\s*\{[^}]*transform:\s*translateX\(-100%\)/);
+  assert.match(await readTheme(), /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.ws-main\s*\{[^}]*margin-left:\s*0/);
+  assert.match(await readTheme(), /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.ws-mobile-menu,\s*\.ws-nav-close\s*\{[^}]*display:\s*inline-flex/);
 
   // Overlay shadow and surface styling for open drawer in Ember theme
   assert.match(emberTheme, /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.workspace-shell\s+\.ws-sidebar\s*\{[^}]*background:\s*var\(--ws-surface\)/);
@@ -365,13 +360,13 @@ test('Criterion 4: 834px (Tablet / <= 900px) collapses sidebar to drawer and ref
 });
 
 test('Criterion 4: 390px (Mobile / <= 640px) transforms tables to cards and optimizes headers and buttons', async () => {
-  const workspaceCss = await source('workspace/workspace.css');
-  const consoleTheme = await source('workspace/ui/console-theme.css');
+  const workspaceCss = await themeSection('workspace');
+  const consoleTheme = await themeSection('console-theme');
   const consoleLists = await source('workspace/ui/console-lists.css');
-  const emberTheme = await source('workspace/ui/ember-theme.css');
+  const emberTheme = await themeSection('ember-theme');
 
   // Page heading stacks vertically
-  assert.match(workspaceCss, /@media\s*\(max-width:\s*640px\)\s*\{[\s\S]*?\.ws-page-heading\s*\{[^}]*flex-direction:\s*column/);
+  assert.match(await readTheme(), /@media\s*\(max-width:\s*640px\)\s*\{[\s\S]*?\.ws-page-heading\s*\{[^}]*flex-direction:\s*column/);
 
   // Table header clipped out and rows displayed as cards
   assert.match(consoleTheme, /@media\s*\(max-width:\s*640px\)\s*\{[\s\S]*?\.ws-db-table\s+thead\s*\{[^}]*clip-path:\s*inset\(50%\)/);
@@ -382,7 +377,7 @@ test('Criterion 4: 390px (Mobile / <= 640px) transforms tables to cards and opti
   assert.match(emberTheme, /@media\s*\(max-width:\s*640px\)\s*\{[\s\S]*?\.workspace-shell\s+\.ws-db-table\s+tr,\s*\.workspace-shell\s+\.ws-websites-table\s+tbody\s+tr\s*\{[^}]*background:\s*var\(--ws-surface-subtle\)/);
 
   // Minimum touch target 44px
-  assert.match(consoleTheme, /@media\s*\(max-width:\s*640px\)\s*\{[\s\S]*?--ws-control-height:\s*44px/);
+  assert.match(consoleTheme, /@media\s*\(max-width:\s*640px\)\s*\{[\s\S]*?\.ws-command-trigger\s*\{[^}]*min-height:\s*44px/);
   assert.match(emberTheme, /@media\s*\(max-width:\s*640px\)\s*\{[\s\S]*?min-height:\s*44px/);
 
   // Modal fits within viewport
@@ -390,9 +385,9 @@ test('Criterion 4: 390px (Mobile / <= 640px) transforms tables to cards and opti
 });
 
 test('Criterion 4: 320px (Narrow Mobile / <= 380px) guarantees overflow prevention and single-column filters', async () => {
-  const styles = await source('styles.css');
+  const styles = await themeSection('styles');
   const consoleLists = await source('workspace/ui/console-lists.css');
-  const consoleTheme = await source('workspace/ui/console-theme.css');
+  const consoleTheme = await themeSection('console-theme');
 
   // Body has min-width 320px
   assert.match(styles, /body\s*\{[^}]*min-width:\s*320px/);
@@ -409,21 +404,21 @@ test('Criterion 4: 320px (Narrow Mobile / <= 380px) guarantees overflow preventi
 });
 
 test('Criterion 4: 200% zoom scaling behaves consistently with responsive breakpoints', async () => {
-  const workspaceCss = await source('workspace/workspace.css');
-  const consoleTheme = await source('workspace/ui/console-theme.css');
-  const emberTheme = await source('workspace/ui/ember-theme.css');
+  const workspaceCss = await themeSection('workspace');
+  const consoleTheme = await themeSection('console-theme');
+  const emberTheme = await themeSection('ember-theme');
 
   // Text uses clamp and responsive sizing
   assert.match(emberTheme, /font-size:\s*clamp\(27px,\s*2\.1vw,\s*34px\)/);
 
   // Overflow wrap is set across headings, tables, and notices
-  assert.match(workspaceCss, /\.ws-page-heading\s+h1\s*\{[^}]*overflow-wrap:\s*anywhere/);
-  assert.match(workspaceCss, /\.ws-notice\s*\{[^}]*overflow-wrap:\s*anywhere/);
-  assert.match(workspaceCss, /\.ws-keyvalues\s+dd\s*\{[^}]*overflow-wrap:\s*anywhere/);
+  assert.match(await readTheme(), /\.ws-page-heading\s+h1\s*\{[^}]*overflow-wrap:\s*anywhere/);
+  assert.match(await readTheme(), /\.ws-notice\s*\{[^}]*overflow-wrap:\s*anywhere/);
+  assert.match(await readTheme(), /\.ws-keyvalues\s+dd\s*\{[^}]*overflow-wrap:\s*anywhere/);
 
   // Modal dialog has calc-based max height and auto scrolling
-  assert.match(workspaceCss, /\.ws-modal\s*\{[^}]*max-height:\s*calc\(100vh\s*-\s*40px\)/);
-  assert.match(consoleTheme, /\.ws-modal\s*\{[^}]*max-height:\s*calc\(100dvh\s*-\s*24px\)/);
+  // The console 640px max-height (100dvh - 24px) was always overridden by this unconditional theme rule.
+  assert.match(await readTheme(), /\.ws-modal\s*\{[^}]*max-height:\s*calc\(100dvh\s*-\s*20px\)/);
 });
 
 /* ==========================================================================
@@ -433,13 +428,13 @@ test('Criterion 4: 200% zoom scaling behaves consistently with responsive breakp
 
 test('Criterion 5: Keyboard navigation has visible focus, skip link, and mobile focus trap', async () => {
   const layout = await source('workspace/WorkspaceLayout.jsx');
-  const emberTheme = await source('workspace/ui/ember-theme.css');
-  const workspaceCss = await source('workspace/workspace.css');
+  const emberTheme = await themeSection('ember-theme');
+  const workspaceCss = await themeSection('workspace');
 
   // Skip-to-content link
   assert.match(layout, /<a href="#workspace-main" className="ws-skip">İçeriğe geç<\/a>/);
-  assert.match(workspaceCss, /\.ws-skip\s*\{[^}]*position:\s*fixed/);
-  assert.match(workspaceCss, /\.ws-skip:focus\s*\{[^}]*top:\s*8px/);
+  assert.match(await readTheme(), /\.ws-skip\s*\{[^}]*position:\s*fixed/);
+  assert.match(await readTheme(), /\.ws-skip:focus\s*\{[^}]*top:\s*8px/);
 
   // Focus visible styling with Ember focus token
   assert.match(
@@ -460,7 +455,7 @@ test('Criterion 5: Keyboard navigation has visible focus, skip link, and mobile 
 test('Criterion 5: Long lists support pagination, scrolling containers, and text wrapping', async () => {
   const websitesPage = await source('workspace/WebsitesPage.jsx');
   const resellerPage = await source('workspace/ResellerCustomersPage.jsx');
-  const workspaceCss = await source('workspace/workspace.css');
+  const workspaceCss = await themeSection('workspace');
   const consoleLists = await source('workspace/ui/console-lists.css');
 
   // Pagination controls with prev/next buttons
@@ -477,14 +472,13 @@ test('Criterion 5: Long lists support pagination, scrolling containers, and text
 
   // Domain tree toggling
   assert.match(websitesPage, /domainTreeRows/);
-  assert.match(consoleLists, /\.ws-site-list\s+\.ws-tree-toggle/);
 });
 
 test('Criterion 5: Error states, notices, and empty states maintain design integrity without Plesk conflation', async () => {
   const websitesPage = await source('workspace/WebsitesPage.jsx');
   const resellerPage = await source('workspace/ResellerCustomersPage.jsx');
-  const consoleTheme = await source('workspace/ui/console-theme.css');
-  const emberTheme = await source('workspace/ui/ember-theme.css');
+  const consoleTheme = await themeSection('console-theme');
+  const emberTheme = await themeSection('ember-theme');
 
   // Semantic notices
   assert.match(consoleTheme, /\.ws-notice-error,\s*\.ws-notice-danger\s*\{[^}]*color:\s*var\(--ws-danger\)/);

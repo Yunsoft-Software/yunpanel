@@ -6,6 +6,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { createPanelServer } from '../server.js';
 import { gitBlobHash, UI_FONTS, verifyFontAsset } from '../../../scripts/prepare-ui-fonts.mjs';
+import { themeSection } from './theme-section.js';
 import {
   API_VERSION,
   SCHEMA_VERSION,
@@ -297,7 +298,7 @@ test('Criterion 4: UX flows, multi-tenant role/scope boundaries, and phpMyAdmin 
   // B. Role & Tenant Scope Boundaries:
   // Visual theme changes (ember-theme.css) are presentation-only and must never alter
   // backend auth, authorization, or role definitions
-  const emberThemeCss = await readFile(new URL('../src/workspace/ui/ember-theme.css', import.meta.url), 'utf8');
+  const emberThemeCss = await themeSection('ember-theme');
   assert.ok(!emberThemeCss.includes('isAdmin'), 'CSS must not define authorization logic');
   assert.ok(!emberThemeCss.includes('function('), 'CSS must not contain script functions');
 
@@ -367,7 +368,7 @@ test('Criterion 6: Secondary Dribbble reference nuances evaluated when accessibl
   // - Tangerine accent: #f77749
   // - Warm paper light surface: #f2f0eb
   // - Generous border radiuses (22-25px) and lineless surfaces
-  const emberThemeCss = await readFile(new URL('../src/workspace/ui/ember-theme.css', import.meta.url), 'utf8');
+  const emberThemeCss = await themeSection('ember-theme');
   assert.match(emberThemeCss, /#171816/);
   assert.match(emberThemeCss, /#222320/);
   assert.match(emberThemeCss, /#f77749/);

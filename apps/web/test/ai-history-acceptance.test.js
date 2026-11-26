@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { setSession } from '../src/session-client.js';
 import { streamAiMessage } from '../src/workspace/ai-client.js';
+import { themeSection } from './theme-section.js';
 import {
   createAiHistory,
   createAiConversationReader,
@@ -475,7 +476,7 @@ test('Comprehensive acceptance: >20 equal-time chats, concurrent mutation races,
    ========================================================================== */
 
 test('Criterion 9: Production Ember typography is bound across body, modal headings, and code elements', async () => {
-  const emberTypography = await source('ui/ember-typography.css');
+  const emberTypography = await themeSection('ember-typography');
 
   // Same-origin verified font-family definitions
   assert.match(emberTypography, /font-family:\s*'Yun Manrope'/);

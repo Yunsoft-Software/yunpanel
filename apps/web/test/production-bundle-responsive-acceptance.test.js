@@ -6,6 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, access, stat } from 'node:fs/promises';
 import { execSync } from 'node:child_process';
+import { readTheme, themeSection } from './theme-section.js';
 
 async function ensureProductionBuild() {
   const distIndex = new URL('../dist/index.html', import.meta.url);
@@ -36,7 +37,7 @@ test('Production bundle dist assets: built index.html, bundled CSS and JS exist 
   assert.ok(distHtml.includes('<!DOCTYPE html>') || distHtml.includes('<html'), 'dist/index.html must exist and contain HTML document');
 
   // Verify CSS contains graphite and mandarin tokens
-  const emberTheme = await readSrc('workspace/ui/ember-theme.css');
+  const emberTheme = await themeSection('ember-theme');
   assert.match(emberTheme, /#171816/, 'Ember graphite canvas token must be present');
   assert.match(emberTheme, /#222320/, 'Ember graphite surface token must be present');
   assert.match(emberTheme, /#f77749/, 'Ember mandarin brand token must be present');
@@ -46,9 +47,9 @@ test('Production bundle dist assets: built index.html, bundled CSS and JS exist 
 /* ==========================================================================\n   2. Responsive Viewports (320, 390, 834, 1440 CSS px) & 200% Zoom\n   ========================================================================== */
 
 test('Responsive viewports 320/390/834/1440 CSS px & 200% zoom reflow rules', async () => {
-  const styles = await readSrc('styles.css');
-  const workspaceCss = await readSrc('workspace/workspace.css');
-  const emberTheme = await readSrc('workspace/ui/ember-theme.css');
+  const styles = await themeSection('styles');
+  const workspaceCss = await themeSection('workspace');
+  const emberTheme = await themeSection('ember-theme');
 
   // 320px minimum width constraint prevents layout breaking
   assert.match(styles, /min-width:\s*320px/, 'Root styles must declare min-width: 320px');
@@ -67,13 +68,13 @@ test('Responsive viewports 320/390/834/1440 CSS px & 200% zoom reflow rules', as
   assert.match(emberTheme, /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.workspace-shell\s+\.ws-sidebar\s*\{[^}]*max-width:\s*90vw/);
 
   // 1440px (Desktop) fixed sidebar and 4-column metrics
-  assert.match(workspaceCss, /\.ws-metrics\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(await readTheme(), /\.ws-metrics\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
 });
 
 /* ==========================================================================\n   3. Chromium and Firefox Cross-Browser Compatibility\n   ========================================================================== */
 
 test('Chromium and Firefox cross-browser compatibility: scrollbars, focus-inner, smoothing', async () => {
-  const emberTheme = await readSrc('workspace/ui/ember-theme.css');
+  const emberTheme = await themeSection('ember-theme');
 
   // Firefox scrollbar styling
   assert.match(emberTheme, /scrollbar-width:\s*thin;/);
@@ -148,8 +149,8 @@ test('Mail and Database tables have full ARIA semantics and scroll containment',
   const mailDkim = await readSrc('workspace/MailDkimDiagnosticsPanel.jsx');
   const databases = await readSrc('workspace/DatabasesPage.jsx');
   const siteResources = await readSrc('workspace/SiteResourcesPanel.jsx');
-  const workspaceCss = await readSrc('workspace/workspace.css');
-  const emberTheme = await readSrc('workspace/ui/ember-theme.css');
+  const workspaceCss = await themeSection('workspace');
+  const emberTheme = await themeSection('ember-theme');
 
   // Mailboxes table
   const { default: MailboxesPanel } = await import('../src/workspace/MailboxesPanel.jsx');
@@ -187,7 +188,7 @@ test('Mail and Database tables have full ARIA semantics and scroll containment',
   assert.match(siteResources, /role="cell"/);
 
   // Table horizontal scrolling is strictly contained in .ws-table-scroll to prevent page overflow
-  assert.match(workspaceCss, /\.ws-table-scroll\s*\{[^}]*overscroll-behavior-x:\s*contain;/);
+  assert.match(await readTheme(), /\.ws-table-scroll\s*\{[^}]*overscroll-behavior-x:\s*contain;/);
   assert.match(emberTheme, /\.workspace-shell\s+\.ws-table-scroll\s*\{[^}]*overscroll-behavior-x:\s*contain;/);
 });
 
@@ -196,7 +197,7 @@ test('Mail and Database tables have full ARIA semantics and scroll containment',
 test('Theme preference preservation and Ember graphite/mandarin palette conformance', async () => {
   const uxModel = await readSrc('workspace/ui/ux-model.js');
   const preferences = await readSrc('workspace/ui/Preferences.jsx');
-  const emberTheme = await readSrc('workspace/ui/ember-theme.css');
+  const emberTheme = await themeSection('ember-theme');
 
   // Theme preferences normalization supports system, light, and dark
   assert.match(uxModel, /const themes = new Set\(\['system', 'light', 'dark'\]\);/);

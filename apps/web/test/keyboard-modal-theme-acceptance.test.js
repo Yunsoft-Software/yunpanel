@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { readTheme, themeSection } from './theme-section.js';
 
 const source = (name) => readFile(new URL(`../src/${name}`, import.meta.url), 'utf8');
 
@@ -28,8 +29,8 @@ const [
   source('workspace/WorkspaceLayout.jsx'),
   source('workspace/PanelKit.jsx'),
   source('AccountDialog.jsx'),
-  source('workspace/ui/ember-theme.css'),
-  source('workspace/workspace.css'),
+  themeSection('ember-theme'),
+  themeSection('workspace'),
   source('workspace/dns-panel.css'),
   source('workspace/network-dns.css'),
   source('workspace/terminal.css'),
@@ -133,11 +134,11 @@ test('prefers-reduced-motion and forced-colors are comprehensively supported', (
 
 /* ==========================================================================\n   4. Theme Conformance & Table Containment across Panels\n   ========================================================================== */
 
-test('Panels conform to common theme tokens and contain wide tables', () => {
+test('Panels conform to common theme tokens and contain wide tables', async () => {
   // DNS styles use semantic variables without hardcoded hex
   assert.doesNotMatch(dnsPanelCss, /#[0-9a-fA-F]{3,8}/);
   assert.doesNotMatch(networkDnsCss, /#[0-9a-fA-F]{3,8}/);
-  assert.match(dnsPanelCss, /\.dns-table-wrap/);
+  assert.match(await readTheme(), /\.dns-table-wrap/);
 
   // Terminal styles use semantic tokens
   assert.match(terminalCss, /var\(--ws-terminal-bg,\s*var\(--ws-canvas/);
@@ -157,7 +158,7 @@ test('Panels conform to common theme tokens and contain wide tables', () => {
 
   // Universal table scroll utility exists
   assert.match(workspaceCss, /\.ws-table-scroll\s*\{[^}]*overflow-x:\s*auto/);
-  assert.match(workspaceCss, /\.ws-table-scroll\s*\{[^}]*overscroll-behavior-x:\s*contain;/);
+  assert.match(await readTheme(), /\.ws-table-scroll\s*\{[^}]*overscroll-behavior-x:\s*contain;/);
 });
 
 /* ==========================================================================\n   5. Vendor iframe CSS Protection\n   ========================================================================== */

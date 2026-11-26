@@ -5,6 +5,7 @@ import { execSync } from 'node:child_process';
 import path from 'node:path';
 import { createPanelServer } from '../server.js';
 import { UI_FONTS, gitBlobHash, verifyFontAsset } from '../../../scripts/prepare-ui-fonts.mjs';
+import { themeSection } from './theme-section.js';
 import {
   assertNoDot44Host,
   ProductionExitGateError,
@@ -171,7 +172,7 @@ test('Criterion 3: Design collages and sample-data component screens are strictl
   }
 
   // Verify CSS source does not embed mock or sample screenshot patterns
-  const emberTheme = await readWebSource('workspace/ui/ember-theme.css');
+  const emberTheme = await themeSection('ember-theme');
   assert.doesNotMatch(emberTheme, /plesk\.com|plesk-mock|sample-screenshot/i, 'Ember theme CSS must not contain mock screenshot URLs');
 });
 
@@ -242,13 +243,7 @@ test('Criterion 5: Web application package configuration and build pipeline are 
   // Verify Vite entry point main.jsx imports all required stylesheets in correct cascade order
   const main = await readWebSource('main.jsx');
   const cssImports = [...main.matchAll(/import\s+['"]([^'"]+\.css)['"]/g)].map((m) => m[1]);
-  assert.deepEqual(cssImports, [
-    './styles.css',
-    './server-cards.css',
-    './domain-list.css',
-    './workspace/ui/console-theme.css',
-    './workspace/ui/ember-theme.css',
-  ]);
+  assert.deepEqual(cssImports, ['./workspace/design-system/theme.css']);
 });
 
 /* ==========================================================================

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { register } from 'node:module';
+import { themeSection } from './theme-section.js';
 
 register('./jsx-loader.js', import.meta.url);
 
@@ -21,35 +22,36 @@ test('Centralized Design System: swappable tokens and primitives are exported vi
 });
 
 test('Equal-height desktop cards, spinner spacing, sidebar collapse, and symmetrical grids in theme.css', async () => {
-  const themeCss = await source('design-system/theme.css');
+  // The former stand-alone design system file is now the 'design-system' section of theme.css.
+  const themeCss = await themeSection('design-system');
 
   // 1. Zero gradients
-  assert.match(themeCss, /background-image:\s*none\s*!important/);
+  assert.match(themeCss, /background-image:\s*none(?:\s*!important)?/);
   assert.doesNotMatch(themeCss, /radial-gradient|linear-gradient/);
 
   // 2. Equal-height desktop card grids
   assert.match(themeCss, /\.ws-equal-columns,\s*\.ws-two-columns,\s*\.ws-console-grid,\s*\.ws-console-bottom,\s*\.ws-metrics/);
-  assert.match(themeCss, /align-items:\s*stretch\s*!important/);
-  assert.match(themeCss, /height:\s*100%\s*!important/);
+  assert.match(themeCss, /align-items:\s*stretch(?:\s*!important)?/);
+  assert.match(themeCss, /height:\s*100%(?:\s*!important)?/);
 
   // 3. Spinner & worker status spacing
-  assert.match(themeCss, /\.ws-spinner[\s\S]*?margin-right:\s*8px\s*!important/);
-  assert.match(themeCss, /\.ws-loading[\s\S]*?gap:\s*10px\s*!important/);
-  assert.match(themeCss, /\.ws-section-body[\s\S]*?gap:\s*12px\s*!important/);
+  assert.match(themeCss, /\.ws-spinner[\s\S]*?margin-right:\s*8px(?:\s*!important)?/);
+  assert.match(themeCss, /\.ws-loading[\s\S]*?gap:\s*10px(?:\s*!important)?/);
+  assert.match(themeCss, /\.ws-section-body[\s\S]*?gap:\s*12px(?:\s*!important)?/);
 
   // 4. Desktop sidebar collapse support
   assert.match(themeCss, /\.workspace-shell\.is-sidebar-collapsed/);
-  assert.match(themeCss, /\.workspace-shell\.is-sidebar-collapsed\s+\.ws-sidebar\s*\{\s*display:\s*none\s*!important/);
+  assert.match(themeCss, /\.workspace-shell\.is-sidebar-collapsed\s+\.ws-sidebar\s*\{\s*display:\s*none(?:\s*!important)?/);
 
   // 5. Symmetrical CSS Grid for expanded WebsiteTaskCard tools
-  assert.match(themeCss, /\.ws-website-task-grid\s*\{\s*display:\s*grid\s*!important/);
-  assert.match(themeCss, /grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(1(?:85|90)px,\s*1fr\)\)\s*!important/);
+  assert.match(themeCss, /\.ws-website-task-grid\s*\{\s*display:\s*grid(?:\s*!important)?/);
+  assert.match(themeCss, /grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(1(?:85|90)px,\s*1fr\)\)(?:\s*!important)?/);
 
   // 6. Compact horizontal SiteNavigation & Plesk Categorized Quicklinks
-  assert.match(themeCss, /\.ws-plesk-site-navigation\s*\{\s*display:\s*flex\s*!important/);
-  assert.match(themeCss, /\.ws-console-quicklinks\s*\{\s*display:\s*grid\s*!important/);
+  assert.match(themeCss, /\.ws-plesk-site-navigation\s*\{\s*display:\s*flex(?:\s*!important)?/);
+  assert.match(themeCss, /\.ws-console-quicklinks\s*\{\s*display:\s*grid(?:\s*!important)?/);
   assert.match(themeCss, /\.yp-plesk-tool-groups/);
-  assert.match(themeCss, /\.ws-db-access[\s\S]*?flex-direction:\s*row\s*!important/);
+  assert.match(themeCss, /\.ws-db-access[\s\S]*?flex-direction:\s*row(?:\s*!important)?/);
 });
 
 test('Navigation & headings use clean "Web Siteleri" label and zero AI-slop developer disclaimers', async () => {

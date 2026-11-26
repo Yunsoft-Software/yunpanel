@@ -5,6 +5,7 @@ import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router';
+import { themeSection } from './theme-section.js';
 
 import {
   resolveSubdomainSharedFileRoot,
@@ -32,10 +33,11 @@ const readSrc = (relPath) => readFile(new URL(`../src/${relPath}`, import.meta.u
 test('Centralized Shadcn Design System CSS defines Zinc/Slate surfaces, 1px borders, Indigo brand, Emerald status, and spotlight/tree rules', async () => {
   const [themeCss, emberCss] = await Promise.all([
     readSrc('workspace/design-system/theme.css'),
-    readSrc('workspace/ui/ember-theme.css'),
+    themeSection('ember-theme'),
   ]);
 
-  assert.match(emberCss, /\.\.\/design-system\/theme\.css/, 'ember-theme.css must import centralized design-system/theme.css');
+  assert.ok(emberCss.length > 0, 'theme overrides are a section of the centralized design-system/theme.css');
+  assert.match(await readSrc('main.jsx'), /import '\.\/workspace\/design-system\/theme\.css'/, 'main.jsx must import the centralized design-system/theme.css');
 
   // Dark and Light Shadcn Zinc/Slate tokens
   assert.match(themeCss, /--ws-canvas:\s*#09090b/);

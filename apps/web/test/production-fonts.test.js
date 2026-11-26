@@ -6,6 +6,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { createPanelServer } from '../server.js';
 import { gitBlobHash, UI_FONTS, verifyFontAsset } from '../../../scripts/prepare-ui-fonts.mjs';
+import { themeSection } from './theme-section.js';
 
 async function ensureProductionBuild() {
   const distIndex = new URL('../dist/index.html', import.meta.url);
@@ -261,13 +262,13 @@ test('variable font weight variations: fvar tables support declared weight range
   assert.equal(outfitWght.minVal, 100);
   assert.equal(outfitWght.maxVal, 900);
 
-  const typographyCss = await readFile(new URL('../src/workspace/ui/ember-typography.css', import.meta.url), 'utf8');
+  const typographyCss = await themeSection('ember-typography');
   assert.match(typographyCss, /font-family:\s*'Yun Manrope';[^}]*font-weight:\s*200\s+800;/);
   assert.match(typographyCss, /font-family:\s*'Yun Outfit';[^}]*font-weight:\s*100\s+900;/);
 });
 
 test('monospace font family is strictly preserved in code editor and terminal components', async () => {
-  const typographyCss = await readFile(new URL('../src/workspace/ui/ember-typography.css', import.meta.url), 'utf8');
+  const typographyCss = await themeSection('ember-typography');
   const terminalCss = await readFile(new URL('../src/workspace/terminal.css', import.meta.url), 'utf8');
 
   assert.match(typographyCss, /--ws-font-code:\s*ui-monospace,\s*'SFMono-Regular',\s*Consolas,\s*'Liberation Mono',\s*monospace;/);

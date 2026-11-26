@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { managedServiceStatus } from '../src/workspace/managed-service-model.js';
+import { readTheme, themeSection } from './theme-section.js';
 
 const readSrc = (path) => readFile(new URL(`../src/${path}`, import.meta.url), 'utf8');
 
@@ -77,8 +78,8 @@ test('/websites/new: accessible form fields, password security, site-admin field
 });
 
 test('Chromium and Firefox styling compatibility for all 4 target screens', async () => {
-  const emberTheme = await readSrc('workspace/ui/ember-theme.css');
-  const workspaceCss = await readSrc('workspace/workspace.css');
+  const emberTheme = await themeSection('ember-theme');
+  const workspaceCss = await themeSection('workspace');
 
   // Firefox scrollbars and moz-focus-inner
   assert.match(emberTheme, /scrollbar-width:\s*thin;/);
@@ -90,7 +91,7 @@ test('Chromium and Firefox styling compatibility for all 4 target screens', asyn
   assert.match(emberTheme, /-webkit-font-smoothing:\s*antialiased;/);
 
   // Table horizontal scrolling is contained across browsers
-  assert.match(workspaceCss, /\.ws-table-scroll\s*\{[^}]*overscroll-behavior-x:\s*contain;/);
+  assert.match(await readTheme(), /\.ws-table-scroll\s*\{[^}]*overscroll-behavior-x:\s*contain;/);
 });
 
 /* =========================================================================

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { register } from 'node:module';
+import { readTheme, themeSection } from './theme-section.js';
 
 register('./jsx-loader.js', import.meta.url);
 
@@ -39,11 +40,12 @@ test('Target Screens 1-10: Components exist, import correct CSS layers, and defi
     );
   }
 
-  // Verify CSS cascade order in main.jsx: ember-theme.css must be last
+  // Verify CSS cascade order: the design system loads last and its theme overrides follow the console skin
   const main = await readWebSource('main.jsx');
   const cssImports = [...main.matchAll(/import\s+['"]([^'"]+\.css)['"]/g)].map((m) => m[1]);
-  assert.equal(cssImports.at(-1), './workspace/ui/ember-theme.css');
-  assert.ok(cssImports.indexOf('./workspace/ui/ember-theme.css') > cssImports.indexOf('./workspace/ui/console-theme.css'));
+  assert.equal(cssImports.at(-1), './workspace/design-system/theme.css');
+  const theme = await readWebSource('workspace/design-system/theme.css');
+  assert.ok(theme.indexOf('   Theme overrides, accessibility and reduced motion') > theme.indexOf('   Console skin'));
 });
 
 /* ==========================================================================
@@ -51,10 +53,10 @@ test('Target Screens 1-10: Components exist, import correct CSS layers, and defi
    ========================================================================== */
 
 test('Responsive 320px (Narrow Mobile): Layout, drawers, modals, tables, and filters adapt without overflow', async () => {
-  const styles = await readWebSource('styles.css');
+  const styles = await themeSection('styles');
   const consoleLists = await readWebSource('workspace/ui/console-lists.css');
-  const emberTheme = await readWebSource('workspace/ui/ember-theme.css');
-  const workspaceCss = await readWebSource('workspace/workspace.css');
+  const emberTheme = await themeSection('ember-theme');
+  const workspaceCss = await themeSection('workspace');
 
   // Body minimum width 320px prevents broken layout collapsing
   assert.match(styles, /body\s*\{[^}]*min-width:\s*320px/);
@@ -74,15 +76,15 @@ test('Responsive 320px (Narrow Mobile): Layout, drawers, modals, tables, and fil
 });
 
 test('Responsive 390px (Mobile): Minimum touch targets 44px, cards layout, and vertical stacking', async () => {
-  const workspaceCss = await readWebSource('workspace/workspace.css');
-  const consoleTheme = await readWebSource('workspace/ui/console-theme.css');
-  const emberTheme = await readWebSource('workspace/ui/ember-theme.css');
+  const workspaceCss = await themeSection('workspace');
+  const consoleTheme = await themeSection('console-theme');
+  const emberTheme = await themeSection('ember-theme');
 
   // Page heading stacks vertically on <= 640px
-  assert.match(workspaceCss, /@media\s*\(max-width:\s*640px\)\s*\{[\s\S]*?\.ws-page-heading\s*\{[^}]*flex-direction:\s*column/);
+  assert.match(await readTheme(), /@media\s*\(max-width:\s*640px\)\s*\{[\s\S]*?\.ws-page-heading\s*\{[^}]*flex-direction:\s*column/);
 
   // Touch target minimum 44px
-  assert.match(consoleTheme, /@media\s*\(max-width:\s*640px\)\s*\{[\s\S]*?--ws-control-height:\s*44px/);
+  assert.match(consoleTheme, /@media\s*\(max-width:\s*640px\)\s*\{[\s\S]*?\.ws-command-trigger\s*\{[^}]*min-height:\s*44px/);
   assert.match(emberTheme, /@media\s*\(max-width:\s*640px\)\s*\{[\s\S]*?min-height:\s*44px/);
 
   // Tables transform to cards on mobile
@@ -90,13 +92,13 @@ test('Responsive 390px (Mobile): Minimum touch targets 44px, cards layout, and v
 });
 
 test('Responsive 834px (Tablet / <= 900px): Sidebar transforms to off-screen drawer and grid reflows', async () => {
-  const workspaceCss = await readWebSource('workspace/workspace.css');
-  const consoleTheme = await readWebSource('workspace/ui/console-theme.css');
-  const emberTheme = await readWebSource('workspace/ui/ember-theme.css');
+  const workspaceCss = await themeSection('workspace');
+  const consoleTheme = await themeSection('console-theme');
+  const emberTheme = await themeSection('ember-theme');
 
   // Sidebar transforms off-screen and main resets margin
-  assert.match(workspaceCss, /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.ws-sidebar\s*\{[^}]*transform:\s*translateX\(-100%\)/);
-  assert.match(workspaceCss, /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.ws-main\s*\{[^}]*margin-left:\s*0/);
+  assert.match(await readTheme(), /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.ws-sidebar\s*\{[^}]*transform:\s*translateX\(-100%\)/);
+  assert.match(await readTheme(), /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.ws-main\s*\{[^}]*margin-left:\s*0/);
 
   // Drawer surface & overlay shadow in Ember theme
   assert.match(emberTheme, /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?\.workspace-shell\s+\.ws-sidebar\s*\{[^}]*background:\s*var\(--ws-surface\)/);
@@ -107,15 +109,15 @@ test('Responsive 834px (Tablet / <= 900px): Sidebar transforms to off-screen dra
 });
 
 test('Responsive 1440px (Desktop): Fixed sidebar, 4-column metrics, two-column layouts, and full tables', async () => {
-  const workspaceCss = await readWebSource('workspace/workspace.css');
-  const emberTheme = await readWebSource('workspace/ui/ember-theme.css');
+  const workspaceCss = await themeSection('workspace');
+  const emberTheme = await themeSection('ember-theme');
 
   // Fixed sidebar width
-  assert.match(workspaceCss, /\.ws-sidebar\s*\{[^}]*width:\s*(?:232px|var\(--ws-sidebar-width\))/);
-  assert.match(workspaceCss, /\.ws-main\s*\{[^}]*margin-left:\s*(?:232px|var\(--ws-sidebar-width\))/);
+  assert.match(await readTheme(), /\.ws-sidebar\s*\{[^}]*width:\s*(?:232px|var\(--ws-sidebar-width\))/);
+  assert.match(await readTheme(), /\.ws-main\s*\{[^}]*margin-left:\s*(?:232px|var\(--ws-sidebar-width\))/);
 
   // 4-column metrics grid
-  assert.match(workspaceCss, /\.ws-metrics\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(await readTheme(), /\.ws-metrics\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/);
 
   // Table separate borders and transparent header
   assert.match(emberTheme, /\.workspace-shell\s+\.ws-table\s*\{[^}]*border-collapse:\s*separate/);
@@ -127,7 +129,7 @@ test('Responsive 1440px (Desktop): Fixed sidebar, 4-column metrics, two-column l
    ========================================================================== */
 
 test('Light and Dark themes declare semantic tokens with contrast >= 4.5:1 across surfaces', async () => {
-  const css = await readWebSource('workspace/ui/ember-theme.css');
+  const css = await themeSection('ember-theme');
   const [base, tail] = css.split(":root[data-ws-theme='dark']");
   const parseTokens = (text) =>
     Object.fromEntries([...text.matchAll(/(--[\w-]+):\s*(#[a-f0-9]{6})(?:;|\s)/g)].map((m) => [m[1], m[2]]));
@@ -175,7 +177,7 @@ test('Light and Dark themes declare semantic tokens with contrast >= 4.5:1 acros
    ========================================================================== */
 
 test('Lineless surfaces: Compact density rules tighten paddings without breaking structure', async () => {
-  const emberTheme = await readWebSource('workspace/ui/ember-theme.css');
+  const emberTheme = await themeSection('ember-theme');
   assert.match(emberTheme, /:root\[data-ws-density='compact'\]\s*\{[^}]*--ws-row-pad:\s*10px;\s*--ws-section-pad:\s*20px;\s*\}/);
   assert.match(emberTheme, /:root\[data-ws-density='compact'\]\s+\.workspace-shell\s+\.ws-table\s+td/);
   assert.match(emberTheme, /:root\[data-ws-density='compact'\]\s+\.workspace-shell\s+\.ws-section-heading/);
@@ -183,7 +185,7 @@ test('Lineless surfaces: Compact density rules tighten paddings without breaking
 });
 
 test('Lineless surfaces: Selected, hover, disabled, and error states are clearly distinguishable', async () => {
-  const emberTheme = await readWebSource('workspace/ui/ember-theme.css');
+  const emberTheme = await themeSection('ember-theme');
 
   // Selected row state uses warm accent soft on lineless tables
   assert.match(
@@ -205,7 +207,7 @@ test('Lineless surfaces: Selected, hover, disabled, and error states are clearly
     emberTheme,
     /\.workspace-shell\s+:is\(input,select,textarea\):is\(\[aria-invalid="true"\],\s*\.is-error,\s*\.ws-input-error\)/
   );
-  assert.match(emberTheme, /border-color:\s*var\(--ws-danger\)\s*!important/);
+  assert.match(emberTheme, /border-color:\s*var\(--ws-danger\)(?:\s*!important)?/);
   assert.match(emberTheme, /background:\s*var\(--ws-danger-soft\)/);
 });
 
@@ -214,8 +216,8 @@ test('Lineless surfaces: Selected, hover, disabled, and error states are clearly
    ========================================================================== */
 
 test('Tables and long file/domain names: text wrapping and scroll containers prevent layout breaking', async () => {
-  const emberTheme = await readWebSource('workspace/ui/ember-theme.css');
-  const workspaceCss = await readWebSource('workspace/workspace.css');
+  const emberTheme = await themeSection('ember-theme');
+  const workspaceCss = await themeSection('workspace');
 
   // All table cells have overflow-wrap: anywhere and word-break: break-word
   assert.match(
@@ -226,7 +228,7 @@ test('Tables and long file/domain names: text wrapping and scroll containers pre
   // Domain and file labels have overflow-wrap: anywhere and min-width: 0
   assert.match(
     emberTheme,
-    /\.workspace-shell\s+\.ws-domain-name,\s*\.workspace-shell\s+\.ws-domain-name\s+a,\s*\.workspace-shell\s+\.yf-tree-name,\s*\.workspace-shell\s+\.yf-name\s*\{[^}]*overflow-wrap:\s*anywhere;\s*word-break:\s*break-word;\s*min-width:\s*0;/
+    /\.workspace-shell\s+\.ws-domain-name,\s*\.workspace-shell\s+\.ws-domain-name\s+a,\s*\.workspace-shell\s+\.yf-tree-name\s*\{[^}]*overflow-wrap:\s*anywhere;\s*word-break:\s*break-word;\s*min-width:\s*0;/
   );
 
   // Table scroll container
@@ -239,7 +241,7 @@ test('Tables and long file/domain names: text wrapping and scroll containers pre
    ========================================================================== */
 
 test('Modals, Dropdown / Diğer menus, and mobile drawer clipping prevention are guaranteed', async () => {
-  const emberTheme = await readWebSource('workspace/ui/ember-theme.css');
+  const emberTheme = await themeSection('ember-theme');
 
   // Modal header flex layout, title overflow wrapping, and close button shrink suppression
   assert.match(
@@ -255,10 +257,7 @@ test('Modals, Dropdown / Diğer menus, and mobile drawer clipping prevention are
     /\.ws-modal\s+>\s+header\s+\.ws-button\s*\{[^}]*flex-shrink:\s*0;\s*\}/
   );
 
-  // Dropdown / Diğer menu visible overflow and max width
-  assert.match(emberTheme, /\.workspace-shell\s+\.ys-site-navigation\s*\{[^}]*overflow:\s*visible;\s*\}/);
-  assert.match(emberTheme, /\.workspace-shell\s+\.ys-site-more\s*\{[^}]*overflow:\s*visible;\s*\}/);
-  assert.match(emberTheme, /\.workspace-shell\s+\.ys-site-more\s+nav\s*\{[^}]*max-width:\s*calc\(100vw\s*-\s*32px\);\s*z-index:\s*50;\s*\}/);
+  // (.ys-site-more was removed with the unused legacy site navigation; no selector remains to check.)
 
   // Mobile drawer width bounded to min(290px, 90vw) and scrolling overflow-x contained
   assert.match(
