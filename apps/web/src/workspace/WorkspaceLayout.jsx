@@ -12,8 +12,6 @@ import CommandPalette from './ui/CommandPalette.jsx';
 import JobDrawer from './JobDrawer.jsx';
 import AiDrawer from './AiDrawer.jsx';
 import NotificationCenterDrawer, { computeWorkspaceAlerts } from './NotificationCenterDrawer.jsx';
-import './workspace.css';
-import './ui/ux-theme.css';
 
 export default function WorkspaceLayout() {
   return <WorkspaceProvider><UnsavedChangesProvider><Shell /></UnsavedChangesProvider></WorkspaceProvider>;
