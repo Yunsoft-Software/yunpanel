@@ -276,8 +276,8 @@ test('provisioning recovery wires mobile layout, keyboard focus trapping, dark t
   const panelCode = await source('../../web/src/workspace/ProvisioningRecoveryPanel.jsx');
   const panelKitCode = await source('../../web/src/workspace/PanelKit.jsx');
   const controllerCode = await source('../../web/src/workspace/provisioning-recovery.js');
-  const workspaceCss = await source('../../web/src/workspace/workspace.css');
-  const emberTheme = await source('../../web/src/workspace/ui/ember-theme.css');
+  const workspaceCss = await source('../../web/src/workspace/design-system/theme.css');
+  const emberTheme = await source('../../web/src/workspace/design-system/theme.css');
 
   // 1. Mobile layout & overflow prevention: table-scroll, modal calculation, label word break
   assert.match(panelCode, /<div className="ws-table-scroll">/);

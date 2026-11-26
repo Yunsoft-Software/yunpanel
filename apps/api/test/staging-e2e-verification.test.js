@@ -8882,8 +8882,8 @@ test('Source contract T-DEV-CREATE-RESULT: React StrictMode, logout/login, yetki
   const readProjectFile = async (relPath) => readFile(new URL(relPath, import.meta.url), 'utf8');
   const resultCode = await readProjectFile('../../web/src/workspace/SiteCreateResult.jsx');
   const pageCode = await readProjectFile('../../web/src/workspace/NewWebsitePage.jsx');
-  const consoleCss = await readProjectFile('../../web/src/workspace/ui/console-theme.css');
-  const emberCss = await readProjectFile('../../web/src/workspace/ui/ember-theme.css');
+  const consoleCss = await readProjectFile('../../web/src/workspace/design-system/theme.css');
+  const emberCss = await readProjectFile('../../web/src/workspace/design-system/theme.css');
 
   // Result container auto-focus on mount with tabIndex={-1}
   assert.match(resultCode, /ref=\{resultRef\}/);

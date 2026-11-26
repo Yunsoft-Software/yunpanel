@@ -98,8 +98,8 @@ test('SiteCreateResult component uses Domain-ID for navigation and labels interr
 test('SiteCreateResult and shared-site result containers wire keyboard focus, screen reader live regions, and theme focus styles', async () => {
   const resultCode = await source('../../web/src/workspace/SiteCreateResult.jsx');
   const pageCode = await source('../../web/src/workspace/NewWebsitePage.jsx');
-  const consoleCss = await source('../../web/src/workspace/ui/console-theme.css');
-  const emberCss = await source('../../web/src/workspace/ui/ember-theme.css');
+  const consoleCss = await source('../../web/src/workspace/design-system/theme.css');
+  const emberCss = await source('../../web/src/workspace/design-system/theme.css');
 
   // Accessible focus and screen reader regions on SiteCreateResult
   assert.match(resultCode, /ref=\{resultRef\}/);

@@ -1613,8 +1613,8 @@ test('Mevcut recovery runtime, context, command, ve store kodları kalıcı duru
 // ============================================================================
 
 test('Gerçek mobil ekranlarda (320px/390px) görünüm, hesaplama, sarmalama ve taşma engellemesi', async () => {
-  const workspaceCss = readFileSync(new URL('../../web/src/workspace/workspace.css', import.meta.url), 'utf8');
-  const emberTheme = readFileSync(new URL('../../web/src/workspace/ui/ember-theme.css', import.meta.url), 'utf8');
+  const workspaceCss = readFileSync(new URL('../../web/src/workspace/design-system/theme.css', import.meta.url), 'utf8');
+  const emberTheme = readFileSync(new URL('../../web/src/workspace/design-system/theme.css', import.meta.url), 'utf8');
   const panelSource = readFileSync(new URL('../../web/src/workspace/ProvisioningRecoveryPanel.jsx', import.meta.url), 'utf8');
 
   // Modal width calculation across viewports
@@ -1672,7 +1672,7 @@ test('Klavye navigasyonu, modal odak yakalama (focus trap), Escape iptali ve oda
 });
 
 test('Koyu temada (data-ws-theme=dark) ve Ember tasarım sisteminde kurtarma ekranı ve modalı token kurallarına tam uyar', async () => {
-  const emberTheme = readFileSync(new URL('../../web/src/workspace/ui/ember-theme.css', import.meta.url), 'utf8');
+  const emberTheme = readFileSync(new URL('../../web/src/workspace/design-system/theme.css', import.meta.url), 'utf8');
   const panelSource = readFileSync(new URL('../../web/src/workspace/ProvisioningRecoveryPanel.jsx', import.meta.url), 'utf8');
 
   // Dark mode tokens
