@@ -257,6 +257,26 @@ function emptyState() {
   return { version: STORE_VERSION, jobs: [] };
 }
 
+const DEFAULT_JOB_RETENTION_DAYS = 30;
+const MAX_JOB_RETENTION_DAYS = 3650;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const ARCHIVABLE_JOB_STATUSES = new Set(['succeeded', 'failed', 'cancelled']);
+
+export function jobRetentionDaysFromEnv(env = process.env) {
+  const raw = env.YUNPANEL_JOB_RETENTION_DAYS?.trim();
+  if (!raw) return DEFAULT_JOB_RETENTION_DAYS;
+  const days = Number.parseInt(raw, 10);
+  if (!/^[1-9]\d*$/.test(raw) || days > MAX_JOB_RETENTION_DAYS) {
+    throw new JobRegistryError('invalid_job_retention', `YUNPANEL_JOB_RETENTION_DAYS must be an integer between 1 and ${MAX_JOB_RETENTION_DAYS}`);
+  }
+  return days;
+}
+
+/** Finished jobs older than the retention period move here; they stay readable by id and idempotency key. */
+export function jobArchivePathFor(filePath) {
+  return `${filePath}.archive.json`;
+}
+
 function isNonRetryableOperation(operation) {
   return isWebsiteCopyOperation(operation) || operation === OPERATIONS.DOCKER_VOLUME_DELETE;
 }
@@ -1328,7 +1348,14 @@ export function createJobRegistry({
   reauthorize = null,
   storeLock = null,
   storeLockFactory = createProcessStoreLock,
+  retentionDays = jobRetentionDaysFromEnv(),
+  // Returns true for a finished job that must stay in the active file (e.g. pending reconciliation).
+  retainJob = () => false,
 } = {}) {
+  if (!Number.isInteger(retentionDays) || retentionDays < 1 || retentionDays > MAX_JOB_RETENTION_DAYS) {
+    throw new JobRegistryError('invalid_job_retention', 'Job retention must be a whole number of days');
+  }
+  if (typeof retainJob !== 'function') throw new JobRegistryError('invalid_job_retention', 'Job retention predicate is invalid');
   const defaultReauthorize = typeof reauthorize === 'function' ? reauthorize : null;
   let state = emptyState();
   let initialized = false;
@@ -1358,10 +1385,59 @@ export function createJobRegistry({
     return operation;
   }
 
+  const archivePath = filePath ? jobArchivePathFor(filePath) : null;
+
+  function isExpired(job) {
+    if (!ARCHIVABLE_JOB_STATUSES.has(job.status)) return false;
+    const finishedAt = Date.parse(job.finishedAt ?? '');
+    if (!Number.isFinite(finishedAt) || finishedAt >= now() - retentionDays * DAY_MS) return false;
+    return retainJob(Object.freeze({ id: job.id, serverId: job.serverId, status: job.status })) !== true;
+  }
+
+  async function readArchive() {
+    try {
+      const parsed = await readJsonWithFallback(archivePath);
+      if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.jobs)) throw new Error('unsupported or invalid job archive state');
+      return parsed;
+    } catch (error) {
+      if (error?.code === 'ENOENT') return emptyState();
+      throw error;
+    }
+  }
+
+  async function findArchivedJob(predicate) {
+    if (!archivePath) return null;
+    return (await readArchive()).jobs.find(predicate) ?? null;
+  }
+
+  async function appendToArchive(jobs) {
+    const archive = await readArchive();
+    const ids = new Set(jobs.map((job) => job.id));
+    archive.jobs = [...archive.jobs.filter((job) => !ids.has(job.id)), ...jobs];
+    await writeTextAtomic(archivePath, JSON.stringify(archive, null, 2), { directoryMode: 0o700 });
+  }
+
   async function persist() {
     if (!filePath) return;
-    const snapshot = JSON.stringify(state, null, 2);
-    writeChain = writeChain.then(() => writeTextAtomic(filePath, snapshot, { directoryMode: 0o700 }));
+    const expired = state.jobs.filter(isExpired);
+    const fullSnapshot = JSON.stringify(state, null, 2);
+    const archivedJobs = expired.length === 0 ? [] : structuredClone(expired);
+    const snapshot = expired.length === 0
+      ? fullSnapshot
+      : JSON.stringify({ ...state, jobs: state.jobs.filter((job) => !expired.includes(job)) }, null, 2);
+    writeChain = writeChain.then(async () => {
+      let text = snapshot;
+      if (archivedJobs.length > 0) {
+        // The archive is written first; a crash before the main write leaves the job in both files and main wins.
+        try {
+          await appendToArchive(archivedJobs);
+        } catch (error) {
+          text = fullSnapshot;
+          console.error(`[yunpanel-api] job archive unavailable; finished jobs stay active: ${error?.code ?? error?.name ?? 'error'}`);
+        }
+      }
+      await writeTextAtomic(filePath, text, { directoryMode: 0o700 });
+    });
     return writeChain;
   }
 
@@ -1386,6 +1462,7 @@ export function createJobRegistry({
     await withStoreLock(async () => {
       await reload();
       initialized = true;
+      if (archivePath && state.jobs.some(isExpired)) await persist();
     });
   }
 
@@ -1437,22 +1514,31 @@ export function createJobRegistry({
         serverId, type, operation, payload, resourceType, resourceId,
       });
       const existing = idempotencyKey === null ? null : state.jobs.find((candidate) => candidate.idempotencyKey === idempotencyKey);
-      if (existing) {
-        if (existing.idempotencyDigest !== requestDigest) {
+      const assertSameWork = (job) => {
+        if (job.idempotencyDigest !== requestDigest) {
           throw new JobRegistryError('job_idempotency_conflict', 'Job idempotency key was already used for different work', 409);
         }
-        const existingAuthorization = normalizeJobAuthorization(
-          existing.authorization,
-          { optional: true },
-        );
-        if (existingAuthorization && privateAuthorization
-          && JSON.stringify(existingAuthorization) !== JSON.stringify(privateAuthorization)) {
+        const jobAuthorization = normalizeJobAuthorization(job.authorization, { optional: true });
+        if (jobAuthorization && privateAuthorization
+          && JSON.stringify(jobAuthorization) !== JSON.stringify(privateAuthorization)) {
           throw new JobRegistryError(
             'job_authorization_conflict',
             'Job idempotency key is already bound to a different private authorization scope',
             409,
           );
         }
+        return jobAuthorization;
+      };
+      if (!existing && idempotencyKey !== null) {
+        // Archived jobs are final: the same work returns the archived job and is never re-run or retried.
+        const archived = await findArchivedJob((candidate) => candidate.idempotencyKey === idempotencyKey);
+        if (archived) {
+          assertSameWork(archived);
+          return enqueueResult(archived, false);
+        }
+      }
+      if (existing) {
+        const existingAuthorization = assertSameWork(existing);
         if (isNonRetryableOperation(operation) && existing.status === 'failed') {
           if (manual === true || manualRetry === true) {
             throw new JobRegistryError(
@@ -1588,7 +1674,8 @@ export function createJobRegistry({
       if (typeof idempotencyKey !== 'string' || !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
         throw new JobRegistryError('invalid_idempotency_key', 'Job idempotency key is invalid');
       }
-      const existing = state.jobs.find((candidate) => candidate.idempotencyKey === idempotencyKey);
+      const existing = state.jobs.find((candidate) => candidate.idempotencyKey === idempotencyKey)
+        ?? await findArchivedJob((candidate) => candidate.idempotencyKey === idempotencyKey);
       if (!existing) return null;
       const requestDigest = idempotencyDigest({
         serverId, type, operation, payload, resourceType, resourceId,
@@ -1604,7 +1691,8 @@ export function createJobRegistry({
     if (typeof key !== 'string' || !IDEMPOTENCY_KEY_PATTERN.test(key)) throw new JobRegistryError('invalid_idempotency_key', 'Job idempotency key is invalid');
     return withStoreLock(async () => {
       await ensureInitialized(); await reload();
-      const job = state.jobs.find(candidate => candidate.idempotencyKey === key);
+      const job = state.jobs.find(candidate => candidate.idempotencyKey === key)
+        ?? await findArchivedJob(candidate => candidate.idempotencyKey === key);
       return job ? publicJob(job) : null;
     });
   }
@@ -1706,7 +1794,8 @@ export function createJobRegistry({
     return withStoreLock(async () => {
       await ensureInitialized();
       await reload();
-      const job = state.jobs.find((candidate) => candidate.id === jobId);
+      const job = state.jobs.find((candidate) => candidate.id === jobId)
+        ?? await findArchivedJob((candidate) => candidate.id === jobId);
       return job ? publicJob(job) : null;
     });
   }

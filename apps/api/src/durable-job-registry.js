@@ -82,8 +82,21 @@ export function createDurableJobRegistry({
   if (!storeLock || typeof storeLock.withLock !== 'function') {
     throw new DurableJobRegistryError('durable_job_store_lock_invalid', 'Durable job store lock is invalid');
   }
-  let registry = registryFactory({ filePath, now, storeLock: false });
-  const recoveryStore = recoveryStoreFactory({ filePath: recoveryFilePath, now });
+  let recoveryStoreReady = false;
+  let recoveryStore = null;
+  // Finished jobs listed for reconciliation stay in the active job file; before the
+  // recovery record is loaded nothing may be archived.
+  function retainJob(job) {
+    if (!recoveryStoreReady) return true;
+    try {
+      const pending = [...(recoveryStore.snapshot()?.jobs ?? []), ...(recovery?.jobs ?? [])];
+      return pending.some((candidate) => candidate?.jobId === job.id && candidate?.serverId === job.serverId);
+    } catch {
+      return true;
+    }
+  }
+  let registry = registryFactory({ filePath, now, storeLock: false, retainJob });
+  recoveryStore = recoveryStoreFactory({ filePath: recoveryFilePath, now });
   let initialized = false;
   let initializing = null;
   let mutationTail = Promise.resolve();
@@ -188,6 +201,7 @@ export function createDurableJobRegistry({
     }
     try {
       await recoveryStore.init();
+      recoveryStoreReady = true;
     } catch {
       latch('durable_job_recovery_record_failed', 'Durable job recovery record could not be initialized');
     }
@@ -312,7 +326,7 @@ export function createDurableJobRegistry({
 
   async function reloadDurableState({ inspectRecovery = false } = {}) {
     try {
-      const replacement = registryFactory({ filePath, now, storeLock: false });
+      const replacement = registryFactory({ filePath, now, storeLock: false, retainJob });
       registry = await initialize(replacement);
       initialized = true;
       if (typeof recoveryStore.refresh === 'function') await recoveryStore.refresh();
