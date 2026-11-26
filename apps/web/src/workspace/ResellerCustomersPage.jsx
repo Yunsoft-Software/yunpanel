@@ -9,7 +9,6 @@ import { buildResellerAccountQuotaMetrics } from './quota-model.js';
 import { buildResellerNextActions } from './next-actions-model.js';
 import CustomerQuotaDialog from './CustomerQuotaDialog.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
-import './ui/console-lists.css';
 
 const LIMIT = 25;
 const blankForm = () => ({ username: '', password: '' });

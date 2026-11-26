@@ -2,7 +2,6 @@ import { Link, useNavigate } from 'react-router';
 import { Icon } from '../PanelKit.jsx';
 import { siteHref } from '../site-model.js';
 import { groupSiteTabs, tabKey } from './ux-model.js';
-import './site-resource-workspace.css';
 import './plesk-navigation.css';
 
 const ICONS = { overview: 'dashboard', hosting: 'globe', files: 'folder', databases: 'database', mail: 'mail', ssl: 'shield', node: 'code', deploy: 'git', domains: 'globe', dns: 'globe', logs: 'file', analytics: 'dashboard', cron: 'clock', backup: 'archive', terminal: 'terminal', php: 'code', wordpress: 'code', access: 'shield', settings: 'settings', resources: 'box' };

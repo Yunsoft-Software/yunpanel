@@ -11,7 +11,6 @@ import SiteWebmailAccess from './SiteWebmailAccess.jsx';
 import SiteMailApplyPanel from './SiteMailApplyPanel.jsx';
 import { Badge, Button, EmptyState, ErrorNotice, Icon, ModalScope, Section } from './PanelKit.jsx';
 import { siteMailDomains, mailSection } from './ui/site-resource-model.js';
-import './ui/site-resource-workspace.css';
 
 // Keep the Website/Domain distinction. Never select a mail domain from its name.
 export default function SiteMailPanel(props) {

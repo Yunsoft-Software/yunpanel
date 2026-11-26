@@ -4,7 +4,6 @@ import { domainTreeRows } from '../domain-tree.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Badge, CollectionNotice, EmptyState, Icon, PageHeading, Section } from './PanelKit.jsx';
 import { certificateState, selectedApplication, siteHref } from './site-model.js';
-import './ui/console-lists.css';
 
 export default function ReadOnlyWebsitesPage() {
   const { domains, applications, certificates, servers } = useWorkspace();
