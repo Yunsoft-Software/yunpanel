@@ -338,3 +338,4 @@
 - 2026-11-25 02:26 orchestrator: verify f54f6f13..5b051121: ok, yeniden açılan -, bulgu -
 - 2026-11-25 02:37 orchestrator: verify 5b051121..8cf4719f: ok, yeniden açılan -, bulgu -
 - 2026-11-26 04:35 orchestrator: verify 8cf4719f..8b5dc818: ok, yeniden açılan -, bulgu -
+- 2026-11-26 05:26 orchestrator: verify 8b5dc818..94c6d26d: failed, yeniden açılan -, bulgu ['T963']

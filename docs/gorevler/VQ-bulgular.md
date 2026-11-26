@@ -2142,3 +2142,61 @@
     ℹ duration_ms 255.909125
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T963 · Doğrulama: test — Gerçek mobil ekranlarda (320px/390px) görünüm, hesaplama, sarmalama ve taşma engel
+- **Bağımlı:** —
+- **Dosyalar:** —
+- **Kaynak:** QA · 2026-11-26 05:26
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    Başarısız testler:
+    - Gerçek mobil ekranlarda (320px/390px) görünüm, hesaplama, sarmalama ve taşma engellemesi
+    - Koyu temada (data-ws-theme=dark) ve Ember tasarım sisteminde kurtarma ekranı ve modalı token kurallarına tam uyar
+    - provisioning recovery wires mobile layout, keyboard focus trapping, dark theme tokens, and abort isolation
+    - SiteCreateResult and shared-site result containers wire keyboard focus, screen reader live regions, and theme focus styles
+    - Source contract T-DEV-CREATE-RESULT: React StrictMode, logout/login, yetki değişimi, unmount/abort, parola temizleme ve sonuç erişilebilirliği
+    
+    files without allocating a localhost port (0.611208ms)
+    ✔ rejects shell fragments, unsafe entry files, ports and health URLs (0.362792ms)
+    ✔ normalizes complete Node deployment specs (0.396291ms)
+    ✔ normalizes fixed Node process actions against a managed release (0.6975ms)
+    ✔ Passenger release snapshots carry exact site, runtime and routing revisions without a port (1.294292ms)
+    ✔ Passenger release snapshots reject systemd ports, arbitrary commands and public secrets (0.294834ms)
+    ✔ Passenger snapshots reject missing or ambiguous authorities and unsupported revisions (0.398167ms)
+    ✔ proxy hosts canonicalize DNS, IDN, IPv4 and IPv6 without accepting URLs (8.296667ms)
+    ✔ proxy hosts reject schemes, paths, credentials and config control characters (0.269083ms)
+    ✔ normalizePythonRuntimeConfig applies canonical defaults (1.540667ms)
+    ✔ normalizePythonRuntimeConfig accepts valid custom options (0.415958ms)
+    ✔ normalizePythonRuntimeConfig rejects unsupported versions or app servers (0.492625ms)
+    ✔ normalizePythonRuntimeConfig rejects invalid entry points or workers (1.004958ms)
+    ✔ normalizePythonRuntimeConfig enforces port requirements when requested (0.346709ms)
+    ✔ normalizePythonApplicationSpec normalizes complete spec (1.272833ms)
+    ✔ normalizePythonApplicationSpec rejects invalid fields (0.083417ms)
+    ✔ normalizes python rollback, restart, and status specs (0.173625ms)
+    ✔ a redirect target keeps the URL and defaults to a permanent redirect that keeps the path (0.896959ms)
+    ✔ redirect URLs that could break out of the nginx directive or mislead are refused (0.37075ms)
+    ✔ redirect Domains accept only settings that apply to a redirect response (0.294875ms)
+    ✔ tenant constants and role classification predicates (2.039041ms)
+    ✔ assertTenantIdentifier and isValidTenantIdentifier (0.30625ms)
+    ✔ normalizeResellerAccount validates reseller models and enforces no nesting (0.22725ms)
+    ✔ normalizeCustomerAccount validates customer under reseller and direct Owner customer (0.160042ms)
+    ✔ normalizeHostingAccount delegates and verifies expectedKind (0.120333ms)
+    ✔ normalizeWebsiteOwnership validates website-to-customer ownership projection (0.133917ms)
+    ✔ createTenantContext builds accurate tenant context for all roles (0.186709ms)
+    ✔ resolveEntityTenantScope maps all entity types to their tenant scope (0.204958ms)
+    ✔ assertTenantAccess enforces boundaries across Owner, Reseller, Customer, and legacy SM (0.444458ms)
+    ✔ filterByTenantBoundary filters resources according to actor tenant boundary (0.313959ms)
+    ✔ resolveEntityTenantScope handles application, database, mail_alias, job variations and lookup errors (0.240458ms)
+    ✔ assertTenantAccess negative scenarios: cross-tenant data leakage prevention (0.2795ms)
+    ✔ filterByTenantBoundary negative scenarios: prevents cross-tenant data leakage in collections (0.318667ms)
+    ✔ tenant context creation and account normalization security edge cases (0.194791ms)
+    ℹ tests 87
+    ℹ suites 0
+    ℹ pass 87
+    ℹ fail 0
+    ℹ cancelled 0
+    ℹ skipped 0
+    ℹ todo 0
+    ℹ duration_ms 238.05475
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
