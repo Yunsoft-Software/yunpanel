@@ -11,7 +11,6 @@ import { createApp } from '../src/app.js';
 import { createApplicationRegistry } from '../src/application-registry.js';
 import { createAiConversationService } from '../src/ai-conversation-service.js';
 import { createAiMcpAdapter } from '../src/ai-mcp-adapter.js';
-import { startAiMcpServer } from '../src/ai-mcp-server.js';
 import { createAiProviderRegistry } from '../src/ai-provider-registry.js';
 import { createAiToolRegistry } from '../src/ai-tool-registry.js';
 import { DEFAULT_AI_TOOL_DEFINITIONS } from '../src/ai-tool-catalog.js';

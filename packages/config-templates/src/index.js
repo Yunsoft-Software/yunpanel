@@ -258,13 +258,6 @@ export {
 } from './phpmyadmin-signon.js';
 
 export {
-  NetdataTemplateError,
-  netdataTemplatePolicy,
-  previewNetdataConfiguration,
-  renderNetdataConfig,
-} from './netdata.js';
-
-export {
   GOACCESS_DATE_FORMAT,
   GOACCESS_DEFAULT_REPORTS_ROOT,
   GOACCESS_DEFAULT_SOCKET_ROOT,
@@ -284,16 +277,6 @@ export {
 } from './nftables.js';
 export { normalizeSmarthost, renderSmarthost, smarthostPolicy, SMARTHOST_DIRECTORY, SMARTHOST_SASL_PASSWD_PATH } from './mail-smarthost.js';
 export { PROTECTED_PATH_AUTH_DIRECTORY } from './nginx.js';
-
-export {
-  WafPolicyTemplateError,
-  nginxWafConfigPath,
-  normalizeWafExcludedRoutes,
-  previewCloudflareManagedWafPolicy,
-  previewCrowdSecAppSecPolicy,
-  previewWafPolicy,
-  wafPolicyTemplatePolicy,
-} from './waf-policy.js';
 
 export {
   NginxTrafficTemplateError,

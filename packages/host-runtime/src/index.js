@@ -47,11 +47,6 @@ export {
   dockerComposeObserverInternals,
 } from './docker-compose-observer.js';
 export {
-  createDockerVolumeInspector,
-  DockerVolumeInspectorError,
-  dockerVolumeInspectorInternals,
-} from './docker-volume-inspector.js';
-export {
   createDockerVolumeManager,
   DockerVolumeManagerError,
   dockerVolumeManagerInternals,
@@ -437,10 +432,6 @@ export {
   WebsiteRestoreReceiptError,
   websiteRestoreReceiptInternals,
 } from './website-restore-receipt.js';
-export {
-  createNetdataManager,
-  NetdataManagerError,
-} from './netdata-manager.js';
 export {
   createGoAccessManager,
   GoAccessManagerError,
