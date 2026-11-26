@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
-import { OWNER_USERNAME, OWNER_PASSWORD, loginAs, logout } from '../helpers.js';
+import {
+  OWNER_USERNAME, OWNER_PASSWORD, loginAs, logout, missingPremiumCapabilities, premiumSkipReason, expectPanelUserCreateGated,
+} from '../helpers.js';
 
 test.use({ trace: 'off' });
 
@@ -126,6 +128,13 @@ test.describe('BAK-01 Server, reseller/customer, subscription ve site düzeyleri
   });
 
   test('yetki/sınır senaryosu: site_manager rolünün sunucu düzeyi depolara ve yetkisiz site yedeklerine erişiminin 403 ile engellenmesi', async ({ page }) => {
+    // Ücretsiz sürümde yeni panel kullanıcısı Premium (perSiteIsolatedUsers) ister: kapıyı doğrula, devamı atla.
+    const missing = await missingPremiumCapabilities(page.request, ['perSiteIsolatedUsers']);
+    if (missing.length) {
+      await expectPanelUserCreateGated(page, { username: testUsername, password: testPassword });
+      test.skip(true, premiumSkipReason(missing));
+    }
+
     // 1. Owner oturumuyla yeni bir site_manager kullanıcısı oluştur
     await page.goto('/settings/users');
     await expect(page.locator('h1', { hasText: 'Kullanıcılar' })).toBeVisible({ timeout: 15000 });
