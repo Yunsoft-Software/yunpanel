@@ -1,0 +1,284 @@
+# Test senaryoları matrisinden taşınan kanıt kayıtları — 12–19 Kasım 2026
+
+> **Arşiv · 26 Kasım 2026.** Bu bölümler `docs/test-scenarios-matrix.md` içinden aynen taşındı. Görev bazlı gerçek koşu kanıtıdır (T883, T889–T921). Senaryo matrisi [test-scenarios-matrix.md](../test-scenarios-matrix.md), güncel durum [devir notu](../DEVIR.md).
+## 12 Kasım 2026 — T883 assertion kapsamı ve native tekrar
+
+38 eski mantıksal senaryo (59 eski proje koşusu), iki bağımsız assertion denetiminde22kısmi/16eksik/0tam karşılık verdi. Bu başlangıç sınıflaması canlı başarı sayısı değildir. Satır bazında eski davranışlar, tam yeni test başlıkları, gerçek sonuçlar ve kabul sınırları [T883 kapsam ve öncelik kaydında](../t883-coverage-and-priorities-2026-11-12.md) tutulur. 13 Kasım `88d18c35` sonrasında T883 kapsamındaki 8 dosyada **43 mantıksal test / 65 yapılandırılmış proje koşusu** (Chromium 43 + Firefox 22; `13-native-source-mutation.spec.js` içinde Chromium 17 test; yeni `23-native-applied-domain-removal-mutation.spec.js` içinde Chromium 2 test) bağımsız `--list` ile keşfedildi; hata0 ve auth-state oluşturulmadı. Bu yalnız keşif sayısıdır, canlı yürütme veya başarı sayısı değildir. T900 kapsamında `13.11b` birleşik (`paths` + `databases` + `mail` + `environment`) failed-health HTTP 503 rollback + silinmiş RFC822/State-B ileti + posta parolası + SQL + dosya + korunan webhook sırrı geri dönüşü + kardeş statik ilk HTTP 200 sürekliliği senaryosu (`@mutation source compound restore refuses owned HTTP health failure and rolls back file, SQL, mailbox password, deleted RFC822 message and protected secret while preserving sibling HTTP`) yazılı matrise ve `13-native-source-mutation.spec.js` kaynağına eklendi (`13.13` WordPress eklenti rollback'i ve `16.2` DNS/hosting rollback'i bu birleşik matrisi ikame etmez); `.28` canlı doğrulaması yeni paket deploy kapısı sonrasında iki taze koşuda hem `13.11` birleşik başarılı restore hem `13.11b` birleşik failed-health rollback geçene kadar **AÇIK** durumdadır.
+
+T886 uygulama/DB/posta/WP/silme32, T887 DNS/hosting/ortam72, T888 tenant/API/job/tool/WS4 olmak üzere **108 olumlu assertion icrası**, ilgili gerçek native paket üzerinde iki fresh koşuyla kaydedildi. Tarayıcı/koşu kapsamları ayrıntılı raporda ayrıdır;108 özellik veya bütün panel için yüzde hesaplanmaz. Yeni ilk dinamik PHP yanıtı ve tam fiziksel temizlik kontrolleri önceki yüzeysel marker/API404 kabulünün yerine geçti.
+
+**T883 genel kabulü açık:** T889 PHP kurulum kararlılığı, T891 PHP settings stage, T892 silme sonrası iki Nginx artığı, T893 aralıklı depo init durumu, T894 native kurulum görünümü, T897 aralıklı PHP kardeş sürekliliği, T898 açık terminalle silme, T899 geçici kuyruk kapısı, T900 birleşik restore+rollback hatası ve T901 gerçek build kimliği bulguları açık tutuldu. Kırmızı testler yeşil sayılmadı; tarihsel orphan/DNS/draft/index-error kesinti kanalları, farklı PHP sürümü, gerçek API restart ve farklı WordPress sürümüne upgrade henüz doğrulanmadı. Seçili paths+databases restore, tablo bazında veya birleşik posta/ortam restore değildir. Son tam kaynak kapısında T902 testleri geçti fakat bağımsız SQLite writer testi15s süre aşımıyla iptal edildi (T903); tüm kapı kırmızı tutuldu. T903 dosya süreçlerini2ile sınırlar, gerçek iki-worker yarışı/15s sınır/assertionlar korunur. Maker ve bağımsız63/63 koşularından sonra `5007a124` tam görev lint/lint/test/build kapısı geçti (`3caefb36`):8549test/8548pass/0fail/0cancel/1Postfix-root ortam skip. Bu kaynak kabulüdür; yukarıdaki native açık kapılar kapanmadı.
+
+
+## 13 Kasım 2026 — T892 aktif ve istenen ayar ayrımı
+
+Önceki `19` barındırma testleri ayarları etkinleştirip eski hâline döndürdükten sonra temizlik yapar; bu, istenen ayar aktif yapılandırmadan ilerideyken silmeyi sınamaz. `23-native-applied-domain-removal-mutation.spec.js` için kaynak geliştirme öncesi kabul matrisi:
+
+| Senaryo | Gerçek önkoşul ve işlem | Zorunlu sonuç | Durum |
+|---|---|---|---|
+| T892-DRAFT | Ayrı Unix kimlikli, gerçekten çalışan sahipli PHP sitesi; normal update-preview/PATCH; stage yapılmadan desiredRevision > appliedRevision; eski aktif Nginx hash ve HTTP korunur; normal kaldırma | Aynı kaldırma journalı tamamlanır; Website/Domain/Application404, canonical kökler/Unix/FPM/socket/Nginx/mount yok; ayrı dinamik PHP kardeş ilk HTTP200, beklenen içerik/UID/fpm-fcgi/no-store | Kaynak `88d18c35` ile eklendi; yeni paket ve iki taze `.28` koşusu açık |
+| T892-STAGED | Ayrı sahipli aktif PHP sitesi; normal update-preview/PATCH ve gerçek stage işi; activate yapılmadan stagedRevision = desiredRevision > appliedRevision; eski aktif Nginx hash ve HTTP korunur; normal kaldırma | Aynı fiziksel yokluk ve ilk yanıt kardeş sürekliliği; yalnız o işin sahipli yapılandırması kaldırılır | Kaynak `88d18c35` ile eklendi; yeni paket ve iki taze `.28` koşusu açık |
+
+Testler gerçek panel API'sini ve sabit hedefli salt okunur fiziksel probu kullanır. Boş exec cevabı Nginx configtest/reload kanıtı değildir. Önceden kalan iki Nginx artığının elle silinmesi bu senaryolara dahil değildir; bunlar ayrı güvenli kurtarma kabulü olarak açık kalır.
+
+
+## 13 Kasım 2026 — T901 yayımlanan API yolu
+
+Gerçek kurulu `621c8757` üzerinde Owner oturumuyla bare `/api/system/diagnostics/version` public web gateway'den404; yayımlanan `/api/panel/system/diagnostics/version` ve CSRF'li `/compare`200 döndü. Tam kimlik senkron, eksik kimlik belirsiz, eski commit farklı olarak gerçek API'de doğrulandı. Bağımsız kaynak incelemesi, yeniden kullanılabilir tarayıcı yardımcılarının varsayılan URL'lerinin yanlış bare yolu kullandığını doğruladı; mevcut Tanılama ekranı ayrı settings API'sini kullanır ve bu bulgu o ekranın bozuk olduğu iddiası değildir.
+
+| Senaryo | Gerçek sınır | Zorunlu sonuç | Önceki kapsam açığı |
+|---|---|---|---|
+| T901-PUBLIC-DEFAULT | Gerçek panel web gateway → authenticated API → SQLite AuthStore; GET/POST yardımcıları endpoint override olmadan | Public `/api/panel/system/...` yoluna gider; tam kimlik200/synchronized; eksik kimlikunknown; aynıID/eski commitstale_cache | Eski testler endpoint'i doğrudan core API adresine override ediyordu |
+| T901-PUBLIC-AUTH | Aynı gerçek gateway; çerezsiz GET ve CSRF'siz karşılaştırma POST'u | 401/403; bare `/api/system/...`404 kalır, allowlist genişlemez | Native gateway ve default URL birlikte sınanmıyordu |
+
+İki varsayılan URL düzeltmesi ve gerçek gateway regresyonu hazırlanacak. Yerel gateway testi yeni paket/native varsayılan istemci veya gerçek DOM kabulünün yerine geçmez; P0 döngüsünde yeniden doğrulanır.
+
+
+## 13 Kasım 2026 — T891 native PHP ayar temizliği
+
+Kurulu621c8757 üzerinde `t891-chrome-q1` gerçek UI save/stage202, header/body-limit/cache HTTP kontrollerini geçti (`hosting.ui.http verified:true`); test eski ayara dönüşte başarısız oldu. PATCH alanları birleştirdiği için ilk kayıtta bulunmayan `staticAssetCacheSeconds` alanını geri dönüş nesnesinden atlamak yeni120değerini temizlemez. Önceki testin strict eşitliği haklı olarak bunu yakaladı; koşu PASS sayılmadı. Site afterAll normal silinip fiziksel yokluğu doğrulandı.
+
+| Senaryo | Gerçek sınır | Zorunlu sonuç |
+|---|---|---|
+| T891-CACHE-RESET | Native PHP UI'da ilk olmayan cache alanı120eklenir; normal preview/PATCH ile aynı alan açıkça null temizlenir; stage/activate işleri gerçek | Strict beklenen canonical reset kaydı (nullable alan null), yeni header/body/cache değerleri temizlenir; gerçek CSS/HTTP cache davranışı özgün davranışa döner; beklenti subset/partial yapılmaz |
+| T891-STAGE-HTTP | Tek UI kaydetme → preview/PATCH/stage/activate ve sayfa yenileme | Birer mutation; stage202/job succeeded; gerçek header/413/cache120; özgün ayara normal dönüş ve fiziksel test kaynağı temizliği; Chrome ve Firefox taze koşular |
+
+Test yardımcı temizliği T891 diliminde düzeltilecek; PHP protokol kaynak düzeltmesi korunur. T891'in yeni native19dosyası, önceki T887 tesliminden sonra sıralanır. Bu bir product stage hatası yeniden üretimi veya beklenti gevşetmesi değildir.
+
+
+## 13 Kasım 2026 — T889 gerçek hazırlık nedenselliği
+
+İki yeni native23 koşusunda sekiz PHP fixture'ı ilk dinamik nonce/UID/SAPI/no-store yanıtı ve fiziksel temizliğiyle geçti; native13 T900PHP/SQL akışları da geçti. Bunlar güncel regresyon kanıtıdır. Eski run1794490934 kaydı ilk `php_fpm_apply_unverified` için reason/config/socket/UMask gözlemi saklamamış; sonraki yeşil koşular tek başına tarihsel aralıklı bulguyu kapatmaz.
+
+18 Kasım ek senaryosu [Native24] üzerinden üç ayrı PHP sitesini arayüzden açar ve siler. Her site için ilk dinamik HTTP yanıtı, PHP sürümü ve sitenin Unix kullanıcısı, silme işleminin tamamlanması ve kaynakların fiziksel yokluğu doğrulanır. Aynı testte panelin yeni siteyi hazır göstermesi ve özgün PHP sitesinin her silmeden sonra yanıt vermesi gerekir.
+
+[Native24]: ../e2e/live-audit/24-native-php-readiness-mutation.spec.js
+
+| Senaryo | Gerçek kaynak ve sınır | Kabul |
+|---|---|---|
+| T889-OBSERVATION | Mevcut manager/handler gerçek inspect sonuçları; ilk pool activation ve UMask sonrası faz ayrı; ilk/son satisfied/reason/listener ve gerçek attempts/elapsed | Kontrol edilmeyen alan null, uydurma false yok; serbest stderr/config/parola/çıktı evidence'e giremez; mevcut final başarısızlıklar yutulmaz; UI geliştirme notu eklenmez |
+| T889-NATIVE-READY | En fazla iki taze dalga, dalga başına en fazla iki paralel normal sahipli PHP kurulumu; gerçek API/Unix/FPM/HTTP ve exact owned registry'nin yalnız salt okunur hazırlık projection'ı | Her ilk dinamik yanıt200/nonce/nonrootUID/fpm-fcgi/no-store; her kaynak normal API ile kaldırılır ve canonical/Unix/FPM/socket/Nginx/mount yokluğu; özgün kardeşler korunur |
+| T889-CAUSAL | Aynı gerçek activation inspect'inde ilk satisfied:false + allowlist reason → son satisfied:true | En az bir gerçek geçiş gözlenirse eski tek-inspect hata yolunun sınıfı tekrar üretilmiş olur. Yalnız listener:false→true yeterli değildir. Tüm attempts1/ilktrue ise mekanizma AÇIK; atlanan veya sahte PASS yok |
+
+Global PHP servisini bozma/durdurma, root registry yazma, uydurma PHP/systemd/HTTP motoru veya otomatik Linux-root fixture kullanılmaz. Süre yalnız uyku aralıkları değildir; inspect/configtest/systemctl süreleri de gerçek toplam süreye dahil edilir. 13 Kasım kullanıcı onayıyla T889 nedensellik kapısı açık kalır; T897 artık T861/T891 ardından, T898 ise T861/T897 ardından yürür. Diğer kabul ve izolasyon sınırları korunur.
+
+## 13 Kasım 2026 — T905 taze WordPress giriş gözlemi
+
+İkinci taze native13 koşusunda gerçek DB formu ve Türkçe kurulum geçti; boş tarayıcı oturumunda giriş GET200 ve test cookie vardı, fakat giriş POST yanıtı 45 saniyede gözlenmedi. İlk koşunun 4/4 sonucu bu kırmızıyı kapatmaz; sonraki statik silme serial testi çalışmadı. Neden henüz sınıflandırılamaz.
+
+| Senaryo | Gözlem ve korunan sınır |
+|---|---|
+| WP-LOGIN-TRANSPORT | Gerçek request/response/requestfailed olayları; yalnız method/path/status/allowlist hata kodu. Cookie, headers, body, postdata ve kullanıcı/parola değeri kaydedilmez. |
+| WP-LOGIN-FORM | Gerçek form action origin/scheme/path, submit gerçekleşmesi, validity ve alanların yalnız dolu/boş bayrağı; submit düğmesi disabled durumu. Form veya ağ yanıtı değiştirilmez. |
+| WP-LOGIN-TIMEOUT | Aynı timeout ve assertion korunur; hata anında gerçek URL path, admin bar/login error varlığı ve güvenli sınıf bayrakları kaydedilir. Otomatik POST tekrarı, selector/timeout gevşetme yok. |
+| WP-LOGIN-NATIVE | İncelenmiş yardımcıyla yeni sahipli fixture üzerinde tekrar; ardından normal kaldırma ve fiziksel yokluk. Yeşil tekrar nedensellik kanıtının yerine geçmez. |
+
+## 13 Kasım 2026 — T893 gerçek initialize/list yarışı
+
+Mevcut native16 initialize:true senaryosu yalnız tek POST sonrasını okur. Bu dilim aynı senaryoya sınırlı iki gerçek GET/list poller ekler; POST bir kez gönderilir. Geçerli gözlem, POST tamamlanmadan gerçek başarılı listelerin dönmesidir. Kendi satırı init sırasında uninitialized görülmediyse yarışın nedenselliği açık kalır. Başarı iddiası için POST201 ready, ayrı GET ready, gerçek Restic check200 ve snapshots[] gerekir. Normal metadata DELETE/404 ve exact fiziksel cleanup-required kaydı tutulur; özel kanıt olmadan depo yolu silinmez. Yerel ENOENT/disk-lock testleri gerçek Restic initialization yerine geçmez.
+
+## 13 Kasım 2026 — T899 native eşzamanlı işler
+
+Yeni native26 iki fresh sahipli statik site üzerinde en fazla üç gerçek stage/activate dalgasını eşzamanlı kuyruğa verir. Öncesinde sırayla normal kurulum, gerçek nonce HTTP ve aktif config SHA; sonrasında her tek POST için202/ayrı durable job ID ve terminal succeeded, gerçek config/header etkisi ve normal ters cleanup/Unix/FPM/socket/mount/kök yokluğu doğrulanır. 503, kayıp job veya retry başarı sayılmaz. Gerçek enqueue zamanları kaydedilir; doğal örtüşme, yerel deterministik completion/ack penceresi kanıtının yerine geçirilmez. Kaynak motoru veya shared fixture değiştirilmez.
+
+## 13 Kasım 2026 — T894 gerçek UI ve eşzamanlı devam
+
+Native28 en fazla üç fresh sahipli UI denemesi ile tek create/same-operation kuralını korur. İkinci gerçek istemci, kendi operation kimliği ve mevcut durumuna bakarak en fazla iki normal continue çağrısı yapar; yalnız gerçek UI isteği gerekirse pass-through gönderim bariyerinde kısa tutulur. Yanıt veya body/header içeriği değiştirilmez; route.fulfill/abort, fake409, root lock/journal yazma veya backend gecikme motoru yoktur. Kabul için UI’nin kendi gerçek409+belgeli code’u, o ana ait aynı operation GET ve daha sonra gerçek backend ready/allrequired succeeded ile operation’a ait site/DOM hazır hali birlikte gerekir. UI409 oluşmazsa causal kabul açık/fail; normal UI yeşili bu kanıt değildir. Kimliksiz/uncertain POST yeniden gönderilmez. Gerçek dosya/HTTP/Unix/root ve ters normal cleanup ayrıca doğrulanır; desteklenmeyen rol/tarayıcı kanalları kapsanmış sayılmaz.
+
+
+## 13 Kasım 2026 — T892 özgün journal ile emekli site telafisi
+
+Native23iki taze koşuda4/4 geçti. Önceden kalmış iki dosya ise duruyor. Güncel salt okunur sunucu projection'ı, her dosyanın SHA'sını özgün provisioning Nginx evidence ve rollback makbuzuyla eşleştirdi; her iki özgün activation'dan önce aktif dosya yoktu. Eski kayıtlarda hash görünmemesi sahiplik uydurularak giderilmedi. Aynı hostname ile yeni site kurarak eski dosyayı üzerine yazma ve elle config silme uygulanmayacak.
+
+| Senaryo | Gerçek kaynak/sınır | Zorunlu sonuç |
+|---|---|---|
+| T892-RETIRED-PROOF | Özgün provisioning kaynakları + terminal kendi Website/Domain removal journal'ları; aynıserver/domain/name; mevcut Website/Application/Domain yok; adı/aliası başka kayda atanmamış | Yalnız compensation yolunda retired-satisfied; Domain oluşturma/reset yok. Salt404, eksik/nonterminal/foreign journal, yanlışID/server/name tek başına yetmez |
+| T892-RETIRED-NGINX | Aynı gerçek NginxManager instance'ı; doğrulanmış receipt; prior-active yok, rename yok; özgün checksum hâlen aktif veya zaten doğrulanmış absent | Özgün sıra domain_activation→nginx compensation; mevcut configtest/reload/rollback motoru kullanılır. Yabancı/drift checksum, bozuk/eksik receipt veya prior-active varsa değişiklik yok |
+| T892-NAMESPACE-ATOMIC | Gerçek tek backend'in canonical DomainRegistry create/update/reparent ile aynı merkezi namespace serialization sınırı; immutable snapshot → provider → Nginx işlemi bitene kadar reservation | Eski site UUID kilidi tek başına yeterli sayılmaz; farklı UUID ile yeni primary/alias ataması araya giremez. skipLock namespace sınırını atlayamaz; ham lockfile+eski cache güvenli sayılmaz |
+| T892-REASSIGNMENT | Native25: A normal kur/normal sil; A'nın domain_activation compensation'ı retired; sonra B normal kur ve A adını B alias'ına normal PATCH ile kaydet | Eski A nginx compensation, dosya zaten yokken bile yeniden atama nedeniyle reddedilir; B'nin aktif hash'i ve ilk dinamik HTTP korunur. Alias normal API ile kaldırılınca A idempotent compensation geçer |
+| T892-HISTORICAL | İki exact eski provisioning ID; gerçek current SHA ve receipt ön-durum/kimlik kapıları; Owner mevcut API ve typed confirmation | Yeni eşleşen paket+inceleme sonrası aynı özgün journal'ların desteklenen telafisi iki eski dosyayı kaldırır; yeni kimlik üretilmez, field/journal elle değiştirilmez; tüm yan hedef/kardeşler korunur |
+
+Yeni endpoint/panel/host motoru eklenmez. Namespace sınırı tek mevcut backend/canonical registry kapsamındadır; process/disk lock yapılacaksa tüm yazanlar ve kilit içi reload gerekir, yalnız yeni lockfile eklenmez. Native25 ve tarihsel iki pozitif telafi, kaynak/yerel model kontrolleriyle geçmiş sayılmaz.
+
+
+## 13 Kasım 2026 — Onaylanan T897/T898 kaynak sırası
+
+Kullanıcı T889 açık kalırken `t889-gate-decision-proposal.md` kapsamını uygulamayı açıkça onayladı. T897 eski502 nedenselliğini kapatmaz; mevcut elFinder FPM retirement invariantını düzeltir. T898, T897 kabulünden sonra mevcut terminal motorunda Website fence/lease/awaitable drain uygular. Root plan tamamlanma işaretleri verilmez; teknik kaynak sözleşmeleri görevlerde ve bu matriste tutulur.
+
+| Senaryo | Gerçek sınır | Zorunlu sonuç |
+|---|---|---|
+| T897-RETIRE | Tek normal owned static removal; gerçek aynı-servis FPM ve en az iki fresh normal PHP sibling | Kendi pool/socket yok; önceden sağlıklı sibling listener'lar bounded gerçek readiness; her ilk dynamic nonce/UID/SAPI/no-store200; tekrarlı shared reload yok |
+| T897-IDEMPOTENT | Aynı gerçek original receipt ve terminal removal kimlikleri; identity-cleanup tekrar kontrolü | Doğru terminal durum yeniden reload gerektirmeden doğrulanır; retained/foreign/drift pool veya eksik readiness başarı olmaz |
+| T897-LATE-IDEMPOTENT | Başarılı retirement sonrası başka normal sibling kaldırılır, aynı özgün retired kayıt salt okunur yeniden kontrol edilir; önceki Unix adımı başarısız aynı journal yeni pakette normal devam eder | Retired/compensated ve own pool/socket/kernel yokluğu doğrulanır; eski eksik listener yalnız aynı çalışan FPM binary/effective config tam resolved dump içinde artık tanımlı değilse ve socket/kernelde yoksa kabul edilebilir. Hâlâ configured missing listener başarı olmaz. Bütün current declared listener sağlıklı; eski baseline/receipt yazılmaz, reload/unlink/persist yok. Prepared/reload_started ilk immutable liste değişmez. |
+| T897-ERROR | Gerçek validation/receipt/drift/rollback sınırları; global PHP servisi bozulmaz | Hata ve belirsizlik görünür, kardeşler korunur; fake binary/socket/service/HTTP yok |
+| T897-CLEAN | Normal reverse API cleanup; original site inventory/canonical TLS ve physical readback | Website/Domain/Application404, Unix/group/canonical roots/FPM/socket/Nginx/mount yok, baseline ilk canonical HTTP200 |
+| T898-FENCE | Mevcut NodePTY/ttyd pending-open ve active Website-bound oturumlar; aynı removal journal | Removal fence sonrası yeni site token/open/consume/WS reddedilir; pending ve active kendi oturumları Unix cleanup öncesi gerçek exit/drain ile kapanır |
+| T898-ISOLATION | Açık B/site/root/diğer tenant oturumları ile sahipli A removal | Yalnız A drain edilir; B ve root ilk challenge yanıtı korunur, RBAC/CSRF/session revoke gevşetilmez |
+| T898-RETRY | Timeout/failure ve aynı authoritative journal | Doğrulanamayan drain temizliğe başarı vermez; yeni journal/mutation replay, force userdel, broad UID kill veya yeni terminal motoru yok |
+
+13 Kasım geç çapraz yaşam döngüsü: 13.04 üzerindeki iki native27 koşusu tek reload/no-op sıfır ve altı own physical cleanup ile geçti; ardından gerçek native20 2PASS/1FAIL koşusunda açık B terminali Unix temizliğini durdurdu. Sonraki normal Direct temizliği başarılı oldu. Salt okunur kurulu manager denetimi, B original receipt compensated/checkpoint retired/own pool+socket absent iken artık normal silinmiş Direct listener nedeniyle `elfinder_fpm_retirement_sibling_pending` döndürdü. T897 yeniden açıldı; eski başarılı/başarısız kayıtlar korunur. Root gerçek aynı master binary/effective config `-tt` projeksiyonunda 12 pool/12 Unix listen ve B/Direct artık tanımsızlığını doğruladı; ham config/env çıktısı kaydedilmedi. Bu yeni late-idempotence senaryosu yeni eşleşen paket ve gerçek tekrar olmadan kabul edilmez; T898 ve genel T883 kabulü açık kalır.
+
+
+## 15 Kasım 2026 — ttyd pending kanıtı, T908 HTTP yaşam döngüsü ve T883 kalan kabul
+
+Kullanıcı T889 açık kalırken ttyd kanıt açığının ve T908'in incelenmesini, bulunan kusurların giderilmesini, ardından T883 kalan gerçek kabul senaryoları/tam kaynak kapısı/.28 doğrulamasını istedi. Eski FAIL/UNKNOWN/OPEN kayıtları yeniden etiketlenmez. Güncel yürütme planı T883 görev ilerleme kaydı ve bu matriste tutulur; kök planın kabul işaretleri bu dilimle kapatılmaz.
+
+| Senaryo | Gerçek yürütme / karşılaştırılan mevcut kapsam | Beklenen kanıt ve sınır |
+|---|---|---|
+| T898-PENDING-FENCE-CANCEL | Normal Owner POST + normal UI kaldırma; mevcut native20 strict HTTP-overlap boyutuna ek ayrı sunucu pending-at-fence ölçümü | Tam güvenli immutable snapshot içindeki exact Website/ttyd/unique leaseId/started:false → aynı removal journal ve snapshot SHA → aynı leaseId verified closure → dosya/Unix adımından önce gerçek exit/socket yokluğu. HTTP yanıtının hızlı409 bitmesi ayrı kaydedilir; eski strict HTTP-overlap OPEN değiştirilmez. |
+| T898-PENDING-NEGATIVE | Aynı gerçek akışta snapshot ve closure bağlama; diğer Website/backend/generation/stale lease ve eksik pending kanıtı | Başka lease/backend/site veya yalnız map/WS/HTTP kapanması başarı sayılmaz. Started:true lease pre-spawn kanıtı değildir; pending yoksa yeni pre-spawn alt sonucu OPEN. Root/diğer site oturumları ve ilk dinamik çıktıları korunur. |
+| T898-PENDING-LATE-CHILD | Aynı akışın gerçek sonucu ayrıca sınıflanır | ProcessCount0 yalnız spawn öncesi iptal kanıtıdır. Gerçek fence sonrası geç child doğumu ve draini doğrudan gözlenmedikçe bu ayrı kanal OPEN; gecikme/fake/spawn/HTTP yanıtı/retry ile üretilmez. |
+| T908-HTTP-CLOSE-SUCCESS | Aynı dosyada gerçek loopback HTTP sunucusu, gerçek Express varsayılan404 ve gerçek istemci | Helper yalnız listen tamamlandıktan sonra URL sağlar; callback sonucu dönerken close callback+event bitmiş, listener kapanmış ve aynı porta yeni bağlantı reddedilmiş olmalı. Yeni sahte servis/auth/cevap yok. |
+| T908-HTTP-CLOSE-THROW | Aynı gerçek sunucu/istemci; callback assertion hatası | Özgün hata korunur; finally gerçek close callback'ini bekler. Hata yolu listener/soket bırakmaz; geçici sunucu ve istemci kapanışı doğrulanır. |
+| T908-LEGACY-COMPAT | Mevcut altı cache-route testi, aynı assertion ve legacy fixture'lar | Dinleme/kapanış helper'ına geçirilir; sahte kapsam genişletilmez. Bu eski fixture uyumluluğu ve gerçek HTTP yaşam döngüsü kanıtıdır, native cache ürün kabulü değildir. İlk GET hatasının eksik stack'i ve UNKNOWN nedeni ayrı korunur. |
+| T883-REMAINING-PLAN | Özgün38 davranış/59 eski koşu ile güncel39 satır eşlemesi | Orphan/interruption, farklı PHP sürümü, farklı WordPress sürümüne yükseltme, gerçek API restart, DNS/hosting/index-error kesinti alt kanalları için normal sahipli kaynak/authoritative journal/physical cleanup planı; her biri gerçek yürütme ve ayrı kabul gerektirir. Önceki yalnız happy-path veya aynı sürüm kanıtı bu kanalları kapatmaz. |
+
+İlk iki kaynak dilimi yalnız native20 gözlemcisi ve T908 test dosyası olarak sınırlıdır. Ürün/helper/host mutation genişlemesi gerekirse önce mevcut kanıt ve dar sözleşme hazırlanır. Tek root host operatörü, .28 explicit allowlist/kilitler, gizli bilgi koruması, başarısız mutation replay yasağı ve rutin yedek yasağı sürer. Yeni kaynak tamamlandıktan sonra ilgili batch ve bağımsız inceleme, sonrasında tam lint/test/build kapısı ve matching runtime kimliğiyle gerçek native doğrulama yapılır. T889 açık kalır.
+
+Yeni pre-spawn alt kabulü en az iki ayrı fresh own Website/operation/nonce üzerinde OBSERVED zinciri ve tam native20/normal temizliği gerektirir. Chrome ve Firefox olağan kapsamı en az birer tam koşuda geçmelidir; iki nedensellik gözlemi sunucu mekanizması için aynı tarayıcıda olabilir ve proje kimliği açık kaydedilir. İlk iki fresh tam koşudan sonra gerekirse en çok iki ek normal fresh koşu yapılır; gecikme/barrier/replay kullanılmaz. Eksik aday per-run OPEN kalabilir fakat ayrı makine kabul kapısı iki OBSERVED olmadan HOLD kalır. Pre-spawn adayı aynı lease closure içinde processCount0/processes[] gerektirir; >0 süreç late/post-spawn kanalıdır.
+
+
+### T912 — ilk tam koşuda importer HTTP red ve ayrı fixture yaşam döngüsü
+
+İzole96794af0 kaynak kapısı01'de yerel Owner preview200 yerine401 verdi; tek subtest ile parent suite birlikte fail2 sayıldı. Tek dosya6/6 ve salt gözlemli Node HTTP diagnostic6/6 tekrarında doğru intended listener/Owner context200 görüldü; ilk401 nedeni UNKNOWN ve ham log korunur. Ayrı gerçek kusur: fixture'lar close callback'ini beklemiyordu. Kaynak dilimi yalnız `apps/api/test/plesk-importer-http.test.js`: mevcut auth fixture/200-401-403-400 ve offline yasak-hedef doğrulamaları korunarak explicit loopback/listen-await/finally-close-await ve safe intended-listener diagnostic eklenir. İki yeni gerçek Express varsayılan404 success/throw senaryosu close event+callback ve gerçek yeni bağlantıECONNREFUSED ile RED→GREEN kanıtlar. Bu bir native importer/lisans veya ilk401 kök neden kabulü değildir. Bağımsız dosya incelemesi ve yeni tam kaynak kapısı02 yeşil olmadan .28 native kabulüne geçilmez; başarısız kapı01 veya T889 kapanmaz.
+
+
+### 15 Kasım — source03 doğal API pipeline, pre-spawn kapısı hâlâ açık
+
+İlk kaynakla Q1 Chrome ve Q2 Firefox tam native20 3/3 geçti; iki koşuda da ttyd201 ve started:true olduğu için yeni pre-spawn alt kabulü **0/2 OBSERVED** kaldı. Bu olağan PASS sonuçları ve eski strict HTTP-overlap OPEN kayıtları değişmez. Yeni kaynak aşağıdaki doğal kullanıcı istek sırasını ölçer; başarı garantisi veya yeni native sonuç değildir.
+
+| Senaryo | Gerçek kanal / sıra | Katı kabul |
+|---|---|---|
+| T883-PENDING-NATURAL-API | B için tek normal removal POST başlatılır; await etmeden tek fresh capability POST; yalnız gerçek201 yanıtından sonra tek ttyd POST. A ve Direct için var olan normal UI kaldırmaları korunur. | Capability409 ise ttyd isteği0, ttyd response null, nedensellik OPEN; önceden verilmiş capability fallback/retry, sleep/barrier/interception yok. |
+| T883-PENDING-EXACT-ZERO | Tam immutable snapshot, unique own Website/ttyd/started:false leaseId → aynı journal/snapshotSHA → aynı leaseId file+Unix verified closure | processCount0 ve processes[]; current API generation, gerçek bilinen PID/session/socket yokluğu, diğer terminal/ilk çıktı ve normal fiziksel temizlik zorunlu. Sadece API yanıt zamanı bu zincirin yerine geçmez. |
+| T883-PENDING-SETTLE | Removal/capability/ttyd ve NodeUI gerçek effect promise'ları cleanup öncesi allSettled/join; bilinen removal journal read-only uzlaştırılır | UNKNOWN_KEEP sonrasında yeni mutation yok. Capability değerleri veya confirmation loglanmaz. B sonucu normal-api-removal, diğer ikisi normal-ui-removal diye kaydedilir. |
+
+HTTPpending booleans gerçek call-response fulfillment anında pasif yakalanır, sonra caller'ın capability-await zamanıyla karıştırılmaz; strictAND ifadesi değişmez. capabilityResponseAt her gerçek yanıtta, capabilityIssuedAt yalnız201'de bulunur (409'da null). Mevcut zaman aşımı/interval/sleep sınırları korunur. En az iki fresh ayrı Website/operation/nonce üzerinde OBSERVED ve en az birer tam Chrome/Firefox PASS gereği sürer; en çok dört doğal fresh koşu, aksi halde HOLD. Eski Website/HTTP-overlap veya late-child fault kanalları yeniden etiketlenmez; T889 açık.
+
+
+## 15 Kasım 2026 — T883 prospective source04, bağımsız inceleme ve gerçek kabul bekleniyor
+
+Bu ek bağımsız kaynak incelemesinden sonra izole kaynak dilimine uygulanan altı dosyanın senaryolarını tanımlar. Yeni tam kaynak kapısı veya native başarı kaydı değildir. Native18 değiştirilmez, fakat ilgili tam native batch'e dahildir. Önceki matris satırları, tarihsel FAIL/UNKNOWN/KEEP ve desteklenmeyen fault kanalları korunur. T889 initial-readiness nedenselliği OPEN kalır.
+
+| Senaryo / kaynak | Normal gerçek kanal ve önkoşul | Beklenen gerçek kanıt / negatif ve UNKNOWN_KEEP sınırı |
+|---|---|---|
+| T883-13-CURRENT-DOMAIN | native13: kendi Domain'inde desteklenen normal detach aşaması; aynı unfinished journal/checksum; initiating APIRequestContext gerçekten dispose; fresh normal Owner context | Aynı Website/Application/Domain/server/UnixUID/dosya/configSHA, detachment ACK ve metadata-finalization henüz tamamlanmamış olmalı; normal devam aynı journalı bitirir. Gözlenmeyen aşama veya belirsiz mutation KEEP; tarihsel backend crash/orphan fault bu normal client recovery ile kapatılmaz. |
+| T883-13-PHP-DIFFERENT | native13: ROOT'un ayrı kapsamıyla ikinci desteklenen PHP8.4 runtime gerçekten hazır olmalı; normal PHP config sürüm değişimi8.3→8.4→8.3 | Her ilk HTTP nonce/nonrootUID/major.minor/fpm-fcgi/no-store200; gerçek config ve FPM etkisi/geri dönüş. Aynı8.3 ayar değişimi farklı-version PASS değildir. Eksik runtime prerequisite HOLD/FAIL; test kendisi global runtime kurmaz. T889 ayrı OPEN. |
+| T883-13-WP-UPGRADE | native13: sahipli gerçek WordPress/DB; normal owned CLI ile7.1.3 hazırlığı, gerçek Toolkit core.update işi7.1.4 | Önce gerçek7.1.3 ve checksum, sonra tam immutable202 job kimliği ve terminal succeeded; gerçek7.1.4/checksum/inventory/SQL içeriği ve fresh admin login/HTTP. Aynı sürüme update, yalnız CLI exit veya kayıp/foreign job başarı değildir. Bilinmeyen efektler KEEP; native sonrası exact normal cleanup. |
+| T883-13-JOB-OWNERSHIP | native13 yeni mutation/recovery/afterAll yolları | Accepted202 id/server/type/op/application/createdAt ve ownWebsite/Unix/action immutable binding terminal job ile birebir; map yalnız bu doğrulamadan sonra silinir. Eksik, failed veya foreign job → KEEP; replay/başka job ile telafi yok. browserLogin, eski assertion ve deadline korunur. |
+| T883-15-ACTUAL-RESTART | native15 mevcut session-revoke ve browser-close testleri ayrı kalır; yeni case ROOT-prearmed fixtureKey ve reviewed operator SHA64 ister. Normal UI tek removal201, aynı journal nonterminal ve>=2 incomplete step; gerçek browser context.close sonrası O_EXCL0600 request | ROOT dış controller tam aynırun/key/gerçek ledger+nonce+Website/app/domain/server/op/sourceSHA ile bağlanır. Tek normal PID1 API restart; actual eski/yeni PID+starttime farklı, oldPID yok, actual busctl type`t` epoch-usec ve08/9c8 build/asset değişmez. Aynı Owner/samejournal removed; receipt cut listesinden>=1 step updatedAt(ms)*1000 STRICTLY>newExecMainStartRealtimeUsec; all metadata404/full physicalabsence/ilk dinamik protected PHP nonce-UID-version-SAPI-no-store200. Missing pin/receipt, completedcut, post-start work yokluğu HOLD/FAIL/UNKNOWN_KEEP; client-close gerçek restart yerine geçmez. İki ayrı fresh run/op gerekir; test içinde SSH/systemctl yok. |
+| T883-16-CLIENT-CHECKPOINT | native16: acknowledged normal settings PATCH+exact terminal stagejob; desired>applied ve activeNginxSHA değişmez; private stableFD0600 checkpoint | Gerçek APIRequestContext.dispose ve fresh Owner/ALL own fixture cleanupOnly rebind; aynıIDs/revision/checksum/filehash/UnixUID; normal stage+activate restore/hashguard cleanup. Ayrı protected PHP ilk nonce/UID/version/SAPI/no-store200; unknown KEEP. Historical servercrash/receiptconflict ayrı OPEN. |
+| T883-19-CLIENT-CHECKPOINT | native19: PHP/Node/static kendi targetları; stageACK/terminaljob/activeSHA checkpoint; hedeflerden ayrı own protected PHP Website/app/domain/Unixuser/UID | Tüm context references cleanupOnly yeniden bağlanır; her target current checkpoint ve gerçek restore/SHA/fileUID korunur. PHP target'ın kendi nonce/UID firstHTTP kanıtı ve ayrı kardeş kanıtı birlikte gerekir. Normal physical afterAll tüm exact targetları, protected siteyi en son temizler. Eksik restore/unknown mutation KEEP; eski body/timeouts/sleeps gevşetilmez. |
+| T883-22-CLIENT-CHECKPOINT | native22: PHP/static target index+404 dosyaları ve staged preferences; ayrı protected own PHP fixture | Accepted stagejob kimliği, desired/applied/checksum, exact file hashes+UID contextdispose sonrası değişmez; normal restore ve yalnız hashguard exactfiles cleanup. TargetPHP firstHTTP ve ayrı siblingPHP firstHTTP ikisi korunur; dış hataURL/unsafeindex/Node-negatif mevcut testleri kalır. Unknown/fail KEEP; historical crash/receiptfault kapanmaz. |
+| T883-20-PROSPECTIVE-PAIR | native20 B: normal preview+confirmation ve mevcut NodeUI/control prerequisites; tek fresh actual capability201/sameOwner/site/server/Unixuser/CWD/normalTTL; ardından aynı JSturn sabit TTyD-first→removal iki normalPOST | İki call arasında await/ledgerwrite/sleep/barrier/interception yok; eachPOST1/no retry/fallback. Yeni pipeline`ttyd-first-concurrent-posts` ve actual0/1 counters ayrı kaydedilir. SameJSturn serverconcurrency kanıtı değildir. A/Direct normalUI, NodeUIpendingstart, activelease/root/direct/legacyHTTPAND ve tüm zamanlar korunur. |
+| T883-20-UNCHANGED-GATE | Exact immutable unique own ttyd started:false lease → aynı journal/snapshotSHA → aynı lease file+Unix iki verified closure | Dört completionflag + processCount0/processes[]; sameAPIgeneration, gerçek OS PID/session/socket yokluğu, Owner200before/after, root/direct ilk actualoutput ve normalphysicalcleanup gerekir. Typed409 tekbaşına/started:true/401/missingcandidate causalOPEN. Tüm effectpromise'ları cleanupöncesi join; unknownKEEP/no replay. Latechild veya reliability yüzdesi iddiası yok. |
+| T883-18-UNCHANGED | Native18 mevcut gerçek environment/runtime kapsamı | Yeni source değişikliği yok; native13/15/16/18/19/20/22 ilgili batch planına dahil ve gerçek own kaynak/secretmasking/cleanup kabulü gerektirir. Taslak/syntax/discovery nativePASS değildir. |
+
+İlk dört actual fresh native20 koşusunun aggregate sonucu immutable HOLD1/2: `.local/p0-20261115/pending-cancel-aggregate-15-01/result.json`, SHA256`40a9dc6f5f697aa860f4328260476ad81149fc4797250592a0ed95904c08ff8d`. Q4 tek güçlü OBSERVED; eski max4 phase geriye dönük PASS yapılamaz. Q4 öncesi sabitlenen prospective plan`adc02daf8a8f9d7a1fcde1d4cb8e697cef772ae35c73f34f47ed788f5ba770cf` uyarınca yeni profilde en fazla iki fresh fullrun yapılabilir. ROOT tüm6 runın exact identities/source/profile/outcome/cleanup ve per-profile OBSERVED sayılarını birlikte envanterler; global minimum2strong ve en azbirer ordinary Chrome/Firefox PASS değişmez. Red/UNKNOWN örnek gizlenmez, yeni örnekle değiştirilmez; iki yeni sample sonrasında eşik yoksa HOLD ile durulur.
+
+Uygulama sonrası kanıt sırası: bağımsız altı-source+doc incelemesi → dar trackedapply → ilgili toplu lint/discovery/test/build ve tam yeşil kaynak kapısı → matching current08/9c8 product byteproof → gerçek fresh native batch+negative/cleanup kabulü. Sonraki test sonuçları ayrı actual kayıt olarak eklenir; bu prospective metin geçmiş başarı iddiasına çevrilmez.
+
+Bağımsız original6 incelemesi`3950a43f6c44a81fe7ff6c255b00c98f25186d6357d78c37dc3f864916ab7dbb` native13 terminal succeeded/result:null için kaynakHOLD verdi; bu eski rapor korunur. Yeni13`f49b075875826719132f6e95ce8cdefc54cdb71a54bf30427ede7e7dda192f30` delta incelemesi`061b6de78c886304ebd626356945c04840ff5b082e56daf16c989598e1c950fa` kaynak bakımından uygun, blocker0. Accepted202 queued/running result:null normaldir; POST öncesi ownpreview'den frozen9field intent ve accepted immutableheaders tutulur. Terminal succeeded nonnull exact9field/error:null doğrulamasından önce job map silinmez; unknown jobGET stickyKEEP. Publicpayload zorunluluğu yok. Yedi üretim sözleşmesi yerel/current9c8Gitblob/pinned08manifest ile eşleşti; bu kaynak kanıtı actualhostfault veya nativePASS değildir. Diğer beş aday aynı hash'te korunmuştur. Eski gate03/current byteproof yeni altı dosyanın kabulü değildir; yeni fullgate04/matchingbyteproof ve actual native sonuçlar ROOT'ta ayrıca bekler.
+
+
+## 15 Kasım 2026 — native18/19 kaynak dilimi ve gerçek koşu sınırları
+
+Bu ek, kurulu08/source9c8 üzerinde native16/18/19'un TEST_SOURCEc636 sonuçlarını, native20'nin ayrı source profilleri taşıyan altı koşu envanterini ve sonraki18/19 kaynak düzeltmesini ayırır. Gate04 (`ff11f5805a4e8c4080a4bec882cf4d382fad03b33843ea0f358abe45e4412ace`) kaynak07205737 için8724 toplam/8723 PASS/0 FAIL/0 cancel/1 Postfix platform skip ve lint/tasklint/build0 verdi; yeni18/19 dosyaları bu eski yeşille kabul edilmez. Yeni kaynak kapısı, güncel byteproof ve gerçek tekrarlar ayrı gerekir. T883 ve T889 açık kalır.
+
+| Kanal | Gerçek mevcut kanıt | Sonraki kaynak / açık kabul |
+|---|---|---|
+| Native16 DNS/hosting restore ve gerçek client checkpoint | `t883-native16-client-04-c1` Chrome4/4 ve `...-f1` Firefox4/4; iki koşunun da exit0, unexpected/skipped/flaky0. İkişer own ledger normal kaldırılmış. | Mevcut69fce kaynağı değişmez. Güncel clientdispose/rebind/checkpoint/restore ve var olan TXT/Nginx/health-rollback sınırını taşır; tarihsel backendcrash/receiptconflict veya dışDNS delegasyonu kapanmaz. |
+| Native18 normal Node UI, dedicated UID/CWD ve ortam geri dönüşü | `t883-native18-node-04-c1` Chrome2/2 ve `...-f1` Firefox2/2; exit0, own Node ledger normal kaldırılmış. Eski cac3f8 kaynağının UID/CWD/envHash/release/revision ve aynı snapshot'tan iki restore assertionları geçerlidir. | Eski HTTP PID/process.version alanları assert edilmemiş ve ledger'a kaydedilmemiştir. Bu koşular PID/gerçekNode24 veya belirsiz cleanup kanalını kanıtlamaz. Yeni1a9ba kaynak bu alanları ve exact same-PID physical row'u doğrular; yeni Chrome/Firefox native koşuları beklenir. |
+| Native18 işlem kimliği ve geç continuation | Yeni kaynak `1a9ba213f3995fb9a471addb4f9b7be0edff5f75912f427cc0eec1dc3aa56101`, bağımsız whole-source inceleme `73394457e36fa70fbe4abb201b6610fbebf9650e75d639d85c413d360e27470c` kaynak bakımından uygun. | PREPOST own intent→202 immutable operation→actual public job→ayrı strict operation/job result→gerçek snapshot/runtime content proof BEFOREMapdelete. Transport/GET/deadline/mismatch/content belirsizliği stickyUNKNOWN_KEEP; repo/site cleanup durur. Gerçek client dispatch'e son await sonrası synchronous phase/active/known-response gate; late work cleanup fazını kullanamaz. Gerçek timeout/unknown fault kanalı çalıştırılmadı. |
+| Native19 actual client interruption | `t883-native19-client-04-c1` Chrome9 PASS/1 FAIL, exit1; PHP checkpoint restore kısmı tamamlandı, Node restore-preview400 `invalid_nginx_settings` ile durdu; static interruption branch'e ulaşılmadı. Dört own fixture/checkpoint UNKNOWN_KEEP olarak korundu. | Node/Passenger'da desteklenmeyen indexFiles/errorPages null ekleyen test isteği kusurluydu; ürünün400 yanıtı doğrudur. e2f11 kaynak yalnız gerçek original settings spread'ini gönderir. Eski9/1 değişmez; ayrı normal recovery/cleanup makbuzu ve iki yeni tam Chrome/Firefox native19 koşusu gerekir. |
+| Native20 altı koşu | Altı tam ordinary run3/3 ve cleanup doğrulandı; cumulative `b3c1b6da53ef3c0a05ad11949c1952ae0879f8b859cc28dbbfc103f301d342e8` **HOLD1/2**. İlk dört koşu40a9...HOLD ve iki yeni sabitTTyD-first full-run envanteri korunur. | Globalmin2 strong OBSERVED değişmez; legacy HTTP-overlap ve late-child OPEN. Aynı JSturn server concurrency kanıtı değildir. Yeni sample bütçesi tüketildi; ordinary PASS, güçlü kapıyı veya T889'u kapatmaz. |
+
+Native18 gerçek process.pid safeInteger>1 ve process.version requested major24 kontrolü, nonce/no-store, actual /proc PID/UID/CWD/seçili envSHA eşleşmesi ve normal restart/restore sonrası per-start application-instance değişimi ister; OS start ticks/Passenger membership bu mevcut physical probe ile iddia edilmez. Succeeded wrapper job, rolled_back operation için bu pozitif restore senaryosunu geçirmez. İlk response-known kaydı terminal/content kanıtının yerine geçmez; zaten delege edilmiş effect iptal edilmiş sayılmaz ve replay edilmez. Bütün eski innerdeadline/assertionlar korunur. Normal repository metadataDELETE, fiziksel snapshot/repoGC kabulü değildir.
+
+Native19 tek satır düzeltme `e2f11f427e0a3982567112c2b6388a0a12c5c7168fda28a6a7387de83600e5a3`, bağımsız inceleme `cc7e640850dd93152ded71dde4f891342f30670ebc52d52d68551cebc2317ecc`: bağlı Domain GET sonrasında yalnız `{...original}`; normal preview/PATCH/stage/activate ve exact originalsettings/revision/activeSHA beklentileri aynıdır. Gerçek Node/PHP checkpoint'leriyle local pure normalizer RED→GREEN (`ff4389b7978d842dc74174837c3ca9572937b4cff1b65cf5dd13b29a909a4077`) native/recovery başarısı değildir. Static kontrolü gerçek eski ledger başlangıcı+derived body-only staging'dir; actual interrupted static checkpoint diye sunulmaz.
+
+Önce Root'un dört fixture için gerçek normal recovery/cleanup ve açık clean bildirimi gerekir; ardından yalnız18/19+bu matris+T883 ilerlemesi izole checkout'a uygulanır. İlgili original-config discovery ve kaynak batch sonuçları gerçek native kabulden ayrı kaydedilir; Firefox'un13/15 filename testIgnore kuralı değiştirilmez, forced collection configured coverage sayılmaz. PHP8.4 prerequisite/producer baseline ve refs0, farklı WP yükseltmesi, gerçek API restart ve desteklenmeyen tarihsel fault kanalları ayrı açıktır.
+
+
+### Recovery03 — eski native19 başarısızlığı korunarak normal dört-site temizliği
+
+Root'un tek normal exact4 CLEANUP03 yürütmesi (exec56434)2026-11-15T20:20:03.984Z'de exit0 bitti. Gerçek cleanup`9436ff1a1ee2474b85c122a11614e60c7e4c092851d3eacbcc71180ad873f8a2`, same-run COMPLETE`b60a4797dbbb3a7ed89a1a5644053d13e85bbdd51faf412584fddebc8d64ef4a` ve bağımsız postreview`d07002af9bc5366f27e390e9b5e8070d1f517c5b7459d5ee0b711cdb596b59fb` ile Node→static→PHP→protected sırasındaki aynı dört own Website/Application/Domain metadata ve fiziksel yokluğu doğrulandı. Orijinal beş site korundu; unknownAcceptedMutationfalse, cleanupFailures[], eski artifactlar korunmuş, POSTreplay yok.
+
+Bu normal kaldırma kabulüdür. Node'un staged D6/S6/A5 checkpoint'i başarısız eski restore iş akışı tamamlandı diye etiketlenmez; native19 eski9 PASS/1 FAIL ve `FAILED_UNCHANGED` aynen kalır. Actual cleanup ve yeni e2f kaynak düzeltmesi iki yeni tam native19 koşusunun yerini tutmaz. Root'un bu dar clean bildirimi yalnız izole18/19+matris+T883 kaynak uygulama/batch iznini açar; gate05, updated byteproof ve native18/19/22 tekrarları ayrı Root kapsamındadır. T889 OPEN.
+
+### 16 Kasım 2026 — Native cleanup kaynak düzeltmesi; ürün ve gerçek kabul açık
+
+Bu sınırlı kaynak dilimi, bağımsız private12 incelemesi `0ccb5919` ve Root izniyle izole SOURCE `247f3238` tabanına uygulanır. İnceleme kaynak yeterliliğiyle sınırlıdır; T913 ürün düzeltmesi, yeni paket ve gerçek native kabulü yerine geçmez.
+
+| Senaryo | Kaynakta eklenen doğrulama | Gerçek kanıt ve açık sınır |
+|---|---|---|
+| Native19 tam normal temizlik | Önceki 10 işlevsel senaryonun gövdeleri, assertion ve iç süreleri korunur. Ayrı son `@mutation` senaryosu 480000 ms bütçeyle aynı dört exact fixture'ı, protected PHP en son olacak şekilde, normal kaldırma ve tüm mevcut fiziksel kontrollerle temizler. | Chrome05 sonucu 9 PASS / 1 FAIL olarak kalır. Hata eski `afterAll` 45000 ms sınırıdır; PHP/Node/statik checkpoint geri yükleme kayıtları vardır. Root'un sonraki salt okunur incelemesinde dört journal `removed`, 12 metadata yanıtı404; Node Passenger include dosyası hâlâ vardır. Tam fiziksel kabul OPEN. |
+| Native22 tam normal temizlik | Önceki altı işlevsel gövde ve iç süreler korunur; aynı kontroller ayrı son 480000 ms senaryosuna taşınır. Uzun mutation akışı `afterAll` içinden çıkarılır; hook süresi artırılmaz. | Bu yeni dilim için gerçek Native22 koşusu yapılmadı. Kaynak AST sayımları Native19=11 ve Native22=7; Playwright discovery veya PASS sayısı değildir. |
+| Native18 değişmiş gerçek environment sonrası kaldırma | Önceki iki senaryo, PID/Node sürümü, boş olmayan environment, restore ve faz kontrolleri aynıdır. Normal cleanup sonuna exact Passenger include yolu, güvenilir parent ve `exists === false` assertion'ları eklenir. | Source05 Chrome/Firefox 2/2 PID/environment/restore kanıtı kendi kapsamıyla korunur. Eski koşular yeni dosya-yokluğu assertion'ını içermez; tam include retirement OPEN. Yeni ürün düzeltmesinden sonra fresh C/FF gerekir. |
+| Hata, timeout veya bilinmeyen mutation cevabı | Native19/22, kalıcı RUN STARTED/KEEP/COMPLETE ve gerçek dispatch intent/cevap kayıtları kullanır. Son awaited GET'ten sonra, gerçek Owner API dispatch'inin hemen öncesinde synchronous faz ve known-outcome kapısı vardır. Başarısız önceki senaryo, eksik dört fixture veya yeni worker/partial grep boş cleanup PASS üretemez. | Kaynak kontrol akışı ve AST kanıtı vardır. Gerçek unsafe-channel fault testi çalıştırılmadı; mock, sahte HTTP veya dosya sistemi cevabı yok. Bilinmeyen kabul edilmiş istekte yeni POST/replay yok; kalan fixture'lar KEEP. |
+| Exact generated Passenger include | Mevcut `lifecycle-absence` probe'u `/etc/yunpanel/passenger-env/<actualApplicationId>.conf` için lstat/lexists ve parent güveni döndürür. Normal dosya bounded stable O_NOFOLLOW FD ile yalnız metadata/SHA üretir; içerik/env değeri döndürmez. Dosya, bozuk marker, symlink veya directory varlığı FILEABSENT sayılmaz. | Root exact metadata kanıtı `c939abbd`: silinen Node uygulamasının include dosyası root0:0/0600, normal, symlink değil, 81 byte, SHA `2959773f…`; kendi revision0 marker'ı ve sıfır env directive vardır. Ürünün generated-file cleanup açığı T913 OPEN; manuel silme veya belgelenmiş retention kabulü yok. |
+
+Bu apply aşamasında yalnız dört dosyanın Node24 syntax kontrolü yapılır; ilgili private AST ve embedded Python AST derleme kanıtı korunur. Eşzamanlı T913 ürün dilimi sürerken lint/discovery/fullgate, API, native, host veya deploy çalıştırılmaz. Yeni kaynak için Root'un toplu gate/byteproof ve bağımsız input incelemesi hâlâ gereklidir. Önceki FAILED/UNKNOWN/KEEP/STARTED kayıtları değiştirilmez; T883/T889 ve altı koşuluk ttyd nedensellik HOLD1/2 açık kalır.
+
+
+### Prospective Native20 phase4 — dual persistent normal Owner HTTP/1.1
+
+PRIVATE candidate only; Root/OPS source review, application by the T883 owner, fullGate09 and current1601 exact712/11/3 byte proof remain future gates. The current six ordinary runs and aggregate b3c1 HOLD1/2 stay immutable; old Connection:close sources do not establish a pool defect. Two further full runs are prospectively fixed (chrome-desktop then firefox-desktop); both results must be retained in the eight-run inventory, with unchanged global required2 strong chains and no per-browser strong requirement.
+
+The B-site focused pair uses two distinct stock persistent Owner HTTPS connections, normal session GET prewarm, same actual native session/CSRF and same GET→POST socket with req.reusedSocket true. One fresh default30s capability, exactly one TTYD POST followed by one normal removal POST in the same JavaScript turn; both safe intent records are fsynced before either forward. Actual transport proof is separate from the server snapshot/unique startedfalse lease/typed409/samejournal/two exact zero-effect closures/API generation/OS absence/protected outputs. Existing A/direct UI, five-actor RBAC/CSRF, real console/TTL/revocation and normal third-case removals/account cleanup remain.
+
+No retries, rewarm, fallback capability, redirect, TTL extension, interception, fake data, delay or backend change. Queue/DNS/TLS/body share the existing90s total deadline. Synchronous sticky case/afterAll closure blocks late POST; afterAll performs only joining/context disposal and exact read-only final absence checks. A failed or unknown case retains owned resources for authoritative review; Agent.destroy is not backend cancellation evidence. Legacy HTTP overlap and late-child channels remain OPEN. This entry claims no source application, gate result or native execution.
+
+
+### 16 Kasım 2026 — Native20 phase4 kaynak uygulaması ve güncel gerçek kabul sınırı
+
+Yukarıdaki prospective phase4 kaydı hazırlık anını korur. Root'un orphan recovery sonrası sınırlı izniyle, bağımsız kaynak incelemesi `370b3e9c2d76358ddd7c9335a95f5cdede03617027fd72b35a65c269543e2a11` ve private freeze `c527dd3a7062a9104d1dde0d3debf9a60c314b5a9017762e9e031e1c822bc72d` içindeki exact Native20 source `86b9c5d79c62bd731163368419194c2cd93acc614312fd4e19fbca89a1648676` yalnız izole SOURCE33684 tabanına uygulanır. Ürün kaynağı değişmez; yeni test HEAD kurulu ürün commit'iyle aynı diye sunulmaz. Bu kayıt henüz Gate09 veya yeni Native20 yürütme sonucu değildir. Syntax/lint/tasklint ve özgün yapılandırmada Chrome3/Firefox3 keşif sonuçları özel `.local/p0-20261116/native20-phase4-applied-local-01/` raporunda tutulur; keşif auth/setup veya native PASS değildir.
+
+Kurulu gerçek `0.3.0-2026111601`, runtime/test source `33684e9bb5a8571c872c1abe76a28bdada217de6` üzerindeki bağımsız gerçek kabul: Native18 Chrome2/2 + Firefox2/2 (review `78cd8acc`), Native19 Chrome11/11 + Firefox11/11 (`9a804bd9`), Native22 Chrome7/7 + Firefox7/7 (`4843e9b1`), Native29 iki farklı fresh Chrome koşusunda5/5'er (`f99a40db` ve `1fdb01dd`) toplam50/50 geçti. Native29 için Firefox kabulü iddia edilmez; özgün yapılandırma bu mutation dosyasını Firefox'ta dışlar. Native18 gerçek PID/Node24/env/restore ve exact include yokluğu, Native19/22 tam explicit cleanup ve Native29 empty/applied/saved retirement zincirleri bu yeni kanıtlarla sınırlıdır; eski9/1 FAIL kayıtları değişmez. Ayrı gerçek Root Postfix koşullu vaka1/1, skip0 (`a22098c8`) geçti; canlı main/master config kimliği/byte'ları ve kuyruk metadata'sı korundu. Bu SMTP teslimatı, genel relay etkinleştirmesi veya bütün Linux suite kabulü değildir.
+
+Root exact-one orphan07 EFFECT sonucu `b1a2c375407fbdfc9c8ac0cd65ca6f80f0155822720faaf878c54dfd78d015b3` COMPLETE: yalnız eski own App257aad37 include dosyası bir kez unlink edildi; iki servis normal durumlarına döndü, restoreErrors[]/failure null. Bu kontrollü tarihsel tek-dosya recovery'si normal removed journal replay'i veya başka orphan/backup temizliği değildir. Eski failed ledger/günlük/Root initial receipt ve registry byte'ları korunur;275 stale/WebsiteAbsent provisioning kaydı değiştirilmedi,262 removed journal ve13 noRemoval ayrımı korunur.05/06 read-only HOLD sonuçları ve metadata kanıtları değişmez. Bu yazım anında bağımsız EFFECT son incelemesi ayrıdır; Root CLEAN operasyon koşulu yeni kaynak uygulama iznini açmıştır.
+
+Eski altı Native20 ordinary/fullcleanup koşusunun `b3c1b6da53ef3c0a05ad11949c1952ae0879f8b859cc28dbbfc103f301d342e8` HOLD1/2 sonucu aynen kalır. Yeni phase4 için önceden sabitlenmiş en fazla iki tam fresh koşu Chrome sonra Firefox'tur; ikisi de eski altı ile sekiz satırlık envantere girer, global required2 güçlü gözlem eşiği değişmez. Aynı turn, socket reuse veya ordinary PASS tek başına sunucu causal kabulü değildir. Root yeni Gate09, servis restart'ı sonrası taze baseline ve gerçek712/11/3 current1601 byte köprüsünü bağımsız input incelemesiyle bağlamadan yeni Native20/native/GC/PHP yürütülmez. LegacyHTTP/late-child, unsupported fault kanalları, genel T883 kabulü ve T889 OPEN kalır; başarılı feature backup fiziksel GC'si yapılmış sayılmaz.
+
+
+### 16 Kasım 2026 — Native15 current1601 provenance dilimi
+
+Bağımsız dar kaynak incelemesi `fb121cbff618d407baf730a1e620b586f415f9dc8d4f0fb12d7ad6fd02af2e49` sonrasında Root izniyle, izole test HEAD8d1f5849 tabanında Native15'in yalnız `RESTART_RUNTIME_SOURCE` ve `RESTART_PACKAGE` sabitleri gerçek kurulu ürün `33684e9bb5a8571c872c1abe76a28bdada217de6` / `0.3.0-2026111601` olarak güncellendi. Exact candidate SHA `8fb7c2d07c5074c837c010c51f6c6ddb8e1c0de5eb641626f314bb63510ccab1`; iki literal ters çevrildiğinde eski24b6d7c0 dosyasının tamamı byte eşittir. Üç test gövdesi, bütün iç deadline'lar, immutable request/receipt/normal removal binding'leri, PID1/systemctl gerçek yeni PID/starttime ve eski PID yokluğu, strictly-post-start incomplete step, aynı journal/physical absence/KEEP kriterleri değişmedi. Bu değişiklik genel crash/fault kanalı kabulü veya yeni native başarı sonucu değildir.
+
+Native20 exact86b9c5 source ve önceki kanıtları değişmez. Bu üç dosyalık dilimin Node24syntax/lint/tasklint/diff ve özgün yapılandırmada Chrome3/Firefox0-ignore keşif kanıtı özel `.local/p0-20261116/native15-current-literals-applied-local-01/` altında tutulur; Firefox mutation ignore kuralı override edilmez,0 keşif PASS/coverage diye sayılmaz. Root'un yeni Gate09 sonucu, taze current1601 byte köprüsü, özel restart/controller profilleri ve gerçek fresh Native15/request/tek Root API restart/receipt/cleanup kabulü ayrı kapılardır. Kaynak/keşif bu kapıları geçmiş sayılmaz; kurulu ürün commit'i ile yeni test HEAD'i ayrıdır. T883 claimed, T889 OPEN; eski Native15/08 ve altı Native20 HOLD1/2, FAIL/UNKNOWN/KEEP kanıtları korunur. PRIMARY lisans/ürün kaynakları değiştirilmedi.
+
+
+### Primary entegrasyon adayi - kanit siniri
+
+Bu ek izole Source9e kaynak/gecmis kayitlarini tasir; Primary lisans03c ile birlesik dogrulama/deployment kabul edilmis sayilmaz. Native20 phase4 C1 gercekte1PASS/2unexpected bitti; race case kabul edilmedi. Exact6site/10hesap normalcleanup ayri Root Recovery02 de7f2110 sonucudur, test PASS degildir. Eski alti ordinary Native20 sonucu ve strongHOLD1/2, T889 OPEN ve desteklenmeyen fault kanallari korunur. Yeni Native15/PHP, genelT883/T913 DONE veya Source tasks/verified degerinin Primary kabulune tasinmasi iddiasi yoktur.
+
+
+# Guard02 prospective scenarios before code
+
+| Scenario | Required behavior | Evidence boundary |
+|---|---|---|
+| Complete baseline with >100users | Read documented100/offset pages to actual total, dedup and preserve every baseline ID | Native API contract+captured97/100 mismatch now; no fake API execution |
+| Own cleanup at97+5=102users | Complete own lookup/absence and final original-ID preservation across two pages | Actual future normal run required; no all-users cleanup |
+| Duplicate/short/mismatched/changing pagination | Strict failure and sticky KEEP; no subsequent mutation or silently partial success | Static control-flow proof only, no synthetic reply |
+| Existing replacement-worker guard | Shared RUN/project STARTED/KEEP before apiContext; no perworker replay |01realFS proof retained and extracted functions/preamble byte-equal |
+| Invariants | All three case bodies/deadlines/Agent/race criteria byte-equal | Reverse entire01 except helper+fourcalls; no native PASS claim |
+
+
+Private combined Guard02 integration: source/local real-FS preparation only; old Native20 C1 remains FAILED (1pass/2unexpected), no new Native20 run or causal acceptance claimed. Strong pending-cancellation gate remains OPEN. Primary/Source live trees unchanged.
+
+## 19 Kasım 2026 — T920 iş yürütücüsü durma bilgisi
+
+| Senaryo | Beklenen sonuç |
+|---|---|
+| Gerçek geçici kuyruk dosyası okunamıyor | Sunucu günlüğü kuyruk okuma aşamasını ve izin verilen hata türünü gösterir. İş çalışmaz ve yürütücü durmuş görünür. |
+| Geçici gerçek kuyrukta başka süreç dosya kilidini tutuyor | Sahiplenme hatasında güvenli aşama ve kilit kodu kayda geçer. Belirsiz hiçbir iş tekrar çalışmaz. |
+| Normal başlatma ve durdurma | Yerel çalışma durumu gerçek süreç yaşam döngüsüyle eşleşir. Yönetim durumunda mevcut hata alanları korunur. |
+
+## 19 Kasım 2026 — WordPress klon hedefinin başlangıç dosyası
+
+| Senaryo | Beklenen sonuç |
+|---|---|
+| Yeni yönetilen PHP hedefi ve ayrı boş DB | Kanonik kökteki tek resmi PHP başlangıç dosyası canlı bootstrap makbuzu ve hash ile doğrulanır. Önizleme hedefi kabul eder. Klonun kendi ana sayfası ancak beklenen dosya hâlâ mevcutsa yazılır. |
+| WordPress ekranından yeni PHP hedefinde staging | Kullanıcı hedefi formdan seçer. Başlangıç dosyasına elle müdahale etmeden staging çalışır. Ayrı hedef veritabanı, HTTP yanıtı ve yeni hedef yönetici oturumu doğrulanır. |
+| Kullanıcı dosyası, özel belge kökü veya değişen hedef | Mevcut kullanıcı içeriği korunur. Önizleme sonrası yazılan yeni dosyanın üstüne klon içeriği yazılmaz. |
+| Gerçekten boş hedef | Mevcut normal akış ve önizleme biçimi korunur. Ayrı DB, site yetkisi ve kaynak bütünlüğü denetimleri uygulanır. |
