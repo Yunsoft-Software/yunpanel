@@ -1486,6 +1486,7 @@ const listener = createAuthenticatedApi({
     siteMutationLock,
     localServerId,
     baseHandler: createApp({
+      requireDurableStores: true,
       registry,
       domainRegistry,
       jobRegistry,

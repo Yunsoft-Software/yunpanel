@@ -342,8 +342,22 @@ function localServerRegistryView(registry, localServerId) {
   });
 }
 
+// These options default to in-memory stores for tests. Production passes
+// `requireDurableStores: true` so a missing file-backed store fails startup.
+const FILE_BACKED_STORE_OPTIONS = Object.freeze([
+  'registry', 'jobRegistry', 'certificateRegistry', 'applicationRegistry', 'dockerWorkloadRegistry',
+  'websiteRegistry', 'websiteMigrationPolicy', 'migrationLedger', 'domainRegistry', 'dnsHostingRegistry',
+  'dnsProviderCredentialRegistry', 'mailDomainRegistry', 'mailDkimRegistry', 'mailDkimRetirementRegistry',
+  'mailboxRegistry', 'mailboxQuotaRegistry', 'mailboxForwardingRegistry', 'mailAliasRegistry',
+]);
+
 export function createApp(allOptions = {}) {
+  if (allOptions.requireDurableStores === true) {
+    const missing = FILE_BACKED_STORE_OPTIONS.filter((name) => allOptions[name] == null);
+    if (missing.length > 0) throw new Error(`Production wiring is missing file-backed stores: ${missing.join(', ')}`);
+  }
   const {
+  requireDurableStores = false,
   registry = createServerRegistry(),
   jobRegistry = createJobRegistry(),
   aiToolRegistry = null,
