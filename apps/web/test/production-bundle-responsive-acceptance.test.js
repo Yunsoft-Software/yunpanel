@@ -172,7 +172,7 @@ test('Mail and Database tables have full ARIA semantics and scroll containment',
   assert.match(mailOps, /<table className="ws-table" role="table" aria-label="Mail kuyruğu">/);
 
   // Mail config & DKIM tables
-  assert.match(mailConfig, /<table className="ws-table" role="table" aria-label="Konfigürasyon artefaktları">/);
+  assert.match(mailConfig, /<table className="ws-table" role="table" aria-label="Yapılandırma dosyaları">/);
   assert.match(mailDkim, /<table className="ws-table" role="table" aria-label="DKIM tanılamaları">/);
 
   // Database table

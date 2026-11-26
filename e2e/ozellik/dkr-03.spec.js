@@ -187,7 +187,7 @@ test.describe('DKR-03 Port, environment, volume ve restart politikası', () => {
 
     // 2. UI Konfigürasyon Doğrulamaları
     // a) Port Eşlemesi doğrulaması
-    const desiredStateSection = page.locator('section').filter({ has: page.locator('h2:text-is("Desired state")') });
+    const desiredStateSection = page.locator('section').filter({ has: page.locator('h2:text-is("Hedef yapılandırma")') });
     await expect(desiredStateSection).toBeVisible({ timeout: 10000 });
     await expect(desiredStateSection).toContainText(`Inner: 80/tcp`);
     await expect(desiredStateSection).toContainText(`Outer: 127.0.0.1:${hostPort}`);

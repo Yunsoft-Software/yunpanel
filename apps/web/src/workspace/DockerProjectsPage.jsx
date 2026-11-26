@@ -248,16 +248,16 @@ function DockerProjectList() {
 
   return <>
     <PageHeading
-      title="Docker & Compose Stack Yönetimi"
+      title="Docker ve Compose Yönetimi"
       description="Docker Hub üzerinden dilediğiniz imajı arayın, tek tıkla konteyner veya Compose stack oluşturun, .yml dosyası yükleyin ve alan adlarınıza proxy olarak bağlayın."
       actions={<>
         <Button className="ws-icon-btn" icon="refresh" aria-label="Yenile" title="Yenile" onClick={projects.refresh} />
         <LinkButton to="/websites/new?mode=subdomain" icon="globe">Subdomain'e Docker Bağla</LinkButton>
-        <Button variant="primary" icon="plus" onClick={() => openWithTemplate(null)}>Compose / Stack Ekle</Button>
+        <Button variant="primary" icon="plus" onClick={() => openWithTemplate(null)}>Compose projesi ekle</Button>
       </>}
     />
     <LoadNotice resource={projects} label="Docker projeleri" />
-    <Section title="Compose projeleri" description="Çalışan ve tanımlı Compose stack'leri, Inner ↔ Outer port eşlemeleri ve Domain/Subdomain proxy bağlantıları.">
+    <Section title="Compose projeleri" description="Compose projeleri, konteyner ve sunucu port eşlemeleri ve alan adı bağlantıları.">
       {items.length > 0 ? (
         <div className="ws-table-scroll">
           <table className="ws-table">
@@ -406,7 +406,7 @@ function DiagnosisPanel({ project }) {
     [project.id, selected],
     { enabled: Boolean(binding) },
   );
-  if (options.length === 0) return <EmptyState icon="alert" title="HTTP target seçilemiyor" detail="Projede TCP published port özeti yok. Website/Nginx binding için açık bir service target port publish edilmelidir." />;
+  if (options.length === 0) return <EmptyState icon="alert" title="HTTP target seçilemiyor" detail="Projede yayınlanan TCP portu yok. Siteye bağlamak için bir servis portunu sunucuya yayınlayın." />;
   const result = diagnosis.data;
   return <div className="ws-section-body"><div className="ws-filters"><label>Website target<select value={selected} onChange={(event) => setSelected(event.target.value)}>{options.map((item) => <option key={item.key} value={item.key}>{item.serviceName} · {item.targetPort}/tcp</option>)}</select></label><Button icon="refresh" onClick={diagnosis.refresh}>Kontrol et</Button></div><LoadNotice resource={diagnosis} label="Target diagnosis" />{result && <><KeyValues items={[
     ['Durum', <Badge key="status" state={result.status === 'ready' ? 'active' : result.status === 'attention' ? 'warning' : 'error'}>{result.status}</Badge>],
@@ -430,10 +430,10 @@ function StoragePanel({ project, backup }) {
       ['Backup dışı', currentBackup.counts?.excluded ?? 0],
       ['Reddedilen', currentBackup.counts?.rejected ?? 0],
     ]} /></div>}
-    {mounts.length > 0 ? <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Servis</th><th>Tür</th><th>Kaynak</th><th>Container hedefi</th><th>Mod</th><th>Backup</th></tr></thead><tbody>{mounts.map((mount) => {
+    {mounts.length > 0 ? <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Servis</th><th>Tür</th><th>Kaynak</th><th>Konteyner hedefi</th><th>Mod</th><th>Yedek</th></tr></thead><tbody>{mounts.map((mount) => {
       const policy = policyByMount.get(storageResourceKey(mount.serviceName, mount)) ?? null;
       return <tr key={`${mount.serviceName}:${mount.target}`}><td><strong>{mount.serviceName}</strong></td><td>{storageKindLabel(mount)}</td><td><code>{mount.source ?? '—'}</code></td><td><code>{mount.target}</code></td><td>{mount.readOnly ? 'Read only' : 'Read / write'}</td><td><Badge state={storagePolicyBadge(policy)}>{storagePolicyLabel(policy)}</Badge></td></tr>;
-    })}</tbody></table></div> : <EmptyState icon="archive" title="Kalıcı veya ephemeral mount yok" detail="Bu Compose projesinin doğrulanmış servis tanımlarında storage mount bulunmuyor." />}
+    })}</tbody></table></div> : <EmptyState icon="archive" title="Kalıcı veya geçici bağlama yok" detail="Bu Compose projesinin servislerinde depolama bağlantısı bulunmuyor." />}
   </Section>;
 }
 
@@ -500,13 +500,13 @@ function RuntimePanel({ projectId, projectRevision = 0 }) {
 
   const result = runtime.data;
   return <>
-    <Section title="Runtime" actions={<Button icon="refresh" onClick={refreshAllRuntime}>Yenile</Button>}>
-      <LoadNotice resource={runtime} label="Runtime" />
+    <Section title="Çalışma durumu" actions={<Button icon="refresh" onClick={refreshAllRuntime}>Yenile</Button>}>
+      <LoadNotice resource={runtime} label="Çalışma durumu" />
       {result && (
         <div className="ws-section-body">
           <KeyValues items={[
             ['Durum', <Badge key="runtime" state={runtimeBadge(result.status)}>{result.status}</Badge>],
-            ['Container', result.containerCount],
+            ['Konteyner', result.containerCount],
             ['Proje', result.projectName],
           ]} />
           {result.containers?.length > 0 && (
@@ -514,10 +514,10 @@ function RuntimePanel({ projectId, projectRevision = 0 }) {
               <table className="ws-table">
                 <thead>
                   <tr>
-                    <th>Container</th>
+                    <th>Konteyner</th>
                     <th>Durum</th>
-                    <th>Health</th>
-                    <th>Exit</th>
+                    <th>Sağlık</th>
+                    <th>Çıkış kodu</th>
                     {isOwner && <th>Konsol</th>}
                   </tr>
                 </thead>
@@ -586,13 +586,13 @@ function LogsPanel({ project }) {
   const [tail, setTail] = useState(100);
   const logs = useAsyncResource(() => getDockerLogs(project.id, { service: service || null, tail }), [project.id, service, tail]);
   const result = logs.data;
-  return <Section title="Container logları" actions={<Button icon="refresh" onClick={logs.refresh}>Yenile</Button>}><div className="ws-section-body"><div className="ws-filters"><label>Servis<select value={service} onChange={(event) => setService(event.target.value)}>{serviceNames.map((name) => <option key={name} value={name}>{name}</option>)}</select></label><label>Satır<select value={tail} onChange={(event) => setTail(Number(event.target.value))}><option value={50}>50</option><option value={100}>100</option><option value={200}>200</option><option value={500}>500</option></select></label></div><LoadNotice resource={logs} label="Container logları" />{result?.containers?.map((container) => <div key={container.id} className="ws-log-block"><strong>{container.name ?? container.id}</strong>{container.unavailable ? <p className="ws-muted">Log okunamadı.</p> : <pre>{container.lines?.join('\n') || 'Log satırı yok.'}</pre>}</div>)}</div></Section>;
+  return <Section title="Konteyner günlükleri" actions={<Button icon="refresh" onClick={logs.refresh}>Yenile</Button>}><div className="ws-section-body"><div className="ws-filters"><label>Servis<select value={service} onChange={(event) => setService(event.target.value)}>{serviceNames.map((name) => <option key={name} value={name}>{name}</option>)}</select></label><label>Satır<select value={tail} onChange={(event) => setTail(Number(event.target.value))}><option value={50}>50</option><option value={100}>100</option><option value={200}>200</option><option value={500}>500</option></select></label></div><LoadNotice resource={logs} label="Konteyner günlükleri" />{result?.containers?.map((container) => <div key={container.id} className="ws-log-block"><strong>{container.name ?? container.id}</strong>{container.unavailable ? <p className="ws-muted">Log okunamadı.</p> : <pre>{container.lines?.join('\n') || 'Log satırı yok.'}</pre>}</div>)}</div></Section>;
 }
 
 function HistoryPanel({ projectId }) {
   const history = useAsyncResource(() => getDockerHistory(projectId), [projectId]);
   const items = Array.isArray(history.data) ? history.data : [];
-  return <Section title="Deploy / lifecycle geçmişi" actions={<Button icon="refresh" onClick={history.refresh}>Yenile</Button>}><LoadNotice resource={history} label="Docker geçmişi" />{items.length > 0 ? <Table label="Docker işlem geçmişi" columns={HISTORY_COLUMNS}>{items.slice(0, 30).map((job) => <tr key={job.id} role="row"><td role="cell">{job.operation ?? job.type}</td><td role="cell"><Badge state={job.status}>{job.status}</Badge></td><td role="cell">{formatDate(job.createdAt)}</td><td role="cell"><code>{job.id}</code></td></tr>)}</Table> : history.status === 'ready' && <EmptyState icon="clock" title="Henüz lifecycle işi yok" detail="Build, pull, start, stop veya restart işlemleri burada görünecek." />}</Section>;
+  return <Section title="Dağıtım ve çalıştırma geçmişi" actions={<Button icon="refresh" onClick={history.refresh}>Yenile</Button>}><LoadNotice resource={history} label="Docker geçmişi" />{items.length > 0 ? <Table label="Docker işlem geçmişi" columns={HISTORY_COLUMNS}>{items.slice(0, 30).map((job) => <tr key={job.id} role="row"><td role="cell">{job.operation ?? job.type}</td><td role="cell"><Badge state={job.status}>{job.status}</Badge></td><td role="cell">{formatDate(job.createdAt)}</td><td role="cell"><code>{job.id}</code></td></tr>)}</Table> : history.status === 'ready' && <EmptyState icon="clock" title="Henüz işlem yok" detail="Derleme, imaj çekme, başlatma, durdurma ve yeniden başlatma işlemleri burada görünür." />}</Section>;
 }
 
 function DockerProjectDetail({ projectId }) {
@@ -614,13 +614,13 @@ function DockerProjectDetail({ projectId }) {
       </nav>
       <PageHeading
         title={project?.projectName ? project.projectName : 'Docker projesi'}
-        description="Compose desired state, depolama yedekleme politikası, yayınlanan portlar, runtime ve işlem geçmişi."
+        description="Compose yapılandırması, depolama yedekleme ayarı, yayınlanan portlar, çalışma durumu ve işlem geçmişi."
         actions={<Button className="ws-icon-btn" icon="refresh" aria-label="Yenile" title="Yenile" onClick={refresh} />}
       />
       <LoadNotice resource={detail} label="Docker proje detayı" />
       {project && (
         <>
-          <Section title="Desired state">
+          <Section title="Hedef yapılandırma">
             <div className="ws-section-body">
               <KeyValues
                 items={[
@@ -640,8 +640,8 @@ function DockerProjectDetail({ projectId }) {
                     <tr>
                       <th>Servis</th>
                       <th>Kaynak</th>
-                      <th>Inner Port (Container targetPort)</th>
-                      <th>Outer Port (Host publishedPort)</th>
+                      <th>Konteyner portu</th>
+                      <th>Sunucu portu</th>
                       <th>Published ports</th>
                       <th>Domain / Subdomain Proxy Hedefi</th>
                     </tr>
@@ -690,7 +690,7 @@ function DockerProjectDetail({ projectId }) {
               </div>
             </div>
           </Section>
-          <LoadNotice resource={storageBackup} label="Docker storage backup policy" />
+          <LoadNotice resource={storageBackup} label="Docker depolama yedekleme ayarı" />
           <StoragePanel project={project} backup={storageBackup.data} />
           <DockerVolumesPanel project={project} onChanged={refresh} />
           <DockerConfigPanel data={data} onChanged={detail.refresh} />

@@ -39,7 +39,7 @@ function RoundcubePanel() {
     ['Config SHA-256', preview.configuration?.sha256 ?? '—'],
     ['FPM SHA-256', preview.fpm?.sha256 ?? '—'],
     ['Nginx SHA-256', preview.nginx?.sha256 ?? '—'],
-  ]} />{preview.blockers?.length > 0 && <div className="ws-notice ws-notice-warn"><div><strong>Roundcube blocker</strong><p>{preview.blockers.join(', ')}</p></div></div>}<div className="ws-actions">{!preview.readyToApply && <Button disabled={busy} onClick={prepare}>{busy ? 'Hazırlanıyor…' : 'Roundcube hazırla'}</Button>}<Button icon="refresh" disabled={busy} onClick={refresh}>Yenile</Button>{preview.readyToApply && <Button variant="primary" disabled={busy} onClick={() => setConfirming(true)}>Config apply</Button>}</div></>}</div>{confirming && preview?.readyToApply && <ConfirmDialog title="Roundcube configuration uygula" message="Roundcube config, PHP-FPM pool ve Nginx endpoint durable job ile uygulanacak. Host health doğrulanmadan tamamlandı sayılmaz." busy={busy} error={error} onCancel={() => setConfirming(false)} onConfirm={apply} confirmLabel="Roundcube apply" />}</Section>;
+  ]} />{preview.blockers?.length > 0 && <div className="ws-notice ws-notice-warn"><div><strong>Roundcube engeli</strong><p>{preview.blockers.join(', ')}</p></div></div>}<div className="ws-actions">{!preview.readyToApply && <Button disabled={busy} onClick={prepare}>{busy ? 'Hazırlanıyor…' : 'Roundcube hazırla'}</Button>}<Button icon="refresh" disabled={busy} onClick={refresh}>Yenile</Button>{preview.readyToApply && <Button variant="primary" disabled={busy} onClick={() => setConfirming(true)}>Ayarları uygula</Button>}</div></>}</div>{confirming && preview?.readyToApply && <ConfirmDialog title="Roundcube ayarlarını uygula" message="Roundcube ayarları, PHP-FPM havuzu ve Nginx adresi bir işlem olarak uygulanacak. Sunucu sağlığı doğrulanmadan tamamlandı sayılmaz." busy={busy} error={error} onCancel={() => setConfirming(false)} onConfirm={apply} confirmLabel="Roundcube ayarlarını uygula" />}</Section>;
 }
 
 function ServiceConnectionDiagnosticsPanel({ serverId }) {
@@ -184,7 +184,7 @@ function QueuePanel({ serverId }) {
   useEffect(() => { load(); }, [serverId]);
   const items = queue?.entries ?? [];
   return (
-    <Section title="Postfix mail queue" description="Bekleyen ve işlenen Postfix e-posta kuyruğu.">
+    <Section title="Postfix posta kuyruğu" description="Bekleyen ve işlenen Postfix e-posta kuyruğu.">
       <div className="ws-section-body">
         <ErrorNotice error={error} />
         <form
@@ -327,6 +327,6 @@ function LogsPanel({ serverId }) {
 export default function MailOperationsPanel() {
   const { servers, isOwner } = useWorkspace();
   const server = servers.items.length === 1 ? servers.items[0] : null;
-  return <><RoundcubePanel />{server ? <>{isOwner && <ServiceConnectionDiagnosticsPanel serverId={server.id} />}{isOwner && <><QueuePanel serverId={server.id} /><LogsPanel serverId={server.id} /></>}{isOwner && <ServiceTestDeliveryPanel serverId={server.id} />}{isOwner && <SmarthostPanel serverId={server.id} />}</> : <Section title="Mail runtime"><EmptyState icon="server" title="Yerel sunucu kimliği bulunamadı" detail="Yerel sunucu bağlantısı hazır olduğunda posta kuyruğu ve servis günlükleri burada görüntülenir." /></Section>}</>;
+  return <><RoundcubePanel />{server ? <>{isOwner && <ServiceConnectionDiagnosticsPanel serverId={server.id} />}{isOwner && <><QueuePanel serverId={server.id} /><LogsPanel serverId={server.id} /></>}{isOwner && <ServiceTestDeliveryPanel serverId={server.id} />}{isOwner && <SmarthostPanel serverId={server.id} />}</> : <Section title="Posta hizmeti"><EmptyState icon="server" title="Yerel sunucu kimliği bulunamadı" detail="Yerel sunucu bağlantısı hazır olduğunda posta kuyruğu ve servis günlükleri burada görüntülenir." /></Section>}</>;
 }
 

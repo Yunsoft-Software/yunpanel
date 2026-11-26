@@ -203,8 +203,8 @@ export default function SystemSettingsPanels({
       </Section>}
 
       {diagnostics && data.deployment && <Section
-        title="Dağıtılan sürüm ve veri tazeliği"
-        description="Backend ve frontend derleme kimlikleri, şema sürümü ve önbellek tazelik doğrulaması."
+        title="Çalışan sürüm ve veri güncelliği"
+        description="Panelin çalışan sürümü, veri şeması ve önbellek güncelliği."
       >
         {data.deployment.sourceInfo?.warning && (
           <div className="ws-notice ws-notice-warning" style={{ marginBottom: '1rem' }}>

@@ -87,7 +87,7 @@ test.describe('EML-10 Giden posta limitleri, kuyruk ve teslimat tanılama', () =
     await expect(page).toHaveURL(new RegExp(`section=operations`), { timeout: 10000 });
 
     // A. Postfix mail queue paneli
-    const queueSection = page.locator('section').filter({ has: page.locator('h2', { hasText: 'Postfix mail queue' }) });
+    const queueSection = page.locator('section').filter({ has: page.locator('h2', { hasText: 'Postfix posta kuyruğu' }) });
     await expect(queueSection).toBeVisible({ timeout: 15000 });
     await expect(queueSection.locator('input[placeholder*="queue ID, sender"]')).toBeVisible();
 
@@ -214,7 +214,7 @@ test.describe('EML-10 Giden posta limitleri, kuyruk ve teslimat tanılama', () =
     // 1. Posta kuyruğu yönetiminde mesaj silme veya kuyruğu boşaltma butonları aranır
     await expect(page.locator('nav.ws-tabs')).toBeVisible({ timeout: 15000 });
     await page.locator('nav.ws-tabs a:has-text("Kuyruk ve loglar")').click();
-    const queueSection = page.locator('section').filter({ has: page.locator('h2', { hasText: 'Postfix mail queue' }) });
+    const queueSection = page.locator('section').filter({ has: page.locator('h2', { hasText: 'Postfix posta kuyruğu' }) });
     await expect(queueSection).toBeVisible({ timeout: 10000 });
 
     // Plesk'te bulunan "Flush Queue" (Kuyruğu Boşalt/Gönder) ve "Delete" (Kuyruktan Sil) butonları

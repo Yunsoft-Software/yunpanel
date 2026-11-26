@@ -379,7 +379,7 @@ test('SCN-E2E-05: /websites/new Wizard (Domain mode, Subdomain mode & all JAMsta
   // 4. Click Docker / Compose Proxy
   await page.locator('button:has-text("Docker / Compose Proxy")').click();
   assert.equal(await siteTypeSelect.inputValue(), 'docker_compose', 'Docker preset must set Site türü to docker_compose');
-  assert.equal(await page.locator('label:has-text("Inner Port (Container targetPort)") input').inputValue(), '8080', 'Docker preset must populate Inner Port 8080');
+  assert.equal(await page.locator('label:has-text("Konteyner portu") input').inputValue(), '8080', 'Docker preset must populate Inner Port 8080');
 
   // 5. Click PHP-FPM / WordPress / Laravel
   await page.locator('button:has-text("PHP-FPM / WordPress / Laravel")').click();

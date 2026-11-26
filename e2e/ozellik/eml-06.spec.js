@@ -184,7 +184,7 @@ print(len(active))
     }
   }
 
-  async function fillAndConfirm(modalLocator, confirmButtonSelector = 'button:has-text("Mail config apply")') {
+  async function fillAndConfirm(modalLocator, confirmButtonSelector = 'button:has-text("Ayarları uygula")') {
     const code = (await modalLocator.locator('label strong').textContent())?.trim();
     if (code) {
       await modalLocator.locator('label input').fill(code);
@@ -345,7 +345,7 @@ print(len(active))
     await page.waitForURL(/section=configuration/, { timeout: 15000 });
 
     // Host mail configuration panelini doğrula
-    await expect(page.locator('h2:has-text("Host mail configuration")')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('h2:has-text("Sunucu posta ayarları")')).toBeVisible({ timeout: 15000 });
 
     // 3. Posta servisini kapatma (Deactivate / Disabled) testi
     const targetStatusSelect = page.locator('label:has-text("Hedef durum") select');
@@ -353,7 +353,7 @@ print(len(active))
     await targetStatusSelect.selectOption('disabled');
 
     // Preview oluştur
-    const previewBtn = page.locator('button:has-text("Preview oluştur")');
+    const previewBtn = page.locator('button:has-text("Önizleme oluştur")');
     await expect(previewBtn).toBeEnabled({ timeout: 10000 });
     await previewBtn.click();
 
@@ -362,7 +362,7 @@ print(len(active))
     await expect(page.locator('text=apply edilebilir').first()).toBeVisible({ timeout: 15000 });
 
     // Preview'ı uygula
-    const applyPreviewBtn = page.locator('button:has-text("Bu preview’ı apply et")');
+    const applyPreviewBtn = page.locator('button:has-text("Önizlemeyi uygula")');
     await expect(applyPreviewBtn).toBeEnabled({ timeout: 10000 });
     await applyPreviewBtn.click();
 
@@ -383,20 +383,20 @@ print(len(active))
 
     // 4. Posta servisini tekrar açma (Re-activate / Enabled) testi
     await page.reload();
-    await expect(page.locator('h2:has-text("Host mail configuration")')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('h2:has-text("Sunucu posta ayarları")')).toBeVisible({ timeout: 15000 });
 
     const reTargetStatusSelect = page.locator('label:has-text("Hedef durum") select');
     await expect(reTargetStatusSelect).toBeVisible({ timeout: 10000 });
     await reTargetStatusSelect.selectOption('enabled');
 
-    const rePreviewBtn = page.locator('button:has-text("Preview oluştur")');
+    const rePreviewBtn = page.locator('button:has-text("Önizleme oluştur")');
     await expect(rePreviewBtn).toBeEnabled({ timeout: 10000 });
     await rePreviewBtn.click();
 
     await expect(page.locator('dl dt:has-text("Hedef durum") + dd:has-text("enabled")')).toBeVisible({ timeout: 15000 });
     await expect(page.locator('text=apply edilebilir').first()).toBeVisible({ timeout: 15000 });
 
-    const reApplyPreviewBtn = page.locator('button:has-text("Bu preview’ı apply et")');
+    const reApplyPreviewBtn = page.locator('button:has-text("Önizlemeyi uygula")');
     await expect(reApplyPreviewBtn).toBeEnabled({ timeout: 10000 });
     await reApplyPreviewBtn.click();
 
@@ -454,7 +454,7 @@ print(len(active))
     );
 
     await page.goto(`/mail/${encodeURIComponent(localMailDomainId || 'c46068e1-82f3-4956-aa3f-f1e04d7ff9ee')}?section=configuration`);
-    await expect(page.locator('h2:has-text("Host mail configuration")')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('h2:has-text("Sunucu posta ayarları")')).toBeVisible({ timeout: 15000 });
 
     const catchAllSelector = page.locator('label:has-text("Bulunmayan alıcı"), label:has-text("Catch-all"), label:has-text("Non-existent"), select[name="nonExistentPolicy"]');
     await expect(catchAllSelector).toBeVisible({ timeout: 3000 });

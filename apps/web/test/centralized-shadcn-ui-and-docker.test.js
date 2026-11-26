@@ -235,8 +235,9 @@ test('Docker Hub quick-generator and Inner <-> Outer Port proxy helpers produce 
   assert.match(createDialog, /accept="\.yml,\.yaml"/);
   assert.match(createDialog, /DockerHubCatalogPicker/);
   assert.match(configPanel, /Mevcut Compose YAML'ı Editöre Yükle/);
-  assert.match(projectsPage, /Inner Port \(Container targetPort\)/);
-  assert.match(projectsPage, /Outer Port \(Host publishedPort\)/);
+  assert.match(projectsPage, /Konteyner portu/);
+  assert.match(projectsPage, /Sunucu portu/);
+  assert.doesNotMatch(projectsPage, /\((?:Container targetPort|Host publishedPort)\)/);
   assert.match(newWebsitePage, /resolveSubdomainSharedFileRoot/);
   assert.match(siteOps, /yp-subdomain-tree/);
   assert.match(siteOps, /yp-subdomain-branch/);

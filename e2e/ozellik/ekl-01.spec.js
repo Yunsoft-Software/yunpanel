@@ -52,7 +52,7 @@ test.describe('EKL-01 Uygulama kurucu/katalog; site ve DB kurulum bütünlüğü
   test('mutlu yol: Uygulama Marketi arayüzü, kategori filtreleri, şablon kartları ve tek tıkla kurulum önizlemesi', async ({ page }) => {
     // 1. Sol menüden veya doğrudan /docker rotasından Uygulama Marketi sayfasına git
     await page.goto('/docker');
-    await expect(page.locator('h1', { hasText: /Docker & Compose|Uygulama Marketi/ })).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('h1', { hasText: /Docker ve Compose|Uygulama Marketi/ })).toBeVisible({ timeout: 15000 });
 
     // 2. Uygulama Marketi katalog ızgarasının ve kartlarının ekranda görüntülendiğini doğrula
     const catalogGrid = page.locator('.yp-docker-catalog-grid');

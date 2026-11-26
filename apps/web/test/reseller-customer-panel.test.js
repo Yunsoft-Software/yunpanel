@@ -300,7 +300,7 @@ test('product extensions: AI and custom runtimes (Docker, Python) remain accessi
 
   // Check DockerProjectsPage source
   const dockerPage = await source('DockerProjectsPage.jsx');
-  assert.match(dockerPage, /Docker & Compose Stack Yönetimi/);
+  assert.match(dockerPage, /Docker ve Compose Yönetimi/);
 
   // Check SiteDetailPage source
   const siteDetailPage = await source('SiteDetailPage.jsx');

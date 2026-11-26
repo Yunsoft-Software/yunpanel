@@ -5,10 +5,10 @@ import { Badge, Button, ConfirmDialog, ErrorNotice, KeyValues, Section } from '.
 
 function blockerLabel(code) {
   const labels = {
-    mail_postmaster_mailbox_required: 'Etkin mail konfigürasyonu için en az bir enabled mailbox gerekli.',
-    mail_service_domain_required: 'Mail servisi için local Web Domain/TLS identity gerekli.',
-    mail_srs_configuration_unavailable: 'External forwarding için SRS konfigürasyonu hazır değil.',
-    mail_srs_configuration_not_ready: 'External forwarding için SRS state hazır değil.',
+    mail_postmaster_mailbox_required: 'Posta hizmetini açmak için en az bir etkin e-posta hesabı gerekli.',
+    mail_service_domain_required: 'Posta hizmeti için bu sunucuda SSL sertifikalı bir alan adı gerekli.',
+    mail_srs_configuration_unavailable: 'Dış adreslere yönlendirme için SRS ayarı hazır değil.',
+    mail_srs_configuration_not_ready: 'Dış adreslere yönlendirme için SRS durumu hazır değil.',
   };
   return labels[code] ?? code;
 }
@@ -36,7 +36,7 @@ export default function MailConfigurationPanel({ domain, onChanged }) {
       const job = await applyMailConfiguration(domain.id, { expectedRevision: domain.revision, status, preview });
       observe(job);
       setConfirming(false); setPreview(null);
-      setNotice('Mail configuration işi kuyruğa alındı. Host değişikliği ancak job başarıyla tamamlandığında geçerli olur.');
+      setNotice('Posta ayarı işlemi sıraya alındı. Değişiklik, işlem başarıyla tamamlandığında geçerli olur.');
       onChanged?.();
     } catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { setBusy(false); }
@@ -45,8 +45,8 @@ export default function MailConfigurationPanel({ domain, onChanged }) {
   const configuration = preview?.configuration ?? null;
   return (
     <Section
-      title="Host mail configuration"
-      description="Postfix, Dovecot, Rspamd ve ilgili managed artefactlar exact preview üzerinden uygulanır."
+      title="Sunucu posta ayarları"
+      description="Postfix, Dovecot ve Rspamd ayarları önizleme onaylandıktan sonra uygulanır."
     >
       <div className="ws-section-body">
         <ErrorNotice error={error} />
@@ -65,13 +65,13 @@ export default function MailConfigurationPanel({ domain, onChanged }) {
                 setPreview(null);
               }}
             >
-              <option value="enabled">Enabled</option>
-              <option value="disabled">Disabled</option>
+              <option value="enabled">Açık</option>
+              <option value="disabled">Kapalı</option>
             </select>
           </label>
           <div className="ws-actions">
             <Button disabled={busy} onClick={buildPreview}>
-              {busy ? 'Hazırlanıyor…' : 'Preview oluştur'}
+              {busy ? 'Hazırlanıyor…' : 'Önizleme oluştur'}
             </Button>
           </div>
         </div>
@@ -81,24 +81,24 @@ export default function MailConfigurationPanel({ domain, onChanged }) {
               items={[
                 ['Mevcut durum', preview.currentStatus],
                 ['Hedef durum', preview.desiredStatus],
-                ['Managed domain', preview.domains?.length ?? 0],
+                ['Yönetilen alan adı', preview.domains?.length ?? 0],
                 [
                   'Hazır',
                   <Badge key="ready" state={preview.readyToApply ? 'active' : 'warning'}>
-                    {preview.readyToApply ? 'apply edilebilir' : 'blocker var'}
+                    {preview.readyToApply ? 'uygulanabilir' : 'engel var'}
                   </Badge>,
                 ],
-                ['Preview digest', preview.previewDigest],
-                ['Configuration SHA-256', configuration?.sha256 ?? '—'],
-                ['Artefact', configuration?.artifactDigests?.length ?? 0],
-                ['Mailbox', configuration?.counts?.mailboxes ?? configuration?.counts?.accounts ?? '—'],
+                ['Önizleme özeti', preview.previewDigest],
+                ['Yapılandırma SHA-256', configuration?.sha256 ?? '—'],
+                ['Yapılandırma dosyası', configuration?.artifactDigests?.length ?? 0],
+                ['E-posta hesabı', configuration?.counts?.mailboxes ?? configuration?.counts?.accounts ?? '—'],
                 ['Alias', configuration?.counts?.aliases ?? '—'],
               ]}
             />
             {preview.blockers?.length > 0 && (
               <div className="ws-notice ws-notice-warn" role="alert">
                 <div>
-                  <strong>Apply blocker</strong>
+                  <strong>Uygulama engeli</strong>
                   <ul>
                     {preview.blockers.map((code) => (
                       <li key={code}>{blockerLabel(code)}</li>
@@ -109,11 +109,11 @@ export default function MailConfigurationPanel({ domain, onChanged }) {
             )}
             {configuration?.artifactDigests?.length > 0 && (
               <div className="ws-table-scroll">
-                <table className="ws-table" role="table" aria-label="Konfigürasyon artefaktları">
+                <table className="ws-table" role="table" aria-label="Yapılandırma dosyaları">
                   <thead>
                     <tr role="row">
-                      <th scope="col">Artefact</th>
-                      <th scope="col">Digest</th>
+                      <th scope="col">Dosya</th>
+                      <th scope="col">Özet</th>
                       <th scope="col">Hassas</th>
                     </tr>
                   </thead>
@@ -134,24 +134,24 @@ export default function MailConfigurationPanel({ domain, onChanged }) {
               </div>
             )}
             <p className="ws-muted">
-              Protected configuration değerleri public response’da gösterilmez; yalnız hash/digest metadata kullanılır.
+              Gizli ayar değerleri gösterilmez; yalnız dosya özetleri listelenir.
             </p>
             <Button variant="primary" disabled={busy || !preview.readyToApply || !configuration} onClick={() => setConfirming(true)}>
-              Bu preview’ı apply et
+              Önizlemeyi uygula
             </Button>
           </>
         )}
       </div>
       {confirming && preview && (
         <ConfirmDialog
-          title="Mail host konfigürasyonunu uygula"
-          message={`${domain.domainName} için ${preview.currentStatus} → ${preview.desiredStatus} geçişi durable job olarak uygulanacak. Validator, reload ve health gate başarısız olursa job başarılı sayılmaz.`}
+          title="Sunucu posta ayarlarını uygula"
+          message={`${domain.domainName} için ${preview.currentStatus} → ${preview.desiredStatus} geçişi bir işlem olarak uygulanacak. Doğrulama, yeniden yükleme veya sağlık kontrolü başarısız olursa işlem başarılı sayılmaz.`}
           confirmation={preview.confirmation}
           busy={busy}
           error={error}
           onCancel={() => setConfirming(false)}
           onConfirm={applyPreview}
-          confirmLabel="Mail config apply"
+          confirmLabel="Ayarları uygula"
         />
       )}
     </Section>

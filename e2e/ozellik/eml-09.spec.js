@@ -216,7 +216,7 @@ print(json.dumps(result))`, [JSON.stringify(excluded)]);
     await expect(dkim.locator('dt').filter({ hasText: /^Algoritma$/ }).locator('+ dd')).toHaveText('rsa-sha256');
     await expect(dkim.locator('dt').filter({ hasText: /^DNS adı$/ }).locator('+ dd')).toContainText(`${selector}._domainkey.${target.hostname}`);
     await expect(dkim.locator('dt').filter({ hasText: /^DNS değer$/ }).locator('+ dd')).toContainText('v=DKIM1');
-    await dkim.getByRole('button', { name: 'Signing preview', exact: true }).click();
+    await dkim.getByRole('button', { name: 'İmzalama önizlemesi', exact: true }).click();
     await expect(dkim.locator('dt').filter({ hasText: /^Preview digest$/ }).locator('+ dd')).toHaveText(/^[a-f0-9]{64}$/);
     const key = keySnapshot()[target.mailDomainId];
     expect(key?.['private.pem']?.mode).toBe(0o600);

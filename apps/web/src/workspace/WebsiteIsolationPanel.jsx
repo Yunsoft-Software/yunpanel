@@ -54,7 +54,7 @@ function staticControlMigrationOperation(operation) {
 function migrationResultText(operation) {
   if (operation?.result) {
     if (identityMigrationOperation(operation)) {
-      return operation.result.createdUnixIdentity ? 'Unix identity oluşturuldu' : 'Unix identity doğrulandı';
+      return operation.result.createdUnixIdentity ? 'Sistem kullanıcısı oluşturuldu' : 'Sistem kullanıcısı doğrulandı';
     }
     if (sftpMigrationOperation(operation)) {
       return operation.result.activatedSftpIsolation
@@ -62,27 +62,27 @@ function migrationResultText(operation) {
         : 'SFTP izolasyonu doğrulandı';
     }
     if (phpMigrationOperation(operation)) {
-      return operation.result.createdPhpFpmPool ? 'PHP-FPM site pool oluşturuldu' : 'PHP-FPM site pool doğrulandı';
+      return operation.result.createdPhpFpmPool ? 'PHP-FPM site havuzu oluşturuldu' : 'PHP-FPM site havuzu doğrulandı';
     }
     if (phpContainerMigrationOperation(operation)) {
-      return operation.result.migratedPhpContainer ? 'PHP container metadata düzeltildi' : 'PHP container metadata doğrulandı';
+      return operation.result.migratedPhpContainer ? 'PHP konteyner izinleri düzeltildi' : 'PHP konteyner izinleri doğrulandı';
     }
     if (staticControlMigrationOperation(operation)) {
       return operation.result.migratedStaticControlMetadata
-        ? 'Static control metadata düzeltildi'
-        : 'Static control metadata doğrulandı';
+        ? 'Statik site izinleri düzeltildi'
+        : 'Statik site izinleri doğrulandı';
     }
     return `${operation.result.createdWorkspaceDirectories ?? 0} dizin oluşturuldu`;
   }
   if (operation?.compensation) {
     if (identityMigrationOperation(operation)) {
-      if (operation.compensation.preservedHomeData) return 'User/group geri alındı; HOME verisi korundu';
-      return operation.compensation.removedHome ? 'Unix identity ve boş HOME geri alındı' : 'Unix identity geri alındı';
+      if (operation.compensation.preservedHomeData) return 'Kullanıcı ve grup geri alındı; ana dizin verisi korundu';
+      return operation.compensation.removedHome ? 'Sistem kullanıcısı ve boş ana dizin geri alındı' : 'Sistem kullanıcısı geri alındı';
     }
-    if (sftpMigrationOperation(operation)) return 'Receipt-owned SFTP izolasyonu geri alındı';
-    if (phpMigrationOperation(operation)) return 'Receipt-owned PHP-FPM site pool geri alındı';
-    if (phpContainerMigrationOperation(operation)) return 'Receipt-owned PHP container metadata geri alındı';
-    if (staticControlMigrationOperation(operation)) return 'Receipt-owned static control metadata geri alındı';
+    if (sftpMigrationOperation(operation)) return 'SFTP izolasyonu geri alındı';
+    if (phpMigrationOperation(operation)) return 'PHP-FPM site havuzu geri alındı';
+    if (phpContainerMigrationOperation(operation)) return 'PHP konteyner izinleri geri alındı';
+    if (staticControlMigrationOperation(operation)) return 'Statik site izinleri geri alındı';
     return `${operation.compensation.removedWorkspaceDirectories ?? 0} dizin kaldırıldı`;
   }
   return '—';
@@ -115,9 +115,9 @@ export default function WebsiteIsolationPanel({ websiteId, onChanged = null }) {
     if (current !== generation.current) return;
     const nextAudit = auditResult.status === 'fulfilled' ? auditResult.value : null;
     if (nextAudit) setAudit(nextAudit);
-    else if (auditResult.reason?.name !== 'AbortError') setError(auditResult.reason?.message ?? 'Website izolasyon denetimi yüklenemedi.');
+    else if (auditResult.reason?.name !== 'AbortError') setError(auditResult.reason?.message ?? 'Site izolasyonu denetimi yüklenemedi.');
     if (migrationResult.status === 'fulfilled') setMigrations(migrationResult.value);
-    else if (migrationResult.reason?.name !== 'AbortError') setMigrationError(migrationResult.reason?.message ?? 'Migration geçmişi yüklenemedi.');
+    else if (migrationResult.reason?.name !== 'AbortError') setMigrationError(migrationResult.reason?.message ?? 'Düzeltme geçmişi yüklenemedi.');
 
     if (nextAudit?.applicationId && passengerMigrationHandoffRequired(nextAudit)) {
       setPassengerLoading(true);
@@ -128,7 +128,7 @@ export default function WebsiteIsolationPanel({ websiteId, onChanged = null }) {
       } catch (failure) {
         if (current === generation.current && failure.name !== 'AbortError') {
           setPassengerPreview(null);
-          setPassengerError(failure.message ?? 'Passenger migration preview yüklenemedi.');
+          setPassengerError(failure.message ?? 'Passenger geçiş önizlemesi yüklenemedi.');
         }
       } finally {
         if (current === generation.current) setPassengerLoading(false);
@@ -205,30 +205,30 @@ export default function WebsiteIsolationPanel({ websiteId, onChanged = null }) {
   const passengerHandoffRequired = passengerMigrationHandoffRequired(audit);
 
   return <Section
-    title="Website izolasyon denetimi"
-    description="Canonical Unix kimliği, runtime yolları ve provisioning kanıtının canlı denetimi; yalnız exact preview ile operation-owned değişiklikler uygulanır."
+    title="Site izolasyonu denetimi"
+    description="Sitenin sistem kullanıcısı, çalışma dizinleri ve kurulum kayıtları canlı denetlenir; değişiklikler yalnız onaylanan önizlemeyle uygulanır."
     actions={<div className="ws-actions">
       {audit && <Badge state={status.badge}>{status.label}</Badge>}
       <Button icon="refresh" disabled={loading || busy} onClick={() => load({ signal: requests.current?.signal, showLoading: false })}>{loading ? 'Denetleniyor…' : 'Yeniden denetle'}</Button>
     </div>}
   >
     <div className="ws-section-body"><ErrorNotice error={error} />
-      {loading && !audit && <div className="ws-loading" role="status"><span className="ws-spinner" />Website izolasyonu denetleniyor…</div>}
-      {audit?.applicable === false && <p className="ws-muted">{isolationRuntimeLabel(audit.runtimeType)} runtime için dedicated Unix identity izolasyon denetimi uygulanmaz.</p>}
+      {loading && !audit && <div className="ws-loading" role="status"><span className="ws-spinner" />Site izolasyonu denetleniyor…</div>}
+      {audit?.applicable === false && <p className="ws-muted">{isolationRuntimeLabel(audit.runtimeType)} uygulamalarında ayrı sistem kullanıcısı denetimi yapılmaz.</p>}
       {audit?.applicable && <KeyValues items={[
-        ['Runtime', isolationRuntimeLabel(audit.runtimeType)],
+        ['Çalışma ortamı', isolationRuntimeLabel(audit.runtimeType)],
         ['Beklenen Unix kullanıcısı', audit.expected?.unixUser],
         ['Beklenen HOME', audit.expected?.homeDirectory],
-        ['Beklenen document root', audit.expected?.documentRoot],
+        ['Beklenen site kök dizini', audit.expected?.documentRoot],
         ['Beklenen geçici alan', audit.expected?.temporaryDirectory],
         ['Beklenen log alanı', audit.expected?.logDirectory],
       ]} />}
     </div>
     {audit?.inspectedSteps?.length > 0 && <div className="ws-table-scroll"><table className="ws-table">
-      <thead><tr><th>İzolasyon adımı</th><th>Durum</th><th>Kanıt sonucu</th></tr></thead>
+      <thead><tr><th>İzolasyon adımı</th><th>Durum</th><th>Sonuç</th></tr></thead>
       <tbody>{audit.inspectedSteps.map((step) => {
         const presentation = isolationStepPresentation(step);
-        return <tr key={step.stepId}><td><strong>{presentation.name}</strong><div className="ws-muted"><code>{step.stepId}</code></div></td><td><Badge state={presentation.badge}>{presentation.label}</Badge></td><td><code>{step.reason ?? 'satisfied'}</code></td></tr>;
+        return <tr key={step.stepId}><td><strong>{presentation.name}</strong><div className="ws-muted"><code>{step.stepId}</code></div></td><td><Badge state={presentation.badge}>{presentation.label}</Badge></td><td><code>{step.reason ?? 'uygun'}</code></td></tr>;
       })}</tbody>
     </table></div>}
     {audit?.findings?.length > 0 && <div className="ws-table-scroll"><table className="ws-table">
@@ -238,64 +238,64 @@ export default function WebsiteIsolationPanel({ websiteId, onChanged = null }) {
         return <tr key={finding.code}><td><strong>{finding.message}</strong><div className="ws-muted"><code>{finding.code}</code></div></td><td><Badge state={presentation.badge}>{presentation.label}</Badge></td><td>{finding.action}</td></tr>;
       })}</tbody>
     </table></div>}
-    {audit?.applicable && audit.findings?.length === 0 && <EmptyState icon="check" title="İzolasyon doğrulandı" detail="Canonical Website kimliği ve denetlenebilen host izolasyon adımları mevcut desired state ile uyumlu." />}
+    {audit?.applicable && audit.findings?.length === 0 && <EmptyState icon="check" title="İzolasyon doğrulandı" detail="Sitenin sistem kullanıcısı ve denetlenen izolasyon adımları beklenen ayarlarla uyumlu." />}
     {passengerHandoffRequired && <div className="ws-section-body"><div className="ws-notice ws-notice-warn"><div>
-      <strong>Passenger geçişi ayrı durable workflow ile yönetiliyor</strong>
-      <p>Bu Node Website için isolation migration journal doğrudan runtime mutation yapmaz. Mevcut direct-systemd → Passenger akışı source route, release/environment evidence, Nginx checksum, target health ve systemd cleanup sınırlarını kendi operation/job ownership’i altında yönetir.</p>
+      <strong>Passenger geçişi ayrı bir işlemle yönetilir</strong>
+      <p>Bu Node.js sitesinde izolasyon düzeltmesi çalışan uygulamayı doğrudan değiştirmez. systemd’den Passenger’a geçiş; yönlendirme, sürüm ve ortam bilgisi, Nginx yapılandırması, uygulama sağlığı ve eski servisin kapatılması adımlarını kendi işleminde yürütür.</p>
       <ErrorNotice error={passengerError} />
-      {passengerLoading && <div className="ws-loading" role="status"><span className="ws-spinner" />Passenger migration preview hazırlanıyor…</div>}
+      {passengerLoading && <div className="ws-loading" role="status"><span className="ws-spinner" />Passenger geçiş önizlemesi hazırlanıyor…</div>}
       {passengerPreview && <KeyValues items={[
-        ['Passenger geçişi', passengerPreview.ready ? 'Hazır' : 'Bloklu'],
-        ['Application', passengerPreview.application?.applicationId],
-        ['Release', passengerPreview.application?.releaseId],
-        ['Domain', passengerPreview.domain?.primaryDomain],
-        ['Blocker', passengerPreview.blockers?.length ? passengerPreview.blockers.map((item) => item.detail ? `${item.code}:${item.detail}` : item.code).join(', ') : 'Yok'],
+        ['Passenger geçişi', passengerPreview.ready ? 'Hazır' : 'Hazır değil'],
+        ['Uygulama', passengerPreview.application?.applicationId],
+        ['Sürüm', passengerPreview.application?.releaseId],
+        ['Alan adı', passengerPreview.domain?.primaryDomain],
+        ['Engel', passengerPreview.blockers?.length ? passengerPreview.blockers.map((item) => item.detail ? `${item.code}:${item.detail}` : item.code).join(', ') : 'Yok'],
       ]} />}
       {passengerPreview?.ready && <Button variant="primary" disabled={busy} onClick={() => setConfirmation({ kind: 'passenger' })}>Passenger geçişini başlat</Button>}
-      {passengerJob && <p className="ws-muted">Passenger migration job: <code>{passengerJob.id}</code> · <code>{passengerJob.status}</code>. Sonuç site işlem kayıtlarında izlenir.</p>}
+      {passengerJob && <p className="ws-muted">Passenger geçiş işlemi: <code>{passengerJob.id}</code> · <code>{passengerJob.status}</code>. Sonuç site işlem kayıtlarında izlenir.</p>}
     </div></div></div>}
-    {audit?.migrationRequired && <div className="ws-section-body"><div className="ws-notice ws-notice-warn"><div><strong>{audit.migration?.applyAvailable ? (identityApplyAvailable ? 'Unix identity migration uygulanabilir' : sftpApplyAvailable ? 'SFTP migration uygulanabilir' : phpApplyAvailable ? 'PHP-FPM pool migration uygulanabilir' : phpContainerApplyAvailable ? 'PHP container metadata migration uygulanabilir' : staticControlApplyAvailable ? 'Static control metadata migration uygulanabilir' : 'Workspace migration uygulanabilir') : passengerHandoffRequired ? 'Bu runtime drift’i Passenger workflow tarafından yönetilir' : 'Bu drift için migration apply kapalı'}</strong><p>{audit.migration?.warning}</p>{audit.migration?.applyAvailable && <Button variant="primary" disabled={busy} onClick={() => setConfirmation({ kind: 'apply' })}>Exact değişiklikleri uygula</Button>}</div></div></div>}
+    {audit?.migrationRequired && <div className="ws-section-body"><div className="ws-notice ws-notice-warn"><div><strong>{audit.migration?.applyAvailable ? (identityApplyAvailable ? 'Sistem kullanıcısı düzeltmesi uygulanabilir' : sftpApplyAvailable ? 'SFTP izolasyon düzeltmesi uygulanabilir' : phpApplyAvailable ? 'PHP-FPM havuzu düzeltmesi uygulanabilir' : phpContainerApplyAvailable ? 'PHP konteyner izinleri düzeltmesi uygulanabilir' : staticControlApplyAvailable ? 'Statik site izinleri düzeltmesi uygulanabilir' : 'Çalışma alanı düzeltmesi uygulanabilir') : passengerHandoffRequired ? 'Bu fark Passenger geçişiyle giderilir' : 'Bu fark için otomatik düzeltme yok'}</strong><p>{audit.migration?.warning}</p>{audit.migration?.applyAvailable && <Button variant="primary" disabled={busy} onClick={() => setConfirmation({ kind: 'apply' })}>Önizlenen değişiklikleri uygula</Button>}</div></div></div>}
     {audit?.migration?.changes?.some((change) => change.desired?.directories?.length > 0) && <div className="ws-table-scroll"><table className="ws-table">
-      <thead><tr><th>Migration hedefi</th><th>Path</th><th>Mode</th><th>Ownership kapısı</th></tr></thead>
+      <thead><tr><th>Düzeltme hedefi</th><th>Yol</th><th>İzin</th><th>Sahiplik</th></tr></thead>
       <tbody>{audit.migration.changes.flatMap((change) => (change.desired?.directories ?? []).map((directory) => <tr key={`${change.action}:${directory.name}`}><td><code>{directory.name}</code></td><td><code>{directory.directory}</code></td><td><code>{directory.mode}</code></td><td><code>{change.ownership}</code></td></tr>))}</tbody>
     </table></div>}
-    {(migrations.length > 0 || migrationError) && <div className="ws-section-body"><h3>Isolation migration geçmişi</h3><ErrorNotice error={migrationError} /></div>}
+    {(migrations.length > 0 || migrationError) && <div className="ws-section-body"><h3>İzolasyon düzeltme geçmişi</h3><ErrorNotice error={migrationError} /></div>}
     {migrations.length > 0 && <div className="ws-table-scroll"><table className="ws-table">
-      <thead><tr><th>Durum</th><th>Operation</th><th>Receipt sonucu</th><th>İşlem</th></tr></thead>
+      <thead><tr><th>Durum</th><th>İşlem kaydı</th><th>Sonuç</th><th>İşlem</th></tr></thead>
       <tbody>{[...migrations].reverse().map((operation) => {
         const presentation = isolationMigrationStatusPresentation(operation);
         const canRollback = ['succeeded', 'failed', 'compensation_failed'].includes(operation.status);
-        return <tr key={operation.id}><td><Badge state={presentation.badge}>{presentation.label}</Badge>{operation.error && <div className="ws-muted"><code>{operation.error}</code></div>}</td><td><code>{operation.id}</code><div className="ws-muted">{identityMigrationOperation(operation) ? 'Unix identity' : sftpMigrationOperation(operation) ? 'SFTP isolation' : phpMigrationOperation(operation) ? 'PHP-FPM site pool' : phpContainerMigrationOperation(operation) ? 'PHP container metadata' : staticControlMigrationOperation(operation) ? 'Static control metadata' : operation.targets?.map((target) => target.name).join(', ')}</div></td><td>{migrationResultText(operation)}</td><td>{canRollback ? <Button variant="danger" disabled={busy} onClick={() => setConfirmation({ kind: 'rollback', operation })}>Receipt rollback</Button> : '—'}</td></tr>;
+        return <tr key={operation.id}><td><Badge state={presentation.badge}>{presentation.label}</Badge>{operation.error && <div className="ws-muted"><code>{operation.error}</code></div>}</td><td><code>{operation.id}</code><div className="ws-muted">{identityMigrationOperation(operation) ? 'Sistem kullanıcısı' : sftpMigrationOperation(operation) ? 'SFTP izolasyonu' : phpMigrationOperation(operation) ? 'PHP-FPM site havuzu' : phpContainerMigrationOperation(operation) ? 'PHP konteyner izinleri' : staticControlMigrationOperation(operation) ? 'Statik site izinleri' : operation.targets?.map((target) => target.name).join(', ')}</div></td><td>{migrationResultText(operation)}</td><td>{canRollback ? <Button variant="danger" disabled={busy} onClick={() => setConfirmation({ kind: 'rollback', operation })}>Geri al</Button> : '—'}</td></tr>;
       })}</tbody>
     </table></div>}
-    {confirmation?.kind === 'passenger' && passengerPreview?.ready && <ConfirmDialog title="Direct-systemd uygulamayı Passenger’a geçir" message="Bu işlem mevcut source route ve release/environment evidence’ını yeniden doğrular, Passenger Nginx hedefini health-gated etkinleştirir ve ancak hedef sağlıklı olduktan sonra legacy systemd servisini durdurup disable etmeyi dener. Güvenli cutover kanıtlanamazsa mevcut route korunur veya operation actionable recovery state bırakır." confirmation={passengerPreview.confirmation} busy={busy} error={passengerError} onCancel={() => { setConfirmation(null); setPassengerError(null); }} onConfirm={queuePassengerMigration} confirmLabel="Passenger migration başlat" />}
+    {confirmation?.kind === 'passenger' && passengerPreview?.ready && <ConfirmDialog title="systemd uygulamasını Passenger’a geçir" message="Bu işlem yönlendirme, sürüm ve ortam bilgisini yeniden doğrular, Passenger Nginx hedefini uygulama sağlıklıysa etkinleştirir ve ardından eski systemd servisini durdurup devre dışı bırakmayı dener. Güvenli geçiş doğrulanamazsa mevcut yönlendirme korunur veya işlem kurtarma için bekletilir." confirmation={passengerPreview.confirmation} busy={busy} error={passengerError} onCancel={() => { setConfirmation(null); setPassengerError(null); }} onConfirm={queuePassengerMigration} confirmLabel="Passenger geçişini başlat" />}
     {confirmation?.kind === 'apply' && audit?.migration?.applyAvailable && (
       <ConfirmDialog
         title={
           identityApplyAvailable
-            ? 'Unix identity izolasyon migration’ını uygula'
+            ? 'Sistem kullanıcısı düzeltmesini uygula'
             : sftpApplyAvailable
-              ? 'SFTP izolasyon migration’ını uygula'
+              ? 'SFTP izolasyon düzeltmesini uygula'
               : phpApplyAvailable
-                ? 'PHP-FPM pool migration’ını uygula'
+                ? 'PHP-FPM havuzu düzeltmesini uygula'
                 : phpContainerApplyAvailable
-                  ? 'PHP container metadata migration’ını uygula'
+                  ? 'PHP konteyner izinleri düzeltmesini uygula'
                   : staticControlApplyAvailable
-                    ? 'Static control metadata migration’ını uygula'
-                    : 'Workspace izolasyon migration’ını uygula'
+                    ? 'Statik site izinleri düzeltmesini uygula'
+                    : 'Çalışma alanı düzeltmesini uygula'
         }
         message={
           identityApplyAvailable
-            ? 'Yalnız preview’da all-missing olduğu doğrulanan canonical Unix user/group/HOME durable receipt ile oluşturulacak. Önceden var olan identity/HOME state değiştirilmez; rollback HOME içeriğini recursive silmez.'
+            ? 'Önizlemede tamamen eksik olduğu doğrulanan site sistem kullanıcısı, grubu ve ana dizini oluşturulacak. Var olan kullanıcı veya ana dizin değiştirilmez; geri alma ana dizin içeriğini silmez.'
             : sftpApplyAvailable
-              ? 'Yalnız preview’da all-missing olduğu doğrulanan site-specific SFTP chroot/mount/config/unit state durable receipt ile oluşturulacak. Foreign artifact varsa apply bloklanır; rollback yalnız receipt-owned artifact ve boş operation-created dizinleri kaldırır.'
+              ? 'Önizlemede eksik olduğu doğrulanan siteye özel SFTP kök dizini, bağlama ve yapılandırması oluşturulacak. Başka bir kaynağa ait dosya varsa işlem durur; geri alma yalnız bu işlemin oluşturduklarını ve boş dizinleri kaldırır.'
               : phpApplyAvailable
-                ? 'Yalnız container ownership, shared PHP-FPM service/package ve UMask zaten canonical iken eksik site-specific FPM pool receipt ile oluşturulacak. Migration shared runtime’ı kurmaz, enable etmez veya container ownership değiştirmez.'
+                ? 'Konteyner sahipliği, ortak PHP-FPM servisi ve izin maskesi zaten doğruysa eksik olan siteye özel PHP-FPM havuzu oluşturulacak. Ortak PHP kurulumu, servis durumu veya konteyner sahipliği değiştirilmez.'
                 : phpContainerApplyAvailable
-                  ? 'Yalnız application root, releases dizini ve current symlink için preview’da kanıtlanan UID/GID/mode metadata’sı receipt ile düzeltilecek. Release içeriği site kullanıcısında kalır; recursive chown, chmod veya silme yapılmaz.'
+                  ? 'Uygulama kök dizini, sürümler dizini ve geçerli sürüm bağlantısının önizlemede gösterilen sahiplik ve izinleri düzeltilecek. Sürüm dosyaları site kullanıcısında kalır; alt dizinlerde toplu sahiplik, izin değişikliği veya silme yapılmaz.'
                   : staticControlApplyAvailable
-                    ? 'Yalnız static publish root, releases root ve current symlink control-plane UID/GID/mode metadata’sı receipt ile düzeltilecek. Release dosyaları ve Nginx ACL’leri zaten sağlıklı olmalı; migration recursive chown/chmod/setfacl çalıştırmaz.'
-                    : 'Yalnız preview’da listelenen eksik tmp/log direct-child dizinleri operation receipt ile oluşturulacak. Unix hesabı, mevcut veri, runtime ve SFTP değiştirilmeyecek.'
+                    ? 'Statik yayın dizini, sürümler dizini ve geçerli sürüm bağlantısının sahiplik ve izinleri düzeltilecek. Sürüm dosyaları ve Nginx erişim izinleri zaten sağlıklı olmalıdır; alt dizinlerde toplu sahiplik veya izin değişikliği yapılmaz.'
+                    : 'Önizlemede listelenen eksik geçici dosya ve günlük dizinleri oluşturulacak. Sistem kullanıcısı, mevcut veri, uygulama ve SFTP değiştirilmez.'
         }
         confirmation={audit.migration.confirmation}
         busy={busy}
@@ -305,36 +305,36 @@ export default function WebsiteIsolationPanel({ websiteId, onChanged = null }) {
           setMigrationError(null);
         }}
         onConfirm={() => mutate((signal) => applyWebsiteIsolationMigration(websiteId, audit.migration, { signal }))}
-        confirmLabel="Migration’ı uygula"
+        confirmLabel="Düzeltmeyi uygula"
       />
     )}
     {confirmation?.kind === 'rollback' && (
       <ConfirmDialog
         title={
           identityMigrationOperation(confirmation.operation)
-            ? 'Unix identity migration receipt’ini geri al'
+            ? 'Sistem kullanıcısı düzeltmesini geri al'
             : sftpMigrationOperation(confirmation.operation)
-              ? 'SFTP migration receipt’ini geri al'
+              ? 'SFTP izolasyon düzeltmesini geri al'
               : phpMigrationOperation(confirmation.operation)
-                ? 'PHP-FPM pool migration receipt’ini geri al'
+                ? 'PHP-FPM havuzu düzeltmesini geri al'
                 : phpContainerMigrationOperation(confirmation.operation)
-                  ? 'PHP container metadata migration receipt’ini geri al'
+                  ? 'PHP konteyner izinleri düzeltmesini geri al'
                   : staticControlMigrationOperation(confirmation.operation)
-                    ? 'Static control metadata migration receipt’ini geri al'
-                    : 'Workspace migration receipt’ini geri al'
+                    ? 'Statik site izinleri düzeltmesini geri al'
+                    : 'Çalışma alanı düzeltmesini geri al'
         }
         message={
           identityMigrationOperation(confirmation.operation)
-            ? 'Yalnız bu operation’ın oluşturduğu canonical user/group geri alınır. HOME boşsa kaldırılır; veri içeriyorsa recursive silinmeden korunur.'
+            ? 'Yalnız bu işlemin oluşturduğu kullanıcı ve grup geri alınır. Ana dizin boşsa kaldırılır; veri içeriyorsa silinmeden korunur.'
             : sftpMigrationOperation(confirmation.operation)
-              ? 'Yalnız receipt-owned SSH config, systemd mount unit ve operation-created boş chroot/mount dizinleri geri alınır. Veri içeren dizinler korunur; key registry silinmez.'
+              ? 'Yalnız bu işlemin oluşturduğu SSH yapılandırması, bağlama birimi ve boş SFTP dizinleri geri alınır. Veri içeren dizinler ve kayıtlı SSH anahtarları korunur.'
               : phpMigrationOperation(confirmation.operation)
-                ? 'Yalnız bu operation’ın oluşturduğu site-specific PHP-FPM pool kaldırılır. Shared PHP paketi, servis durumu, UMask ve container ownership değiştirilmez.'
+                ? 'Yalnız bu işlemin oluşturduğu siteye özel PHP-FPM havuzu kaldırılır. Ortak PHP kurulumu, servis durumu, izin maskesi ve konteyner sahipliği değiştirilmez.'
                 : phpContainerMigrationOperation(confirmation.operation)
-                  ? 'Yalnız receipt’in kaydettiği application root, releases dizini ve current symlink UID/GID/mode metadata’sı geri yüklenir. Release içeriğine recursive işlem yapılmaz; arada yabancı drift oluşursa rollback bloklanır.'
+                  ? 'Uygulama kök dizini, sürümler dizini ve geçerli sürüm bağlantısının önceki sahiplik ve izinleri geri yüklenir. Sürüm dosyalarına dokunulmaz; arada başka bir değişiklik olduysa geri alma durur.'
                   : staticControlMigrationOperation(confirmation.operation)
-                    ? 'Yalnız receipt’in kaydettiği static publish root, releases root ve current symlink UID/GID/mode metadata’sı geri yüklenir. Release dosyaları ve ACL’lere dokunulmaz; current target veya yabancı metadata drift’i varsa rollback bloklanır.'
-                    : 'Yalnız bu operation’ın oluşturduğu ve hâlâ boş olan dizinler kaldırılacak. Veri içeren veya önceden var olan dizinler korunur.'
+                    ? 'Statik yayın dizini, sürümler dizini ve geçerli sürüm bağlantısının önceki sahiplik ve izinleri geri yüklenir. Sürüm dosyalarına ve erişim izinlerine dokunulmaz; arada başka bir değişiklik olduysa geri alma durur.'
+                    : 'Yalnız bu işlemin oluşturduğu ve hâlâ boş olan dizinler kaldırılacak. Veri içeren veya önceden var olan dizinler korunur.'
         }
         confirmation={websiteIsolationRollbackConfirmation(confirmation.operation)}
         busy={busy}

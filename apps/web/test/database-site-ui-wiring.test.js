@@ -24,7 +24,7 @@ test('Website database credential revoke requires a successful durable delete jo
   assert.match(panel, /finalizeDatabaseCredentialDelete/);
   assert.match(panel, /deleteJob\.status === 'succeeded'/);
   assert.match(panel, /Kör replay yapılmadı/);
-  assert.match(panel, /Schema ve Website binding silinmez/);
+  assert.match(panel, /Veritabanı ve site bağlantısı silinmez/);
 });
 
 test('Website database backup waits for checksum-validated durable vendor dump completion', async () => {
@@ -35,7 +35,7 @@ test('Website database backup waits for checksum-validated durable vendor dump c
   assert.match(panel, /website\.id/);
   assert.match(panel, /waitForJob\(backupJob\.id\)/);
   assert.match(panel, /resourceBusy\('database', binding\.databaseName\)/);
-  assert.match(panel, /checksum kanıtı oluşmadan başarılı sayılmaz/);
+  assert.match(panel, /sağlama toplamı doğrulanmadan başarılı sayılmaz/);
   assert.match(panel, /backupJob\.status === 'succeeded'/);
   assert.match(panel, /Kör replay yapılmadı/);
 });
@@ -50,8 +50,8 @@ test('Website database restore selects scoped backup evidence and applies an exa
   assert.match(panel, /databaseRestorePreviewView/);
   assert.match(panel, /restoreWebsiteDatabase/);
   assert.match(panel, /waitForJob\(restoreJob\.id\)/);
-  assert.match(panel, /pre-restore snapshot/);
-  assert.match(panel, /checksum ve post-restore doğrulaması/);
+  assert.match(panel, /geri yükleme öncesi anlık görüntü/);
+  assert.match(panel, /sağlama toplamı ve geri yükleme sonrası doğrulama/);
   assert.match(panel, /confirmation=\{restoreTarget\.binding\.databaseName\}/);
   assert.doesNotMatch(panel, /createDatabaseBackup\(|previewDatabaseRestore\(|restoreDatabase\(/);
 });
@@ -69,10 +69,10 @@ test('Website database delete uses scoped preview, durable DROP and evidence-gat
   assert.match(panel, /Silme onayına geç/);
   assert.match(panel, /confirmation=\{deleteTarget\.databaseName\}/);
   assert.match(panel, /güncel bağlantı revizyonuna ait doğrulanmış/);
-  assert.match(panel, /DROP tamamlandı, binding finalization bekliyor/);
+  assert.match(panel, /Veritabanı silindi; site bağlantısının kaldırılması bekleniyor/);
   assert.match(panel, /dropImpact\.readyToFinalize/);
   assert.match(panel, /dropImpact\.completedDelete\.jobId/);
-  assert.match(panel, /Binding finalization’ı tamamla/);
+  assert.match(panel, /Site bağlantısını kaldırmayı tamamla/);
   assert.match(panel, /successful scoped DROP job zaten kanıtlandı/);
   assert.doesNotMatch(panel, /getDatabaseDropPreview|databaseDropPreviewView|database_delete_safety_chain_pending/);
   assert.doesNotMatch(panel, /window\.(?:prompt|confirm|alert)/);

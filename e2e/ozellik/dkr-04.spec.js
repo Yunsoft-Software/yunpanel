@@ -237,7 +237,7 @@ print(json.dumps({'content':open(p,'r',encoding='utf-8',errors='replace').read()
 
     // 3. UI üzerinde Container loglarının aktığını doğrula
     await page.reload();
-    const logsSection = page.locator('section').filter({ has: page.locator('h2:text-is("Container logları")') });
+    const logsSection = page.locator('section').filter({ has: page.locator('h2:text-is("Konteyner günlükleri")') });
     await expect(logsSection).toBeVisible({ timeout: 15000 });
 
     const logBlock = logsSection.locator('.ws-log-block');
@@ -283,7 +283,7 @@ print(json.dumps({'content':open(p,'r',encoding='utf-8',errors='replace').read()
     const serviceInput = page.locator('label:has-text("Compose servisi") input');
     await serviceInput.fill('web');
 
-    const targetPortInput = page.locator('label:has-text("Inner Port (Container targetPort)") input');
+    const targetPortInput = page.locator('label:has-text("Konteyner portu") input');
     await targetPortInput.fill('80');
 
     // Adım 3'e geç
@@ -360,7 +360,7 @@ print(json.dumps({'content':open(p,'r',encoding='utf-8',errors='replace').read()
     await projectInput.fill(createdProjectId);
     await page.locator('label:has-text("Compose servisi") input').fill('web');
 
-    const targetPortInput = page.locator('label:has-text("Inner Port (Container targetPort)") input');
+    const targetPortInput = page.locator('label:has-text("Konteyner portu") input');
     await targetPortInput.fill('70000');
 
     // HTML5 sınır doğrulaması (max 65535)
@@ -435,7 +435,7 @@ print(json.dumps({'containerId':cid,'containerName':cname,'status':status,'top':
     await page.goto(`/docker/${encodeURIComponent(createdProjectId)}`);
     await expect(page.locator('h1')).toContainText(projectName, { timeout: 15_000 });
 
-    const runtimeSection = page.locator('section').filter({ has: page.locator('h2:text-is("Runtime")') });
+    const runtimeSection = page.locator('section').filter({ has: page.locator('h2:text-is("Çalışma durumu")') });
     await expect(runtimeSection).toBeVisible({ timeout: 15_000 });
 
     // 1. Konsolu aç -> Terminali aç -> root olmayan canlı oturum (65534:65534)
@@ -530,7 +530,7 @@ print(json.dumps({'containerId':cid,'containerName':cname,'status':status,'top':
       expect(revokeSession?.csrfToken).toBeTruthy();
 
       await revokePage.goto(`/docker/${encodeURIComponent(createdProjectId)}`);
-      const revRuntime = revokePage.locator('section').filter({ has: revokePage.locator('h2:text-is("Runtime")') });
+      const revRuntime = revokePage.locator('section').filter({ has: revokePage.locator('h2:text-is("Çalışma durumu")') });
       await expect(revRuntime.getByRole('button', { name: 'Konsolu aç', exact: true }).first()).toBeVisible({ timeout: 15_000 });
       await revRuntime.getByRole('button', { name: 'Konsolu aç', exact: true }).first().click();
 

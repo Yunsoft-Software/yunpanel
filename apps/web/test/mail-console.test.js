@@ -264,7 +264,7 @@ test('mail detail mounts all 6 real subpanels concurrently with section tab togg
   assert.ok(panes[1].textContent.includes('Webmail (Roundcube)'), 'Pane 1 contains real MailWebmailPanel data');
   assert.ok(panes[2].textContent.includes('Mail aliasları'), 'Pane 2 contains real MailAliasesPanel data');
   assert.ok(panes[3].textContent.includes('DKIM') && panes[3].textContent.includes('rsa2048'), 'Pane 3 contains real MailDkimDiagnosticsPanel data');
-  assert.ok(panes[4].textContent.includes('Host mail configuration'), 'Pane 4 contains real MailConfigurationPanel data');
+  assert.ok(panes[4].textContent.includes('Sunucu posta ayarları'), 'Pane 4 contains real MailConfigurationPanel data');
   assert.ok(panes[5].textContent.includes('Teslimat takibi'), 'Pane 5 contains real MailDeliveryTrackingPanel');
   assert.ok(panes[6].textContent.includes('Roundcube webmail'), 'Pane 6 contains real MailOperationsPanel data');
 
@@ -623,7 +623,7 @@ test('fixture component actions: authentic SMTP test delivery, DKIM preview & ap
   assert.ok(securityPane.textContent.includes('msg-smtp-test-1234'), 'Message ID displayed');
 
   // 2. DKIM Preview & Apply with durable job observation
-  const previewBtn = securityPane.querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('Signing preview'))[0];
+  const previewBtn = securityPane.querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('İmzalama önizlemesi'))[0];
   assert.ok(previewBtn, 'Signing preview button exists');
 
   await act(async () => {
@@ -635,7 +635,7 @@ test('fixture component actions: authentic SMTP test delivery, DKIM preview & ap
   assert.ok(dkimPreviewCall, 'DKIM preview endpoint called');
   assert.ok(securityPane.textContent.includes('digest-dkim-999'), 'Preview digest rendered');
 
-  const applyBtn = securityPane.querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('DKIM signing apply'))[0];
+  const applyBtn = securityPane.querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('DKIM imzalamayı uygula'))[0];
   assert.ok(applyBtn, 'DKIM signing apply button exists');
 
   await act(async () => {
@@ -652,7 +652,7 @@ test('fixture component actions: authentic SMTP test delivery, DKIM preview & ap
     });
     await flush();
   }
-  const confirmBtn = confirmDialog.querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('DKIM apply'))[0];
+  const confirmBtn = confirmDialog.querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('DKIM ayarını uygula'))[0];
 
   await act(async () => {
     clickElement(confirmBtn);
@@ -832,8 +832,8 @@ test('fixture component actions: Roundcube webmail preview & bind with durable j
   // Operations is the 7th section since Teslimat was added (2026-10-27).
   const opsPane = panes[6];
   assert.ok(opsPane.textContent.includes('Roundcube webmail'), 'Operations panel rendered');
-  const configApplyBtn = opsPane.querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('Config apply'))[0];
-  assert.ok(configApplyBtn, 'Roundcube Config apply button must exist');
+  const configApplyBtn = opsPane.querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('Ayarları uygula'))[0];
+  assert.ok(configApplyBtn, 'Roundcube apply button must exist');
 
   await act(async () => {
     clickElement(configApplyBtn);
@@ -842,7 +842,7 @@ test('fixture component actions: Roundcube webmail preview & bind with durable j
 
   const rcConfirmDialog = container.querySelector('.ws-modal');
   assert.ok(rcConfirmDialog, 'ConfirmDialog for Roundcube global apply appears');
-  const rcConfirmBtn = rcConfirmDialog.querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('Roundcube apply'))[0];
+  const rcConfirmBtn = rcConfirmDialog.querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('Roundcube ayarlarını uygula'))[0];
 
   await act(async () => {
     clickElement(rcConfirmBtn);
@@ -1137,7 +1137,7 @@ test('fixture component actions: mail configuration preview & apply with durable
 
   const panes = container.querySelectorAll('.ws-mail-pane');
   const configPane = panes[4];
-  assert.ok(configPane.textContent.includes('Host mail configuration'), 'Configuration panel rendered');
+  assert.ok(configPane.textContent.includes('Sunucu posta ayarları'), 'Configuration panel rendered');
 
   // Change desired status to 'disabled'
   const statusSelect = configPane.querySelector('select');
@@ -1147,9 +1147,9 @@ test('fixture component actions: mail configuration preview & apply with durable
   });
   await flush();
 
-  // Click Preview oluştur
-  const previewBtn = configPane.querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('Preview oluştur'))[0];
-  assert.ok(previewBtn, 'Preview oluştur button must exist');
+  // Click Önizleme oluştur
+  const previewBtn = configPane.querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('Önizleme oluştur'))[0];
+  assert.ok(previewBtn, 'Önizleme oluştur button must exist');
 
   await act(async () => {
     clickElement(previewBtn);
@@ -1164,8 +1164,8 @@ test('fixture component actions: mail configuration preview & apply with durable
   assert.ok(configPane.textContent.includes('sha-host-config-222'), 'Config SHA rendered');
 
   // Click Apply Preview
-  const applyBtn = configPane.querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('Bu preview’ı apply et'))[0];
-  assert.ok(applyBtn, 'Bu preview’ı apply et button must exist');
+  const applyBtn = configPane.querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('Önizlemeyi uygula'))[0];
+  assert.ok(applyBtn, 'Önizlemeyi uygula button must exist');
 
   await act(async () => {
     clickElement(applyBtn);
@@ -1181,7 +1181,7 @@ test('fixture component actions: mail configuration preview & apply with durable
     });
     await flush();
   }
-  const confirmBtn = confirmDialog.querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('Mail config apply'))[0];
+  const confirmBtn = confirmDialog.querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('Ayarları uygula'))[0];
 
   await act(async () => {
     clickElement(confirmBtn);
@@ -1195,7 +1195,7 @@ test('fixture component actions: mail configuration preview & apply with durable
   assert.equal(configApplyCall.body.previewDigest, 'digest-cfg-apply-111');
   assert.equal(observedJobs.length, 1, 'Observed mail config apply durable job');
   assert.equal(observedJobs[0].id, 'job-mail-config-88');
-  assert.ok(configPane.textContent.includes('Mail configuration işi kuyruğa alındı'), 'Job queue notice displayed');
+  assert.ok(configPane.textContent.includes('Posta ayarı işlemi sıraya alındı'), 'Job queue notice displayed');
 
   await act(async () => {
     root.unmount();

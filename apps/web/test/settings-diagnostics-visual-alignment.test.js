@@ -40,7 +40,7 @@ test('architecture and version metadata live in Sunucu > Tanılama, not in gener
 
   // SystemSettingsPanels renders version, deployment, and architecture info under diagnostics
   assert.match(panelsSource, /diagnostics && <Section[\s\S]*?Panel ve sunucu/);
-  assert.match(panelsSource, /diagnostics && data\.deployment && <Section[\s\S]*?Dağıtılan sürüm/);
+  assert.match(panelsSource, /diagnostics && data\.deployment && <Section[\s\S]*?Çalışan sürüm/);
   assert.match(panelsSource, /diagnostics && <Section[\s\S]*?Site varsayılanları ve izolasyon/);
 });
 

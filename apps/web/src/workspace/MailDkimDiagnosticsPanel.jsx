@@ -32,7 +32,7 @@ function DkimKeyModal({ keyState, domain, onClose, onChanged }) {
     } catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { setBusy(false); }
   }
-  return <Modal title={keyState ? 'DKIM key rotate et' : 'DKIM key oluştur'} onClose={onClose} busy={busy}><form className="ws-form" onSubmit={submit}><ErrorNotice error={error} /><label>Selector<input value={selector} required pattern="[a-z0-9](?:[a-z0-9-]*[a-z0-9])?" autoCapitalize="none" spellCheck={false} onChange={(event) => setSelector(event.target.value)} placeholder={keyState ? 'mail-2026' : 'mail'} /></label>{keyState && <p className="ws-muted">Mevcut selector <strong>{keyState.selector}</strong>. Rotation için farklı selector gerekir; eski DNS kaydı retirement tamamlanana kadar korunur.</p>}<p className="ws-muted">Private key protected server state’inde kalır. Panel yalnız public DNS metadata gösterir.</p><footer className="ws-modal-footer"><ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton><Button type="submit" variant="primary" disabled={busy || !selector}>{busy ? 'Hazırlanıyor…' : keyState ? 'Rotate et' : 'DKIM oluştur'}</Button></footer></form></Modal>;
+  return <Modal title={keyState ? 'DKIM anahtarını yenile' : 'DKIM anahtarı oluştur'} onClose={onClose} busy={busy}><form className="ws-form" onSubmit={submit}><ErrorNotice error={error} /><label>Seçici adı<input value={selector} required pattern="[a-z0-9](?:[a-z0-9-]*[a-z0-9])?" autoCapitalize="none" spellCheck={false} onChange={(event) => setSelector(event.target.value)} placeholder={keyState ? 'mail-2026' : 'mail'} /></label>{keyState && <p className="ws-muted">Mevcut seçici <strong>{keyState.selector}</strong>. Yenileme için farklı bir seçici gerekir; eski DNS kaydı geçiş tamamlanana kadar korunur.</p>}<p className="ws-muted">Özel anahtar sunucuda korunur; panel yalnız DNS kaydı bilgisini gösterir.</p><footer className="ws-modal-footer"><ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton><Button type="submit" variant="primary" disabled={busy || !selector}>{busy ? 'Hazırlanıyor…' : keyState ? 'Rotate et' : 'DKIM oluştur'}</Button></footer></form></Modal>;
 }
 
 export default function MailDkimDiagnosticsPanel({ domain, onChanged }) {
@@ -102,7 +102,7 @@ export default function MailDkimDiagnosticsPanel({ domain, onChanged }) {
   const forwarding = diagnostics?.diagnostics?.forwardingDeliverability ?? null;
   return (
     <>
-      <Section title="DKIM" description="Public DNS key metadata ve guarded Rspamd signing apply akışı.">
+      <Section title="DKIM" description="DKIM DNS kaydı ve Rspamd imzalama ayarı.">
         <div className="ws-section-body">
           <ErrorNotice error={error} />
           {notice && (
@@ -126,7 +126,7 @@ export default function MailDkimDiagnosticsPanel({ domain, onChanged }) {
               <div className="ws-actions">
                 <Button onClick={() => setEditing(true)}>Key rotate</Button>
                 <Button disabled={busy} onClick={buildPreview}>
-                  {busy ? 'Hazırlanıyor…' : 'Signing preview'}
+                  {busy ? 'Hazırlanıyor…' : 'İmzalama önizlemesi'}
                 </Button>
               </div>
             </>
@@ -166,7 +166,7 @@ export default function MailDkimDiagnosticsPanel({ domain, onChanged }) {
               {preview.blockers?.length > 0 && (
                 <div className="ws-notice ws-notice-warn">
                   <div>
-                    <strong>DKIM blocker</strong>
+                    <strong>DKIM engeli</strong>
                     <p>{preview.blockers.join(', ')}</p>
                   </div>
                 </div>
@@ -176,13 +176,13 @@ export default function MailDkimDiagnosticsPanel({ domain, onChanged }) {
                 disabled={busy || !preview.readyToApply || !preview.configuration}
                 onClick={() => setConfirming(true)}
               >
-                DKIM signing apply
+                DKIM imzalamayı uygula
               </Button>
             </>
           )}
         </div>
       </Section>
-      <Section title="Mail diagnostics" description="DNS ve forwarding readiness sonuçları; secret veya private config içermez.">
+      <Section title="Posta tanılama" description="DNS ve yönlendirme hazırlık sonuçları.">
         <div className="ws-section-body">
           <div className="ws-actions">
             <Button icon="refresh" disabled={busy} onClick={refresh}>
@@ -252,7 +252,7 @@ export default function MailDkimDiagnosticsPanel({ domain, onChanged }) {
               )}
             </>
           ) : diagnostics === null ? (
-            <EmptyState icon="shield" title="Diagnostic sonucu yok" detail="Mail diagnostics henüz sonuç üretmedi." />
+            <EmptyState icon="shield" title="Tanılama sonucu yok" detail="Posta tanılaması henüz sonuç üretmedi." />
           ) : (
             <div className="ws-loading">
               <span className="ws-spinner" />
@@ -402,14 +402,14 @@ export default function MailDkimDiagnosticsPanel({ domain, onChanged }) {
       )}
       {confirming && preview && (
         <ConfirmDialog
-          title="DKIM signing configuration uygula"
-          message={`${domain.domainName} DKIM signing state durable job ile uygulanacak. Public DNS readiness tekrar doğrulanır.`}
+          title="DKIM imzalama ayarını uygula"
+          message={`${domain.domainName} için DKIM imzalama ayarı bir işlem olarak uygulanacak. DNS kaydı yeniden doğrulanır.`}
           confirmation={preview.confirmation}
           busy={busy}
           error={error}
           onCancel={() => setConfirming(false)}
           onConfirm={applyPreview}
-          confirmLabel="DKIM apply"
+          confirmLabel="DKIM ayarını uygula"
         />
       )}
     </>
