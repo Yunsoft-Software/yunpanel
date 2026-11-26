@@ -10,7 +10,7 @@ Yunsoft'un kendi hosting paneli. Plesk Obsidian'ın ekran düzeni, iş akışlar
 
 | Klasör | İçerik |
 |---|---|
-| `apps/api` | Node arka uç (root yetkisi yalnız burada). Giriş `src/index.js`, testler `test/`. |
+| `apps/api` | Node arka uç (root yetkisi yalnız burada). Giriş `src/index.js`, modüller `src/<alan>/` (aşağıdaki tablo), testler `test/`. |
 | `apps/web` | React/JSX arayüz (Vite). Ortak bileşenler `src/workspace/design-system/` ve `src/workspace/PanelKit.jsx`. |
 | `packages/host-runtime` | Sunucu adaptörleri (nginx, PHP-FPM, posta, DNS, kullanıcı…). |
 | `packages/config-templates`, `protocol`, `shared` | Şablonlar ve ortak kod. |
@@ -20,6 +20,33 @@ Yunsoft'un kendi hosting paneli. Plesk Obsidian'ın ekran düzeni, iş akışlar
 | `orkestra/`, `tasks/`, `docs/gorevler/` | Görev kayıtları ve ajan düzeni (bkz. bölüm 3). |
 | `scripts/` | Paket (`build-deb.sh`), lint (`validate-repository.mjs`), kurtarma araçları. |
 | `docs/yunpanel-docs-0.3.0/` | Yayımlanacak TR/EN ürün dokümanı paketi. Bu klasör elle düzenlenmez. |
+
+Arka uç `apps/api/src` alan klasörleri (T957). Kökte yalnız systemd girişleri kalır: `index.js` (`yunpanel-api.service`) ve `notification-sentinel.js` (`yunpanel-sentinel.service`). Alanın `*-http.js` rota dosyası alanın klasöründedir.
+
+| Klasör | İçerik |
+|---|---|
+| `http/` | `app.js`, `core-app.js`, `management-app.js` (rota bağlama), `panel-http-guard.js`, `tenant-boundary.js`, `site-resource-boundary.js`, `automation-http.js` |
+| `auth/` | Oturum, kullanıcı, MFA, API anahtarı, audit, secret maskeleme |
+| `hosting/` | Hosting hesabı, müşteri/reseller kapsamı ve kotaları, tenant site, yetenek kataloğu |
+| `websites/` | Website kaydı ve rotaları, silme, askıya alma, izolasyon, cron, cache, SFTP, statik kopya, sağlık |
+| `provisioning/` | Site oluşturma (`site-create*`) ve `website-provisioning-*` orkestratörü ile adım işleyicileri |
+| `domains/` | Domain kaydı, hiyerarşi, nginx/proxy ayarı, silme ve askıya alma, harici yaşam döngüsü |
+| `dns/` | DNS zone, DNSSEC, şablon, PowerDNS |
+| `mail/` | Posta alanı, kutu, alias, DKIM, SRS, smarthost, Roundcube |
+| `databases/` | Veritabanı, bağlama, kimlik bilgisi, yedek/geri yükleme, phpMyAdmin |
+| `applications/` | Uygulama kaydı, Node/Passenger/Python çalışma zamanı ve sürümleri, Git webhook |
+| `php/` | PHP araçları ve PHP site kopyası |
+| `wordpress/` | WordPress araç seti, klon, seçici aktarım |
+| `docker/` | Compose, volume, workload, katalog |
+| `files/` | Site dosya yöneticisi ve çalışanı, elFinder, korumalı yollar |
+| `terminal/` | Terminal ve ttyd oturumları |
+| `certificates/` | Sertifika kaydı, yenileme, reload |
+| `backup/` | Yedek planı/çalıştırma, website yedek ve geri yükleme, restic/rclone |
+| `migration/` | Plesk içe aktarma, yerel taşıma/kurtarma yedeği, website taşıma |
+| `jobs/` | Durable job kaydı, idempotency, `job-running-*` kurtarma |
+| `runtime/` | Yerel host yürütücüsü ve işlem listesi, sunucu kaydı, firewall, servisler, watchdog, log |
+| `panel/` | Lisans (ve `vendor-entitlement-public.pem`), panel ayarları, bildirimler, ürün bağlantıları |
+| `ai/` | AI sohbet, sağlayıcı, araç kataloğu |
 
 ## 2. Şu anki durum (26-11-2026)
 

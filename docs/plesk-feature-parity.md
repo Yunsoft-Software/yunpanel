@@ -337,7 +337,7 @@ Kaynak: 26 Ekim 2026 senior kod incelemesi ve 27 Ekim'de İNSAN'ın açtığı o
 
 ### Katalogda yarım işaretli olanlar
 
-Kaynak: `apps/api/src/non-reseller-capabilities.js` (26 Ekim'de 95 özellik: 70 completed, 13 partial, 9 deferred). Katalogdaki "completed" işareti çalıştığı anlamına gelmez.
+Kaynak: `apps/api/src/hosting/non-reseller-capabilities.js` (26 Ekim'de 95 özellik: 70 completed, 13 partial, 9 deferred). Katalogdaki "completed" işareti çalıştığı anlamına gelmez.
 
 | Özellik | 26 Kasım durumu |
 | --- | --- |

@@ -6,7 +6,7 @@ YunPanel aylık (`periodMonths: 1`), yıllık (`periodMonths: 12`), kampanya/sü
 
 Standart `.deb` kurulumlarında ve varsayılan kaynak çalıştırmalarında müşterinin veya sistem yöneticisinin elle Ed25519 açık anahtar dosyası kopyalaması **gerekmez**:
 
-1. Resmi Yunsoft Commerce açık anahtarı (`kid: 1cbcc4d3173d0c15`) paket içinde `/usr/share/yunpanel/trust/entitlement-public.pem` ve `apps/api/src/vendor-entitlement-public.pem` olarak hazır gelir.
+1. Resmi Yunsoft Commerce açık anahtarı (`kid: 1cbcc4d3173d0c15`) paket içinde `/usr/share/yunpanel/trust/entitlement-public.pem` ve `apps/api/src/panel/vendor-entitlement-public.pem` olarak hazır gelir.
 2. Paket kurulum betiği (`postinst`), `/etc/yunpanel/control-plane/entitlement-public.pem` dosyası henüz mevcut değilse bu resmi açık anahtarı otomatik olarak (`0644`, `root:root`) yerleştirir.
 3. İlk `Owner` kurulum ekranı (`setupRequired: true`) isteğe bağlı olarak Yunsoft web sitesindeki kredi kartsız 3 aylık Premium teklifine yönlendirme sunar. E-posta aboneliği müşteri panelinde tutulmaz ve bağlantıya e-posta veya alan adı eklenmez.
 4. İlk `Owner` hesabıyla panele giriş yapıldığında **Araçlar ve Ayarlar → Ayarlar → Lisans** (`/settings?section=license`) ekranından doğrudan lisans anahtarı veya imzalı lisans jetonu girilerek etkinleştirme tamamlanır.

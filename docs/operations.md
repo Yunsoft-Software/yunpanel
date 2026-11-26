@@ -43,7 +43,7 @@ WAF şablonları iki açık sağlayıcıyı destekler (`packages/config-template
 
 ## WordPress staging’den canlıya seçici aktarım hazırlığı
 
-Staging’den canlıya aktarım planlayıcısı (`apps/api/src/wordpress-selective-transfer.js`) canlı sipariş, üyelik ve çalışma zamanı yapılandırmasını varsayılan olarak korur.
+Staging’den canlıya aktarım planlayıcısı (`apps/api/src/wordpress/wordpress-selective-transfer.js`) canlı sipariş, üyelik ve çalışma zamanı yapılandırmasını varsayılan olarak korur.
 
 1. **Dosya kapsamı:** Yalnızca seçilen göreli kapsamlar (`themes`, `plugins`, `mu-plugins` ve doğrulanmış `wp-content/` özel yolları) aktarılır. `wp-config.php`, `.htaccess`, `.user.ini` her zaman; `wp-content/uploads/**` ise açıkça istenmedikçe korunur. Sembolik link ve yol kaçışı reddedilir.
 2. **Tablo koruması:** WooCommerce sipariş/ödeme/oturum tabloları, `users`/`usermeta`, `comments`/`commentmeta` ve Action Scheduler kuyruk tabloları varsayılan olarak aktarılmaz. Canlıda `shop_order` / `shop_subscription` / `shop_order_refund` kayıtları varsa paylaşılan `posts` ve `postmeta` tabloları kör tam yazmaya kapatılır.
