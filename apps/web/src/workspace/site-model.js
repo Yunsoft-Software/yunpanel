@@ -1,3 +1,5 @@
+export { formatBytes } from './format-bytes.js';
+
 const DAY = 86400000;
 const ACTIVE_JOBS = new Set(['queued', 'running']);
 const CRON = 'cron';
@@ -107,12 +109,6 @@ export function parentTrail(domain, domains) {
     trail.unshift(parent); seen.add(parent.id); parent = byId.get(parent.parentDomainId);
   }
   return trail;
-}
-export function formatBytes(value) {
-  if (!Number.isFinite(value) || value < 0) return '—';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']; let unit = 0; let size = value;
-  while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit++; }
-  return `${size.toFixed(unit >= 3 ? 1 : 0)} ${units[unit]}`;
 }
 export function formatDate(value) {
   if (value == null || !Number.isFinite(new Date(value).getTime())) return '—';

@@ -2,12 +2,12 @@ const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const USERNAME = /^[a-z0-9][a-z0-9._@+-]{2,127}$/;
 const integer = (value, minimum = 0) => Number.isSafeInteger(value) && value >= minimum;
 const object = (value) => value && typeof value === 'object' && !Array.isArray(value);
-function problem(code) { const error = new Error(code); error.code = code; return error; }
+import { apiErrorMessage, apiProblem as problem } from '../api-errors.js';
+
 function obsolete() { const error = problem('session_superseded'); error.name = 'AbortError'; return error; }
 const denied = (error) => [401, 403].includes(error?.status) && error?.code !== 'premium_license_required';
 
-export function userAdminMessage(error) {
-  const messages = {
+const userAdminMessages = Object.freeze({
     premium_license_required: 'Ek panel kullanıcısı oluşturmak veya yönetmek için aktif bir YunPanel Premium lisansı gerekiyor.',
     last_owner: 'Son aktif Owner silinemez, kapatılamaz veya Read Only rolüne düşürülemez.',
     user_revision_conflict: 'Bu hesap başka bir işlemde değişti. Formu kapatıp güncel kaydı yeniden açın; değişiklikleriniz gönderilmedi.',
@@ -27,11 +27,13 @@ export function userAdminMessage(error) {
     forbidden: 'Kullanıcı yönetimi için Owner yetkisi gerekiyor.',
     mfa_enrollment_required: 'Yönetim erişimi için iki adımlı doğrulamayı tamamlayın.',
     unauthorized: 'Oturumunuz kapatıldı. Yeniden giriş yapın.',
-    csrf_invalid: 'Oturum doğrulanamadı. Yeniden giriş yapın.',
     auth_busy: 'Parola işlemleri şu anda yoğun. Biraz sonra tekrar deneyin.',
-    rate_limited: 'Çok fazla deneme yapıldı. Biraz sonra tekrar deneyin.',
-  };
-  return messages[error?.code] ?? (error?.status === 404 ? 'Kullanıcı yönetimi API’si bulunamadı. API ve arayüz sürümlerini kontrol edin.' : 'İstek tamamlanamadı. Bağlantıyı ve sunucu durumunu kontrol edin.');
+});
+
+export function userAdminMessage(error) {
+  return apiErrorMessage(error, userAdminMessages, (cause) => (cause?.status === 404
+    ? 'Kullanıcı yönetimi API’si bulunamadı. API ve arayüz sürümlerini kontrol edin.'
+    : 'İstek tamamlanamadı. Bağlantıyı ve sunucu durumunu kontrol edin.'));
 }
 
 export function readAdminUser(value) {

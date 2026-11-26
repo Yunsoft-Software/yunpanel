@@ -1,3 +1,6 @@
+import { formatPreciseBytes as formatDatabaseBytes } from './format-bytes.js';
+
+export { formatDatabaseBytes };
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
 const RESERVED_DATABASES = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
@@ -107,21 +110,6 @@ export function validDatabaseName(value) {
     && DATABASE_NAME_PATTERN.test(value)
     && !RESERVED_DATABASES.has(value.toLowerCase())
     && !ROUNDCUBE_SCHEMA.test(value);
-}
-
-export function formatDatabaseBytes(value) {
-  if (!Number.isSafeInteger(value) || value < 0) return '—';
-  if (value < 1024) return `${value} B`;
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  let size = value / 1024;
-  for (const unit of units) {
-    if (size < 1024 || unit === units.at(-1)) {
-      const digits = size >= 100 ? 0 : size >= 10 ? 1 : 2;
-      return `${Number(size.toFixed(digits))} ${unit}`;
-    }
-    size /= 1024;
-  }
-  return '—';
 }
 
 export function databaseInventoryView(data) {

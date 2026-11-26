@@ -1,5 +1,7 @@
-export function authMessage(error) {
-  const messages = {
+import { apiErrorMessage } from './api-errors.js';
+
+// Sign-in screens keep their own wording for session codes (no session yet).
+const authMessages = Object.freeze({
     invalid_credentials: 'Kullanıcı adı, parola veya kurulum anahtarı geçersiz.',
     rate_limited: 'Çok fazla deneme yapıldı. Bir süre sonra tekrar deneyin.',
     auth_busy: 'Giriş hizmeti meşgul. Tekrar deneyin.',
@@ -7,7 +9,6 @@ export function authMessage(error) {
     already_configured: 'İlk kurulum tamamlanmış. Sayfayı yenileyip giriş yapın.',
     origin_forbidden: 'Panel adresi sunucu ayarıyla eşleşmiyor. Yöneticiniz public origin ayarını kontrol etmeli.',
     csrf_invalid: 'Oturum doğrulanamadı. Sayfayı yenileyin.',
-    session_superseded: 'Oturum değişti. İşlemi yeniden deneyin.',
     invalid_secret_master_key: 'Sunucunun şifreleme anahtarı geçersiz. Yöneticiniz yapılandırmayı kontrol etmeli.',
     mfa_invalid_code: 'Kod geçersiz veya kullanılmış. Yeni uygulama kodunu bekleyin ya da kullanılmamış kurtarma kodunu girin.',
     mfa_challenge_expired: 'Doğrulama süresi doldu. Kullanıcı adı ve parolanızla yeniden başlayın.',
@@ -21,6 +22,10 @@ export function authMessage(error) {
     invalid_email: 'Geçerli bir e-posta adresi girin.',
     email_in_use: 'Bu e-posta adresi başka bir hesap tarafından kullanılıyor.',
     invalid_identifier: 'Kullanıcı adı veya kurtarma e-postası girin.',
-  };
-  return messages[error?.code] ?? (error instanceof TypeError ? 'Sunucuya ulaşılamadı. Bağlantınızı kontrol edin.' : error?.message ?? 'İşlem tamamlanamadı.');
+});
+
+export function authMessage(error) {
+  return apiErrorMessage(error, authMessages, (cause) => (cause instanceof TypeError
+    ? 'Sunucuya ulaşılamadı. Bağlantınızı kontrol edin.'
+    : cause?.message ?? 'İşlem tamamlanamadı.'));
 }

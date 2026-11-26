@@ -1,3 +1,5 @@
+import { apiErrorMessage, apiProblem as problem } from '../api-errors.js';
+
 const ROOT = '/users/hosting/accounts';
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 const USERNAME = /^[a-z0-9][a-z0-9._@+-]{2,127}$/;
@@ -5,11 +7,9 @@ const object = (value) => value !== null && typeof value === 'object' && !Array.
 const identifier = (value) => typeof value === 'string' && ID.test(value);
 const integer = (value, min = 0) => Number.isSafeInteger(value) && value >= min;
 const nonNegativeNumber = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0;
-const problem = (code) => Object.assign(new Error(code), { code });
 const obsolete = () => Object.assign(problem('session_superseded'), { name: 'AbortError' });
 
-export function hostingAccountMessage(error) {
-  const messages = {
+const hostingAccountMessages = Object.freeze({
     hosting_account_revision_conflict: 'Profil değişti. Pencereyi kapatıp güncel kaydı yeniden açın.',
     user_revision_conflict: 'Kullanıcı hesabı değişti. Pencereyi kapatıp kullanıcı listesini yenileyin.',
     hosting_account_exists: 'Bu hesaba zaten bir profil bağlı. Listeyi yenileyip profili açın.',
@@ -43,10 +43,12 @@ export function hostingAccountMessage(error) {
     premium_license_required: 'Bu işlem için aktif bir YunPanel Premium lisansı gerekiyor. Lisans yönetimi ekranından Premium lisansınızı etkinleştirebilirsiniz.',
     forbidden: 'Bu işlem için Owner yetkisi gerekiyor.',
     unauthorized: 'Oturum kapandı. Yeniden giriş yapın.',
-    csrf_invalid: 'Oturum doğrulanamadı. Yeniden giriş yapın.',
-    mfa_enrollment_required: 'Yönetim için iki adımlı doğrulamayı tamamlayın.',
-  };
-  return messages[error?.code] ?? (error?.status === 404 ? 'Hesap API’si bulunamadı. API ve arayüz sürümlerini kontrol edin.' : 'İşlem tamamlanamadı. Bağlantıyı ve güncel kaydı kontrol edin.');
+});
+
+export function hostingAccountMessage(error) {
+  return apiErrorMessage(error, hostingAccountMessages, (cause) => (cause?.status === 404
+    ? 'Hesap API’si bulunamadı. API ve arayüz sürümlerini kontrol edin.'
+    : 'İşlem tamamlanamadı. Bağlantıyı ve güncel kaydı kontrol edin.'));
 }
 
 export function readHostingAccount(value) {

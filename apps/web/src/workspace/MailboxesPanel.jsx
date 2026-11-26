@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePanelSession } from '../panel-session.jsx';
 import { sessionVersion } from '../session-client.js';
 import { useMailChange } from './useMailChange.js';
+import { formatQuotaBytes } from './format-bytes.js';
 import MailboxRemovalPanel from './MailboxRemovalPanel.jsx';
 import MailboxDeliveryPolicyPanel from './MailboxDeliveryPolicyPanel.jsx';
 import {
@@ -23,13 +24,6 @@ import { dmarcPolicy, mailDnsRequirementStatus } from './mail-dns-requirements.j
 
 function destinationList(value) {
   return [...new Set(String(value ?? '').split(/[\n,]/).map((item) => item.trim()).filter(Boolean))];
-}
-
-function bytesLabel(value) {
-  if (!Number.isFinite(value)) return '—';
-  const gib = value / (1024 ** 3);
-  if (gib >= 1) return `${gib.toFixed(gib >= 10 ? 0 : 1)} GiB`;
-  return `${Math.round(value / (1024 ** 2))} MiB`;
 }
 
 function MailboxCreateModal({ domain, onClose, onChanged }) {
@@ -135,7 +129,7 @@ function MailboxDiagnosticsModal({ mailbox, onClose }) {
               <KeyValues items={[
                 ['Kabul Durumu', <Badge key="reception" state={reception?.canReceive ? 'active' : 'error'}>{reception?.canReceive ? 'Teslimata Hazır' : 'Teslimat Engelli'}</Badge>],
                 ['Yönlendirme Modu', <Badge key="routing" state={data?.routing === 'local' ? 'active' : 'warning'}>{data?.routing === 'local' ? 'Yerel Teslimat' : 'Dış Yönlendirme'}</Badge>],
-                ['Kota Durumu', reception?.quota?.quotaBytes ? `${bytesLabel(reception.quota.quotaBytes)} tanımlı` : 'Sınırsız'],
+                ['Kota Durumu', reception?.quota?.quotaBytes ? `${formatQuotaBytes(reception.quota.quotaBytes)} tanımlı` : 'Sınırsız'],
               ]} />
             </Section>
 
@@ -228,7 +222,7 @@ function PolicyPanel({ mailbox, onChanged }) {
     event.preventDefault();
     await mutate(() => setMailboxForwarding(mailbox.id, { expectedRevision: forwarding?.revision ?? 0, mode, destinations: destinationList(destinations), enabled: true }), 'forwarding');
   }
-  return <Section title={`Mailbox policy · ${mailbox.address}`} description="Kota ve yönlendirme değişiklikleri kaydettiğinizde posta hizmetine uygulanır."><div className="ws-section-body"><ErrorNotice error={error} /><div className="ws-form-grid"><form className="ws-form" onSubmit={saveQuota}><fieldset disabled={busy || quota === undefined}><label>Kota (MiB)<input disabled={change.pending} type="number" min="1" value={quotaMiB} onChange={(event) => setQuotaMiB(event.target.value)} placeholder="1024" required /></label><p className="ws-muted">Mevcut: {quota ? `${bytesLabel(quota.quotaBytes)} · rev ${quota.revision}` : 'Yapılandırılmadı'}</p><div className="ws-actions"><Button type="submit" disabled={busy || !quotaMiB}>Kotayı kaydet</Button>{quota && <Button variant="danger" type="button" disabled={busy} onClick={() => setConfirm('quota')}>Kotayı kaldır</Button>}</div></fieldset></form><form className="ws-form" onSubmit={saveForwarding}><fieldset disabled={busy || forwarding === undefined}><label>Yönlendirme biçimi<select disabled={change.pending} value={mode} onChange={(event) => setMode(event.target.value)}><option value="copy">Bir kopyasını ilet</option><option value="redirect">Yalnız yönlendir</option></select></label><label>Hedefler<textarea disabled={change.pending} rows="4" value={destinations} onChange={(event) => setDestinations(event.target.value)} placeholder="user@example.com" /></label><p className="ws-muted">Mevcut: {forwarding ? `${forwarding.destinations.join(', ')} · rev ${forwarding.revision}` : 'Yapılandırılmadı'}</p><div className="ws-actions"><Button type="submit" disabled={busy || destinationList(destinations).length === 0}>Yönlendirmeyi kaydet</Button>{forwarding && <Button variant="danger" type="button" disabled={busy} onClick={() => setConfirm('forwarding')}>Yönlendirmeyi kaldır</Button>}</div></fieldset></form></div></div>{confirm === 'quota' && quota && <ConfirmDialog title="Mailbox quota policy kaldır" message={`${mailbox.address} kota sınırı kaldırılacak ve posta hizmetine uygulanacak.`} confirmation={`clear-mailbox-quota:${mailbox.id}`} busy={busy} error={error} onCancel={() => setConfirm(null)} onConfirm={() => mutate(async () => { await clearMailboxQuota(mailbox.id, { expectedRevision: quota.revision }); }, 'quota')} confirmLabel="Quota policy kaldır" />}{confirm === 'forwarding' && forwarding && <ConfirmDialog title="Mailbox forwarding policy kaldır" message={`${mailbox.address} yönlendirmesi kaldırılacak ve posta hizmetine uygulanacak.`} confirmation={`clear-mailbox-forwarding:${mailbox.id}`} busy={busy} error={error} onCancel={() => setConfirm(null)} onConfirm={() => mutate(async () => { await clearMailboxForwarding(mailbox.id, { expectedRevision: forwarding.revision }); }, 'forwarding')} confirmLabel="Forwarding policy kaldır" />}</Section>;
+  return <Section title={`Mailbox policy · ${mailbox.address}`} description="Kota ve yönlendirme değişiklikleri kaydettiğinizde posta hizmetine uygulanır."><div className="ws-section-body"><ErrorNotice error={error} /><div className="ws-form-grid"><form className="ws-form" onSubmit={saveQuota}><fieldset disabled={busy || quota === undefined}><label>Kota (MiB)<input disabled={change.pending} type="number" min="1" value={quotaMiB} onChange={(event) => setQuotaMiB(event.target.value)} placeholder="1024" required /></label><p className="ws-muted">Mevcut: {quota ? `${formatQuotaBytes(quota.quotaBytes)} · rev ${quota.revision}` : 'Yapılandırılmadı'}</p><div className="ws-actions"><Button type="submit" disabled={busy || !quotaMiB}>Kotayı kaydet</Button>{quota && <Button variant="danger" type="button" disabled={busy} onClick={() => setConfirm('quota')}>Kotayı kaldır</Button>}</div></fieldset></form><form className="ws-form" onSubmit={saveForwarding}><fieldset disabled={busy || forwarding === undefined}><label>Yönlendirme biçimi<select disabled={change.pending} value={mode} onChange={(event) => setMode(event.target.value)}><option value="copy">Bir kopyasını ilet</option><option value="redirect">Yalnız yönlendir</option></select></label><label>Hedefler<textarea disabled={change.pending} rows="4" value={destinations} onChange={(event) => setDestinations(event.target.value)} placeholder="user@example.com" /></label><p className="ws-muted">Mevcut: {forwarding ? `${forwarding.destinations.join(', ')} · rev ${forwarding.revision}` : 'Yapılandırılmadı'}</p><div className="ws-actions"><Button type="submit" disabled={busy || destinationList(destinations).length === 0}>Yönlendirmeyi kaydet</Button>{forwarding && <Button variant="danger" type="button" disabled={busy} onClick={() => setConfirm('forwarding')}>Yönlendirmeyi kaldır</Button>}</div></fieldset></form></div></div>{confirm === 'quota' && quota && <ConfirmDialog title="Mailbox quota policy kaldır" message={`${mailbox.address} kota sınırı kaldırılacak ve posta hizmetine uygulanacak.`} confirmation={`clear-mailbox-quota:${mailbox.id}`} busy={busy} error={error} onCancel={() => setConfirm(null)} onConfirm={() => mutate(async () => { await clearMailboxQuota(mailbox.id, { expectedRevision: quota.revision }); }, 'quota')} confirmLabel="Quota policy kaldır" />}{confirm === 'forwarding' && forwarding && <ConfirmDialog title="Mailbox forwarding policy kaldır" message={`${mailbox.address} yönlendirmesi kaldırılacak ve posta hizmetine uygulanacak.`} confirmation={`clear-mailbox-forwarding:${mailbox.id}`} busy={busy} error={error} onCancel={() => setConfirm(null)} onConfirm={() => mutate(async () => { await clearMailboxForwarding(mailbox.id, { expectedRevision: forwarding.revision }); }, 'forwarding')} confirmLabel="Forwarding policy kaldır" />}</Section>;
 }
 
 export default function MailboxesPanel({ domain, mailboxes, onChanged }) {
@@ -253,4 +247,4 @@ export default function MailboxesPanel({ domain, mailboxes, onChanged }) {
     {removing?.scope === removalScope && <MailboxRemovalPanel mailbox={removing.mailbox} domain={domain} onChanged={onChanged} onClose={() => setRemoving(null)} onPolicy={() => setSelected(mailboxes.find((item) => item.id === removing.mailbox.id) ?? null)} />}{creating && <MailboxCreateModal domain={domain} onClose={() => setCreating(false)} onChanged={onChanged} />}{passwordFor && <PasswordModal mailbox={passwordFor} onClose={() => setPasswordFor(null)} onChanged={onChanged} />}{diagnosticsFor && <MailboxDiagnosticsModal mailbox={diagnosticsFor} onClose={() => setDiagnosticsFor(null)} />}</>;
 }
 
-export const mailboxesPanelInternals = Object.freeze({ destinationList, bytesLabel });
+export const mailboxesPanelInternals = Object.freeze({ destinationList });

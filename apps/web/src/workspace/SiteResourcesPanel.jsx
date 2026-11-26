@@ -3,6 +3,7 @@ import { applyDatabaseCredential, createPhpMyAdminHandoff, createWebsiteDatabase
 import { databaseBackupChoices, databaseRestorePreviewView, websiteDatabaseDeletePreviewView, formatDatabaseBytes, websiteDatabaseResourcesView } from './database-model.js';
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, Icon, KeyValues, LinkButton, Modal, ModalCloseButton, Section } from './PanelKit.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
+import { formatLocaleBytes } from './format-bytes.js';
 import { openWebsitePhpMyAdmin } from './phpmyadmin-client.js';
 import { formatDate, siteHref } from './site-model.js';
 import SiteMailPanel from './SiteMailPanel.jsx';
@@ -34,18 +35,6 @@ const CONSUMPTION_ROWS = Object.freeze([
   ['memoryMb', 'Bellek', false],
   ['processCount', 'Süreç Sayısı', false],
 ]);
-
-function formatHumanBytes(bytes) {
-  if (!Number.isFinite(bytes) || bytes < 0) return null;
-  if (bytes === 0) return '0 B';
-  if (bytes < 1024) return `${Math.round(bytes).toLocaleString('tr-TR')} B`;
-  const kib = bytes / 1024;
-  if (kib < 1024 * 1024) {
-    return `${Math.round(kib).toLocaleString('tr-TR')} KB`;
-  }
-  const gib = bytes / (1024 * 1024 * 1024);
-  return `${gib.toLocaleString('tr-TR', { maximumFractionDigits: 1 })} GB`;
-}
 
 function formatMetricLimit(value, unit) {
   if (value === null || value === undefined || !Number.isFinite(value)) return null;
@@ -135,7 +124,7 @@ export function formatMeasuredDisplay(key, item) {
     if (typeof item.bytes === 'number' && Number.isFinite(item.bytes)) {
       if (item.bytes === 0) return '0 B';
       const mbText = `${item.measured.toLocaleString('tr-TR', { maximumFractionDigits: 2 })} MB`;
-      const humanText = formatHumanBytes(item.bytes);
+      const humanText = formatLocaleBytes(item.bytes);
       return humanText ? `${mbText} (${humanText})` : mbText;
     }
     return `${item.measured.toLocaleString('tr-TR', { maximumFractionDigits: 2 })} MB`;

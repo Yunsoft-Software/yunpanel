@@ -1,3 +1,5 @@
+import { apiErrorMessage, apiProblem as problem } from '../api-errors.js';
+
 const ACTION = /^[a-z0-9][a-z0-9._-]{0,119}$/;
 const TYPE = /^[a-z][a-z0-9._-]{0,63}$/;
 const CODE = ACTION;
@@ -7,7 +9,6 @@ const integer = (value, minimum = 0) => Number.isSafeInteger(value) && value >= 
 const object = (value) => value && typeof value === 'object' && !Array.isArray(value);
 const denied = (error) => [401, 403].includes(error?.status);
 
-function problem(code) { const error = new Error(code); error.code = code; return error; }
 function safeId(value) { return typeof value === 'string' && value.length >= 1 && value.length <= 128 && !CONTROL.test(value); }
 function optionalText(value, validator) {
   if (value == null || value === '') return null;
@@ -75,8 +76,7 @@ export function readAuditPage(value, { offset, limit }) {
   } catch { throw problem('audit_page_invalid'); }
 }
 
-export function auditMessage(error) {
-  const messages = {
+const auditMessages = Object.freeze({
     audit_resource_pair_required: 'Kaynak türü ve kaynak kimliği birlikte girilmelidir.',
     invalid_audit_filter: 'Denetim filtresi geçersiz. Kimlikleri ve işlem adını kontrol edin.',
     invalid_audit_time_range: 'Başlangıç ve bitiş zamanı geçerli bir aralık oluşturmalıdır.',
@@ -86,11 +86,12 @@ export function auditMessage(error) {
     audit_result_invalid: 'API geçerli bir denetim kaydı döndürmedi.',
     audit_unavailable: 'Denetim geçmişi şu anda kullanılamıyor.',
     forbidden: 'Denetim geçmişi yalnız Owner tarafından görüntülenebilir.',
-    unauthorized: 'Oturumunuz sona erdi. Yeniden giriş yapın.',
-  };
-  return messages[error?.code] ?? (error?.status === 404
+});
+
+export function auditMessage(error) {
+  return apiErrorMessage(error, auditMessages, (cause) => (cause?.status === 404
     ? 'Denetim API’si bulunamadı. API ve arayüz sürümlerini kontrol edin.'
-    : 'Denetim kayıtları alınamadı. Bağlantıyı ve sunucu durumunu kontrol edin.');
+    : 'Denetim kayıtları alınamadı. Bağlantıyı ve sunucu durumunu kontrol edin.'));
 }
 
 export const emptyAuditPage = () => ({ status: 'loading', data: null, error: null });

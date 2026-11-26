@@ -4,14 +4,8 @@ import { getServerMailDeliveryDiagnostics, sendServerMailTestDelivery } from './
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, Section } from './PanelKit.jsx';
 import { formatDate } from './site-model.js';
+import { formatBinaryBytes } from './format-bytes.js';
 import SmarthostPanel from './SmarthostPanel.jsx';
-
-function bytesLabel(value) {
-  if (!Number.isFinite(value)) return '—';
-  if (value >= 1024 ** 2) return `${(value / (1024 ** 2)).toFixed(1)} MiB`;
-  if (value >= 1024) return `${(value / 1024).toFixed(1)} KiB`;
-  return `${value} B`;
-}
 
 function RoundcubePanel() {
   const { observe } = useWorkspace();
@@ -189,7 +183,7 @@ function QueuePanel({ serverId }) {
   }, [serverId, search]);
   useEffect(() => { load(); }, [serverId]);
   const items = queue?.entries ?? [];
-  return <Section title="Postfix mail queue" description="Bekleyen ve işlenen Postfix e-posta kuyruğu."><div className="ws-section-body"><ErrorNotice error={error} /><form className="ws-filters" onSubmit={(event) => { event.preventDefault(); load(); }}><label className="ws-filter-search">Queue ara<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="queue ID, sender veya recipient" /></label><Button type="submit" disabled={busy}>{busy ? 'Okunuyor…' : 'Ara'}</Button><Button type="button" icon="refresh" disabled={busy} onClick={load}>Yenile</Button></form></div>{items.length ? <div className="ws-table-scroll"><table className="ws-table" role="table" aria-label="Mail kuyruğu"><thead><tr role="row"><th scope="col">Queue ID</th><th scope="col">Queue</th><th scope="col">Yönlendirme</th><th scope="col">Gönderen</th><th scope="col">Alıcılar</th><th scope="col">Boyut</th><th scope="col">Geliş</th></tr></thead><tbody>{items.map((item) => <tr key={item.queueId} role="row"><td role="cell"><code>{item.queueId}</code></td><td role="cell">{item.queueName}</td><td role="cell"><Badge state={item.routing === 'local' ? 'active' : item.routing === 'external' ? 'warning' : 'neutral'}>{item.routing === 'local' ? 'Yerel' : item.routing === 'external' ? 'Dış' : item.routing ?? '—'}</Badge></td><td role="cell">{item.sender || '<>'}</td><td role="cell">{item.recipients.map((recipient) => <small key={recipient.address}>{recipient.address}{recipient.delayReason ? ` · ${recipient.delayReason}` : ''}</small>)}</td><td role="cell">{bytesLabel(item.messageSize)}</td><td role="cell">{formatDate(item.arrivalTime)}</td></tr>)}</tbody></table></div> : queue && <EmptyState icon="mail" title="Queue boş" detail="Filtreye uyan bekleyen Postfix mesajı yok." />}{queue?.page && <div className="ws-section-body"><p className="ws-muted">{queue.page.count} kayıt · {queue.page.scanned} tarandı{queue.page.hasMore ? ' · daha fazla kayıt var' : ''}{queue.page.malformed ? ` · ${queue.page.malformed} bozuk kayıt atlandı` : ''}</p></div>}</Section>;
+  return <Section title="Postfix mail queue" description="Bekleyen ve işlenen Postfix e-posta kuyruğu."><div className="ws-section-body"><ErrorNotice error={error} /><form className="ws-filters" onSubmit={(event) => { event.preventDefault(); load(); }}><label className="ws-filter-search">Queue ara<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="queue ID, sender veya recipient" /></label><Button type="submit" disabled={busy}>{busy ? 'Okunuyor…' : 'Ara'}</Button><Button type="button" icon="refresh" disabled={busy} onClick={load}>Yenile</Button></form></div>{items.length ? <div className="ws-table-scroll"><table className="ws-table" role="table" aria-label="Mail kuyruğu"><thead><tr role="row"><th scope="col">Queue ID</th><th scope="col">Queue</th><th scope="col">Yönlendirme</th><th scope="col">Gönderen</th><th scope="col">Alıcılar</th><th scope="col">Boyut</th><th scope="col">Geliş</th></tr></thead><tbody>{items.map((item) => <tr key={item.queueId} role="row"><td role="cell"><code>{item.queueId}</code></td><td role="cell">{item.queueName}</td><td role="cell"><Badge state={item.routing === 'local' ? 'active' : item.routing === 'external' ? 'warning' : 'neutral'}>{item.routing === 'local' ? 'Yerel' : item.routing === 'external' ? 'Dış' : item.routing ?? '—'}</Badge></td><td role="cell">{item.sender || '<>'}</td><td role="cell">{item.recipients.map((recipient) => <small key={recipient.address}>{recipient.address}{recipient.delayReason ? ` · ${recipient.delayReason}` : ''}</small>)}</td><td role="cell">{formatBinaryBytes(item.messageSize)}</td><td role="cell">{formatDate(item.arrivalTime)}</td></tr>)}</tbody></table></div> : queue && <EmptyState icon="mail" title="Queue boş" detail="Filtreye uyan bekleyen Postfix mesajı yok." />}{queue?.page && <div className="ws-section-body"><p className="ws-muted">{queue.page.count} kayıt · {queue.page.scanned} tarandı{queue.page.hasMore ? ' · daha fazla kayıt var' : ''}{queue.page.malformed ? ` · ${queue.page.malformed} bozuk kayıt atlandı` : ''}</p></div>}</Section>;
 }
 
 function LogsPanel({ serverId }) {
@@ -210,4 +204,3 @@ export default function MailOperationsPanel() {
   return <><RoundcubePanel />{server ? <>{isOwner && <ServiceConnectionDiagnosticsPanel serverId={server.id} />}{isOwner && <><QueuePanel serverId={server.id} /><LogsPanel serverId={server.id} /></>}{isOwner && <ServiceTestDeliveryPanel serverId={server.id} />}{isOwner && <SmarthostPanel serverId={server.id} />}</> : <Section title="Mail runtime"><EmptyState icon="server" title="Yerel sunucu kimliği bulunamadı" detail="Yerel sunucu bağlantısı hazır olduğunda posta kuyruğu ve servis günlükleri burada görüntülenir." /></Section>}</>;
 }
 
-export const mailOperationsPanelInternals = Object.freeze({ bytesLabel });
