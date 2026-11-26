@@ -285,3 +285,13 @@ export {
   YUNPANEL_TRAFFIC_LOG_PATH,
   renderNginxTrafficAccountingConfig,
 } from './nginx-traffic.js';
+
+export {
+  WafPolicyTemplateError,
+  nginxWafConfigPath,
+  normalizeWafExcludedRoutes,
+  previewCloudflareManagedWafPolicy,
+  previewCrowdSecAppSecPolicy,
+  previewWafPolicy,
+  wafPolicyTemplatePolicy,
+} from './waf-policy.js';
