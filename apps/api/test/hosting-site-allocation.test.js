@@ -3,10 +3,10 @@ import test from 'node:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createHostingAccountStore } from '../src/hosting-account-store.js';
-import { initializeHostingAccountSchema, rollbackEmptyHostingAccountSchema } from '../src/hosting-account-schema.js';
+import { createHostingAccountStore } from '../src/hosting/hosting-account-store.js';
+import { initializeHostingAccountSchema, rollbackEmptyHostingAccountSchema } from '../src/hosting/hosting-account-schema.js';
 import { hostingAuthFixture } from '../test-support/hosting-auth-fixture.js';
-import { hostingWebsiteDigest } from '../src/hosting-site-allocation-store.js';
+import { hostingWebsiteDigest } from '../src/hosting/hosting-site-allocation-store.js';
 import { siteFixture, website, allocation, uuid } from '../test-support/hosting-site-fixture.js';
 
 const code = (expected) => (error) => error.code === expected;

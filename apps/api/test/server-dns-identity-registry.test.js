@@ -6,7 +6,7 @@ import test from 'node:test';
 import {
   createServerDnsIdentityRegistry,
   ServerDnsIdentityRegistryError,
-} from '../src/server-dns-identity-registry.js';
+} from '../src/dns/server-dns-identity-registry.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 

@@ -7,7 +7,7 @@ import {
   createDnsZoneDnssecRolloverRegistry,
   dnsZoneDnssecRolloverPublicView,
   DnsZoneDnssecRolloverRegistryError,
-} from '../src/dns-zone-dnssec-rollover-registry.js';
+} from '../src/dns/dns-zone-dnssec-rollover-registry.js';
 
 const operationId = '6b11545e-e9cf-4227-b525-21c986d7e3f4';
 const domainId = '8bc307db-9e2d-4c3f-91ea-49e740d259a9';

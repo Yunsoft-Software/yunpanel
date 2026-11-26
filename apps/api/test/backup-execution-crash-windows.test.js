@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createBackupExecutionOrchestrator } from '../src/backup-execution-orchestrator.js';
-import { createBackupOperationRegistry } from '../src/backup-operation-registry.js';
+import { createBackupExecutionOrchestrator } from '../src/backup/backup-execution-orchestrator.js';
+import { createBackupOperationRegistry } from '../src/backup/backup-operation-registry.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const operationId = '2c387b02-8747-458a-b509-8f531d4d149e';

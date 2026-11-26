@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { websiteAnalyticsHttpInternals } from '../src/website-analytics-http.js';
+import { websiteAnalyticsHttpInternals } from '../src/websites/website-analytics-http.js';
 
 const websiteId='11111111-1111-4111-8111-111111111111';
 const raw={websiteId,running:true,pid:1234,socketExists:true,socketPath:'/run/private.sock',pidPath:'/run/private.pid'};

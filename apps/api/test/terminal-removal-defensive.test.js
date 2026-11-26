@@ -13,31 +13,31 @@ import {
   createTtydSessionManager,
   TtydSessionError,
   ttydSessionInternals,
-} from '../src/ttyd-session-manager.js';
-import { createAuthenticatedApi } from '../src/auth-http.js';
-import { createAuthStore } from '../src/auth-store.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createApplicationEnvironmentRegistry } from '../src/application-environment-registry.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createCertificateRegistry } from '../src/certificate-registry.js';
-import { createDnsHostingRegistry } from '../src/dns-hosting-registry.js';
-import { createMailDomainRegistry } from '../src/mail-domain-registry.js';
-import { createApplicationRuntimeBindingRegistry } from '../src/application-runtime-binding-registry.js';
-import { createDurableJobRegistry } from '../src/durable-job-registry.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { createLiveSessionRegistry } from '../src/live-session-registry.js';
-import { createWebsiteProvisioningRuntime } from '../src/website-provisioning-runtime.js';
-import { createWebsiteRemovalCleanupAdapters } from '../src/website-removal-cleanup-adapters.js';
-import { createWebsiteRemovalOperationRegistry } from '../src/website-removal-operation-registry.js';
-import { createWebsiteRemovalPreview } from '../src/website-removal-plan.js';
-import { previewResourceImpact } from '../src/resource-impact.js';
-import { createWebsiteRemovalRuntime } from '../src/website-removal-runtime.js';
-import { mountWebsiteRemovalRoutes, WebsiteRemovalHttpError } from '../src/website-removal-http.js';
-import { startLocalRuntime } from '../src/local-runtime.js';
-import { createSystemWatchdogService } from '../src/system-watchdog-service.js';
-import * as terminalProcessManager from '../src/terminal-process-manager.js';
+} from '../src/terminal/ttyd-session-manager.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
+import { createAuthStore } from '../src/auth/auth-store.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createApplicationEnvironmentRegistry } from '../src/applications/application-environment-registry.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createCertificateRegistry } from '../src/certificates/certificate-registry.js';
+import { createDnsHostingRegistry } from '../src/dns/dns-hosting-registry.js';
+import { createMailDomainRegistry } from '../src/mail/mail-domain-registry.js';
+import { createApplicationRuntimeBindingRegistry } from '../src/applications/application-runtime-binding-registry.js';
+import { createDurableJobRegistry } from '../src/jobs/durable-job-registry.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { createLiveSessionRegistry } from '../src/auth/live-session-registry.js';
+import { createWebsiteProvisioningRuntime } from '../src/provisioning/website-provisioning-runtime.js';
+import { createWebsiteRemovalCleanupAdapters } from '../src/websites/website-removal-cleanup-adapters.js';
+import { createWebsiteRemovalOperationRegistry } from '../src/websites/website-removal-operation-registry.js';
+import { createWebsiteRemovalPreview } from '../src/websites/website-removal-plan.js';
+import { previewResourceImpact } from '../src/websites/resource-impact.js';
+import { createWebsiteRemovalRuntime } from '../src/websites/website-removal-runtime.js';
+import { mountWebsiteRemovalRoutes, WebsiteRemovalHttpError } from '../src/websites/website-removal-http.js';
+import { startLocalRuntime } from '../src/runtime/local-runtime.js';
+import { createSystemWatchdogService } from '../src/runtime/system-watchdog-service.js';
+import * as terminalProcessManager from '../src/terminal/terminal-process-manager.js';
 
 const {
   captureOwnedTerminalIdentity,
@@ -708,7 +708,7 @@ test('terminal-process-manager OWNED_PROCESS_PYTHON binds socketPath in initial 
   // Blocking Fix #1 & #2: ttyd-session-manager passes socketPath directly to createOwnedTerminalLifecycle before sessions.set/waitForSocket,
   // never calls bare killProcessGroup or child.kill in captureOwnedTerminalIdentity / createOwnedTerminalLifecycle failure paths,
   // calls lifecycle.snapshot() after waitForSocket, and keeps unref() on the waitForSocket 25ms timer.
-  const ttydSource = await readFile(new URL('../src/ttyd-session-manager.js', import.meta.url), 'utf8');
+  const ttydSource = await readFile(new URL('../src/terminal/ttyd-session-manager.js', import.meta.url), 'utf8');
   const spawnAttemptedIdx = ttydSource.indexOf('spawnAttempted = true;');
   const lifecycleIdx = ttydSource.indexOf('createOwnedTerminalLifecycle({ seed, childExit: observation.exit, socketPath })');
   const sessionsSetIdx = ttydSource.indexOf('sessions.set(id, record);');

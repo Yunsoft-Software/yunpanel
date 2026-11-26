@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createMailAliasRegistry, MailAliasRegistryError } from '../src/mail-alias-registry.js';
+import { createMailAliasRegistry, MailAliasRegistryError } from '../src/mail/mail-alias-registry.js';
 
 const mailDomainId = '87654321-1234-4234-8234-123456789012';
 const otherMailDomainId = '97654321-1234-4234-8234-123456789012';

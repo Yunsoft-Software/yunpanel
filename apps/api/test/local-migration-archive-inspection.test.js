@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   inspectVerifiedLocalMigrationArchive,
   localMigrationArchiveInspectionInternals,
-} from '../src/local-migration-archive-inspection.js';
+} from '../src/migration/local-migration-archive-inspection.js';
 
 const backupDirectory = '/var/backups/yunpanel/migration-2026-09-10T15-00-00-000Z';
 

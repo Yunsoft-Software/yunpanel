@@ -1,15 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createCertificateRegistry } from '../src/certificate-registry.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createDnsHostingRegistry } from '../src/dns-hosting-registry.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { createMailDomainRegistry } from '../src/mail-domain-registry.js';
-import { previewResourceImpact, ResourceImpactError, resourceImpactInternals } from '../src/resource-impact.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createCertificateRegistry } from '../src/certificates/certificate-registry.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createDnsHostingRegistry } from '../src/dns/dns-hosting-registry.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { createMailDomainRegistry } from '../src/mail/mail-domain-registry.js';
+import { previewResourceImpact, ResourceImpactError, resourceImpactInternals } from '../src/websites/resource-impact.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
 
 async function fixture() {
   const registry = createServerRegistry();

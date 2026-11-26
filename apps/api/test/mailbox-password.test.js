@@ -6,7 +6,7 @@ import {
   mailboxPasswordPolicy,
   MailboxPasswordError,
   verifyMailboxPassword,
-} from '../src/mailbox-password.js';
+} from '../src/mail/mailbox-password.js';
 
 test('hashes mailbox passwords as canonical Dovecot-compatible Argon2id PHC', async () => {
   const password = 'mailbox password 2026';

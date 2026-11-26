@@ -8,7 +8,7 @@ import {
   createManagedServiceMutationReceiptStore,
   ManagedServiceMutationReceiptError,
   managedServiceStateDigest,
-} from '../src/managed-service-mutation-receipt.js';
+} from '../src/runtime/managed-service-mutation-receipt.js';
 
 const serverId = 'server-1';
 const installJobId = '12345678-1234-4234-8234-123456789012';

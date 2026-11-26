@@ -4,8 +4,8 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createWebsiteRemovalRuntime } from '../src/website-removal-runtime.js';
-import { createWebsiteRemovalOperationRegistry } from '../src/website-removal-operation-registry.js';
+import { createWebsiteRemovalRuntime } from '../src/websites/website-removal-runtime.js';
+import { createWebsiteRemovalOperationRegistry } from '../src/websites/website-removal-operation-registry.js';
 import { removalFixture, removalPreview, removalStart, removalContinue } from '../test-support/website-removal-fixture.js';
 
 const code = (expected) => (error) => error.code === expected;

@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   createDnsZoneMailIntentResolver,
   DnsZoneMailIntentError,
-} from '../src/dns-zone-mail-intent.js';
+} from '../src/dns/dns-zone-mail-intent.js';
 
 const domain = Object.freeze({
   id: '8bc307db-9e2d-4c3f-91ea-49e740d259a9',

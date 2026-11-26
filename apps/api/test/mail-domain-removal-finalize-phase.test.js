@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   createMailDomainRemovalFinalizePhase,
   mailDomainRemovalFinalizePhaseInternals,
-} from '../src/mail-domain-removal-finalize-phase.js';
+} from '../src/mail/mail-domain-removal-finalize-phase.js';
 
 const operationId = '12345678-1234-4234-8234-123456789012';
 const parentOperationId = '22345678-1234-4234-8234-123456789012';

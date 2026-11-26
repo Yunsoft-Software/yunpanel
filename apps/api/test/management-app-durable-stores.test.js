@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createApp } from '../src/app.js';
+import { createApp } from '../src/http/app.js';
 
 const FILE_BACKED_STORES = [
   'registry', 'jobRegistry', 'certificateRegistry', 'applicationRegistry', 'dockerWorkloadRegistry',

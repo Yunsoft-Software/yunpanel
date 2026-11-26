@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { trackDeliveries } from '../src/mail-delivery-tracker.js';
+import { trackDeliveries } from '../src/mail/mail-delivery-tracker.js';
 
 // Line shapes as journald stores Postfix MESSAGE on Ubuntu 24.04 (postfix@-.service).
 const at = (second) => `2026-10-27T10:00:${String(second).padStart(2, '0')}.000Z`;

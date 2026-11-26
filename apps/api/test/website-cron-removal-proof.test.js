@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createCronRemovalRequest } from '../src/website-cron-removal-request.js';
-import { verifyCronHostRemoval, verifyCronRemovalJob } from '../src/website-cron-removal-proof.js';
-import { createLocalWebsiteCronOperation } from '../src/local-website-cron-operation.js';
-import { createWebsiteCronApplyService } from '../src/website-cron-apply-service.js';
+import { createCronRemovalRequest } from '../src/websites/website-cron-removal-request.js';
+import { verifyCronHostRemoval, verifyCronRemovalJob } from '../src/websites/website-cron-removal-proof.js';
+import { createLocalWebsiteCronOperation } from '../src/websites/local-website-cron-operation.js';
+import { createWebsiteCronApplyService } from '../src/websites/website-cron-apply-service.js';
 import { task, website, taskId, otherId, serverId, jobId, jobFor } from './fixtures/cron-removal-fixture.js';
 
 const actor = Object.freeze({

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { DomainRegistryError } from '../src/domain-registry.js';
-import { createDomainStageTargetJobRegistry } from '../src/domain-stage-target-job-registry.js';
+import { DomainRegistryError } from '../src/domains/domain-registry.js';
+import { createDomainStageTargetJobRegistry } from '../src/domains/domain-stage-target-job-registry.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';

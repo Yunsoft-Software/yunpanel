@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TOTP } from 'otpauth';
-import { createAuthStore } from '../src/auth-store.js';
+import { createAuthStore } from '../src/auth/auth-store.js';
 
 const script = fileURLToPath(new URL('../../../scripts/auth.mjs', import.meta.url));
 function run(args, env) {

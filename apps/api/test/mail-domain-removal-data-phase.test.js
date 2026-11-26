@@ -5,7 +5,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   createMailDomainRemovalDataPhase,
   mailDomainRemovalDataPhaseInternals,
-} from '../src/mail-domain-removal-data-phase.js';
+} from '../src/mail/mail-domain-removal-data-phase.js';
 
 const operationId = '12345678-1234-4234-8234-123456789012';
 const mailDomainId = '22345678-1234-4234-8234-123456789012';

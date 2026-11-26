@@ -8,21 +8,21 @@ import path from 'node:path';
 import test from 'node:test';
 import { createNginxManager } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createApp } from '../src/app.js';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createApplicationRuntimeBindingRegistry } from '../src/application-runtime-binding-registry.js';
-import { createAuditedJobRegistry } from '../src/audited-job-registry.js';
-import { createAuthenticatedApi } from '../src/auth-http.js';
-import { createAuthStore } from '../src/auth-store.js';
-import { createCertificateRegistry } from '../src/certificate-registry.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createDurableJobRegistry } from '../src/durable-job-registry.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { reconcileCompletedJob } from '../src/job-reconciliation.js';
-import { startLocalRuntime } from '../src/local-runtime.js';
-import { createProcessStoreLock } from '../src/process-store-lock.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
+import { createApp } from '../src/http/app.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createApplicationRuntimeBindingRegistry } from '../src/applications/application-runtime-binding-registry.js';
+import { createAuditedJobRegistry } from '../src/jobs/audited-job-registry.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
+import { createAuthStore } from '../src/auth/auth-store.js';
+import { createCertificateRegistry } from '../src/certificates/certificate-registry.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createDurableJobRegistry } from '../src/jobs/durable-job-registry.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { reconcileCompletedJob } from '../src/jobs/job-reconciliation.js';
+import { startLocalRuntime } from '../src/runtime/local-runtime.js';
+import { createProcessStoreLock } from '../src/runtime/process-store-lock.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
 
 async function createRealRuntimeHarness(t, {
   onBeforeReconcile = null,

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createMailServiceIdentityRegistry } from '../src/mail-service-identity-registry.js';
+import { createMailServiceIdentityRegistry } from '../src/mail/mail-service-identity-registry.js';
 import {
   createRoundcubeConfigurationService,
   RoundcubeConfigurationError,
-} from '../src/roundcube-configuration.js';
-import { createRoundcubeSecretRegistry } from '../src/roundcube-secret-registry.js';
+} from '../src/mail/roundcube-configuration.js';
+import { createRoundcubeSecretRegistry } from '../src/mail/roundcube-secret-registry.js';
 
 const SERVER_ID = '10714f5d-8646-4f9a-a8e9-b80439ff6305';
 const DOMAIN_ID = '0b83fb4d-d9d5-4a88-9975-977f015427c5';

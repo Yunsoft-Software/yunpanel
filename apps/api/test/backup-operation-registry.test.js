@@ -3,11 +3,11 @@ import test from 'node:test';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createBackupExecutionPlan } from '../src/backup-execution-plan.js';
+import { createBackupExecutionPlan } from '../src/backup/backup-execution-plan.js';
 import {
   BackupOperationRegistryError,
   createBackupOperationRegistry,
-} from '../src/backup-operation-registry.js';
+} from '../src/backup/backup-operation-registry.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const inventoryJobId = '1dff50cb-0840-413c-a9d1-d069f8e87743';

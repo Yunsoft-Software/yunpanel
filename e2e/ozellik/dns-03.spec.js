@@ -39,7 +39,7 @@ test.describe('DNS-03 Master/secondary, DNS aç/kapat ve harici DNS davranışı
     if (subdomainId) {
       try {
         runSsh(`node -e "
-          const { createDomainRegistry } = require('./apps/api/src/domain-registry.js');
+          const { createDomainRegistry } = require('./apps/api/src/domains/domain-registry.js');
           // cleanup
         " 2>/dev/null || true`);
       } catch {

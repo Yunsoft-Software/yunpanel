@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
-import { AuthError } from '../src/auth-error.js';
-import { attachManagementAudit, classifyManagementMutation } from '../src/management-audit.js';
+import { AuthError } from '../src/auth/auth-error.js';
+import { attachManagementAudit, classifyManagementMutation } from '../src/auth/management-audit.js';
 
 class Response extends EventEmitter {
   constructor(statusCode = 200) {

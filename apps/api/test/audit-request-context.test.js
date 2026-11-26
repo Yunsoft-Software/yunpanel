@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { currentAuditActorId, withAuditActor } from '../src/audit-request-context.js';
+import { currentAuditActorId, withAuditActor } from '../src/auth/audit-request-context.js';
 
 test('audit actor context survives asynchronous work without leaking across requests', async () => {
   assert.equal(currentAuditActorId(), null);

@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { previewResourceImpact } from '../src/resource-impact.js';
-import { createWebsiteRemovalPreview } from '../src/website-removal-plan.js';
-import { createWebsiteRemovalOperationRegistry } from '../src/website-removal-operation-registry.js';
-import { createWebsiteRemovalRuntime } from '../src/website-removal-runtime.js';
+import { previewResourceImpact } from '../src/websites/resource-impact.js';
+import { createWebsiteRemovalPreview } from '../src/websites/website-removal-plan.js';
+import { createWebsiteRemovalOperationRegistry } from '../src/websites/website-removal-operation-registry.js';
+import { createWebsiteRemovalRuntime } from '../src/websites/website-removal-runtime.js';
 
 test('website with SSL certificate can generate removal preview and be cleanly removed (T801)', async () => {
   const serverId = '11111111-1111-4111-8111-111111111111';

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import test from 'node:test';
-import { createHostingAccountStore } from '../src/hosting-account-store.js';
+import { createHostingAccountStore } from '../src/hosting/hosting-account-store.js';
 import { hostingAuthFixture } from '../test-support/hosting-auth-fixture.js';
 import { loadHostingHttpBoundary } from '../test-support/hosting-http-boundary-loader.js';
 

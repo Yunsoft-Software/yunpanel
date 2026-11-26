@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import http from 'node:http';
 import test from 'node:test';
-import { createApp } from '../src/app.js';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createJobRegistry } from '../src/job-registry.js';
+import { createApp } from '../src/http/app.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
 import { withPanelContext } from './helpers/panel-auth-fixture.js';
 
 const applicationId = '9d4a4727-1aba-4d35-95fe-21db67042ce9';

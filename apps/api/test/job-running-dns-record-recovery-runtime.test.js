@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { runRunningDnsRecordRecoveryFromStores } from '../src/job-running-dns-record-recovery-runtime.js';
+import { runRunningDnsRecordRecoveryFromStores } from '../src/jobs/job-running-dns-record-recovery-runtime.js';
 
 const serverId = 'server-1';
 const jobId = '7f217caa-0f0f-4569-a657-30a97bcb7ca0';

@@ -5,12 +5,12 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { createApplicationEnvironmentRegistry } from '../src/application-environment-registry.js';
-import { createDnsProviderCredentialRegistry } from '../src/dns-provider-credential-registry.js';
-import { createMfaVault } from '../src/mfa-crypto.js';
-import { createMailboxRegistry } from '../src/mailbox-registry.js';
-import { verifyMailboxPassword } from '../src/mailbox-password.js';
-import { rollbackSecretMasterKey, rotateSecretMasterKey } from '../src/secret-master-key-rotation.js';
+import { createApplicationEnvironmentRegistry } from '../src/applications/application-environment-registry.js';
+import { createDnsProviderCredentialRegistry } from '../src/dns/dns-provider-credential-registry.js';
+import { createMfaVault } from '../src/auth/mfa-crypto.js';
+import { createMailboxRegistry } from '../src/mail/mailbox-registry.js';
+import { verifyMailboxPassword } from '../src/mail/mailbox-password.js';
+import { rollbackSecretMasterKey, rotateSecretMasterKey } from '../src/auth/secret-master-key-rotation.js';
 
 const APPLICATION_ID = '11111111-1111-4111-8111-111111111111';
 const DNS_ZONE_ID = '22222222-2222-4222-8222-222222222222';

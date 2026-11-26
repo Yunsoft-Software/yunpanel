@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   DatabaseRestoreJobResultError,
   sanitizeDatabaseRestoreResult,
-} from '../src/database-restore-job-result.js';
+} from '../src/databases/database-restore-job-result.js';
 
 const jobId = '12345678-1234-4234-8234-123456789012';
 const backupId = '22345678-1234-4234-8234-123456789012';

@@ -8,7 +8,7 @@ import {
   executeSiteFileOperation,
   SiteFileWorkerError,
   siteFileWorkerInternals,
-} from '../src/site-file-worker.js';
+} from '../src/files/site-file-worker.js';
 
 const FAKE_ROOT = '/var/www/yunpanel/apps/11111111-1111-4111-8111-111111111111/current';
 

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { DomainRegistryError } from '../src/domain-registry.js';
-import { createDomainStageTargetJobRegistry } from '../src/domain-stage-target-job-registry.js';
-import { createJobRegistry } from '../src/job-registry.js';
+import { DomainRegistryError } from '../src/domains/domain-registry.js';
+import { createDomainStageTargetJobRegistry } from '../src/domains/domain-stage-target-job-registry.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
 import { createNginxManager } from '@yunpanel/host-runtime';
-import { createSiteMutationLock } from '../src/site-mutation-lock.js';
+import { createSiteMutationLock } from '../src/websites/site-mutation-lock.js';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';

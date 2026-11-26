@@ -1,0 +1,370 @@
+import { OPERATIONS } from '@yunpanel/protocol';
+import { NginxSettingsValidationError, normalizeNginxSettings } from '@yunpanel/shared';
+import { dockerComposeApiRequestContext } from '../docker/docker-compose-api-handler.js';
+import {
+  assertOwnerProxyRouteAccess,
+  proxyRouteProjectIds,
+  verifyDomainProxyRoutes,
+  withProxyRouteProjectLocks,
+} from './domain-proxy-routes.js';
+import { DomainRegistryError } from './domain-registry.js';
+import { SiteMutationLockError } from '../websites/site-mutation-lock.js';
+import { provisioningInProgress } from '../provisioning/website-provisioning-worker.js';
+
+const REPARENT_PREVIEW_FIELDS = new Set(['parentDomainId']);
+const REPARENT_APPLY_FIELDS = new Set(['parentDomainId', 'previewDigest', 'confirmation']);
+const UPDATE_PREVIEW_FIELDS = new Set(['changes']);
+const UPDATE_APPLY_FIELDS = new Set(['changes', 'previewDigest', 'confirmation']);
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const CERTIFICATE_OPERATION_STATES = new Set(['pending', 'validating', 'issuing', 'renewing']);
+
+function exactBody(body, fields, code, message) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)
+    || Object.keys(body).length !== fields.size || Object.keys(body).some((key) => !fields.has(key))) {
+    throw new DomainRegistryError(code, message);
+  }
+  return body;
+}
+
+function parentDomainId(value) {
+  if (value === null) return null;
+  if (typeof value !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/.test(value)) {
+    throw new DomainRegistryError('invalid_parent_domain_id', 'parentDomainId must be a safe non-empty string or null');
+  }
+  return value;
+}
+
+function assertReparentPreviewBody(body) {
+  const input = exactBody(body, REPARENT_PREVIEW_FIELDS, 'invalid_domain_reparent_preview', 'Send only parentDomainId');
+  return Object.freeze({ parentDomainId: parentDomainId(input.parentDomainId) });
+}
+
+function assertReparentApplyBody(body) {
+  const input = exactBody(body, REPARENT_APPLY_FIELDS, 'invalid_domain_reparent', 'Send parentDomainId, previewDigest and confirmation');
+  const normalizedParentId = parentDomainId(input.parentDomainId);
+  if (typeof input.previewDigest !== 'string' || !SHA256_PATTERN.test(input.previewDigest)) {
+    throw new DomainRegistryError('invalid_domain_reparent_digest', 'A current Domain reparent preview digest is required');
+  }
+  if (typeof input.confirmation !== 'string') {
+    throw new DomainRegistryError('domain_reparent_confirmation_required', 'Exact Domain reparent confirmation is required');
+  }
+  return Object.freeze({
+    parentDomainId: normalizedParentId,
+    previewDigest: input.previewDigest,
+    confirmation: input.confirmation,
+  });
+}
+
+function assertUpdateChanges(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length < 1) {
+    throw new DomainRegistryError('invalid_domain_update', 'Domain update changes are required');
+  }
+  return value;
+}
+
+function assertUpdatePreviewBody(body) {
+  const input = exactBody(body, UPDATE_PREVIEW_FIELDS, 'invalid_domain_update_preview', 'Send only Domain changes');
+  return Object.freeze({ changes: assertUpdateChanges(input.changes) });
+}
+
+function assertUpdateApplyBody(body) {
+  const input = exactBody(body, UPDATE_APPLY_FIELDS, 'invalid_domain_update', 'Send changes, previewDigest and confirmation');
+  if (typeof input.previewDigest !== 'string' || !SHA256_PATTERN.test(input.previewDigest)) {
+    throw new DomainRegistryError('invalid_domain_update_digest', 'A current Domain update preview digest is required');
+  }
+  if (typeof input.confirmation !== 'string') {
+    throw new DomainRegistryError('domain_update_confirmation_required', 'Exact Domain update confirmation is required');
+  }
+  return Object.freeze({ changes: assertUpdateChanges(input.changes), previewDigest: input.previewDigest, confirmation: input.confirmation });
+}
+
+async function assertDomainUpdateIdle(domain, {
+  jobRegistry = null, certificateRegistry = null, provisioningRegistry = null, now = () => Date.now(),
+} = {}) {
+  // Changing routing while setup still applies it makes the setup's activation step see drift (T868).
+  if (domain.websiteId && typeof provisioningRegistry?.getLatestForWebsite === 'function'
+    && provisioningInProgress(await provisioningRegistry.getLatestForWebsite(domain.websiteId), now())) {
+    throw new DomainRegistryError('domain_update_provisioning_in_progress',
+      'Wait for the Website setup to finish before changing its Domain settings', 409);
+  }
+  const [jobs, allJobs, certificates] = await Promise.all([
+    jobRegistry?.listJobs ? jobRegistry.listJobs({ resourceType: 'domain', resourceId: domain.id }) : [],
+    jobRegistry?.listJobs ? jobRegistry.listJobs() : [],
+    certificateRegistry?.listCertificates ? certificateRegistry.listCertificates() : [],
+  ]);
+  const domainBusy = jobs.some((job) => job.status === 'queued' || job.status === 'running');
+  const certificateBusy = certificates.some((certificate) => (
+    certificate.domainId === domain.id && CERTIFICATE_OPERATION_STATES.has(certificate.state)
+  ));
+  const migrationBusy = allJobs.some((job) => job.operation === OPERATIONS.APP_NODE_PASSENGER_MIGRATE
+    && (job.status === 'queued' || job.status === 'running'));
+  if (domainBusy || certificateBusy || migrationBusy) {
+    throw new DomainRegistryError('domain_update_operation_conflict', 'Wait for the active Domain, certificate or runtime migration operation to finish before updating routing', 409);
+  }
+}
+
+async function requireLocalDomain(domainRegistry, domainId, localServerId) {
+  const domain = await domainRegistry.getDomain(domainId);
+  if (!domain || (localServerId !== null && localServerId !== undefined && domain.serverId !== localServerId)) {
+    throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
+  }
+  return domain;
+}
+
+function localCreateServerId(requestedServerId, localServerId) {
+  if (!localServerId) return requestedServerId;
+  if (requestedServerId !== undefined && requestedServerId !== null && requestedServerId !== localServerId) {
+    throw new DomainRegistryError('local_server_required', 'Domains can be created only on this panel host', 404);
+  }
+  return localServerId;
+}
+
+// Transport mapping is separate from validation and persistence so parent/Website
+// references and error propagation can be tested without a network listener.
+export function createDomainHandler(domainRegistry, {
+  localServerId = null,
+  dockerComposeProjectRegistry = null,
+  jobRegistry = null,
+  siteMutationLock = null,
+} = {}) {
+  const lock = siteMutationLock ?? domainRegistry?.siteMutationLock ?? null;
+  return async (request, response, next) => {
+    try {
+      assertOwnerProxyRouteAccess(request, undefined, request.body?.nginxSettings);
+      const serverId = localCreateServerId(request.body?.serverId, localServerId);
+      const composeRegistry = dockerComposeProjectRegistry ?? request[dockerComposeApiRequestContext]?.projectRegistry ?? null;
+      const rawSettings = request.body?.nginxSettings;
+      const rawProxyRoutes = rawSettings && typeof rawSettings === 'object' && !Array.isArray(rawSettings)
+        ? rawSettings.proxyRoutes
+        : undefined;
+      let routesToVerify = [];
+      if (rawProxyRoutes !== undefined && rawProxyRoutes !== null
+        && ['static', 'proxy', 'passenger', 'php', 'python', 'redirect'].includes(request.body?.targetType)) {
+        try {
+          const normalized = normalizeNginxSettings(request.body.targetType, rawSettings);
+          routesToVerify = normalized.proxyRoutes ?? [];
+        } catch (error) {
+          if (error instanceof NginxSettingsValidationError) {
+            throw new DomainRegistryError(error.code, error.message);
+          }
+          throw error;
+        }
+      }
+      const projectIds = proxyRouteProjectIds(routesToVerify);
+      const domain = await withProxyRouteProjectLocks(lock, projectIds, async () => {
+        if (routesToVerify.length > 0) {
+          await verifyDomainProxyRoutes({
+            routes: routesToVerify,
+            serverId,
+            dockerComposeProjectRegistry: composeRegistry,
+            jobRegistry,
+          });
+        }
+        return domainRegistry.createDomain({
+          serverId,
+          websiteId: request.body?.websiteId ?? null,
+          primaryDomain: request.body?.primaryDomain,
+          parentDomainId: request.body?.parentDomainId ?? null,
+          aliases: request.body?.aliases ?? [],
+          targetType: request.body?.targetType,
+          target: request.body?.target,
+          httpsMode: request.body?.httpsMode ?? 'off',
+          httpsRedirect: request.body?.httpsRedirect,
+          canonicalRedirect: request.body?.canonicalRedirect ?? false,
+          nginxSettings: request.body?.nginxSettings,
+        });
+      });
+      return response.status(201).json({ data: domain });
+    } catch (error) {
+      return next(error);
+    }
+  };
+}
+
+export function createDomainReparentPreviewHandler(domainRegistry, { localServerId = null } = {}) {
+  return async (request, response, next) => {
+    try {
+      if (!domainRegistry || typeof domainRegistry.previewDomainReparent !== 'function') {
+        throw new DomainRegistryError('domain_reparent_unavailable', 'Domain reparent preview is unavailable', 503);
+      }
+      await requireLocalDomain(domainRegistry, request.params.domainId, localServerId);
+      const input = assertReparentPreviewBody(request.body);
+      const preview = await domainRegistry.previewDomainReparent({ domainId: request.params.domainId, ...input });
+      return response.json({ data: preview });
+    } catch (error) {
+      return next(error);
+    }
+  };
+}
+
+export function createDomainUpdatePreviewHandler(domainRegistry, {
+  localServerId = null,
+  dockerComposeProjectRegistry = null,
+  jobRegistry = null,
+} = {}) {
+  return async (request, response, next) => {
+    try {
+      if (!domainRegistry || typeof domainRegistry.previewDomainUpdate !== 'function') {
+        throw new DomainRegistryError('domain_update_unavailable', 'Domain update preview is unavailable', 503);
+      }
+      const domain = await requireLocalDomain(domainRegistry, request.params.domainId, localServerId);
+      const input = assertUpdatePreviewBody(request.body);
+      assertOwnerProxyRouteAccess(request, domain.nginxSettings?.proxyRoutes, input.changes?.nginxSettings);
+      const preview = await domainRegistry.previewDomainUpdate({ domainId: request.params.domainId, ...input });
+      const nextRoutes = preview.next?.nginxSettings?.proxyRoutes;
+      const routesChanged = preview.impact?.nginxSettings?.changedFields?.includes('proxyRoutes') === true;
+      if (routesChanged && Array.isArray(nextRoutes) && nextRoutes.length > 0) {
+        const composeRegistry = dockerComposeProjectRegistry ?? request[dockerComposeApiRequestContext]?.projectRegistry ?? null;
+        await verifyDomainProxyRoutes({
+          routes: nextRoutes,
+          serverId: domain.serverId,
+          dockerComposeProjectRegistry: composeRegistry,
+          jobRegistry,
+        });
+      }
+      return response.json({ data: preview });
+    } catch (error) {
+      return next(error);
+    }
+  };
+}
+
+async function withDomainLock(lock, domain, action) {
+  if (!lock) return action();
+  const domainId = domain?.id ?? null;
+  const websiteId = domain?.websiteId ?? null;
+  const applicationId = domain?.target?.applicationId ?? null;
+
+  const runInner = () => {
+    if (domainId && typeof lock.withDomainLock === 'function') {
+      return lock.withDomainLock(domainId, action);
+    }
+    return action();
+  };
+
+  try {
+    if (websiteId && typeof lock.withWebsiteLock === 'function') {
+      return await lock.withWebsiteLock(websiteId, runInner);
+    }
+    if (domainId && typeof lock.withDomainLock === 'function') {
+      return await lock.withDomainLock(domainId, action);
+    }
+    if (typeof lock.withSiteLock === 'function') {
+      return await lock.withSiteLock({ applicationId, websiteId, domainId }, action);
+    }
+    return await action();
+  } catch (error) {
+    if (error instanceof SiteMutationLockError || error?.name === 'SiteMutationLockError') {
+      throw new DomainRegistryError(error.code, error.message, error.status ?? 409);
+    }
+    throw error;
+  }
+}
+
+export function createDomainUpdateHandler(domainRegistry, dependencies = {}) {
+  const siteMutationLock = dependencies?.siteMutationLock ?? domainRegistry?.siteMutationLock ?? null;
+  return async (request, response, next) => {
+    try {
+      if (!domainRegistry || typeof domainRegistry.previewDomainUpdate !== 'function' || typeof domainRegistry.updateDomain !== 'function') {
+        throw new DomainRegistryError('domain_update_unavailable', 'Domain update is unavailable', 503);
+      }
+      const domain = await requireLocalDomain(domainRegistry, request.params.domainId, dependencies.localServerId ?? null);
+      const input = assertUpdateApplyBody(request.body);
+      assertOwnerProxyRouteAccess(request, domain.nginxSettings?.proxyRoutes, input.changes?.nginxSettings);
+      await assertDomainUpdateIdle(domain, dependencies);
+
+      const composeRegistry = dependencies.dockerComposeProjectRegistry ?? request[dockerComposeApiRequestContext]?.projectRegistry ?? null;
+
+      const performUpdate = async () => {
+        const freshDomain = await requireLocalDomain(domainRegistry, request.params.domainId, dependencies.localServerId ?? null);
+        assertOwnerProxyRouteAccess(request, freshDomain.nginxSettings?.proxyRoutes, input.changes?.nginxSettings);
+        const preview = await domainRegistry.previewDomainUpdate({ domainId: request.params.domainId, changes: input.changes });
+        if (input.previewDigest !== preview.previewDigest) {
+          throw new DomainRegistryError('domain_update_preview_stale', 'Domain routing state changed after preview; request a new preview', 409);
+        }
+        if (input.confirmation !== preview.confirmation) {
+          throw new DomainRegistryError('domain_update_confirmation_required', `Confirm Domain update with ${preview.confirmation}`);
+        }
+        const nextRoutes = preview.next?.nginxSettings?.proxyRoutes;
+        const routesChanged = preview.impact?.nginxSettings?.changedFields?.includes('proxyRoutes') === true;
+        const projectIds = routesChanged
+          ? proxyRouteProjectIds(freshDomain.nginxSettings?.proxyRoutes, nextRoutes)
+          : [];
+        return withProxyRouteProjectLocks(siteMutationLock, projectIds, async () => {
+          if (routesChanged && Array.isArray(nextRoutes) && nextRoutes.length > 0) {
+            await verifyDomainProxyRoutes({
+              routes: nextRoutes,
+              serverId: freshDomain.serverId,
+              dockerComposeProjectRegistry: composeRegistry,
+              jobRegistry: dependencies.jobRegistry ?? null,
+            });
+          }
+          return domainRegistry.updateDomain({
+            domainId: request.params.domainId,
+            changes: input.changes,
+            previewDigest: input.previewDigest,
+            skipLock: true,
+          });
+        });
+      };
+
+      const result = siteMutationLock
+        ? await withDomainLock(siteMutationLock, domain, performUpdate)
+        : await performUpdate();
+
+      return response.json({ data: result });
+    } catch (error) {
+      return next(error);
+    }
+  };
+}
+
+export function createDomainReparentHandler(domainRegistry, dependencies = {}) {
+  const localServerId = typeof dependencies === 'string' ? dependencies : (dependencies?.localServerId ?? null);
+  const siteMutationLock = dependencies?.siteMutationLock ?? domainRegistry?.siteMutationLock ?? null;
+  return async (request, response, next) => {
+    try {
+      if (!domainRegistry || typeof domainRegistry.previewDomainReparent !== 'function' || typeof domainRegistry.reparentDomain !== 'function') {
+        throw new DomainRegistryError('domain_reparent_unavailable', 'Domain reparent is unavailable', 503);
+      }
+      const domain = await requireLocalDomain(domainRegistry, request.params.domainId, localServerId);
+      const input = assertReparentApplyBody(request.body);
+
+      const performReparent = async () => {
+        const preview = await domainRegistry.previewDomainReparent({
+          domainId: request.params.domainId,
+          parentDomainId: input.parentDomainId,
+        });
+        if (input.previewDigest !== preview.previewDigest) {
+          throw new DomainRegistryError('domain_reparent_preview_stale', 'Domain hierarchy changed after preview; request a new preview', 409);
+        }
+        if (input.confirmation !== preview.confirmation) {
+          throw new DomainRegistryError('domain_reparent_confirmation_required', `Confirm Domain reparent with ${preview.confirmation}`);
+        }
+        return domainRegistry.reparentDomain({
+          domainId: request.params.domainId,
+          parentDomainId: input.parentDomainId,
+          previewDigest: input.previewDigest,
+          skipLock: true,
+        });
+      };
+
+      const result = siteMutationLock
+        ? await withDomainLock(siteMutationLock, domain, performReparent)
+        : await performReparent();
+
+      return response.json({ data: result });
+    } catch (error) {
+      return next(error);
+    }
+  };
+}
+
+export const domainHttpInternals = Object.freeze({
+  assertReparentPreviewBody,
+  assertReparentApplyBody,
+  assertUpdatePreviewBody,
+  assertUpdateApplyBody,
+  assertDomainUpdateIdle,
+  withDomainLock,
+});

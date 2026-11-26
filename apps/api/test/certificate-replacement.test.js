@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createCertificateRegistry, CertificateRegistryError } from '../src/certificate-registry.js';
-import { createDomainRegistry, DomainRegistryError } from '../src/domain-registry.js';
+import { createCertificateRegistry, CertificateRegistryError } from '../src/certificates/certificate-registry.js';
+import { createDomainRegistry, DomainRegistryError } from '../src/domains/domain-registry.js';
 
 function result(certName, domains) {
   return {

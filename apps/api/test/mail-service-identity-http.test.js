@@ -3,12 +3,12 @@ import { randomUUID } from 'node:crypto';
 import express from 'express';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { JobRegistryError } from '../src/job-registry.js';
-import { mountMailServiceIdentityRoutes } from '../src/mail-service-identity-http.js';
+import { JobRegistryError } from '../src/jobs/job-registry.js';
+import { mountMailServiceIdentityRoutes } from '../src/mail/mail-service-identity-http.js';
 import {
   createMailServiceIdentityRegistry,
   MailServiceIdentityRegistryError,
-} from '../src/mail-service-identity-registry.js';
+} from '../src/mail/mail-service-identity-registry.js';
 
 const owner = Object.freeze({
   user: { role: 'owner' },

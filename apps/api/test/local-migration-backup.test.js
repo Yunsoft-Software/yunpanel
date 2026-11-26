@@ -7,7 +7,7 @@ import {
   createLocalMigrationBackup,
   LocalMigrationBackupError,
   verifyLocalMigrationBackup,
-} from '../src/local-migration-backup.js';
+} from '../src/migration/local-migration-backup.js';
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-migration-backup-'));

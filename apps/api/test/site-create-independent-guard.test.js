@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { previewSiteCreate, SiteCreateError, siteCreateInternals } from '../src/site-create.js';
+import { previewSiteCreate, SiteCreateError, siteCreateInternals } from '../src/provisioning/site-create.js';
 
 const input = Object.freeze({
   operationId: '1b3ec592-e2ee-4c29-8cc4-e97265c58d35',

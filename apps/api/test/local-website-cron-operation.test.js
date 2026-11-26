@@ -6,7 +6,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   createLocalWebsiteCronOperation,
   LocalWebsiteCronOperationError,
-} from '../src/local-website-cron-operation.js';
+} from '../src/websites/local-website-cron-operation.js';
 
 const serverId = '12345678-1234-4234-8234-123456789012';
 const taskId = '22345678-1234-4234-8234-123456789012';

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createLocalWebsitePhpToolOperation } from '../src/local-website-php-tool-operation.js';
+import { createLocalWebsitePhpToolOperation } from '../src/php/local-website-php-tool-operation.js';
 
 test('worker rejects revoked queued actor before reading action preview', async()=>{
   let previewRead=false, ran=false;

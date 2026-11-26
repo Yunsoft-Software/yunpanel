@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWebsiteBackupBrowser } from '../src/website-backup-browser.js';
+import { createWebsiteBackupBrowser } from '../src/backup/website-backup-browser.js';
 
 const websiteId='11111111-1111-4111-8111-111111111111';
 const serverId='22222222-2222-4222-8222-222222222222';

@@ -3,10 +3,10 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
-import { createSiteFileManager } from '../src/site-file-manager.js';
-import { executeSiteFileOperation } from '../src/site-file-worker.js';
-import { createSiteMutationLock } from '../src/site-mutation-lock.js';
-import { createStaticSiteCopyTransfer } from '../src/static-site-copy-transfer.js';
+import { createSiteFileManager } from '../src/files/site-file-manager.js';
+import { executeSiteFileOperation } from '../src/files/site-file-worker.js';
+import { createSiteMutationLock } from '../src/websites/site-mutation-lock.js';
+import { createStaticSiteCopyTransfer } from '../src/websites/static-site-copy-transfer.js';
 import { staticSiteCopyFixture } from './fixtures/static-site-copy.js';
 
 async function copyFixture(t) {

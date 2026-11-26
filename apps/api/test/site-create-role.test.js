@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import http from 'node:http';
 import test from 'node:test';
-import { createApp } from '../src/app.js';
+import { createApp } from '../src/http/app.js';
 import { ownerManagementContext, withPanelContext } from './helpers/panel-auth-fixture.js';
 
 // Audit 2026-10-27: the non-hosted /api/sites create path called createSite with no

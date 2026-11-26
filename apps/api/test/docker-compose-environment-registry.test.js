@@ -7,7 +7,7 @@ import test from 'node:test';
 import {
   createDockerComposeEnvironmentRegistry,
   DockerComposeEnvironmentRegistryError,
-} from '../src/docker-compose-environment-registry.js';
+} from '../src/docker/docker-compose-environment-registry.js';
 
 const projectId = '0bb78242-03a6-429f-9d17-7725c521437c';
 

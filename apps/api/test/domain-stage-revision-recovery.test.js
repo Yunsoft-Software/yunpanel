@@ -5,10 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { createNginxManager } from '@yunpanel/host-runtime';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { createDurableJobRegistry } from '../src/durable-job-registry.js';
-import { reconcileCompletedJob } from '../src/job-reconciliation.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { createDurableJobRegistry } from '../src/jobs/durable-job-registry.js';
+import { reconcileCompletedJob } from '../src/jobs/job-reconciliation.js';
 
 async function fixture(t, pinned = true) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yp-stage-revision-'));

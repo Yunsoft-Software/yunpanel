@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createApp } from '../src/app.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { reconcileCompletedJob } from '../src/job-reconciliation.js';
+import { createApp } from '../src/http/app.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { reconcileCompletedJob } from '../src/jobs/job-reconciliation.js';
 import { withPanelContext } from './helpers/panel-auth-fixture.js';
 import { completeNextJob } from './helpers/job-completion-fixture.js';
 

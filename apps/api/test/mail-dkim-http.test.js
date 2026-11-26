@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import test from 'node:test';
-import { MailDkimHttpError, mountMailDkimRoutes } from '../src/mail-dkim-http.js';
-import { MailDkimRegistryError } from '../src/mail-dkim-registry.js';
+import { MailDkimHttpError, mountMailDkimRoutes } from '../src/mail/mail-dkim-http.js';
+import { MailDkimRegistryError } from '../src/mail/mail-dkim-registry.js';
 
 const localServerId = randomUUID();
 const remoteServerId = randomUUID();

@@ -5,8 +5,8 @@ import {mkdtemp,readFile,writeFile,rm,stat} from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {powerDnsZoneManagerInternals as dns} from '@yunpanel/host-runtime/powerdns-zone-manager';
-import {createWebsiteDnsBackupAdapter} from '../src/website-dns-backup-adapter.js';
-import {createWebsiteResourceBackupCodec} from '../src/website-resource-backup-codec.js';
+import {createWebsiteDnsBackupAdapter} from '../src/backup/website-dns-backup-adapter.js';
+import {createWebsiteResourceBackupCodec} from '../src/backup/website-resource-backup-codec.js';
 
 // Actual protected files and codec; the authoritative host adapter is controlled.
 async function fixture(t){

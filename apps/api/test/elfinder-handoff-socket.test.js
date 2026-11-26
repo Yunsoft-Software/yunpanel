@@ -8,8 +8,8 @@ import {
   createElFinderHandoffConsumerHandler,
   elFinderHandoffSocketInternals,
   startElFinderHandoffSocket,
-} from '../src/elfinder-handoff-socket.js';
-import { ElFinderHandoffError } from '../src/elfinder-handoff-service.js';
+} from '../src/files/elfinder-handoff-socket.js';
+import { ElFinderHandoffError } from '../src/files/elfinder-handoff-service.js';
 
 const capability = 'A'.repeat(43);
 const sessionDigest = 'd'.repeat(64);

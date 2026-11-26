@@ -10,36 +10,36 @@ import process from 'node:process';
 import { execFileSync } from 'node:child_process';
 import { chromium } from '@playwright/test';
 import { createPanelServer } from '../apps/web/server.js';
-import { createApp } from '../apps/api/src/app.js';
-import { createApplicationRegistry } from '../apps/api/src/application-registry.js';
-import { createAuthenticatedApi } from '../apps/api/src/auth-http.js';
-import { createAuthStore } from '../apps/api/src/auth-store.js';
-import { createBackupOperationRegistry } from '../apps/api/src/backup-operation-registry.js';
-import { createCertificateRegistry } from '../apps/api/src/certificate-registry.js';
-import { createDatabaseBindingRegistry } from '../apps/api/src/database-binding-registry.js';
-import { createDockerComposeProjectRegistry } from '../apps/api/src/docker-compose-project-registry.js';
-import { createDomainRegistry } from '../apps/api/src/domain-registry.js';
-import { createJobRegistry } from '../apps/api/src/job-registry.js';
+import { createApp } from '../apps/api/src/http/app.js';
+import { createApplicationRegistry } from '../apps/api/src/applications/application-registry.js';
+import { createAuthenticatedApi } from '../apps/api/src/auth/auth-http.js';
+import { createAuthStore } from '../apps/api/src/auth/auth-store.js';
+import { createBackupOperationRegistry } from '../apps/api/src/backup/backup-operation-registry.js';
+import { createCertificateRegistry } from '../apps/api/src/certificates/certificate-registry.js';
+import { createDatabaseBindingRegistry } from '../apps/api/src/databases/database-binding-registry.js';
+import { createDockerComposeProjectRegistry } from '../apps/api/src/docker/docker-compose-project-registry.js';
+import { createDomainRegistry } from '../apps/api/src/domains/domain-registry.js';
+import { createJobRegistry } from '../apps/api/src/jobs/job-registry.js';
 import {
   computePublicKeyId,
   ENTITLEMENT_ISSUER,
   ENTITLEMENT_TOKEN_TYPE,
   PREMIUM_CAPABILITIES,
-} from '../apps/api/src/license-entitlement-verifier.js';
-import { createLicenseEntitlementService } from '../apps/api/src/license-entitlement-service.js';
-import { createMailDomainRegistry } from '../apps/api/src/mail-domain-registry.js';
-import { createMailboxRegistry } from '../apps/api/src/mailbox-registry.js';
-import { createPowerDnsAuthoritativeService } from '../apps/api/src/powerdns-authoritative-service.js';
-import { createPowerDnsSecretRegistry } from '../apps/api/src/powerdns-secret-registry.js';
-import { createRcloneRemoteRegistry } from '../apps/api/src/rclone-remote-registry.js';
-import { createResticRepositoryRegistry } from '../apps/api/src/restic-repository-registry.js';
-import { createServerDnsIdentityRegistry } from '../apps/api/src/server-dns-identity-registry.js';
-import { createServerRegistry } from '../apps/api/src/server-registry.js';
-import { createSiteFileManager } from '../apps/api/src/site-file-manager.js';
-import { executeSiteFileOperation } from '../apps/api/src/site-file-worker.js';
-import { createSiteMutationLock } from '../apps/api/src/site-mutation-lock.js';
-import { createWebsitePhpToolsService } from '../apps/api/src/website-php-tools-service.js';
-import { createWebsiteRegistry } from '../apps/api/src/website-registry.js';
+} from '../apps/api/src/panel/license-entitlement-verifier.js';
+import { createLicenseEntitlementService } from '../apps/api/src/panel/license-entitlement-service.js';
+import { createMailDomainRegistry } from '../apps/api/src/mail/mail-domain-registry.js';
+import { createMailboxRegistry } from '../apps/api/src/mail/mailbox-registry.js';
+import { createPowerDnsAuthoritativeService } from '../apps/api/src/dns/powerdns-authoritative-service.js';
+import { createPowerDnsSecretRegistry } from '../apps/api/src/dns/powerdns-secret-registry.js';
+import { createRcloneRemoteRegistry } from '../apps/api/src/backup/rclone-remote-registry.js';
+import { createResticRepositoryRegistry } from '../apps/api/src/backup/restic-repository-registry.js';
+import { createServerDnsIdentityRegistry } from '../apps/api/src/dns/server-dns-identity-registry.js';
+import { createServerRegistry } from '../apps/api/src/runtime/server-registry.js';
+import { createSiteFileManager } from '../apps/api/src/files/site-file-manager.js';
+import { executeSiteFileOperation } from '../apps/api/src/files/site-file-worker.js';
+import { createSiteMutationLock } from '../apps/api/src/websites/site-mutation-lock.js';
+import { createWebsitePhpToolsService } from '../apps/api/src/php/website-php-tools-service.js';
+import { createWebsiteRegistry } from '../apps/api/src/websites/website-registry.js';
 import {
   createPhpCliToolManager,
   createPhpFpmSiteManager,

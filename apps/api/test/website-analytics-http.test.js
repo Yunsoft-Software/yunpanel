@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import express from 'express';
 import test from 'node:test';
-import { mountWebsiteAnalyticsRoutes } from '../src/website-analytics-http.js';
+import { mountWebsiteAnalyticsRoutes } from '../src/websites/website-analytics-http.js';
 
 function createMockApp({ websiteRegistry, domainRegistry, goaccessManager, localServerId = 'srv-1' }) {
   const app = express();

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createJobRegistry } from '../src/job-registry.js';
-import { mountDatabaseRoutes } from '../src/database-http.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { mountDatabaseRoutes } from '../src/databases/database-http.js';
 
 const serverId = '12345678-1234-4234-8234-123456789012';
 

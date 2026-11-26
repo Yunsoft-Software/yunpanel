@@ -6,11 +6,11 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createAuthenticatedApi } from '../src/auth-http.js';
-import { createOwnerMfaPolicy } from '../src/owner-mfa-policy.js';
-import { createAuthStore } from '../src/auth-store.js';
-import { createApp } from '../src/management-app.js';
-import { createPleskImporter } from '../src/plesk-importer.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
+import { createOwnerMfaPolicy } from '../src/auth/owner-mfa-policy.js';
+import { createAuthStore } from '../src/auth/auth-store.js';
+import { createApp } from '../src/http/management-app.js';
+import { createPleskImporter } from '../src/migration/plesk-importer.js';
 
 test('offline Plesk inventory exposes stable, safe metadata through real Owner auth', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'yunpanel-plesk-auth-'));

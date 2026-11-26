@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { sanitizeWebsitePhpToolJobResult } from '../src/website-php-tool-job-result.js';
+import { sanitizeWebsitePhpToolJobResult } from '../src/php/website-php-tool-job-result.js';
 
 const job = Object.freeze({
   operation: 'website.php.action',

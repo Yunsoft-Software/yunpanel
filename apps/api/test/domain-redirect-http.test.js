@@ -6,11 +6,11 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createApp } from '../src/app.js';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
+import { createApp } from '../src/http/app.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
 import { ownerManagementContext, withPanelContext } from './helpers/panel-auth-fixture.js';
 
 // Real app (with the site resource boundary), registries and job queue.

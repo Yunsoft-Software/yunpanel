@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createMailDkimDnsService, MailDkimDnsError } from '../src/mail-dkim-dns.js';
+import { createMailDkimDnsService, MailDkimDnsError } from '../src/mail/mail-dkim-dns.js';
 
 const serverId = randomUUID();
 const webDomainId = randomUUID();

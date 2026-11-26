@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AuditStoreError } from '../src/audit-store.js';
-import { AuthError } from '../src/auth-error.js';
-import { handleAuditRead, parseAuditQuery } from '../src/audit-http.js';
+import { AuditStoreError } from '../src/auth/audit-store.js';
+import { AuthError } from '../src/auth/auth-error.js';
+import { handleAuditRead, parseAuditQuery } from '../src/auth/audit-http.js';
 
 function responseRecorder() {
   const headers = new Map();

@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import {
   createMailSrsConfigurationService,
   MailSrsConfigurationError,
-} from '../src/mail-srs-configuration.js';
+} from '../src/mail/mail-srs-configuration.js';
 
 const SERVER_ID = '10714f5d-8646-4f9a-a8e9-b80439ff6305';
 const SECRET = 'A'.repeat(43);

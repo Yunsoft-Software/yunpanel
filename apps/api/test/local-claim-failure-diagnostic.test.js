@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
-import { claimFailureDiagnostic, safeClaimFailureFields } from '../src/local-claim-failure-diagnostic.js';
+import { claimFailureDiagnostic, safeClaimFailureFields } from '../src/jobs/local-claim-failure-diagnostic.js';
 
 test('claim diagnostic rejects a switching accessor without reading it', () => {
   let reads = 0;

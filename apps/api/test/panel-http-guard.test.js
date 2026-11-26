@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { requirePanelRouteAccess } from '../src/panel-http-guard.js';
+import { requirePanelRouteAccess } from '../src/http/panel-http-guard.js';
 
 const owner = {
   user: { id: 'owner-1', role: 'owner' },

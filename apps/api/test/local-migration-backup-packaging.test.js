@@ -4,11 +4,11 @@ import test from 'node:test';
 
 const buildDebUrl = new URL('../../../scripts/build-deb.sh', import.meta.url);
 const scriptUrl = new URL('../../../scripts/local-migration-backup.mjs', import.meta.url);
-const backupCoreUrl = new URL('../src/local-migration-backup.js', import.meta.url);
-const previewCoreUrl = new URL('../src/local-migration-restore-preview.js', import.meta.url);
-const archiveInspectionUrl = new URL('../src/local-migration-archive-inspection.js', import.meta.url);
-const unixIdentityUrl = new URL('../src/local-migration-unix-identity.js', import.meta.url);
-const stageCoreUrl = new URL('../src/local-migration-restore-stage.js', import.meta.url);
+const backupCoreUrl = new URL('../src/migration/local-migration-backup.js', import.meta.url);
+const previewCoreUrl = new URL('../src/migration/local-migration-restore-preview.js', import.meta.url);
+const archiveInspectionUrl = new URL('../src/migration/local-migration-archive-inspection.js', import.meta.url);
+const unixIdentityUrl = new URL('../src/migration/local-migration-unix-identity.js', import.meta.url);
+const stageCoreUrl = new URL('../src/migration/local-migration-restore-stage.js', import.meta.url);
 const runbookUrl = new URL('../../../docs/local-migration-backup.md', import.meta.url);
 
 test('Debian build installs the migration backup CLI, restore rehearsal source and runbook', async () => {

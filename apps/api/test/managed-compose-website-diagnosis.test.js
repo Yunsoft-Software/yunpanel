@@ -4,7 +4,7 @@ import { DockerComposeObserverError } from '@yunpanel/host-runtime';
 import {
   createManagedComposeWebsiteDiagnosisService,
   ManagedComposeWebsiteDiagnosisError,
-} from '../src/managed-compose-website-diagnosis.js';
+} from '../src/docker/managed-compose-website-diagnosis.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const websiteId = 'db20d91a-ec70-4d79-bc75-1f70de76d1ea';

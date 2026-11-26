@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createDomainRemovalOperationRegistry } from '../src/domain-removal-operation-registry.js';
-import { createDomainRemovalRuntime } from '../src/domain-removal-runtime.js';
+import { createDomainRemovalOperationRegistry } from '../src/domains/domain-removal-operation-registry.js';
+import { createDomainRemovalRuntime } from '../src/domains/domain-removal-runtime.js';
 
 const checksum = 'a'.repeat(64);
 const impactDigest = 'b'.repeat(64);

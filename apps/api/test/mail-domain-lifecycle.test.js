@@ -3,8 +3,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { ExternalLifecycleRegistryError } from '../src/external-lifecycle-registry.js';
-import { createMailDomainRegistry } from '../src/mail-domain-registry.js';
+import { ExternalLifecycleRegistryError } from '../src/domains/external-lifecycle-registry.js';
+import { createMailDomainRegistry } from '../src/mail/mail-domain-registry.js';
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-mail-domain-lifecycle-'));

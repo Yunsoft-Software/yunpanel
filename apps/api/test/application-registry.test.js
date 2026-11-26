@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createApplicationRegistry, ApplicationRegistryError } from '../src/application-registry.js';
+import { createApplicationRegistry, ApplicationRegistryError } from '../src/applications/application-registry.js';
 
 test('uploaded static readiness requires actual runtime evidence, records a real release without an invented commit and denies Git dispatch', async () => {
   const registry = createApplicationRegistry();

@@ -1,46 +1,46 @@
 #!/usr/bin/env node
-import { runPassengerReleaseRecoveryFromStores } from '../apps/api/src/passenger-release-recovery-runtime.js';
+import { runPassengerReleaseRecoveryFromStores } from '../apps/api/src/applications/passenger-release-recovery-runtime.js';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createDurableJobRegistry } from '../apps/api/src/durable-job-registry.js';
-import { inspectDurableJobRecovery } from '../apps/api/src/job-recovery-inspection.js';
+import { createDurableJobRegistry } from '../apps/api/src/jobs/durable-job-registry.js';
+import { inspectDurableJobRecovery } from '../apps/api/src/jobs/job-recovery-inspection.js';
 import {
   runRunningDatabaseCreateRecoveryFromStores,
   runRunningDatabaseDeleteRecoveryFromStores,
   runRunningDomainStageRecoveryFromStores,
   runRunningStaticDeploymentRecoveryFromStores,
   runTerminalRecoveryFromStores,
-} from '../apps/api/src/job-recovery-runtime.js';
-import { runRunningCertificateRecoveryFromStores } from '../apps/api/src/job-running-certificate-recovery-runtime.js';
-import { runRunningDatabaseBackupRecoveryFromStores } from '../apps/api/src/job-running-database-backup-recovery-runtime.js';
-import { runRunningDatabaseCredentialRecoveryFromStores } from '../apps/api/src/job-running-database-credential-recovery-runtime.js';
-import { runRunningDatabaseRestoreRecoveryFromStores } from '../apps/api/src/job-running-database-restore-recovery-runtime.js';
-import { runRunningDnsRecordRecoveryFromStores } from '../apps/api/src/job-running-dns-record-recovery-runtime.js';
-import { runRunningDomainActivationRecoveryFromStores } from '../apps/api/src/job-running-domain-activation-recovery-runtime.js';
-import { runRunningMailConfigRecoveryFromStores } from '../apps/api/src/job-running-mail-config-recovery-runtime.js';
-import { runRunningMailDataRecoveryFromStores } from '../apps/api/src/job-running-mail-data-recovery-runtime.js';
-import { runRunningMailDkimRecoveryFromStores } from '../apps/api/src/job-running-mail-dkim-recovery-runtime.js';
-import { runRunningNodeDeploymentRecoveryFromStores } from '../apps/api/src/job-running-node-deployment-recovery-runtime.js';
-import { runRunningNodeRestartRecoveryFromStores } from '../apps/api/src/job-running-node-restart-recovery-runtime.js';
-import { runRunningNodeProcessRecoveryFromStores } from '../apps/api/src/job-running-node-process-recovery-runtime.js';
-import { runRunningNodeRuntimeRecoveryFromStores } from '../apps/api/src/job-running-node-runtime-recovery-runtime.js';
-import { runRunningNodeRollbackRecoveryFromStores } from '../apps/api/src/job-running-node-rollback-recovery-runtime.js';
-import { runRunningReadOnlyRecoveryFromStores } from '../apps/api/src/job-running-readonly-recovery-runtime.js';
-import { runRunningRoundcubeConfigRecoveryFromStores } from '../apps/api/src/job-running-roundcube-config-recovery-runtime.js';
-import { runRunningPhpToolRecoveryFromStores } from '../apps/api/src/job-running-php-tool-recovery-runtime.js';
+} from '../apps/api/src/jobs/job-recovery-runtime.js';
+import { runRunningCertificateRecoveryFromStores } from '../apps/api/src/jobs/job-running-certificate-recovery-runtime.js';
+import { runRunningDatabaseBackupRecoveryFromStores } from '../apps/api/src/jobs/job-running-database-backup-recovery-runtime.js';
+import { runRunningDatabaseCredentialRecoveryFromStores } from '../apps/api/src/jobs/job-running-database-credential-recovery-runtime.js';
+import { runRunningDatabaseRestoreRecoveryFromStores } from '../apps/api/src/jobs/job-running-database-restore-recovery-runtime.js';
+import { runRunningDnsRecordRecoveryFromStores } from '../apps/api/src/jobs/job-running-dns-record-recovery-runtime.js';
+import { runRunningDomainActivationRecoveryFromStores } from '../apps/api/src/jobs/job-running-domain-activation-recovery-runtime.js';
+import { runRunningMailConfigRecoveryFromStores } from '../apps/api/src/jobs/job-running-mail-config-recovery-runtime.js';
+import { runRunningMailDataRecoveryFromStores } from '../apps/api/src/jobs/job-running-mail-data-recovery-runtime.js';
+import { runRunningMailDkimRecoveryFromStores } from '../apps/api/src/jobs/job-running-mail-dkim-recovery-runtime.js';
+import { runRunningNodeDeploymentRecoveryFromStores } from '../apps/api/src/jobs/job-running-node-deployment-recovery-runtime.js';
+import { runRunningNodeRestartRecoveryFromStores } from '../apps/api/src/jobs/job-running-node-restart-recovery-runtime.js';
+import { runRunningNodeProcessRecoveryFromStores } from '../apps/api/src/jobs/job-running-node-process-recovery-runtime.js';
+import { runRunningNodeRuntimeRecoveryFromStores } from '../apps/api/src/jobs/job-running-node-runtime-recovery-runtime.js';
+import { runRunningNodeRollbackRecoveryFromStores } from '../apps/api/src/jobs/job-running-node-rollback-recovery-runtime.js';
+import { runRunningReadOnlyRecoveryFromStores } from '../apps/api/src/jobs/job-running-readonly-recovery-runtime.js';
+import { runRunningRoundcubeConfigRecoveryFromStores } from '../apps/api/src/jobs/job-running-roundcube-config-recovery-runtime.js';
+import { runRunningPhpToolRecoveryFromStores } from '../apps/api/src/jobs/job-running-php-tool-recovery-runtime.js';
 import {
   runRunningPythonDeploymentRecoveryFromStores,
   runRunningPythonRestartRecoveryFromStores,
   runRunningPythonRollbackRecoveryFromStores,
-} from '../apps/api/src/job-running-python-recovery-runtime.js';
-import { runRunningCronRecoveryFromStores } from '../apps/api/src/job-running-cron-recovery-runtime.js';
-import { runRunningServiceControlRecoveryFromStores } from '../apps/api/src/job-running-service-recovery-runtime.js';
-import { runRunningServiceReceiptRecoveryFromStores } from '../apps/api/src/job-running-service-receipt-recovery-runtime.js';
-import { runRunningStaticRollbackRecoveryFromStores } from '../apps/api/src/job-running-static-rollback-recovery-runtime.js';
-import { runRunningSystemUpgradeRecoveryFromStores } from '../apps/api/src/job-running-system-upgrade-recovery-runtime.js';
-import { createJobRegistry } from '../apps/api/src/job-registry.js';
-import { resolveLocalMigrationPaths } from '../apps/api/src/local-migration-cli.js';
-import { recordRecoveryAuditOutcome } from '../apps/api/src/recovery-audit.js';
+} from '../apps/api/src/jobs/job-running-python-recovery-runtime.js';
+import { runRunningCronRecoveryFromStores } from '../apps/api/src/jobs/job-running-cron-recovery-runtime.js';
+import { runRunningServiceControlRecoveryFromStores } from '../apps/api/src/jobs/job-running-service-recovery-runtime.js';
+import { runRunningServiceReceiptRecoveryFromStores } from '../apps/api/src/jobs/job-running-service-receipt-recovery-runtime.js';
+import { runRunningStaticRollbackRecoveryFromStores } from '../apps/api/src/jobs/job-running-static-rollback-recovery-runtime.js';
+import { runRunningSystemUpgradeRecoveryFromStores } from '../apps/api/src/jobs/job-running-system-upgrade-recovery-runtime.js';
+import { createJobRegistry } from '../apps/api/src/jobs/job-registry.js';
+import { resolveLocalMigrationPaths } from '../apps/api/src/migration/local-migration-cli.js';
+import { recordRecoveryAuditOutcome } from '../apps/api/src/jobs/recovery-audit.js';
 
 const scriptPath = fileURLToPath(import.meta.url);
 const PACKAGED_SCRIPT_ROOT = '/usr/lib/yunpanel/scripts';

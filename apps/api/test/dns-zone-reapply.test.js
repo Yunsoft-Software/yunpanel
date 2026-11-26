@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { powerDnsZoneManagerInternals } from '@yunpanel/host-runtime/powerdns-zone-manager';
-import { renderDnsZoneDesiredState } from '../src/dns-zone-desired-state.js';
+import { renderDnsZoneDesiredState } from '../src/dns/dns-zone-desired-state.js';
 import { ownedDnsZoneOperation } from './helpers/owned-dns-zone-fixture.js';
 import {
   createDnsZoneReapplyService,
   DnsZoneReapplyError,
   dnsZoneReapplyInternals,
-} from '../src/dns-zone-reapply.js';
+} from '../src/dns/dns-zone-reapply.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const domainId = '8bc307db-9e2d-4c3f-91ea-49e740d259a9';

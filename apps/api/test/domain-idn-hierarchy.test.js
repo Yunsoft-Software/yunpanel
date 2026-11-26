@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createDomainRegistry } from '../src/domain-registry.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
 
 const base = (primaryDomain, extra = {}) => ({
   serverId: 'server-1',

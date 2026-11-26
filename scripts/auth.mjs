@@ -1,7 +1,7 @@
 import { createInterface } from 'node:readline/promises';
 import { Writable } from 'node:stream';
 import path from 'node:path';
-import { createAuthStore } from '../apps/api/src/auth-store.js';
+import { createAuthStore } from '../apps/api/src/auth/auth-store.js';
 
 async function readPassword() {
   if (!process.stdin.isTTY) {

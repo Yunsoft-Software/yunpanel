@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWebsiteProvisioningHandlers } from '../src/website-provisioning-handlers.js';
+import { createWebsiteProvisioningHandlers } from '../src/provisioning/website-provisioning-handlers.js';
 
 function dependencies() {
   return {

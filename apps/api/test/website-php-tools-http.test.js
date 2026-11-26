@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { once } from 'node:events';
 import express from 'express';
-import { createAuthenticatedApi } from '../src/auth-http.js';
-import { mountWebsitePhpToolsRoutes } from '../src/website-php-tools-http.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
+import { mountWebsitePhpToolsRoutes } from '../src/php/website-php-tools-http.js';
 
 const WEBSITE_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 

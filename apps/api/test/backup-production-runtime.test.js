@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   BackupProductionRuntimeError,
   createBackupProductionRuntime,
-} from '../src/backup-production-runtime.js';
+} from '../src/backup/backup-production-runtime.js';
 
 function fixture(overrides = {}) {
   return {

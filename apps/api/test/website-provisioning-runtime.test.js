@@ -3,12 +3,12 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createWebsiteProvisioningRuntime } from '../src/website-provisioning-runtime.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
-import { createDomainRemovalOperationRegistry } from '../src/domain-removal-operation-registry.js';
-import { createWebsiteRemovalOperationRegistry } from '../src/website-removal-operation-registry.js';
+import { createWebsiteProvisioningRuntime } from '../src/provisioning/website-provisioning-runtime.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
+import { createDomainRemovalOperationRegistry } from '../src/domains/domain-removal-operation-registry.js';
+import { createWebsiteRemovalOperationRegistry } from '../src/websites/website-removal-operation-registry.js';
 
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';

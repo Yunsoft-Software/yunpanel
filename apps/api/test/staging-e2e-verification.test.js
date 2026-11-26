@@ -12,22 +12,22 @@ import http from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { UI_FONTS } from '../../../scripts/prepare-ui-fonts.mjs';
-import { AuthError } from '../src/auth-error.js';
+import { AuthError } from '../src/auth/auth-error.js';
 import {
   TenantBoundaryError,
   createTenantBoundaryMiddleware,
   extractActorTenant,
   sanitizeTenantCollection,
-} from '../src/tenant-boundary.js';
+} from '../src/http/tenant-boundary.js';
 import {
   validateCustomerQuotas,
   assertCustomerQuotaCapacity,
   assertCustomerQuotaWithinResellerCapacity,
-} from '../src/customer-quotas.js';
-import { createHostingAccountStore } from '../src/hosting-account-store.js';
-import { hostingWebsiteDigest } from '../src/hosting-site-allocation-store.js';
-import { hostingWebsitesForCapacity } from '../src/hosting-site-allocation-schema.js';
-import { rollbackEmptyHostingAccountSchema, initializeHostingAccountSchema } from '../src/hosting-account-schema.js';
+} from '../src/hosting/customer-quotas.js';
+import { createHostingAccountStore } from '../src/hosting/hosting-account-store.js';
+import { hostingWebsiteDigest } from '../src/hosting/hosting-site-allocation-store.js';
+import { hostingWebsitesForCapacity } from '../src/hosting/hosting-site-allocation-schema.js';
+import { rollbackEmptyHostingAccountSchema, initializeHostingAccountSchema } from '../src/hosting/hosting-account-schema.js';
 import { hostingAuthFixture } from '../test-support/hosting-auth-fixture.js';
 import {
   checkLocalApiHealth,
@@ -36,9 +36,9 @@ import {
   createSystemWatchdogService,
   SystemWatchdogError,
   mountSystemWatchdogRoutes,
-} from '../src/local-api-health.js';
-import { requirePanelRouteAccess } from '../src/panel-http-guard.js';
-import { READ_ONLY_PERMISSIONS } from '../src/panel-access.js';
+} from '../src/runtime/local-api-health.js';
+import { requirePanelRouteAccess } from '../src/http/panel-http-guard.js';
+import { READ_ONLY_PERMISSIONS } from '../src/panel/panel-access.js';
 import {
   NON_RESELLER_INVENTORY,
   TASK_GROUPS,
@@ -50,7 +50,7 @@ import {
   ResellerBrandingDeferredError,
   CapabilityRegistryError,
   mountNonResellerCapabilitiesRoutes,
-} from '../src/non-reseller-capabilities.js';
+} from '../src/hosting/non-reseller-capabilities.js';
 import {
   OS_EQUIVALENCE_INVENTORY,
   EXTERNAL_PARITY_INVENTORY,
@@ -65,7 +65,7 @@ import {
   listExternalParityAdapters,
   listDeferredBillingItems,
   mountOsExternalParityRoutes,
-} from '../src/os-external-parity.js';
+} from '../src/hosting/os-external-parity.js';
 import {
   createProductionExitGateService,
   mountProductionExitGateRoutes,
@@ -79,17 +79,17 @@ import {
   evaluateLifecycleGate,
   evaluateTenantIsolationGate,
   evaluateFailClosedSecurityGate,
-} from '../src/production-exit-gate.js';
-import { createLiveSessionRegistry } from '../src/live-session-registry.js';
-import { createElFinderHandoffService, ElFinderHandoffError, elFinderHandoffInternals } from '../src/elfinder-handoff-service.js';
-import { mountElFinderHandoffRoutes } from '../src/elfinder-handoff-http.js';
-import { createElFinderHandoffConsumerHandler } from '../src/elfinder-handoff-socket.js';
-import { terminalWebSocketInternals, createTerminalWebSocketServer } from '../src/terminal-websocket.js';
-import { createTerminalCapabilityRegistry, TerminalCapabilityError } from '../src/terminal-capability-registry.js';
-import { createAuthenticatedApi } from '../src/auth-http.js';
+} from '../src/panel/production-exit-gate.js';
+import { createLiveSessionRegistry } from '../src/auth/live-session-registry.js';
+import { createElFinderHandoffService, ElFinderHandoffError, elFinderHandoffInternals } from '../src/files/elfinder-handoff-service.js';
+import { mountElFinderHandoffRoutes } from '../src/files/elfinder-handoff-http.js';
+import { createElFinderHandoffConsumerHandler } from '../src/files/elfinder-handoff-socket.js';
+import { terminalWebSocketInternals, createTerminalWebSocketServer } from '../src/terminal/terminal-websocket.js';
+import { createTerminalCapabilityRegistry, TerminalCapabilityError } from '../src/terminal/terminal-capability-registry.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
 import net from 'node:net';
-import { createAuthStore } from '../src/auth-store.js';
-import { createAuthMailer, validateEmail as validateAuthEmail } from '../src/auth-mailer.js';
+import { createAuthStore } from '../src/auth/auth-store.js';
+import { createAuthMailer, validateEmail as validateAuthEmail } from '../src/auth/auth-mailer.js';
 import {
   sslContactEmail,
   createSslRequestDraft,
@@ -100,7 +100,7 @@ import {
 } from '../../web/src/workspace/ssl-request-draft.js';
 import { TOTP } from 'otpauth';
 import { WebSocket, WebSocketServer } from 'ws';
-import { recoverRunningPhpTool } from '../src/job-running-php-tool-recovery.js';
+import { recoverRunningPhpTool } from '../src/jobs/job-running-php-tool-recovery.js';
 import * as fs from 'node:fs/promises';
 import { lstat, mkdtemp, rm, readFile } from 'node:fs/promises';
 import { createSiteSubmission, EMPTY_SITE_SUBMISSION, siteSubmissionBusy } from '../../web/src/workspace/site-create-submission.js';
@@ -108,17 +108,17 @@ import {
   createSiteFileManager,
   SiteFileManagerError,
   siteFileManagerInternals,
-} from '../src/site-file-manager.js';
+} from '../src/files/site-file-manager.js';
 import {
   executeSiteFileOperation,
   SiteFileWorkerError,
   siteFileWorkerInternals,
-} from '../src/site-file-worker.js';
+} from '../src/files/site-file-worker.js';
 import {
   mountSiteFileRoutes,
   SiteFileHttpError,
   siteFileHttpInternals,
-} from '../src/site-file-http.js';
+} from '../src/files/site-file-http.js';
 import {
   visibleFiles,
   paginateFiles,
@@ -153,24 +153,24 @@ import {
   createPhpMyAdminHandoffService,
   PhpMyAdminHandoffError,
   phpMyAdminHandoffInternals,
-} from '../src/phpmyadmin-handoff-service.js';
+} from '../src/databases/phpmyadmin-handoff-service.js';
 import {
   mountPhpMyAdminHandoffRoutes,
   phpMyAdminHandoffHttpInternals,
-} from '../src/phpmyadmin-handoff-http.js';
+} from '../src/databases/phpmyadmin-handoff-http.js';
 import {
   createPhpMyAdminHandoffConsumerHandler,
   startPhpMyAdminHandoffSocket,
   phpMyAdminHandoffSocketInternals,
-} from '../src/phpmyadmin-handoff-socket.js';
-import { createSiteResourceBoundary } from '../src/site-resource-boundary.js';
+} from '../src/databases/phpmyadmin-handoff-socket.js';
+import { createSiteResourceBoundary } from '../src/http/site-resource-boundary.js';
 import {
   createJobRegistry,
   jobPublicView,
   classifyJobError,
   isTransientJobError,
   isPermanentJobError,
-} from '../src/job-registry.js';
+} from '../src/jobs/job-registry.js';
 import {
   API_VERSION,
   SCHEMA_VERSION,
@@ -178,7 +178,7 @@ import {
   resolveDeploymentDiagnostics,
   compareDeploymentVersions,
   sanitizeDiagnosticInfo,
-} from '../src/core-app.js';
+} from '../src/http/core-app.js';
 import {
   jobAttemptCount,
   jobHealthIndicator,
@@ -194,78 +194,78 @@ import {
   mountWebsiteProvisioningRoutes,
   WebsiteProvisioningHttpError,
   websiteProvisioningHttpInternals,
-} from '../src/website-provisioning-http.js';
+} from '../src/provisioning/website-provisioning-http.js';
 import { advanceProvisioning } from '../../web/src/workspace/provisioning-advance.js';
-import { createSiteMutationLock } from '../src/site-mutation-lock.js';
-import { createProcessStoreLock } from '../src/process-store-lock.js';
+import { createSiteMutationLock } from '../src/websites/site-mutation-lock.js';
+import { createProcessStoreLock } from '../src/runtime/process-store-lock.js';
 import {
   conversationScope,
   conversationVisible,
   createConversationPager,
   AiHistoryError,
-} from '../src/ai-conversation-history.js';
+} from '../src/ai/ai-conversation-history.js';
 import {
   evaluateAiToolPolicy,
   AiPolicyError,
-} from '../src/ai-policy.js';
+} from '../src/ai/ai-policy.js';
 import {
   AI_TOOL_RISKS,
   AI_TOOL_CONFIRMATION,
   DEFAULT_AI_TOOL_DEFINITIONS,
-} from '../src/ai-tool-catalog.js';
+} from '../src/ai/ai-tool-catalog.js';
 import {
   createAiActionPlan,
   verifyAiActionExecution,
   AiActionPlanError,
-} from '../src/ai-action-plan.js';
+} from '../src/ai/ai-action-plan.js';
 import {
   createAiConversationService,
   AiConversationError,
-} from '../src/ai-conversation-service.js';
+} from '../src/ai/ai-conversation-service.js';
 import {
   createAiToolRegistry,
   AiToolRegistryError,
-} from '../src/ai-tool-registry.js';
+} from '../src/ai/ai-tool-registry.js';
 import {
   createAiToolRuntime,
   AiToolRuntimeError,
-} from '../src/ai-tool-runtime.js';
+} from '../src/ai/ai-tool-runtime.js';
 import {
   createAiOrchestrator,
-} from '../src/ai-orchestrator.js';
+} from '../src/ai/ai-orchestrator.js';
 import {
   mountAiRoutes,
   AiHttpError,
-} from '../src/ai-http.js';
+} from '../src/ai/ai-http.js';
 import {
   resolveAiWebsiteContext,
 } from '../../web/src/workspace/ai-history.js';
-import { createManagedServiceMutationReceiptStore } from '../src/managed-service-mutation-receipt.js';
-import { createDurableJobRegistry } from '../src/durable-job-registry.js';
+import { createManagedServiceMutationReceiptStore } from '../src/runtime/managed-service-mutation-receipt.js';
+import { createDurableJobRegistry } from '../src/jobs/durable-job-registry.js';
 import {
   recoverRunningCron,
   JobRunningCronRecoveryError,
-} from '../src/job-running-cron-recovery.js';
+} from '../src/jobs/job-running-cron-recovery.js';
 import {
   handleHostingAccountAdmin,
   hostingAccountQuery,
   isHostingAccountPath,
-} from '../src/hosting-account-http.js';
-import { createUserAdminStore } from '../src/user-admin-store.js';
+} from '../src/hosting/hosting-account-http.js';
+import { createUserAdminStore } from '../src/auth/user-admin-store.js';
 import {
   createApplicationRegistry,
   ApplicationRegistryError,
-} from '../src/application-registry.js';
+} from '../src/applications/application-registry.js';
 import {
   createApplicationRuntimeBindingRegistry,
   ApplicationRuntimeBindingRegistryError,
-} from '../src/application-runtime-binding-registry.js';
-import { resolveWebsiteDomainTarget } from '../src/website-domain-target.js';
+} from '../src/applications/application-runtime-binding-registry.js';
+import { resolveWebsiteDomainTarget } from '../src/websites/website-domain-target.js';
 import {
   DomainRegistryError,
   domainWebsiteTargetBindingInternals,
-} from '../src/domain-registry.js';
-import { createWebsiteRemovalOperationRegistry } from '../src/website-removal-operation-registry.js';
+} from '../src/domains/domain-registry.js';
+import { createWebsiteRemovalOperationRegistry } from '../src/websites/website-removal-operation-registry.js';
 import {
   MailboxProtocolDisruptionError,
   assertNoDomainOrSiblingDisruption,
@@ -273,88 +273,88 @@ import {
   assertDovecotPostfixCommandContracts,
   assertCommonConfigApplyPendingPreviewAndReloadEffect,
 } from './helpers/mailbox-lifecycle-assertions.js';
-import { createMailConfigurationService } from '../src/mail-configuration.js';
-import { createMailboxRegistry, MailboxRegistryError } from '../src/mailbox-registry.js';
-import { createMailDataOperationsService, MailDataOperationsError } from '../src/mail-data-operations.js';
-import { createMailDeleteFinalizeService, MailDeleteFinalizeError } from '../src/mail-delete-finalize.js';
-import { createMailDeleteImpactService } from '../src/mail-delete-impact.js';
-import { mountMailboxRoutes } from '../src/mailbox-http.js';
-import { mountMailDeleteImpactRoutes } from '../src/mail-delete-impact-http.js';
-import { mountMailDataRoutes } from '../src/mail-data-http.js';
-import { mountMailAliasRoutes } from '../src/mail-alias-http.js';
-import { mountMailboxQuotaRoutes } from '../src/mailbox-quota-http.js';
-import { mountMailboxForwardingRoutes } from '../src/mailbox-forwarding-http.js';
-import { mountMailConfigurationRoutes } from '../src/mail-configuration-http.js';
-import { mountMailDiagnosticsRoutes } from '../src/mail-diagnostics-http.js';
-import { mountRoundcubeDomainMappingRoutes } from '../src/roundcube-domain-mapping-http.js';
-import { createMailAliasRegistry } from '../src/mail-alias-registry.js';
-import { createMailboxQuotaRegistry } from '../src/mailbox-quota-registry.js';
-import { createMailboxForwardingRegistry } from '../src/mailbox-forwarding-registry.js';
-import { createMailDomainRegistry } from '../src/mail-domain-registry.js';
+import { createMailConfigurationService } from '../src/mail/mail-configuration.js';
+import { createMailboxRegistry, MailboxRegistryError } from '../src/mail/mailbox-registry.js';
+import { createMailDataOperationsService, MailDataOperationsError } from '../src/mail/mail-data-operations.js';
+import { createMailDeleteFinalizeService, MailDeleteFinalizeError } from '../src/mail/mail-delete-finalize.js';
+import { createMailDeleteImpactService } from '../src/mail/mail-delete-impact.js';
+import { mountMailboxRoutes } from '../src/mail/mailbox-http.js';
+import { mountMailDeleteImpactRoutes } from '../src/mail/mail-delete-impact-http.js';
+import { mountMailDataRoutes } from '../src/mail/mail-data-http.js';
+import { mountMailAliasRoutes } from '../src/mail/mail-alias-http.js';
+import { mountMailboxQuotaRoutes } from '../src/mail/mailbox-quota-http.js';
+import { mountMailboxForwardingRoutes } from '../src/mail/mailbox-forwarding-http.js';
+import { mountMailConfigurationRoutes } from '../src/mail/mail-configuration-http.js';
+import { mountMailDiagnosticsRoutes } from '../src/mail/mail-diagnostics-http.js';
+import { mountRoundcubeDomainMappingRoutes } from '../src/mail/roundcube-domain-mapping-http.js';
+import { createMailAliasRegistry } from '../src/mail/mail-alias-registry.js';
+import { createMailboxQuotaRegistry } from '../src/mail/mailbox-quota-registry.js';
+import { createMailboxForwardingRegistry } from '../src/mail/mailbox-forwarding-registry.js';
+import { createMailDomainRegistry } from '../src/mail/mail-domain-registry.js';
 import { createMailboxAccessGuard, MailboxAccessError } from '../../../packages/host-runtime/src/mailbox-access-guard.js';
 import { createMailDataDeleteManager, MailDataDeleteError } from '../../../packages/host-runtime/src/mail-data-delete-manager.js';
 import {
   createDatabaseCredentialRegistry,
   DatabaseCredentialRegistryError,
   databaseCredentialRegistryInternals,
-} from '../src/database-credential-registry.js';
+} from '../src/databases/database-credential-registry.js';
 import {
   createDatabaseCredentialApplyService,
   DatabaseCredentialApplyError,
   databaseCredentialApplyInternals,
-} from '../src/database-credential-apply-service.js';
+} from '../src/databases/database-credential-apply-service.js';
 import {
   createDatabaseCredentialMaterializer,
   DatabaseCredentialMaterializerError,
-} from '../src/database-credential-materializer.js';
+} from '../src/databases/database-credential-materializer.js';
 import {
   createDatabaseCredentialOperationReceiptStore,
   DatabaseCredentialOperationReceiptError,
-} from '../src/database-credential-operation-receipt.js';
+} from '../src/databases/database-credential-operation-receipt.js';
 import {
   mountDatabaseCredentialRoutes,
   DatabaseCredentialHttpError,
   databaseCredentialHttpInternals,
-} from '../src/database-credential-http.js';
+} from '../src/databases/database-credential-http.js';
 import {
   createDatabaseBindingRegistry,
   DatabaseBindingRegistryError,
   databaseBindingRegistryInternals,
-} from '../src/database-binding-registry.js';
+} from '../src/databases/database-binding-registry.js';
 import {
   mountDatabaseBindingRoutes,
   DatabaseBindingHttpError,
   databaseBindingHttpInternals,
-} from '../src/database-binding-http.js';
+} from '../src/databases/database-binding-http.js';
 import {
   mountDatabaseRoutes,
   DatabaseHttpError,
   databaseHttpInternals,
-} from '../src/database-http.js';
+} from '../src/databases/database-http.js';
 import {
   mountDatabaseRestoreRoutes,
   DatabaseRestoreHttpError,
   databaseRestoreHttpInternals,
-} from '../src/database-restore-http.js';
+} from '../src/databases/database-restore-http.js';
 import {
   createDatabaseBackupOperationsService,
   DatabaseBackupOperationsError,
   databaseBackupOperationsInternals,
-} from '../src/database-backup-operations.js';
+} from '../src/databases/database-backup-operations.js';
 import {
   mountWebsiteDatabaseDataRoutes,
   WebsiteDatabaseDataHttpError,
   websiteDatabaseDataHttpInternals,
-} from '../src/website-database-data-http.js';
+} from '../src/databases/website-database-data-http.js';
 import {
   mountWebsiteDatabaseDeleteRoutes,
   WebsiteDatabaseDeleteHttpError,
   websiteDatabaseDeleteHttpInternals,
-} from '../src/website-database-delete-http.js';
+} from '../src/databases/website-database-delete-http.js';
 import {
   createDatabaseDeletionReceiptStore,
   DatabaseDeletionReceiptError,
-} from '../src/database-deletion-receipt.js';
+} from '../src/databases/database-deletion-receipt.js';
 import {
   createDatabaseCredentialManager,
   DatabaseCredentialManagerError,
@@ -363,53 +363,53 @@ import {
 import {
   siteCreateProvisioningPlan as siteCreateProvisioningPlanDns,
   siteCreateDnsProvisioningInternals,
-} from '../src/site-create-dns-provisioning.js';
+} from '../src/provisioning/site-create-dns-provisioning.js';
 import {
   siteCreateProvisioningPlan as siteCreateProvisioningPlanMail,
   siteCreateMailProvisioningInternals,
-} from '../src/site-create-mail-provisioning.js';
+} from '../src/provisioning/site-create-mail-provisioning.js';
 import {
   createWebsiteProvisioningPlan,
   WebsiteProvisioningPlanError,
   websiteProvisioningPlanInternals,
-} from '../src/website-provisioning-plan.js';
+} from '../src/provisioning/website-provisioning-plan.js';
 import {
   createWebsiteProvisioningOrchestrator,
   WebsiteProvisioningOrchestratorError,
   websiteProvisioningOrchestratorInternals,
-} from '../src/website-provisioning-orchestrator.js';
+} from '../src/provisioning/website-provisioning-orchestrator.js';
 import {
   createWebsiteProvisioningRegistry,
   WebsiteProvisioningRegistryError,
-} from '../src/website-provisioning-registry.js';
+} from '../src/provisioning/website-provisioning-registry.js';
 import {
   canBeginCompensationInOrder,
   findBlockingLaterCompensationStep,
-} from '../src/website-provisioning-compensation-order.js';
+} from '../src/provisioning/website-provisioning-compensation-order.js';
 import {
   createDnsDelegationInspector,
   DnsDelegationInspectorError,
-} from '../src/dns-delegation-inspector.js';
+} from '../src/dns/dns-delegation-inspector.js';
 import {
   createWebsiteMailHealthProvisioningHandler,
   WebsiteMailHealthProvisioningError,
   websiteMailHealthProvisioningInternals,
-} from '../src/website-mail-health-provisioning-handler.js';
-import { deterministicWebsiteMailDkimSelector } from '../src/website-mail-dkim-selector.js';
-import { SiteCreateError, previewSiteCreate, createSite } from '../src/site-create.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createDockerWorkloadRegistry } from '../src/docker-workload-registry.js';
+} from '../src/provisioning/website-mail-health-provisioning-handler.js';
+import { deterministicWebsiteMailDkimSelector } from '../src/mail/website-mail-dkim-selector.js';
+import { SiteCreateError, previewSiteCreate, createSite } from '../src/provisioning/site-create.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createDockerWorkloadRegistry } from '../src/docker/docker-workload-registry.js';
 import { createApplicationIdentity } from '@yunpanel/host-runtime/application-identity';
 import {
   mountWebsiteAnalyticsRoutes,
   WebsiteAnalyticsHttpError,
   websiteAnalyticsHttpInternals,
-} from '../src/website-analytics-http.js';
+} from '../src/websites/website-analytics-http.js';
 import { GoAccessManagerError } from '@yunpanel/host-runtime';
 import { INTEGRATED_TOOL_GATEWAYS } from '../../../packages/protocol/src/tool-gateway.js';
-import { requireToolGatewaySession } from '../src/tool-gateway-session-policy.js';
+import { requireToolGatewaySession } from '../src/auth/tool-gateway-session-policy.js';
 import { createSiteAnalyticsClient } from '../../web/src/workspace/site-analytics-client.js';
 import {
   analyticsReport,
@@ -424,23 +424,23 @@ import {
   mountWebsiteBackupRoutes,
   WebsiteBackupHttpError,
   isWebsiteBackupHttpError,
-} from '../src/website-backup-http.js';
-import { createWebsiteBackupBrowser } from '../src/website-backup-browser.js';
-import { createWebsiteBackupSetProvider } from '../src/website-backup-set.js';
+} from '../src/backup/website-backup-http.js';
+import { createWebsiteBackupBrowser } from '../src/backup/website-backup-browser.js';
+import { createWebsiteBackupSetProvider } from '../src/backup/website-backup-set.js';
 import {
   createWebsiteBackupOperationService,
   WebsiteBackupOperationServiceError,
   isWebsiteBackupOperationError,
-} from '../src/website-backup-operation-service.js';
+} from '../src/backup/website-backup-operation-service.js';
 import {
   createWebsiteBackupOperationRegistry,
   WebsiteBackupOperationRegistryError,
   websiteBackupOperationPublicView,
-} from '../src/website-backup-operation-registry.js';
-import { createWebsiteBackupService } from '../src/website-backup-service.js';
-import { createWebsiteRestoreService, websiteRestoreTransactionId } from '../src/website-restore-service.js';
-import { mountWebsiteRestoreRoutes, isWebsiteRestoreHttpError } from '../src/website-restore-http.js';
-import { createBackupOperationRegistry } from '../src/backup-operation-registry.js';
+} from '../src/backup/website-backup-operation-registry.js';
+import { createWebsiteBackupService } from '../src/backup/website-backup-service.js';
+import { createWebsiteRestoreService, websiteRestoreTransactionId } from '../src/backup/website-restore-service.js';
+import { mountWebsiteRestoreRoutes, isWebsiteRestoreHttpError } from '../src/backup/website-restore-http.js';
+import { createBackupOperationRegistry } from '../src/backup/backup-operation-registry.js';
 import { createWebsiteRestoreReceiptStore } from '@yunpanel/host-runtime';
 import { createSiteBackupClient } from '../../web/src/workspace/site-backup-client.js';
 import {
@@ -455,27 +455,27 @@ import {
 import {
   mountWebsiteCronRoutes,
   WebsiteCronHttpError,
-} from '../src/website-cron-http.js';
+} from '../src/websites/website-cron-http.js';
 import {
   createWebsiteCronApplyService,
   WebsiteCronApplyServiceError,
-} from '../src/website-cron-apply-service.js';
+} from '../src/websites/website-cron-apply-service.js';
 import {
   createWebsiteCronRegistry,
   WebsiteCronRegistryError,
-} from '../src/website-cron-registry.js';
+} from '../src/websites/website-cron-registry.js';
 import {
   createLocalWebsiteCronOperation,
   LocalWebsiteCronOperationError,
-} from '../src/local-website-cron-operation.js';
+} from '../src/websites/local-website-cron-operation.js';
 import {
   createWebsiteCronOperationReceiptStore,
   WebsiteCronOperationReceiptError,
-} from '../src/website-cron-operation-receipt.js';
+} from '../src/websites/website-cron-operation-receipt.js';
 import {
   createWebsiteCronReconciliationProvider,
   WebsiteCronReconciliationError,
-} from '../src/website-cron-reconciliation.js';
+} from '../src/websites/website-cron-reconciliation.js';
 import {
   createCronTaskClient,
   cronDraft,
@@ -541,15 +541,15 @@ import {
 import {
   createDomainSuspensionService,
   DomainSuspensionError,
-} from '../src/domain-suspension.js';
+} from '../src/domains/domain-suspension.js';
 import {
   createWebsiteSuspensionOperationRegistry,
   WebsiteSuspensionOperationRegistryError,
-} from '../src/website-suspension-operation-registry.js';
+} from '../src/websites/website-suspension-operation-registry.js';
 import {
   createWebsitePhpRuntimeProvisioningHandler,
   WebsitePhpRuntimeProvisioningError,
-} from '../src/website-php-runtime-provisioning-handler.js';
+} from '../src/provisioning/website-php-runtime-provisioning-handler.js';
 
 // ============================================================================
 // STAGING E2E PART 1: Reseller & Customer Multi-Tenant Flow & Isolation

@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { createJobRegistry } from '../src/job-registry.js';
-import { executeSiteFileOperation } from '../src/site-file-worker.js';
-import { createOperationSecretStore } from '../src/operation-secret-store.js';
-import { createWordPressToolkitService, normalizeWordPressActionOptions } from '../src/wordpress-toolkit-service.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { executeSiteFileOperation } from '../src/files/site-file-worker.js';
+import { createOperationSecretStore } from '../src/auth/operation-secret-store.js';
+import { createWordPressToolkitService, normalizeWordPressActionOptions } from '../src/wordpress/wordpress-toolkit-service.js';
 import { managedFilesystemDependencies } from './fixtures/managed-filesystem.js';
 
 const websiteId = '11111111-1111-4111-8111-111111111111';

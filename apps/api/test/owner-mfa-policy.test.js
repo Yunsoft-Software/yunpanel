@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createOwnerMfaPolicy } from '../src/owner-mfa-policy.js';
+import { createOwnerMfaPolicy } from '../src/auth/owner-mfa-policy.js';
 
 const owner = { id: 'session', user: { id: 'owner', role: 'owner' }, csrfToken: 'test' };
 function fixture() {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createAuditedJobRegistry } from '../src/audited-job-registry.js';
-import { withAuditActor } from '../src/audit-request-context.js';
+import { createAuditedJobRegistry } from '../src/jobs/audited-job-registry.js';
+import { withAuditActor } from '../src/auth/audit-request-context.js';
 
 test('HTTP request jobs capture live session and resolved site scope while system jobs keep explicit authorization', async () => {
   const queued = [];

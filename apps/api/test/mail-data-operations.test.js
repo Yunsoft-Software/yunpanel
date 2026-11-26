@@ -5,7 +5,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   createMailDataOperationsService,
   MailDataOperationsError,
-} from '../src/mail-data-operations.js';
+} from '../src/mail/mail-data-operations.js';
 
 const localServerId = randomUUID();
 const webDomainId = randomUUID();

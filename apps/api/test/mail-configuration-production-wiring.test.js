@@ -11,7 +11,7 @@ async function text(name) {
 test('production API constructs and shares quota, forwarding and explicit TLS managed mail state', async () => {
   const [indexSource, appSource] = await Promise.all([
     text('index.js'),
-    text('management-app.js'),
+    text('http/management-app.js'),
   ]);
 
   assert.match(indexSource, /createMailboxQuotaRegistry\(\{/);
@@ -41,7 +41,7 @@ test('production API constructs and shares quota, forwarding and explicit TLS ma
 
 test('mail recovery, development env and package migration use one TLS identity store contract', async () => {
   const [recoverySource, envSource, postinstSource] = await Promise.all([
-    text('job-running-mail-config-recovery-runtime.js'),
+    text('jobs/job-running-mail-config-recovery-runtime.js'),
     readFile(new URL('../../../.env.example', import.meta.url), 'utf8'),
     readFile(new URL('../../../packaging/debian/postinst', import.meta.url), 'utf8'),
   ]);
@@ -56,8 +56,8 @@ test('mail recovery, development env and package migration use one TLS identity 
 
 test('configured local runtime keeps protected material private and persists mail crash evidence', async () => {
   const [configuredSource, hostSource] = await Promise.all([
-    text('configured-local-runtime.js'),
-    text('local-host-operations.js'),
+    text('runtime/configured-local-runtime.js'),
+    text('runtime/local-host-operations.js'),
   ]);
 
   assert.match(configuredSource, /loadManagedMailConfiguration/);

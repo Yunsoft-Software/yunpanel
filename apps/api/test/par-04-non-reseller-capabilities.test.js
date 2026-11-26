@@ -13,8 +13,8 @@ import {
   ResellerBrandingDeferredError,
   CapabilityRegistryError,
   mountNonResellerCapabilitiesRoutes,
-} from '../src/non-reseller-capabilities.js';
-import { TenantBoundaryError } from '../src/tenant-boundary.js';
+} from '../src/hosting/non-reseller-capabilities.js';
+import { TenantBoundaryError } from '../src/http/tenant-boundary.js';
 
 test('PAR-04 Acceptance 1 & 2: Established inventory IDs completeness and source inspection across all domains', () => {
   const inventory = NON_RESELLER_INVENTORY;

@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createJobRegistry } from '../src/job-registry.js';
-import { createWebsitePhpToolsService } from '../src/website-php-tools-service.js';
-import { createWebsitePhpToolActionService } from '../src/website-php-tool-action-service.js';
-import { createLocalWebsitePhpToolOperation } from '../src/local-website-php-tool-operation.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { createWebsitePhpToolsService } from '../src/php/website-php-tools-service.js';
+import { createWebsitePhpToolActionService } from '../src/php/website-php-tool-action-service.js';
+import { createLocalWebsitePhpToolOperation } from '../src/php/local-website-php-tool-operation.js';
 
 const websiteId = '11111111-1111-4111-8111-111111111111';
 const applicationId = '22222222-2222-4222-8222-222222222222';

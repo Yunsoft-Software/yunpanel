@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createHostingAccountStore } from '../src/hosting-account-store.js';
+import { createHostingAccountStore } from '../src/hosting/hosting-account-store.js';
 import { hostingAuthFixture } from '../test-support/hosting-auth-fixture.js';
 
 const code = (expected) => (error) => error.code === expected;

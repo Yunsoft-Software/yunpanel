@@ -127,7 +127,7 @@ test.describe('WP-04 WordPress klonlama, staging ve veri senkronizasyonu', () =>
 
     // 11. Fiziksel kanıt 4: non-reseller-capabilities envanterinde WP-04 yeteneğinin 'partial' olarak tanımlandığını doğrula
     const capOutput = runSsh(`node -e '
-      import("/usr/lib/yunpanel/apps/api/src/non-reseller-capabilities.js").then(m => {
+      import("/usr/lib/yunpanel/apps/api/src/hosting/non-reseller-capabilities.js").then(m => {
         const c = m.getCapabilityById("WP-04");
         console.log(JSON.stringify({ id: c.id, status: c.status, title: c.title, serviceAdapters: c.serviceAdapters }));
       });

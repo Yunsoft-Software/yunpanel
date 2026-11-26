@@ -8,8 +8,8 @@ import path from 'node:path';
 import test from 'node:test';
 import express from 'express';
 import { MailSmarthostError } from '../../../packages/host-runtime/src/mail-smarthost-manager.js';
-import { mountMailSmarthostRoutes } from '../src/mail-smarthost-http.js';
-import { createMailSmarthostRegistry } from '../src/mail-smarthost-registry.js';
+import { mountMailSmarthostRoutes } from '../src/mail/mail-smarthost-http.js';
+import { createMailSmarthostRegistry } from '../src/mail/mail-smarthost-registry.js';
 import { ownerManagementContext, withPanelContext } from './helpers/panel-auth-fixture.js';
 
 const SERVER_ID = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { safeLocalOperationError } from '../src/local-execution-error.js';
+import { safeLocalOperationError } from '../src/runtime/local-execution-error.js';
 
 const databaseCodes = [
   'invalid_database_name',

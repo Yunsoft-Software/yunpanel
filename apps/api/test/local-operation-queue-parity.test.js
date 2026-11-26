@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const jobRegistryUrl = new URL('../src/job-registry.js', import.meta.url);
-const localOperationsUrl = new URL('../src/local-host-operations.js', import.meta.url);
+const jobRegistryUrl = new URL('../src/jobs/job-registry.js', import.meta.url);
+const localOperationsUrl = new URL('../src/runtime/local-host-operations.js', import.meta.url);
 
 function operationNames(source, pattern) {
   const match = source.match(pattern);

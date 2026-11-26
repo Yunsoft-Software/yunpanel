@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   ApplicationRegistryError,
   createApplicationRegistry,
-} from '../src/application-registry.js';
+} from '../src/applications/application-registry.js';
 
 const serverId = 'a6dad2a5-4110-4f1c-885c-f03a1cc11e03';
 const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';

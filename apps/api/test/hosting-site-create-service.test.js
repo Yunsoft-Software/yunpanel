@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
-import { createHostingSiteCreateService } from '../src/hosting-site-create-service.js';
+import { createHostingSiteCreateService } from '../src/hosting/hosting-site-create-service.js';
 import { siteFixture, website, uuid } from '../test-support/hosting-site-fixture.js';
 
 const code = (expected) => (error) => error.code === expected;
@@ -197,8 +197,8 @@ test('construction requires explicit local host and live dependencies', () => {
   assert.throws(() => createHostingSiteCreateService({}), /requires/);
 });
 test('runtime composition uses existing isolated site engine, no HTTP or role change', async () => {
-  const source = await readFile(new URL('../src/hosting-site-create-runtime.js', import.meta.url), 'utf8');
-  assert.match(source, /from '\.\/site-create-isolation-guard.js'/);
+  const source = await readFile(new URL('../src/hosting/hosting-site-create-runtime.js', import.meta.url), 'utf8');
+  assert.match(source, /from '\.\.\/provisioning\/site-create-isolation-guard.js'/);
   assert.match(source, /userAdminStore\?\.hostingAccounts/);
   assert.doesNotMatch(source, /app\.(post|use)|auth_user_websites|INSERT|createSiteManager/);
 });

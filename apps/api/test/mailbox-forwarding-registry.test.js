@@ -6,7 +6,7 @@ import test from 'node:test';
 import {
   createMailboxForwardingRegistry,
   MailboxForwardingRegistryError,
-} from '../src/mailbox-forwarding-registry.js';
+} from '../src/mail/mailbox-forwarding-registry.js';
 
 const mailboxA = '87654321-1234-4234-8234-123456789012';
 const mailboxB = '97654321-1234-4234-8234-123456789012';

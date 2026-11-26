@@ -5,7 +5,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   JobRunningMailDataRecoveryError,
   recoverRunningMailData,
-} from '../src/job-running-mail-data-recovery.js';
+} from '../src/jobs/job-running-mail-data-recovery.js';
 
 const serverId = randomUUID();
 const mailDomainId = randomUUID();

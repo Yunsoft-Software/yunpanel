@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createLiveSessionRegistry } from '../src/live-session-registry.js';
+import { createLiveSessionRegistry } from '../src/auth/live-session-registry.js';
 import {
   createPhpMyAdminHandoffService,
   PhpMyAdminHandoffError,
-} from '../src/phpmyadmin-handoff-service.js';
+} from '../src/databases/phpmyadmin-handoff-service.js';
 
 const SESSION_DIGEST = 'd'.repeat(64);
 

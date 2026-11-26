@@ -12,19 +12,19 @@ import {
   computeStateFingerprint,
   AiActionPlanError,
   aiActionPlanInternals,
-} from '../src/ai-action-plan.js';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createAiToolRegistry } from '../src/ai-tool-registry.js';
-import { createAiToolRuntime } from '../src/ai-tool-runtime.js';
-import { DEFAULT_AI_TOOL_DEFINITIONS } from '../src/ai-tool-catalog.js';
-import { createDurableJobRegistry } from '../src/durable-job-registry.js';
-import { createJobRecoveryContextReader } from '../src/job-recovery-context.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { recoverRunningNodeRestart } from '../src/job-running-node-restart-recovery.js';
-import { recoverRunningServiceReceiptMutation } from '../src/job-running-service-receipt-recovery.js';
-import { createManagedServiceMutationReceiptStore } from '../src/managed-service-mutation-receipt.js';
-import { createNodeRestartReceiptStore } from '../src/node-restart-receipt.js';
-import { createServerRegistry } from '../src/server-registry.js';
+} from '../src/ai/ai-action-plan.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createAiToolRegistry } from '../src/ai/ai-tool-registry.js';
+import { createAiToolRuntime } from '../src/ai/ai-tool-runtime.js';
+import { DEFAULT_AI_TOOL_DEFINITIONS } from '../src/ai/ai-tool-catalog.js';
+import { createDurableJobRegistry } from '../src/jobs/durable-job-registry.js';
+import { createJobRecoveryContextReader } from '../src/jobs/job-recovery-context.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { recoverRunningNodeRestart } from '../src/jobs/job-running-node-restart-recovery.js';
+import { recoverRunningServiceReceiptMutation } from '../src/jobs/job-running-service-receipt-recovery.js';
+import { createManagedServiceMutationReceiptStore } from '../src/runtime/managed-service-mutation-receipt.js';
+import { createNodeRestartReceiptStore } from '../src/applications/node-restart-receipt.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
 
 const ownerAuth = Object.freeze({
   user: Object.freeze({ id: 'owner-user-1', role: 'owner' }),

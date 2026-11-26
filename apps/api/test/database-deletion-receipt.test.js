@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createDatabaseDeletionReceiptStore } from '../src/database-deletion-receipt.js';
+import { createDatabaseDeletionReceiptStore } from '../src/databases/database-deletion-receipt.js';
 
 const serverId = 'server-1';
 const jobId = '12345678-1234-4234-8234-123456789012';

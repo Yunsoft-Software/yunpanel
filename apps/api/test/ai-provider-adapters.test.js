@@ -5,8 +5,8 @@ import {
   createAnthropicAdapter,
   createGeminiAdapter,
   createProviderFromConfig,
-} from '../src/ai-provider-adapters.js';
-import { AiProviderError } from '../src/ai-provider.js';
+} from '../src/ai/ai-provider-adapters.js';
+import { AiProviderError } from '../src/ai/ai-provider.js';
 
 test('OpenAiCompatibleAdapter parses message and tool_calls responses', async () => {
   let capturedRequest = null;

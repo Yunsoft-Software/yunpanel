@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { previewLocalMigrationRestore } from '../src/local-migration-restore-preview.js';
+import { previewLocalMigrationRestore } from '../src/migration/local-migration-restore-preview.js';
 
 const backupDirectory = '/var/backups/yunpanel/migration-2026-09-10T15-00-00-000Z';
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createApplicationRegistry } from '../src/application-registry.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
 
 test('Application deletion requires exact server/revision and no active deployment', async () => {
   const registry=createApplicationRegistry({serverExists:async()=>true});

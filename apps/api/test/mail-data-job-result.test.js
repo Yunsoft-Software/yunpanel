@@ -5,7 +5,7 @@ import {
   sanitizeMailDataBackupResult,
   sanitizeMailDataDeleteResult,
   sanitizeMailDataRestoreResult,
-} from '../src/mail-data-job-result.js';
+} from '../src/mail/mail-data-job-result.js';
 
 const mailDomainId = '12345678-1234-4234-8234-123456789012';
 const mailboxId = '22345678-1234-4234-8234-123456789012';

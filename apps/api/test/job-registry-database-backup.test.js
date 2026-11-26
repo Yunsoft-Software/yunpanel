@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createJobRegistry, JobRegistryError } from '../src/job-registry.js';
+import { createJobRegistry, JobRegistryError } from '../src/jobs/job-registry.js';
 
 const serverId = '12345678-1234-4234-8234-123456789012';
 const databaseName = 'app_main';

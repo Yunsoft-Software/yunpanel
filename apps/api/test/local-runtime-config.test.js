@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resolveLocalRuntimeConfig, LocalRuntimeConfigError } from '../src/local-runtime-config.js';
+import { resolveLocalRuntimeConfig, LocalRuntimeConfigError } from '../src/runtime/local-runtime-config.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 

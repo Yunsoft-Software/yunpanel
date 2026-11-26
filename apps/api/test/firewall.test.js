@@ -7,11 +7,11 @@ import {
   FirewallServiceError,
   computeFirewallImpact,
   parseAllowedPortsFromRuleset,
-} from '../src/firewall-service.js';
+} from '../src/runtime/firewall-service.js';
 import {
   mountFirewallRoutes,
   FirewallHttpError,
-} from '../src/firewall-http.js';
+} from '../src/runtime/firewall-http.js';
 import {
   createNftablesManager,
   NftablesManagerError,

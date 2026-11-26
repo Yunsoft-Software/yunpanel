@@ -12,7 +12,7 @@ import { createPanelServer } from '../server.js';
 import {
   assertNoDot44Host,
   ProductionExitGateError,
-} from '../../api/src/production-exit-gate.js';
+} from '../../api/src/panel/production-exit-gate.js';
 import {
   SITE_TABS,
   normalizeSiteTab,

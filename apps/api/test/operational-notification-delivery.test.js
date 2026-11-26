@@ -3,9 +3,9 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createOperationalNotificationService } from '../src/operational-notification-service.js';
-import { createOperationalNotificationSweep } from '../src/operational-notification-sweep.js';
-import { NOTIFICATION_EVENT_TYPES, NOTIFICATION_SEVERITY } from '../src/operational-notification-types.js';
+import { createOperationalNotificationService } from '../src/panel/operational-notification-service.js';
+import { createOperationalNotificationSweep } from '../src/panel/operational-notification-sweep.js';
+import { NOTIFICATION_EVENT_TYPES, NOTIFICATION_SEVERITY } from '../src/panel/operational-notification-types.js';
 
 const HOUR = 60 * 60 * 1000;
 const silent = { error() {}, warn() {}, info() {} };
@@ -186,7 +186,7 @@ test('the sweep checks certificates and the disk, and a failure is logged withou
 
 test('the feed route returns the owner feed and saving preferences refreshes the sentinel address', async () => {
   const { default: express } = await import('express');
-  const { mountOperationalNotificationRoutes } = await import('../src/operational-notification-http.js');
+  const { mountOperationalNotificationRoutes } = await import('../src/panel/operational-notification-http.js');
   const service = createOperationalNotificationService({ defaultOwnerEmail: 'owner@example.com', logger: silent });
   let refreshed = 0;
   const original = service.refreshAlertAddress;

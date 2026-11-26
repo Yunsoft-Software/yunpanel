@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createApp } from '../src/app.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createDatabaseBindingRegistry } from '../src/database-binding-registry.js';
-import { createServerRegistry } from '../src/server-registry.js';
+import { createApp } from '../src/http/app.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createDatabaseBindingRegistry } from '../src/databases/database-binding-registry.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
 import { withPanelContext } from './helpers/panel-auth-fixture.js';
 
 async function withServer(app, callback) {

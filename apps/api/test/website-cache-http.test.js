@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { createConnection } from 'node:net';
 import express from 'express';
-import { mountWebsiteCacheRoutes } from '../src/website-cache-http.js';
+import { mountWebsiteCacheRoutes } from '../src/websites/website-cache-http.js';
 
 const WEBSITE_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 

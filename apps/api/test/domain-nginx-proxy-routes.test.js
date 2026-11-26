@@ -17,43 +17,43 @@ import {
   renderPhpSiteConfig,
   renderStaticSiteConfig,
 } from '@yunpanel/config-templates';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createApplicationRuntimeBindingRegistry } from '../src/application-runtime-binding-registry.js';
-import { createAuthenticatedApi } from '../src/auth-http.js';
-import { createAuthStore } from '../src/auth-store.js';
-import { createApp as createCoreApp } from '../src/core-app.js';
-import { createDockerComposeApiHandler } from '../src/docker-compose-api-handler.js';
-import { createDockerComposeEnvironmentRegistry } from '../src/docker-compose-environment-registry.js';
-import { createDockerComposeOperationsService } from '../src/docker-compose-operations.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createApplicationRuntimeBindingRegistry } from '../src/applications/application-runtime-binding-registry.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
+import { createAuthStore } from '../src/auth/auth-store.js';
+import { createApp as createCoreApp } from '../src/http/core-app.js';
+import { createDockerComposeApiHandler } from '../src/docker/docker-compose-api-handler.js';
+import { createDockerComposeEnvironmentRegistry } from '../src/docker/docker-compose-environment-registry.js';
+import { createDockerComposeOperationsService } from '../src/docker/docker-compose-operations.js';
 import {
   createDockerComposeProjectRegistry,
   DockerComposeProjectRegistryError,
-} from '../src/docker-compose-project-registry.js';
-import { createDockerComposeRemoval } from '../src/docker-compose-removal.js';
-import { DockerPleskCatalogError, resolveDockerProxyRule } from '../src/docker-plesk-catalog.js';
-import { createDockerRegistryCredentialRegistry } from '../src/docker-registry-credential-registry.js';
+} from '../src/docker/docker-compose-project-registry.js';
+import { createDockerComposeRemoval } from '../src/docker/docker-compose-removal.js';
+import { DockerPleskCatalogError, resolveDockerProxyRule } from '../src/docker/docker-plesk-catalog.js';
+import { createDockerRegistryCredentialRegistry } from '../src/docker/docker-registry-credential-registry.js';
 import {
   createDomainHandler,
   createDomainUpdateHandler,
   createDomainUpdatePreviewHandler,
-} from '../src/domain-http.js';
-import { domainNginxSettingsForTarget } from '../src/domain-nginx-settings.js';
+} from '../src/domains/domain-http.js';
+import { domainNginxSettingsForTarget } from '../src/domains/domain-nginx-settings.js';
 import {
   assertOwnerProxyRouteAccess,
   assertProjectUpdatePreservesProxyRoutes,
   isOwnerManagementAuth,
   requireOwnerDockerAccess,
-} from '../src/domain-proxy-routes.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createDomainStageTargetJobRegistry } from '../src/domain-stage-target-job-registry.js';
-import { hostingWebsiteDigest } from '../src/hosting-site-allocation-store.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { reconcileCompletedJob } from '../src/job-reconciliation.js';
-import { createApp as createManagementApp } from '../src/management-app.js';
-import { createOwnerMfaPolicy } from '../src/owner-mfa-policy.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createSiteMutationLock } from '../src/site-mutation-lock.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
+} from '../src/domains/domain-proxy-routes.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createDomainStageTargetJobRegistry } from '../src/domains/domain-stage-target-job-registry.js';
+import { hostingWebsiteDigest } from '../src/hosting/hosting-site-allocation-store.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { reconcileCompletedJob } from '../src/jobs/job-reconciliation.js';
+import { createApp as createManagementApp } from '../src/http/management-app.js';
+import { createOwnerMfaPolicy } from '../src/auth/owner-mfa-policy.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createSiteMutationLock } from '../src/websites/site-mutation-lock.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
 
 const ORIGIN = 'http://127.0.0.1:5173';
 const PASSWORD = 'test-slice-a-strong-password-2026!';

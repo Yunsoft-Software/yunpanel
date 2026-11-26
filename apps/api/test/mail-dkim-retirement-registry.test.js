@@ -7,7 +7,7 @@ import test from 'node:test';
 import {
   createMailDkimRetirementRegistry,
   MailDkimRetirementRegistryError,
-} from '../src/mail-dkim-retirement-registry.js';
+} from '../src/mail/mail-dkim-retirement-registry.js';
 
 const mailDomainId = randomUUID();
 const PUBLIC_ONE = Buffer.alloc(256, 1).toString('base64');

@@ -5,7 +5,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   createWebsiteCronApplyService,
   WebsiteCronApplyServiceError,
-} from '../src/website-cron-apply-service.js';
+} from '../src/websites/website-cron-apply-service.js';
 
 const websiteId = '12345678-1234-4234-8234-123456789012';
 const taskId = '22345678-1234-4234-8234-123456789012';

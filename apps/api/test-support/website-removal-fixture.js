@@ -1,6 +1,6 @@
-import { createWebsiteRemovalOperationRegistry } from '../src/website-removal-operation-registry.js';
-import { createWebsiteRemovalPreview } from '../src/website-removal-plan.js';
-import { createWebsiteRemovalRuntime } from '../src/website-removal-runtime.js';
+import { createWebsiteRemovalOperationRegistry } from '../src/websites/website-removal-operation-registry.js';
+import { createWebsiteRemovalPreview } from '../src/websites/website-removal-plan.js';
+import { createWebsiteRemovalRuntime } from '../src/websites/website-removal-runtime.js';
 
 // Real plan, operation registry and runtime with fixture resource/host adapters.
 // Physical host and browser acceptance is recorded in e2e/live-audit.

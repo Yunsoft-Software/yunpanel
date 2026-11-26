@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   createMailDiscoveryHttpHandler,
   mailDiscoverySocketInternals,
-} from '../src/mail-discovery-socket.js';
+} from '../src/mail/mail-discovery-socket.js';
 
 function request({ method, url, headers = {}, body = '' }) {
   const stream = Readable.from(body ? [Buffer.from(body)] : []);

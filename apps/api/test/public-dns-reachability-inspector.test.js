@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   createPublicDnsReachabilityInspector,
   PublicDnsReachabilityInspectorError,
-} from '../src/public-dns-reachability-inspector.js';
+} from '../src/dns/public-dns-reachability-inspector.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const identity = Object.freeze({ settings: Object.freeze({ publicIpv4: '203.0.113.10', publicIpv6: '2001:db8::10' }) });

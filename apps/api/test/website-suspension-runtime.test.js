@@ -5,11 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   createWebsiteSuspensionOperationRegistry,
-} from '../src/website-suspension-operation-registry.js';
+} from '../src/websites/website-suspension-operation-registry.js';
 import {
   createWebsiteSuspensionRuntime,
   WebsiteSuspensionRuntimeError,
-} from '../src/website-suspension-runtime.js';
+} from '../src/websites/website-suspension-runtime.js';
 
 async function withTempDir(fn) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'website-susp-rt-test-'));

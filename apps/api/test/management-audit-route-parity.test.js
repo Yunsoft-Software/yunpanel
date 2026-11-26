@@ -3,28 +3,28 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { classifyManagementMutation } from '../src/management-audit.js';
+import { classifyManagementMutation } from '../src/auth/management-audit.js';
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const apiSource = path.resolve(testDirectory, '../src');
 const SOURCE_FILES = [
-  'management-app.js',
-  'core-app.js',
-  'site-create-http.js',
-  'resource-impact-http.js',
-  'application-configuration-http.js',
-  'application-process-http.js',
-  'external-lifecycle-http.js',
-  'mailbox-http.js',
-  'website-http.js',
-  'website-migration-http.js',
-  'managed-service-http.js',
-  'node-runtime-http.js',
-  'database-http.js',
-  'dns-zone-dnssec-http.js',
-  'backup-repository-http.js',
-  'website-backup-http.js',
-  'website-restore-http.js',
+  'http/management-app.js',
+  'http/core-app.js',
+  'provisioning/site-create-http.js',
+  'websites/resource-impact-http.js',
+  'applications/application-configuration-http.js',
+  'applications/application-process-http.js',
+  'domains/external-lifecycle-http.js',
+  'mail/mailbox-http.js',
+  'websites/website-http.js',
+  'migration/website-migration-http.js',
+  'runtime/managed-service-http.js',
+  'applications/node-runtime-http.js',
+  'databases/database-http.js',
+  'dns/dns-zone-dnssec-http.js',
+  'backup/backup-repository-http.js',
+  'backup/website-backup-http.js',
+  'backup/website-restore-http.js',
 ];
 const ROUTE_PATTERN = /app\.(post|put|patch|delete)\(\s*'([^']+)'\s*,\s*(?:requirePanelRouteAccess|requireOwner)\b/g;
 
@@ -81,7 +81,7 @@ test('Website creation and migration mutations are part of common management aud
   }
   const routes = discoveredMutationRoutes();
   for (const route of expected.keys()) {
-    const file = route === '/api/websites' ? 'website-http.js' : 'website-migration-http.js';
+    const file = route === '/api/websites' ? 'websites/website-http.js' : 'migration/website-migration-http.js';
     assert.ok(routes.some((entry) => entry.file === file && entry.method === 'POST' && entry.route === route));
   }
   assert.deepEqual(classifyManagementMutation('POST', '/api/websites/website-1/update-preview'), {

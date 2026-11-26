@@ -3,7 +3,7 @@ import { mkdtemp, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createAiPolicyStore } from '../src/ai-policy-store.js';
+import { createAiPolicyStore } from '../src/ai/ai-policy-store.js';
 
 test('AI policy store persists revisioned allow/confirm/deny overrides in a private file', async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-ai-policy-'));

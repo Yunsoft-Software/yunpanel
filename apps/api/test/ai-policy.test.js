@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { evaluateAiToolPolicy, AiPolicyError, aiPolicyInternals } from '../src/ai-policy.js';
-import { DEFAULT_AI_TOOL_DEFINITIONS, AI_TOOL_CONFIRMATION, AI_TOOL_RISKS } from '../src/ai-tool-catalog.js';
-import { createAiToolRegistry, AiToolRegistryError } from '../src/ai-tool-registry.js';
-import { createAiOrchestrator, AiOrchestratorError } from '../src/ai-orchestrator.js';
-import { createAiToolRuntime } from '../src/ai-tool-runtime.js';
-import { createAiProviderAdapter } from '../src/ai-provider.js';
-import { maskSecrets, maskSecretsInString } from '../src/secret-masker.js';
+import { evaluateAiToolPolicy, AiPolicyError, aiPolicyInternals } from '../src/ai/ai-policy.js';
+import { DEFAULT_AI_TOOL_DEFINITIONS, AI_TOOL_CONFIRMATION, AI_TOOL_RISKS } from '../src/ai/ai-tool-catalog.js';
+import { createAiToolRegistry, AiToolRegistryError } from '../src/ai/ai-tool-registry.js';
+import { createAiOrchestrator, AiOrchestratorError } from '../src/ai/ai-orchestrator.js';
+import { createAiToolRuntime } from '../src/ai/ai-tool-runtime.js';
+import { createAiProviderAdapter } from '../src/ai/ai-provider.js';
+import { maskSecrets, maskSecretsInString } from '../src/auth/secret-masker.js';
 
 const ownerAuth = Object.freeze({
   user: Object.freeze({ id: 'owner-user-1', role: 'owner' }),

@@ -7,7 +7,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   createWebsiteCronOperationReceiptStore,
   WebsiteCronOperationReceiptError,
-} from '../src/website-cron-operation-receipt.js';
+} from '../src/websites/website-cron-operation-receipt.js';
 
 const serverId = '12345678-1234-4234-8234-123456789012';
 const taskId = '22345678-1234-4234-8234-123456789012';

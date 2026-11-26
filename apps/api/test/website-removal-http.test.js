@@ -6,17 +6,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp, readFile, writeFile, rm, chmod, mkdir, realpath } from 'node:fs/promises';
 import { renderCronTaskFile } from '@yunpanel/config-templates';
-import { createSiteMutationLock, SiteMutationLockError } from '../src/site-mutation-lock.js';
-import { createProcessStoreLock, ProcessStoreLockError } from '../src/process-store-lock.js';
-import { createWebsiteRemovalCleanupAdapters } from '../src/website-removal-cleanup-adapters.js';
-import { createLiveSessionRegistry } from '../src/live-session-registry.js';
+import { createSiteMutationLock, SiteMutationLockError } from '../src/websites/site-mutation-lock.js';
+import { createProcessStoreLock, ProcessStoreLockError } from '../src/runtime/process-store-lock.js';
+import { createWebsiteRemovalCleanupAdapters } from '../src/websites/website-removal-cleanup-adapters.js';
+import { createLiveSessionRegistry } from '../src/auth/live-session-registry.js';
 import { createWebsitePassengerEnvironmentManager } from '@yunpanel/host-runtime/website-passenger-environment-manager';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
-import { createApplicationEnvironmentRegistry } from '../src/application-environment-registry.js';
-import { createWebsiteProvisioningRuntime } from '../src/website-provisioning-runtime.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
+import { createApplicationEnvironmentRegistry } from '../src/applications/application-environment-registry.js';
+import { createWebsiteProvisioningRuntime } from '../src/provisioning/website-provisioning-runtime.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
 
 
 function createExpressMockApp() {
@@ -198,17 +198,17 @@ express.json = () => (req, res, next) => next();
 import {
   mountWebsiteRemovalRoutes,
   WebsiteRemovalHttpError,
-} from '../src/website-removal-http.js';
+} from '../src/websites/website-removal-http.js';
 import {
   createWebsiteRemovalRuntime,
   WebsiteRemovalRuntimeError,
-} from '../src/website-removal-runtime.js';
+} from '../src/websites/website-removal-runtime.js';
 import {
   createWebsiteRemovalOperationRegistry,
-} from '../src/website-removal-operation-registry.js';
+} from '../src/websites/website-removal-operation-registry.js';
 import {
   createWebsiteRemovalPreview,
-} from '../src/website-removal-plan.js';
+} from '../src/websites/website-removal-plan.js';
 
 // Real FS + file-backed Passenger dependencies for the two retained legacy HTTP contract cases.
 // Their pre-existing auth/host-service compatibility fixtures do not attest native services.

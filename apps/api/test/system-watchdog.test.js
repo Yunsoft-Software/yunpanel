@@ -7,7 +7,7 @@ import {
   systemWatchdogInternals,
   mountSystemWatchdogRoutes,
   SystemWatchdogHttpError,
-} from '../src/local-api-health.js';
+} from '../src/runtime/local-api-health.js';
 
 const TEST_SERVER_ID = 'srv-test-1234';
 

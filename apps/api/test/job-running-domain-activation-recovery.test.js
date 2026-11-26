@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { recoverRunningDomainActivation } from '../src/job-running-domain-activation-recovery.js';
+import { recoverRunningDomainActivation } from '../src/jobs/job-running-domain-activation-recovery.js';
 
 const serverId = 'server-1';
 const jobId = '12345678-1234-4234-8234-123456789012';

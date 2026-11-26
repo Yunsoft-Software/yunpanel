@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, readdirSync, statSync, rmSync, mkdirSync } f
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { createAuthStore, hashPassword, verifyPassword, safeEqual } from '../src/auth-store.js';
+import { createAuthStore, hashPassword, verifyPassword, safeEqual } from '../src/auth/auth-store.js';
 
 const password = randomBytes(32).toString('base64url');
 const secondPassword = randomBytes(32).toString('base64url');

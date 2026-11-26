@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mountApplicationPassengerMigrationRoutes } from '../src/application-passenger-migration-http.js';
+import { mountApplicationPassengerMigrationRoutes } from '../src/applications/application-passenger-migration-http.js';
 
 function captureApp() {
   const routes = [];

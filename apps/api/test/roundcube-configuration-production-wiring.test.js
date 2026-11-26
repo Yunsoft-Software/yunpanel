@@ -9,7 +9,7 @@ async function text(name) {
 }
 
 test('production API mounts local Roundcube configuration control plane and preserves typed errors', async () => {
-  const appSource = await text('management-app.js');
+  const appSource = await text('http/management-app.js');
 
   assert.match(appSource, /RoundcubeConfigurationHttpError, mountRoundcubeConfigurationRoutes/);
   assert.match(appSource, /roundcubeConfigurationService = null/);
@@ -31,7 +31,7 @@ test('production boot shares one persistent Roundcube secret registry and config
 });
 
 test('configured local runtime materializes Roundcube privately and records only recovery-safe evidence', async () => {
-  const configuredSource = await text('configured-local-runtime.js');
+  const configuredSource = await text('runtime/configured-local-runtime.js');
 
   assert.match(configuredSource, /roundcubeConfigurationService\.materializeForServer\(execution\?\.resourceId/);
   assert.match(configuredSource, /loadRoundcubeConfiguration,/);

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { runRunningPhpToolRecoveryFromStores } from '../src/job-running-php-tool-recovery-runtime.js';
+import { runRunningPhpToolRecoveryFromStores } from '../src/jobs/job-running-php-tool-recovery-runtime.js';
 
 const serverId='33333333-3333-4333-8333-333333333333', jobId='php-action-job-01';
 

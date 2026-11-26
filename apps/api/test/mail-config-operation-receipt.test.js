@@ -6,7 +6,7 @@ import test from 'node:test';
 import {
   createMailConfigOperationReceiptStore,
   MailConfigOperationReceiptError,
-} from '../src/mail-config-operation-receipt.js';
+} from '../src/mail/mail-config-operation-receipt.js';
 
 const SERVER_ID = 'local-server';
 const JOB_ID = '11111111-2222-4333-8444-555555555555';

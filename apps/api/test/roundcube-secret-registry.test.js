@@ -6,7 +6,7 @@ import test from 'node:test';
 import {
   createRoundcubeSecretRegistry,
   RoundcubeSecretRegistryError,
-} from '../src/roundcube-secret-registry.js';
+} from '../src/mail/roundcube-secret-registry.js';
 
 const SERVER_ID = '10714f5d-8646-4f9a-a8e9-b80439ff6305';
 const MISSING_SERVER_ID = '822fa920-166c-4a7a-a26b-476c81d82165';

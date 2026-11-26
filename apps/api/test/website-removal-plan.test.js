@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   createWebsiteRemovalPreview,
   WebsiteRemovalPlanError,
-} from '../src/website-removal-plan.js';
+} from '../src/websites/website-removal-plan.js';
 
 function website(overrides = {}) {
   return {

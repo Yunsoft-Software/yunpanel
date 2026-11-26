@@ -9,9 +9,9 @@ import { once } from 'node:events';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 import { TOTP } from 'otpauth';
-import { createAuthStore, hashPassword, verifyPassword } from '../src/auth-store.js';
-import { createAuthMailer, validateEmail } from '../src/auth-mailer.js';
-import { createAuthenticatedApi } from '../src/auth-http.js';
+import { createAuthStore, hashPassword, verifyPassword } from '../src/auth/auth-store.js';
+import { createAuthMailer, validateEmail } from '../src/auth/auth-mailer.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
 
 function createMockMailer({ available = true, shouldFailSend = false } = {}) {
   const sent = [];

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import './site-manager-auth-csrf.test.js';
-import { AuthError } from '../src/auth-error.js';
+import { AuthError } from '../src/auth/auth-error.js';
 import {
   TenantBoundaryError,
   assertCustomerBelongsToReseller,
@@ -10,14 +10,14 @@ import {
   createTenantBoundaryMiddleware,
   extractActorTenant,
   sanitizeTenantCollection,
-} from '../src/tenant-boundary.js';
-import { handleAuditRead } from '../src/audit-http.js';
-import { mountTerminalCapabilityRoutes } from '../src/terminal-capability-http.js';
-import { classifyManagementMutation, attachManagementAudit } from '../src/management-audit.js';
-import { withAuditActor, currentAuditTenant } from '../src/audit-request-context.js';
-import { mountWebsiteRoutes } from '../src/website-http.js';
-import { createApp } from '../src/core-app.js';
-import { createApp as createManagementApp } from '../src/management-app.js';
+} from '../src/http/tenant-boundary.js';
+import { handleAuditRead } from '../src/auth/audit-http.js';
+import { mountTerminalCapabilityRoutes } from '../src/terminal/terminal-capability-http.js';
+import { classifyManagementMutation, attachManagementAudit } from '../src/auth/management-audit.js';
+import { withAuditActor, currentAuditTenant } from '../src/auth/audit-request-context.js';
+import { mountWebsiteRoutes } from '../src/websites/website-http.js';
+import { createApp } from '../src/http/core-app.js';
+import { createApp as createManagementApp } from '../src/http/management-app.js';
 
 const owner = Object.freeze({ id: 'owner-user', role: 'owner', active: true });
 const readOnly = Object.freeze({ id: 'readonly-user', role: 'read_only', active: true });

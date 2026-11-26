@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AuthError } from '../src/auth-error.js';
-import { assertResellerCapacity, countResellerUsage, validateResellerLimits } from '../src/reseller-limits.js';
+import { AuthError } from '../src/auth/auth-error.js';
+import { assertResellerCapacity, countResellerUsage, validateResellerLimits } from '../src/hosting/reseller-limits.js';
 
 const limits = Object.freeze({ maxCustomers: 2, maxWebsites: 3 });
 const usage = Object.freeze({ customers: 1, websites: 2 });

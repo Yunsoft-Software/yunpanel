@@ -6,7 +6,7 @@ import test from 'node:test';
 import {
   createWebsitePhpToolOperationReceiptStore,
   websitePhpToolOperationReceiptInternals,
-} from '../src/website-php-tool-operation-receipt.js';
+} from '../src/php/website-php-tool-operation-receipt.js';
 
 const base = {
   version: 1, recordedAt: '2026-09-25T00:00:00.000Z',

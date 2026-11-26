@@ -7,7 +7,7 @@ import {
   certificatePublicView,
   createCertificateRegistry,
   CertificateRegistryError,
-} from '../src/certificate-registry.js';
+} from '../src/certificates/certificate-registry.js';
 
 const fingerprint256 = Array.from({ length: 32 }, () => 'AB').join(':');
 

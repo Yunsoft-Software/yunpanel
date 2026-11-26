@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWebsitePhpToolsService } from '../src/website-php-tools-service.js';
+import { createWebsitePhpToolsService } from '../src/php/website-php-tools-service.js';
 
 const websiteId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const applicationId = '11111111-1111-4111-8111-111111111111';

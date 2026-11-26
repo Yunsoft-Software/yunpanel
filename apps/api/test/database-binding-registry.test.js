@@ -6,7 +6,7 @@ import test from 'node:test';
 import {
   createDatabaseBindingRegistry,
   DatabaseBindingRegistryError,
-} from '../src/database-binding-registry.js';
+} from '../src/databases/database-binding-registry.js';
 
 const serverId = '11111111-1111-4111-8111-111111111111';
 const websiteId = '22222222-2222-4222-8222-222222222222';

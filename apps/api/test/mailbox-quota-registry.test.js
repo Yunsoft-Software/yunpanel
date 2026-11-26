@@ -8,7 +8,7 @@ import {
   createMailboxQuotaRegistry,
   MailboxQuotaRegistryError,
   mailboxQuotaRegistryInternals,
-} from '../src/mailbox-quota-registry.js';
+} from '../src/mail/mailbox-quota-registry.js';
 
 const mailboxId = randomUUID();
 const mailbox = Object.freeze({ id: mailboxId, address: 'owner@example.com', revision: 1 });

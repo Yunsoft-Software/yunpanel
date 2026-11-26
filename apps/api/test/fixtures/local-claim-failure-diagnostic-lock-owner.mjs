@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { lstat, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createProcessStoreLock } from '../../src/process-store-lock.js';
+import { createProcessStoreLock } from '../../src/runtime/process-store-lock.js';
 
 const [filePath, expectedDev, expectedIno] = process.argv.slice(2);
 const root = path.dirname(filePath), temp = await realpath(os.tmpdir());

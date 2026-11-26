@@ -8,7 +8,7 @@ import { createApplicationIdentity } from '@yunpanel/host-runtime/application-id
 import {
   createWebsiteElFinderProvisioningHandler,
   WebsiteElFinderProvisioningError,
-} from '../src/website-elfinder-provisioning-handler.js';
+} from '../src/provisioning/website-elfinder-provisioning-handler.js';
 
 const operationId = '12345678-1234-4234-8234-123456789012';
 const intent = Object.freeze({

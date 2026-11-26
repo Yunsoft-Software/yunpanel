@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createSite, previewSiteCreate } from '../src/site-create.js';
-import { createWebsiteRegistry, websiteRegistryInternals } from '../src/website-registry.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createSite, previewSiteCreate } from '../src/provisioning/site-create.js';
+import { createWebsiteRegistry, websiteRegistryInternals } from '../src/websites/website-registry.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';

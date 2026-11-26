@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { recoverRunningRoundcubeConfig } from '../src/job-running-roundcube-config-recovery.js';
+import { recoverRunningRoundcubeConfig } from '../src/jobs/job-running-roundcube-config-recovery.js';
 
 const serverId = '10714f5d-8646-4f9a-a8e9-b80439ff6305';
 const jobId = '12345678-1234-4234-8234-123456789012';

@@ -121,7 +121,7 @@ install -m 0755 scripts/local-runtime.mjs "$package_root/usr/lib/yunpanel/script
 install -m 0755 scripts/job-recovery.mjs "$package_root/usr/lib/yunpanel/scripts/job-recovery.mjs"
 install -m 0755 scripts/local-migration-backup.mjs "$package_root/usr/lib/yunpanel/scripts/local-migration-backup.mjs"
 install -m 0755 scripts/plesk-transfer.mjs "$package_root/usr/lib/yunpanel/scripts/plesk-transfer.mjs"
-install -m 0644 apps/api/src/vendor-entitlement-public.pem "$package_root/usr/share/yunpanel/trust/entitlement-public.pem"
+install -m 0644 apps/api/src/panel/vendor-entitlement-public.pem "$package_root/usr/share/yunpanel/trust/entitlement-public.pem"
 install -m 0644 "${documentation_files[@]}" \
   "$package_root/usr/share/doc/yunpanel/"
 

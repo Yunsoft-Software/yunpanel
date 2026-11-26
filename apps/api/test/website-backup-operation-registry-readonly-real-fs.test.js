@@ -6,9 +6,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createWebsiteBackupOperationRegistry } from '../src/website-backup-operation-registry.js';
-import { createWebsiteBackupOperationService } from '../src/website-backup-operation-service.js';
-import { createJobRegistry } from '../src/job-registry.js';
+import { createWebsiteBackupOperationRegistry } from '../src/backup/website-backup-operation-registry.js';
+import { createWebsiteBackupOperationService } from '../src/backup/website-backup-operation-service.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
 
 async function ownDirectory(action) {
   const parent = await realpath(os.tmpdir());

@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   createWebsiteSftpKeyService,
   WebsiteSftpKeyServiceError,
-} from '../src/website-sftp-key-service.js';
+} from '../src/websites/website-sftp-key-service.js';
 
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
 const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';

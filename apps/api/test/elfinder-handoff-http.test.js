@@ -4,10 +4,10 @@ import express from 'express';
 import test from 'node:test';
 import {
   mountElFinderHandoffRoutes,
-} from '../src/elfinder-handoff-http.js';
+} from '../src/files/elfinder-handoff-http.js';
 import {
   ElFinderHandoffError,
-} from '../src/elfinder-handoff-service.js';
+} from '../src/files/elfinder-handoff-service.js';
 
 const serverId = randomUUID();
 const websiteId = randomUUID();

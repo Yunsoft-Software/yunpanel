@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { powerDnsZoneManagerInternals } from '@yunpanel/host-runtime/powerdns-zone-manager';
-import { createDnsZoneRetirementOperationRegistry } from '../src/dns-zone-retirement-operation-registry.js';
+import { createDnsZoneRetirementOperationRegistry } from '../src/dns/dns-zone-retirement-operation-registry.js';
 import {
   createDnsZoneRetirementRuntime,
   dnsZoneRetirementRuntimeInternals,
-} from '../src/dns-zone-retirement-runtime.js';
+} from '../src/dns/dns-zone-retirement-runtime.js';
 
 const operationId = '12345678-1234-4234-8234-123456789012';
 const domainId = '22345678-1234-4234-8234-123456789012';

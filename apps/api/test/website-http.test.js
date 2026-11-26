@@ -3,8 +3,8 @@ import http from 'node:http';
 import { once } from 'node:events';
 import express from 'express';
 import test from 'node:test';
-import { mountWebsiteRoutes } from '../src/website-http.js';
-import { WebsiteRegistryError } from '../src/website-registry.js';
+import { mountWebsiteRoutes } from '../src/websites/website-http.js';
+import { WebsiteRegistryError } from '../src/websites/website-registry.js';
 
 const ownerAuth = Object.freeze({
   user: { id: 'owner-1', role: 'owner' },

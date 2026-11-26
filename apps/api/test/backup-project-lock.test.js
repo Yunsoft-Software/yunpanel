@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   BackupProjectLockError,
   createBackupProjectLockProvider,
-} from '../src/backup-project-lock.js';
+} from '../src/backup/backup-project-lock.js';
 
 const projectId = '0bb78242-03a6-429f-9d17-7725c521437c';
 const otherProjectId = '5bc2c0f4-948a-4f34-826c-5a9703f9cbf0';

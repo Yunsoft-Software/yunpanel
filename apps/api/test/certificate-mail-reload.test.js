@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { reloadCertificateMail } from '../src/certificate-mail-reload.js';
-import { createLocalHostOperations } from '../src/local-host-operations.js';
-import { createJobRegistry, jobPublicView } from '../src/job-registry.js';
-import { reconcileCompletedJob } from '../src/job-reconciliation.js';
+import { reloadCertificateMail } from '../src/certificates/certificate-mail-reload.js';
+import { createLocalHostOperations } from '../src/runtime/local-host-operations.js';
+import { createJobRegistry, jobPublicView } from '../src/jobs/job-registry.js';
+import { reconcileCompletedJob } from '../src/jobs/job-reconciliation.js';
 
 const leaf = { certName: 'mail.example.com', fullchainPath: '/etc/letsencrypt/live/mail.example.com/fullchain.pem',
   privateKeyPath: '/etc/letsencrypt/live/mail.example.com/privkey.pem', certificatePath: '/etc/letsencrypt/live/mail.example.com/cert.pem',

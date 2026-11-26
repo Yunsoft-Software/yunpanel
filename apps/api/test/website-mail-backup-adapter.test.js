@@ -6,14 +6,14 @@ import { chmod, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { mailSqlTemplatePolicy } from '@yunpanel/config-templates';
-import { createMailboxRegistry } from '../src/mailbox-registry.js';
-import { createMailAliasRegistry } from '../src/mail-alias-registry.js';
-import { createMailboxQuotaRegistry } from '../src/mailbox-quota-registry.js';
-import { createMailboxForwardingRegistry } from '../src/mailbox-forwarding-registry.js';
-import { createMailConfigurationService } from '../src/mail-configuration.js';
-import { createWebsiteMailBackupAdapter } from '../src/website-mail-backup-adapter.js';
-import { createWebsiteResourceBackupCodec } from '../src/website-resource-backup-codec.js';
-import { verifyMailboxPassword } from '../src/mailbox-password.js';
+import { createMailboxRegistry } from '../src/mail/mailbox-registry.js';
+import { createMailAliasRegistry } from '../src/mail/mail-alias-registry.js';
+import { createMailboxQuotaRegistry } from '../src/mail/mailbox-quota-registry.js';
+import { createMailboxForwardingRegistry } from '../src/mail/mailbox-forwarding-registry.js';
+import { createMailConfigurationService } from '../src/mail/mail-configuration.js';
+import { createWebsiteMailBackupAdapter } from '../src/backup/website-mail-backup-adapter.js';
+import { createWebsiteResourceBackupCodec } from '../src/backup/website-resource-backup-codec.js';
+import { verifyMailboxPassword } from '../src/mail/mailbox-password.js';
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'yp-mail-restore-'));

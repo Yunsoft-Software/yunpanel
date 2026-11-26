@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createUserAdminStore } from '../src/user-admin-store.js';
-import { AuthError } from '../src/auth-error.js';
+import { createUserAdminStore } from '../src/auth/user-admin-store.js';
+import { AuthError } from '../src/auth/auth-error.js';
 import { fixture } from './helpers/user-admin-fixture.js';
 
 const code = (expected) => (error) => error.code === expected;

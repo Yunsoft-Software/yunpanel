@@ -8,8 +8,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import { createAuthStore } from '../src/auth-store.js';
-import { createAuthenticatedApi } from '../src/auth-http.js';
+import { createAuthStore } from '../src/auth/auth-store.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
 import {
   API_VERSION,
   SCHEMA_VERSION,
@@ -23,8 +23,8 @@ import {
   evaluateDeploymentEvidence,
   requireDeploymentDiagnosticsAccess,
   createApp as createCoreApp,
-} from '../src/core-app.js';
-import { createApp } from '../src/app.js';
+} from '../src/http/core-app.js';
+import { createApp } from '../src/http/app.js';
 
 const emitBuildInfoScriptPath = fileURLToPath(new URL('../../../scripts/emit-build-info.mjs', import.meta.url));
 const buildDebScriptPath = fileURLToPath(new URL('../../../scripts/build-deb.sh', import.meta.url));

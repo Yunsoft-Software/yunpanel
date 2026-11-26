@@ -6,13 +6,13 @@ import {
   localMigrationBackupInternals,
   resolveLocalMigrationBackupDirectory,
   verifyLocalMigrationBackup,
-} from '../apps/api/src/local-migration-backup.js';
-import { previewLocalMigrationRestore } from '../apps/api/src/local-migration-restore-preview.js';
+} from '../apps/api/src/migration/local-migration-backup.js';
+import { previewLocalMigrationRestore } from '../apps/api/src/migration/local-migration-restore-preview.js';
 import {
   localMigrationRestoreStageInternals,
   stageLocalMigrationRestore,
-} from '../apps/api/src/local-migration-restore-stage.js';
-import { preflightLocalRecoveryBackup } from '../apps/api/src/local-recovery-preflight.js';
+} from '../apps/api/src/migration/local-migration-restore-stage.js';
+import { preflightLocalRecoveryBackup } from '../apps/api/src/migration/local-recovery-preflight.js';
 
 const scriptPath = fileURLToPath(import.meta.url);
 const PACKAGED_SCRIPT_ROOT = '/usr/lib/yunpanel/scripts';

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DnsDelegationInspectorError } from '../src/dns-delegation-inspector.js';
-import { mountPowerDnsRoutes, PowerDnsHttpError } from '../src/powerdns-http.js';
+import { DnsDelegationInspectorError } from '../src/dns/dns-delegation-inspector.js';
+import { mountPowerDnsRoutes, PowerDnsHttpError } from '../src/dns/powerdns-http.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 

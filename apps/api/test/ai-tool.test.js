@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MANAGED_SERVICE_CONTROL_IDS, OPERATIONS } from '@yunpanel/protocol';
-import { DEFAULT_AI_TOOL_DEFINITIONS, AI_TOOL_RISKS, AI_TOOL_CONFIRMATION } from '../src/ai-tool-catalog.js';
-import { createAiToolRegistry, AiToolRegistryError } from '../src/ai-tool-registry.js';
-import { createAiToolRuntime, AiToolRuntimeError } from '../src/ai-tool-runtime.js';
-import { createAiActionPlan, verifyAiActionExecution, AiActionPlanError } from '../src/ai-action-plan.js';
-import { evaluateAiToolPolicy } from '../src/ai-policy.js';
-import { createAiMcpAdapter, MCP_ERROR_CODES } from '../src/ai-mcp-adapter.js';
+import { DEFAULT_AI_TOOL_DEFINITIONS, AI_TOOL_RISKS, AI_TOOL_CONFIRMATION } from '../src/ai/ai-tool-catalog.js';
+import { createAiToolRegistry, AiToolRegistryError } from '../src/ai/ai-tool-registry.js';
+import { createAiToolRuntime, AiToolRuntimeError } from '../src/ai/ai-tool-runtime.js';
+import { createAiActionPlan, verifyAiActionExecution, AiActionPlanError } from '../src/ai/ai-action-plan.js';
+import { evaluateAiToolPolicy } from '../src/ai/ai-policy.js';
+import { createAiMcpAdapter, MCP_ERROR_CODES } from '../src/ai/ai-mcp-adapter.js';
 
 const ownerAuth = Object.freeze({
   user: Object.freeze({ id: 'owner-user-1', role: 'owner' }),

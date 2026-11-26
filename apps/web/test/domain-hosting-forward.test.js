@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createDomainRegistry } from '../../api/src/domain-registry.js';
+import { createDomainRegistry } from '../../api/src/domains/domain-registry.js';
 import { createHostingForm, editHostingForm, reloadHostingForm } from '../src/workspace/domain-hosting-form.js';
 import { hostingExpectedDomain, hostingSettingsChanges, validateHostingSettingsPreview } from '../src/workspace/domain-hosting-model.js';
 

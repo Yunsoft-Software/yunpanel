@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { runRunningRoundcubeConfigRecoveryFromStores } from '../src/job-running-roundcube-config-recovery-runtime.js';
+import { runRunningRoundcubeConfigRecoveryFromStores } from '../src/jobs/job-running-roundcube-config-recovery-runtime.js';
 
 const serverId = 'server-1';
 const jobId = '12345678-1234-4234-8234-123456789012';

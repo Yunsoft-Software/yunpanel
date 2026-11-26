@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   SiteCreateError,
   siteCreateIsolationGuardInternals,
-} from '../src/site-create-isolation-guard.js';
+} from '../src/provisioning/site-create-isolation-guard.js';
 
 function input(wwwMode) {
   return {

@@ -6,9 +6,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
-import { createApp } from '../src/app.js';
-import { createAuthenticatedApi } from '../src/auth-http.js';
-import { createAuthStore, csrfForSession } from '../src/auth-store.js';
+import { createApp } from '../src/http/app.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
+import { createAuthStore, csrfForSession } from '../src/auth/auth-store.js';
 import {
   classifyEntitlementGrantKind,
   computePublicKeyId,
@@ -17,19 +17,19 @@ import {
   PREMIUM_CAPABILITIES,
   verifyYunpanelEntitlementToken,
   YUNPANEL_PRODUCT_CODE,
-} from '../src/license-entitlement-verifier.js';
+} from '../src/panel/license-entitlement-verifier.js';
 import {
   createLicenseEntitlementService,
   LicenseEntitlementError,
-} from '../src/license-entitlement-service.js';
-import { createServerRegistry } from '../src/server-registry.js';
+} from '../src/panel/license-entitlement-service.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
 import {
   buildSetupOfferMetadata,
   DEFAULT_YUNSOFT_DOCS_URL,
   DEFAULT_YUNSOFT_PREMIUM_OFFER_URL,
   parseStrictYunsoftPublicUrl,
   resolveYunsoftPublicUrl,
-} from '../src/yunsoft-links.js';
+} from '../src/panel/yunsoft-links.js';
 
 function generateTestEd25519KeyPair() {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');

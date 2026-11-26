@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createLocalHostOperations } from '../src/local-host-operations.js';
+import { createLocalHostOperations } from '../src/runtime/local-host-operations.js';
 
 const applicationId = '2f334b35-03ce-4aa0-a8e4-b2ad4f592541';
 const deploymentId = '216e4db8-468b-4e2f-a021-3ab31e0f4123';

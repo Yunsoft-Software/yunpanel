@@ -14,8 +14,8 @@ import {
   assertSiteResourceLimit,
   assertSiteIsolation,
   createSiteConsumptionInspector,
-} from '../src/customer-quotas.js';
-import { mountWebsiteRoutes } from '../src/website-http.js';
+} from '../src/hosting/customer-quotas.js';
+import { mountWebsiteRoutes } from '../src/websites/website-http.js';
 
 test('Customer Quota: validateCustomerQuotas strictly verifies fields and bounds', () => {
   const valid = validateCustomerQuotas({

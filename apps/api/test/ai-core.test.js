@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DEFAULT_AI_TOOL_DEFINITIONS } from '../src/ai-tool-catalog.js';
-import { AiToolRegistryError, createAiToolRegistry } from '../src/ai-tool-registry.js';
-import { evaluateAiToolPolicy } from '../src/ai-policy.js';
+import { DEFAULT_AI_TOOL_DEFINITIONS } from '../src/ai/ai-tool-catalog.js';
+import { AiToolRegistryError, createAiToolRegistry } from '../src/ai/ai-tool-registry.js';
+import { evaluateAiToolPolicy } from '../src/ai/ai-policy.js';
 
 const ownerAuth = Object.freeze({
   user: Object.freeze({ id: 'owner-1', role: 'owner' }),

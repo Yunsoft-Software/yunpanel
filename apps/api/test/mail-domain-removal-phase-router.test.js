@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   createMailDomainRemovalPhaseRouter,
   MailDomainRemovalPhaseRouterError,
-} from '../src/mail-domain-removal-phase-router.js';
+} from '../src/mail/mail-domain-removal-phase-router.js';
 
 function phase(name, calls) {
   return {

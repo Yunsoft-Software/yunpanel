@@ -3,7 +3,7 @@ import { mkdtemp, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createWebsiteSftpKeyRuntime } from '../src/website-sftp-key-runtime.js';
+import { createWebsiteSftpKeyRuntime } from '../src/websites/website-sftp-key-runtime.js';
 
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
 const remoteWebsiteId = '21e94c50-f18f-44de-91b7-8168abcee7de';

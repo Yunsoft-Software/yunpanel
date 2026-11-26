@@ -8,7 +8,7 @@ import {
   LOCAL_MAIL_DATA_OPERATIONS,
   LOCAL_NODE_ENVIRONMENT_OPERATIONS,
   LOCAL_PYTHON_ENVIRONMENT_OPERATIONS,
-} from '../src/local-host-operations.js';
+} from '../src/runtime/local-host-operations.js';
 
 test('Nginx activation uses the authorized durable job identity and never a payload identity',async()=>{
  const calls=[],jobId=randomUUID(),authorization={actorId:'owner-a',userId:'owner-a',role:'owner',sessionId:'current-session',websiteId:'website-a'};

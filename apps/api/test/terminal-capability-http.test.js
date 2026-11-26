@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import { once } from 'node:events';
 import test from 'node:test';
-import { createLicenseEntitlementService } from '../src/license-entitlement-service.js';
-import { mountTerminalCapabilityRoutes } from '../src/terminal-capability-http.js';
-import { createTerminalCapabilityRegistry } from '../src/terminal-capability-registry.js';
+import { createLicenseEntitlementService } from '../src/panel/license-entitlement-service.js';
+import { mountTerminalCapabilityRoutes } from '../src/terminal/terminal-capability-http.js';
+import { createTerminalCapabilityRegistry } from '../src/terminal/terminal-capability-registry.js';
 import { withPanelContext, readOnlyManagementContext } from './helpers/panel-auth-fixture.js';
 
 const SERVER_ID = '9d4a4727-1aba-4d35-95fe-21db67042ce8';

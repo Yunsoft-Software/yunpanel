@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import {
   mountWebsiteSuspensionRoutes,
-} from '../src/website-suspension-http.js';
+} from '../src/websites/website-suspension-http.js';
 
 function createTestApp(runtime) {
   const app = express();

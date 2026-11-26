@@ -6,12 +6,12 @@ import { lstat, mkdtemp, readFile, readdir, realpath, rmdir, unlink, writeFile }
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createJobRegistry } from '../src/job-registry.js';
-import { createLocalJobExecutor } from '../src/local-job-executor.js';
-import { createLocalHostOperations } from '../src/local-host-operations.js';
-import { reconcileCompletedJob } from '../src/job-reconciliation.js';
-import { localRuntimeInternals } from '../src/local-runtime.js';
-import { localExecutorFaultLine } from '../src/local-claim-failure-diagnostic.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { createLocalJobExecutor } from '../src/runtime/local-job-executor.js';
+import { createLocalHostOperations } from '../src/runtime/local-host-operations.js';
+import { reconcileCompletedJob } from '../src/jobs/job-reconciliation.js';
+import { localRuntimeInternals } from '../src/runtime/local-runtime.js';
+import { localExecutorFaultLine } from '../src/jobs/local-claim-failure-diagnostic.js';
 
 const sha = value => createHash('sha256').update(value).digest('hex');
 async function ownedStore(t) {

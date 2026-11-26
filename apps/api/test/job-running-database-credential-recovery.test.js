@@ -4,7 +4,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   recoverRunningDatabaseCredential,
   JobRunningDatabaseCredentialRecoveryError,
-} from '../src/job-running-database-credential-recovery.js';
+} from '../src/jobs/job-running-database-credential-recovery.js';
 
 const serverId = '12345678-1234-4234-8234-123456789012';
 const jobId = 'database-credential-job-0001';

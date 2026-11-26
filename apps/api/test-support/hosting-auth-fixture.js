@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { AuthError } from '../src/auth-error.js';
+import { AuthError } from '../src/auth/auth-error.js';
 
 /** Real SQLite / deterministic auth-policy fixture; no password KDF or HTTP server. */
 export function hostingAuthFixture(filePath = ':memory:') {

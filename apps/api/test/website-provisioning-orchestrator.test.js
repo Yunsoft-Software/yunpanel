@@ -3,8 +3,8 @@ import test from 'node:test';
 import {
   createWebsiteProvisioningOrchestrator,
   WebsiteProvisioningOrchestratorError,
-} from '../src/website-provisioning-orchestrator.js';
-import { createWebsiteProvisioningRegistry } from '../src/website-provisioning-registry.js';
+} from '../src/provisioning/website-provisioning-orchestrator.js';
+import { createWebsiteProvisioningRegistry } from '../src/provisioning/website-provisioning-registry.js';
 
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';

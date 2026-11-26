@@ -11,9 +11,9 @@ import React, { StrictMode, createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { MemoryRouter } from 'react-router';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createAuthenticatedApi } from '../src/auth-http.js';
-import { mountMailDataRoutes } from '../src/mail-data-http.js';
-import { mountMailDeleteImpactRoutes } from '../src/mail-delete-impact-http.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
+import { mountMailDataRoutes } from '../src/mail/mail-data-http.js';
+import { mountMailDeleteImpactRoutes } from '../src/mail/mail-delete-impact-http.js';
 import {
   createMailboxRemoval,
   EMPTY_MAILBOX_REMOVAL,
@@ -30,28 +30,28 @@ import { panelPermission, ownerAccess } from '../../web/src/owner-access.js';
 import {
   createMailDeleteImpactService,
   MailDeleteImpactError,
-} from '../src/mail-delete-impact.js';
+} from '../src/mail/mail-delete-impact.js';
 import {
   createMailDataOperationsService,
   MailDataOperationsError,
-} from '../src/mail-data-operations.js';
+} from '../src/mail/mail-data-operations.js';
 import {
   createMailDeleteFinalizeService,
   MailDeleteFinalizeError,
-} from '../src/mail-delete-finalize.js';
+} from '../src/mail/mail-delete-finalize.js';
 import {
   createLocalHostOperations,
-} from '../src/local-host-operations.js';
+} from '../src/runtime/local-host-operations.js';
 import {
   mailboxAliasReferences,
-} from '../src/mailbox-alias-references.js';
+} from '../src/mail/mailbox-alias-references.js';
 import {
   sanitizeMailDataBackupResult,
   sanitizeMailDataDeleteResult,
-} from '../src/mail-data-job-result.js';
+} from '../src/mail/mail-data-job-result.js';
 import {
   mountMailboxRoutes,
-} from '../src/mailbox-http.js';
+} from '../src/mail/mailbox-http.js';
 import { createMailDataDeleteManager } from '@yunpanel/host-runtime';
 import { MailDataDeleteError } from '../../../packages/host-runtime/src/mail-data-delete-manager.js';
 import {
@@ -66,20 +66,20 @@ import {
 import {
   createMailConfigurationService,
   MailConfigurationError,
-} from '../src/mail-configuration.js';
+} from '../src/mail/mail-configuration.js';
 import {
   recoverRunningMailData,
-} from '../src/job-running-mail-data-recovery.js';
+} from '../src/jobs/job-running-mail-data-recovery.js';
 import {
   MailboxRegistryError,
-} from '../src/mailbox-registry.js';
+} from '../src/mail/mailbox-registry.js';
 import {
   createSiteResourceBoundary,
   needsSiteResourceJson,
-} from '../src/site-resource-boundary.js';
+} from '../src/http/site-resource-boundary.js';
 import {
   createTenantBoundaryMiddleware,
-} from '../src/tenant-boundary.js';
+} from '../src/http/tenant-boundary.js';
 
 function sha256(content) {
   return createHash('sha256').update(typeof content === 'string' ? content : JSON.stringify(content)).digest('hex');

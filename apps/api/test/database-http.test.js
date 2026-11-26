@@ -3,11 +3,11 @@ import { once } from 'node:events';
 import http from 'node:http';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createApp } from '../src/app.js';
-import { createAuthenticatedApi } from '../src/auth-http.js';
-import { databaseHttpInternals } from '../src/database-http.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { createServerRegistry } from '../src/server-registry.js';
+import { createApp } from '../src/http/app.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
+import { databaseHttpInternals } from '../src/databases/database-http.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
 
 const origin = 'https://databases.example.test';
 const csrfToken = 'database-csrf';

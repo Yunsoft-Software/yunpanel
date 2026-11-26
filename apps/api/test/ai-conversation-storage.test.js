@@ -5,21 +5,21 @@ import http from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createApp } from '../src/app.js';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createAiConversationService } from '../src/ai-conversation-service.js';
-import { createAiProviderRegistry } from '../src/ai-provider-registry.js';
-import { createAiToolRegistry } from '../src/ai-tool-registry.js';
-import { DEFAULT_AI_TOOL_DEFINITIONS } from '../src/ai-tool-catalog.js';
-import { createAuthenticatedApi } from '../src/auth-http.js';
-import { createAuthStore, csrfForSession } from '../src/auth-store.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
+import { createApp } from '../src/http/app.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createAiConversationService } from '../src/ai/ai-conversation-service.js';
+import { createAiProviderRegistry } from '../src/ai/ai-provider-registry.js';
+import { createAiToolRegistry } from '../src/ai/ai-tool-registry.js';
+import { DEFAULT_AI_TOOL_DEFINITIONS } from '../src/ai/ai-tool-catalog.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
+import { createAuthStore, csrfForSession } from '../src/auth/auth-store.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
 import {
   computePublicKeyId, ENTITLEMENT_ISSUER, ENTITLEMENT_TOKEN_TYPE, YUNPANEL_PRODUCT_CODE,
-} from '../src/license-entitlement-verifier.js';
-import { createLicenseEntitlementService } from '../src/license-entitlement-service.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
+} from '../src/panel/license-entitlement-verifier.js';
+import { createLicenseEntitlementService } from '../src/panel/license-entitlement-service.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
 
 const CONVERSATIONS = '/api/ai/conversations';
 

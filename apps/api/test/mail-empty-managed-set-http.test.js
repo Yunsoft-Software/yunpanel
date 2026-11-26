@@ -3,8 +3,8 @@ import { randomUUID } from 'node:crypto';
 import express from 'express';
 import test from 'node:test';
 import { mailSqlTemplatePolicy, mailSubmissionTemplatePolicy } from '@yunpanel/config-templates';
-import { createMailConfigurationService } from '../src/mail-configuration.js';
-import { mountMailConfigurationRoutes } from '../src/mail-configuration-http.js';
+import { createMailConfigurationService } from '../src/mail/mail-configuration.js';
+import { mountMailConfigurationRoutes } from '../src/mail/mail-configuration-http.js';
 
 const owner = Object.freeze({
   user: { role: 'owner' },

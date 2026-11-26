@@ -8,10 +8,10 @@ const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(testDirectory, '../../..');
 const source = readFileSync(path.join(repositoryRoot, 'apps/api/src/index.js'), 'utf8');
 const envExample = readFileSync(path.join(repositoryRoot, '.env.example'), 'utf8');
-const appSource = readFileSync(path.join(repositoryRoot, 'apps/api/src/management-app.js'), 'utf8');
+const appSource = readFileSync(path.join(repositoryRoot, 'apps/api/src/http/management-app.js'), 'utf8');
 
 test('production API persists and initializes Website registry explicitly', () => {
-  assert.match(source, /import \{ createWebsiteRegistry \} from '\.\/website-registry\.js';/);
+  assert.match(source, /import \{ createWebsiteRegistry \} from '\.\/websites\/website-registry\.js';/);
   assert.match(source, /const websiteStorePath = process\.env\.YUNPANEL_WEBSITE_STORE \?\? path\.resolve\('\.data\/website-registry\.json'\);/);
   assert.match(source, /const websiteRegistry = createWebsiteRegistry\(\{/);
   assert.match(source, /filePath: websiteStorePath,/);
@@ -49,8 +49,8 @@ test('production persists Website isolation migration journal with provisioning 
 });
 
 test('production migration policy and ledger initialize before Domain registry', () => {
-  assert.match(source, /import \{ createWebsiteMigrationPolicyStore \} from '\.\/website-migration-policy\.js';/);
-  assert.match(source, /import \{ createWebsiteMigrationLedger \} from '\.\/website-migration-ledger\.js';/);
+  assert.match(source, /import \{ createWebsiteMigrationPolicyStore \} from '\.\/migration\/website-migration-policy\.js';/);
+  assert.match(source, /import \{ createWebsiteMigrationLedger \} from '\.\/migration\/website-migration-ledger\.js';/);
   assert.match(source, /const websiteMigrationPolicyStorePath = process\.env\.YUNPANEL_WEBSITE_MIGRATION_POLICY_STORE \?\? path\.resolve\('\.data\/website-migration-policy\.json'\);/);
   assert.match(source, /const websiteMigrationLedgerStorePath = process\.env\.YUNPANEL_WEBSITE_MIGRATION_LEDGER_STORE \?\? path\.resolve\('\.data\/website-migration-ledger\.json'\);/);
   assert.match(source, /const websiteMigrationPolicy = createWebsiteMigrationPolicyStore\(\{ filePath: websiteMigrationPolicyStorePath \}\);/);

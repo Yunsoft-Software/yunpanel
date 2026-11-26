@@ -7,25 +7,25 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import express from 'express';
-import { createAuthenticatedApi } from '../src/auth-http.js';
-import { createAuthStore } from '../src/auth-store.js';
-import { provisionSiteAdmin } from '../src/site-admin-provisioning.js';
-import { mountSiteCreateRoutes } from '../src/site-create-http.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
+import { createAuthStore } from '../src/auth/auth-store.js';
+import { provisionSiteAdmin } from '../src/provisioning/site-admin-provisioning.js';
+import { mountSiteCreateRoutes } from '../src/provisioning/site-create-http.js';
 import {
   extractActorTenant,
   assertWebsiteBelongsToTenant,
   assertEntityTenantBoundary,
   sanitizeTenantCollection,
   createTenantBoundaryMiddleware,
-} from '../src/tenant-boundary.js';
-import { AuthError } from '../src/auth-error.js';
-import { handleUserAdmin } from '../src/user-admin-http.js';
-import { databaseCredentialRegistryInternals } from '../src/database-credential-registry.js';
-import { mountDatabaseCredentialRoutes } from '../src/database-credential-http.js';
-import { createSiteResourceBoundary } from '../src/site-resource-boundary.js';
+} from '../src/http/tenant-boundary.js';
+import { AuthError } from '../src/auth/auth-error.js';
+import { handleUserAdmin } from '../src/auth/user-admin-http.js';
+import { databaseCredentialRegistryInternals } from '../src/databases/database-credential-registry.js';
+import { mountDatabaseCredentialRoutes } from '../src/databases/database-credential-http.js';
+import { createSiteResourceBoundary } from '../src/http/site-resource-boundary.js';
 import { siteFixture, uuid } from '../test-support/hosting-site-fixture.js';
-import { createHostingSiteAllocationStore } from '../src/hosting-site-allocation-store.js';
-import { createHostingAccountStore } from '../src/hosting-account-store.js';
+import { createHostingSiteAllocationStore } from '../src/hosting/hosting-site-allocation-store.js';
+import { createHostingAccountStore } from '../src/hosting/hosting-account-store.js';
 
 const websiteId = '11111111-1111-4111-8111-111111111111';
 const operationId = '22222222-2222-4222-8222-222222222222';

@@ -42,7 +42,7 @@ test('existing site-scoped Files and terminal routes remain usable', async () =>
   assert.doesNotMatch(text, /window.location|localStorage|sessionStorage/);
 });
 test('status routes add a data envelope while preserving legacy top-level fields', async () => {
-  const text = await readFile(new URL('../../api/src/website-php-tools-http.js', import.meta.url), 'utf8');
+  const text = await readFile(new URL('../../api/src/php/website-php-tools-http.js', import.meta.url), 'utf8');
   assert.equal((text.match(/res.json\(\{ \.\.\.status, data: status \}\)/g) ?? []).length, 2);
   for (const path of ['wp-cli/status', 'composer/status']) assert.ok(text.includes(`router.get('/${path}', requirePanelRouteAccess`));
   assert.match(text, /app.use\('\/api\/websites\/:websiteId', router\)/);

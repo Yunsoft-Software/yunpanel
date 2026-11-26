@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { recoverRunningMailConfigRollback } from '../src/job-running-mail-config-rollback-recovery.js';
+import { recoverRunningMailConfigRollback } from '../src/jobs/job-running-mail-config-rollback-recovery.js';
 
 const serverId = 'local-server';
 const jobId = '11111111-2222-4333-8444-555555555555';

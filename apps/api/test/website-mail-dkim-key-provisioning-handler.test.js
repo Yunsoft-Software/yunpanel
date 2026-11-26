@@ -3,8 +3,8 @@ import test from 'node:test';
 import {
   createWebsiteMailDkimKeyProvisioningHandler,
   WebsiteMailDkimKeyProvisioningError,
-} from '../src/website-mail-dkim-key-provisioning-handler.js';
-import { deterministicWebsiteMailDkimSelector } from '../src/website-mail-dkim-selector.js';
+} from '../src/provisioning/website-mail-dkim-key-provisioning-handler.js';
+import { deterministicWebsiteMailDkimSelector } from '../src/mail/website-mail-dkim-selector.js';
 
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';

@@ -7,20 +7,20 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { createApp } from '../src/app.js';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createAiConversationService } from '../src/ai-conversation-service.js';
-import { createAiMcpAdapter } from '../src/ai-mcp-adapter.js';
-import { createAiProviderRegistry } from '../src/ai-provider-registry.js';
-import { createAiToolRegistry } from '../src/ai-tool-registry.js';
-import { DEFAULT_AI_TOOL_DEFINITIONS } from '../src/ai-tool-catalog.js';
-import { createApiKeyStore } from '../src/api-key-store.js';
-import { createAuthenticatedApi } from '../src/auth-http.js';
-import { createAuthStore, csrfForSession } from '../src/auth-store.js';
-import { createAutomationHandler } from '../src/automation-http.js';
-import { createDnsHostingRegistry } from '../src/dns-hosting-registry.js';
-import { createDockerWorkloadRegistry } from '../src/docker-workload-registry.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
+import { createApp } from '../src/http/app.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createAiConversationService } from '../src/ai/ai-conversation-service.js';
+import { createAiMcpAdapter } from '../src/ai/ai-mcp-adapter.js';
+import { createAiProviderRegistry } from '../src/ai/ai-provider-registry.js';
+import { createAiToolRegistry } from '../src/ai/ai-tool-registry.js';
+import { DEFAULT_AI_TOOL_DEFINITIONS } from '../src/ai/ai-tool-catalog.js';
+import { createApiKeyStore } from '../src/auth/api-key-store.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
+import { createAuthStore, csrfForSession } from '../src/auth/auth-store.js';
+import { createAutomationHandler } from '../src/http/automation-http.js';
+import { createDnsHostingRegistry } from '../src/dns/dns-hosting-registry.js';
+import { createDockerWorkloadRegistry } from '../src/docker/docker-workload-registry.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
 import {
   computePublicKeyId,
   ENTITLEMENT_ISSUER,
@@ -28,7 +28,7 @@ import {
   parseTrustedPublicKeys,
   YUNPANEL_PRODUCT_CODE,
   verifyYunpanelEntitlementToken,
-} from '../src/license-entitlement-verifier.js';
+} from '../src/panel/license-entitlement-verifier.js';
 import {
   createLicenseEntitlementService,
   DEFAULT_SYSTEM_ENTITLEMENT_PUBLIC_KEY_FILE,
@@ -36,15 +36,15 @@ import {
   LicenseEntitlementError,
   maskLicenseKey,
   VENDOR_ENTITLEMENT_PUBLIC_KEY_KID,
-} from '../src/license-entitlement-service.js';
-import { createMailDomainRegistry } from '../src/mail-domain-registry.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createTenantSiteStore } from '../src/tenant-site-store.js';
-import { createTerminalCapabilityRegistry } from '../src/terminal-capability-registry.js';
-import { createWebsiteProvisioningRuntime } from '../src/website-provisioning-runtime.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
+} from '../src/panel/license-entitlement-service.js';
+import { createMailDomainRegistry } from '../src/mail/mail-domain-registry.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createTenantSiteStore } from '../src/hosting/tenant-site-store.js';
+import { createTerminalCapabilityRegistry } from '../src/terminal/terminal-capability-registry.js';
+import { createWebsiteProvisioningRuntime } from '../src/provisioning/website-provisioning-runtime.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
 
-const SERVICE_MODULE_URL = new URL('../src/license-entitlement-service.js', import.meta.url).href;
+const SERVICE_MODULE_URL = new URL('../src/panel/license-entitlement-service.js', import.meta.url).href;
 
 function generateTestEd25519KeyPair() {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
@@ -1577,7 +1577,7 @@ test('default vendor trust anchor (kid=1cbcc4d3173d0c15), postinst non-destructi
     execFileSync('/bin/sh', ['-n', path.join(repoRoot, 'packaging/debian/postinst')]);
     execFileSync('/bin/bash', ['-n', path.join(repoRoot, 'scripts/build-deb.sh')]);
     const buildDebSource = readFileSync(path.join(repoRoot, 'scripts/build-deb.sh'), 'utf8');
-    assert.match(buildDebSource, /apps\/api\/src\/vendor-entitlement-public\.pem "\$package_root\/usr\/share\/yunpanel\/trust\/entitlement-public\.pem"/);
+    assert.match(buildDebSource, /apps\/api\/src\/panel\/vendor-entitlement-public\.pem "\$package_root\/usr\/share\/yunpanel\/trust\/entitlement-public\.pem"/);
     assert.match(buildDebSource, /docs\/license-configuration\.md/);
 
     // 3. Real shell execution of postinst trust-anchor seeding & operator custom config preservation

@@ -15,7 +15,7 @@ import {
   requiredProtectedTableOverrideConfirmation,
   scanSelectiveWordPressFiles,
   wordpressSelectiveTransferPolicy,
-} from '../src/wordpress-selective-transfer.js';
+} from '../src/wordpress/wordpress-selective-transfer.js';
 
 const STAGING_SITE = Object.freeze({
   websiteId: '11111111-1111-4111-8111-111111111111',

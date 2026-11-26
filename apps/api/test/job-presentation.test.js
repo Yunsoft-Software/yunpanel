@@ -9,7 +9,7 @@ import {
   classifyJobError,
   isTransientJobError,
   isPermanentJobError,
-} from '../src/job-registry.js';
+} from '../src/jobs/job-registry.js';
 import {
   jobAttemptCount,
   jobHealthIndicator,

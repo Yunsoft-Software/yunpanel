@@ -8,17 +8,17 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
-import { createAuthenticatedApi } from '../src/auth-http.js';
-import { createAuthStore } from '../src/auth-store.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
+import { createAuthStore } from '../src/auth/auth-store.js';
 import { createPanelServer } from '../../web/server.js';
 import {
   createFirewallService,
   FirewallServiceError,
-} from '../src/firewall-service.js';
+} from '../src/runtime/firewall-service.js';
 import {
   mountFirewallRoutes,
   FirewallHttpError,
-} from '../src/firewall-http.js';
+} from '../src/runtime/firewall-http.js';
 import {
   createNftablesManager,
   createCrowdsecManager,

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { siteCreateProvisioningPlan } from '../src/site-create-provisioning.js';
+import { siteCreateProvisioningPlan } from '../src/provisioning/site-create-provisioning.js';
 
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';

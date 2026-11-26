@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { createApplicationRegistry, ApplicationRegistryError } from '../src/application-registry.js';
+import { createApplicationRegistry, ApplicationRegistryError } from '../src/applications/application-registry.js';
 
 const FIRST_RELEASE = '216e4db8-468b-4e2f-a021-3ab31e0f4123';
 const SECOND_RELEASE = 'ff830043-9752-4640-83b4-3a1998de78a0';

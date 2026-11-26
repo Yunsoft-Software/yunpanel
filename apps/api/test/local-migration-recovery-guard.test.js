@@ -6,7 +6,7 @@ import {
   inspectLocalServerMigration,
   LocalServerMigrationError,
   releaseLocalServerFromRuntime,
-} from '../src/local-server-migration.js';
+} from '../src/migration/local-server-migration.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const hostname = 'host-1.example.local';

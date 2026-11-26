@@ -5,7 +5,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   createDatabaseCredentialMaterializer,
   DatabaseCredentialMaterializerError,
-} from '../src/database-credential-materializer.js';
+} from '../src/databases/database-credential-materializer.js';
 
 const credentialId = '12345678-1234-4234-8234-123456789012';
 const bindingId = '22345678-1234-4234-8234-123456789012';

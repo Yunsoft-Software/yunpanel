@@ -5,7 +5,7 @@ import {
   verifyWebsitePhpToolAction,
   websitePhpToolActionIds,
   websitePhpToolActionPreview,
-} from '../src/website-php-tool-action.js';
+} from '../src/php/website-php-tool-action.js';
 
 const binding = Object.freeze({
   websiteId: '11111111-1111-4111-8111-111111111111',

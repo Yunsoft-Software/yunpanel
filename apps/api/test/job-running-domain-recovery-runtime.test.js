@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { runRunningDomainStageRecoveryFromStores } from '../src/job-recovery-runtime.js';
+import { runRunningDomainStageRecoveryFromStores } from '../src/jobs/job-recovery-runtime.js';
 
 const serverId = 'server-1';
 const jobId = '12345678-1234-4234-8234-123456789012';

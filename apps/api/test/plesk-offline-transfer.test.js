@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { previewPleskOfflineTransfer } from '../src/plesk-offline-transfer.js';
+import { previewPleskOfflineTransfer } from '../src/migration/plesk-offline-transfer.js';
 
 const exec = promisify(execFile);
 const cli = fileURLToPath(new URL('../../../scripts/plesk-transfer.mjs', import.meta.url));

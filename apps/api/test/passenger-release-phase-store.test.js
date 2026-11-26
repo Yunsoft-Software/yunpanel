@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, realpath, rm, writeFile, symlink } from 'node:fs/promises';
 import os from 'node:os'; import path from 'node:path'; import test from 'node:test';
-import { createPassengerReleasePhaseStore } from '../src/passenger-release-phase-store.js';
-import { createWebsiteResourceBackupCodec } from '../src/website-resource-backup-codec.js';
+import { createPassengerReleasePhaseStore } from '../src/applications/passenger-release-phase-store.js';
+import { createWebsiteResourceBackupCodec } from '../src/backup/website-resource-backup-codec.js';
 import { OPERATIONS } from '@yunpanel/protocol';
 const uuid = n => `${String(n).repeat(8)}-${String(n).repeat(4)}-4${String(n).repeat(3)}-8${String(n).repeat(3)}-${String(n).repeat(12)}`;
 const identity = { serverId: uuid(1), jobId: uuid(2), websiteId: uuid(3), applicationId: uuid(4), operation: OPERATIONS.APP_NODE_PASSENGER_DEPLOY, payloadSha256: 'a'.repeat(64) };

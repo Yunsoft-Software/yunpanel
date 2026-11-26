@@ -6,7 +6,7 @@ import test from 'node:test';
 import {
   mountBackupRepositoryRoutes,
   isBackupRepositoryHttpError,
-} from '../src/backup-repository-http.js';
+} from '../src/backup/backup-repository-http.js';
 
 const ownerAuth = Object.freeze({
   user: { id: 'owner-1', role: 'owner' },
@@ -285,7 +285,7 @@ test('POST /api/backups/repositories with initialize:true fails closed with exac
   const os = await import('node:os');
   const path = await import('node:path');
   const { createResticManager } = await import('@yunpanel/host-runtime');
-  const { createResticRepositoryRegistry } = await import('../src/restic-repository-registry.js');
+  const { createResticRepositoryRegistry } = await import('../src/backup/restic-repository-registry.js');
 
   const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-t893-enoent-'));
   await mkdir(path.join(root, 'repos'), { recursive: true, mode: 0o700 });

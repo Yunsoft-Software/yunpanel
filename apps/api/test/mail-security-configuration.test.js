@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mailTemplatePolicy } from '@yunpanel/config-templates';
-import { createMailConfigurationService } from '../src/mail-configuration.js';
+import { createMailConfigurationService } from '../src/mail/mail-configuration.js';
 
 const PASSWORD_HASH = '$argon2id$v=19$m=65536,t=3,p=1$AQEBAQEBAQEBAQEBAQEBAQ$AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI';
 const mailDomain = Object.freeze({

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createApp } from '../src/app.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { createServerRegistry } from '../src/server-registry.js';
+import { createApp } from '../src/http/app.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
 
 async function withServer(app, callback) {
   const server = app.listen(0, '127.0.0.1');

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createApplicationIdentity } from '@yunpanel/host-runtime/application-identity';
-import { createWebsiteIsolationMigrationRegistry } from '../src/website-isolation-migration-registry.js';
+import { createWebsiteIsolationMigrationRegistry } from '../src/websites/website-isolation-migration-registry.js';
 import {
   createWebsiteIsolationMigrationRuntime,
   WebsiteIsolationMigrationRuntimeError,
-} from '../src/website-isolation-migration-runtime.js';
+} from '../src/websites/website-isolation-migration-runtime.js';
 
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 const sourceOperationId = '4d7d1c87-c088-4c1d-bb44-7f370d315672';

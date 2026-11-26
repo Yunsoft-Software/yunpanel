@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { recoverRunningNodeProcess } from '../src/job-running-node-process-recovery.js';
+import { recoverRunningNodeProcess } from '../src/jobs/job-running-node-process-recovery.js';
 
 const serverId = 'server-1';
 const jobId = '7f217caa-0f0f-4569-a657-30a97bcb7ca0';

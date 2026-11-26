@@ -5,12 +5,12 @@ import path from 'node:path';
 import test from 'node:test';
 import { createStaticRollbackEvidenceInspector } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createDurableJobRegistry } from '../src/durable-job-registry.js';
-import { createJobRecoveryContextReader } from '../src/job-recovery-context.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { recoverRunningStaticRollback } from '../src/job-running-static-rollback-recovery.js';
-import { createServerRegistry } from '../src/server-registry.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createDurableJobRegistry } from '../src/jobs/durable-job-registry.js';
+import { createJobRecoveryContextReader } from '../src/jobs/job-recovery-context.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { recoverRunningStaticRollback } from '../src/jobs/job-running-static-rollback-recovery.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
 
 const releaseOne = 'ff830043-9752-4640-83b4-3a1998de78a0';
 const releaseTwo = '216e4db8-468b-4e2f-a021-3ab31e0f4123';

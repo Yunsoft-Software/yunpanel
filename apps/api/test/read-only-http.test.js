@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { once } from 'node:events';
-import { createAuthenticatedApi } from '../src/auth-http.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
 
 const origin = 'https://panel.example.test';
 const csrfToken = 'test-csrf-value';

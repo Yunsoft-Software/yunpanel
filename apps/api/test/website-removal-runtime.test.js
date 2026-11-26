@@ -3,14 +3,14 @@ import assert from 'node:assert/strict';
 
 import {
   createWebsiteRemovalOperationRegistry,
-} from '../src/website-removal-operation-registry.js';
+} from '../src/websites/website-removal-operation-registry.js';
 import {
   createWebsiteRemovalRuntime,
   WebsiteRemovalRuntimeError,
-} from '../src/website-removal-runtime.js';
+} from '../src/websites/website-removal-runtime.js';
 import {
   createWebsiteRemovalPreview,
-} from '../src/website-removal-plan.js';
+} from '../src/websites/website-removal-plan.js';
 
 function mockPreview({ withDomains = true, backups = [], withCrons = false, withRuntimeBinding = true, withDatabases = false } = {}) {
   const website = {

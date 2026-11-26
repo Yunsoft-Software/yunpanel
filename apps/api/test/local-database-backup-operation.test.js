@@ -4,7 +4,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   createLocalHostOperations,
   localHostOperationInternals,
-} from '../src/local-host-operations.js';
+} from '../src/runtime/local-host-operations.js';
 
 const jobId = '12345678-1234-4234-8234-123456789012';
 const backupId = '22345678-1234-4234-8234-123456789012';

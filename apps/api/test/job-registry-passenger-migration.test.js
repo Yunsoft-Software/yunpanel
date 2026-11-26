@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createJobRegistry } from '../src/job-registry.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
 
 const serverId = '57f8611c-0af7-4d2f-8291-2fe7dbab22fe';
 const applicationId = '11111111-1111-4111-8111-111111111111';

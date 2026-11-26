@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import {
   WebsiteCronImpactError,
   createWebsiteCronImpactProvider,
-} from '../src/website-cron-impact.js';
+} from '../src/websites/website-cron-impact.js';
 import { renderCronTaskFile } from '@yunpanel/config-templates';
 
 const localServerId = '12345678-1234-4234-8234-123456789012';

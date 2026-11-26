@@ -1,0 +1,1666 @@
+import { createWebsiteMailBackupAdapter } from '../backup/website-mail-backup-adapter.js';
+import { createWebsiteEnvironmentBackupAdapter } from '../backup/website-environment-backup-adapter.js';
+import { createWebsiteDnsBackupAdapter } from '../backup/website-dns-backup-adapter.js';
+import { createWebsiteHostingBackupAdapter } from '../backup/website-hosting-backup-adapter.js';
+import { DurableJobRegistryError } from '../jobs/durable-job-registry.js';
+import { createAuthMailer } from '../auth/auth-mailer.js';
+import { createTenantBoundaryMiddleware } from './tenant-boundary.js';
+import express from 'express';
+import { mountAiRoutes } from '../ai/ai-http.js';
+import {
+  createCloudflareDnsManager,
+  CloudflareDnsManagerError,
+  createMailDataBackupManager,
+  MailDataBackupError,
+  createMailDataInspector,
+  createMailDiagnosticsInspector,
+  createMailProtocolHealthInspector,
+  createMailQueueInspector,
+  MailDataInspectorError,
+  MailDiagnosticsInspectorError,
+  createMailboxQuotaInspector,
+  createRcloneManager,
+  createResticManager,
+  createApplicationEnvironmentBackupManager,
+  createWebsiteRestoreReceiptStore,
+  createLinuxSiteConsumptionAdapter,
+  RcloneError,
+} from '@yunpanel/host-runtime';
+import {
+  createCustomerDatabaseQuotaCoordinator,
+  createCustomerManagedDiskWriteGuard,
+  createSiteConsumptionInspector,
+} from '../hosting/customer-quotas.js';
+import { createWebsiteTrafficCoordinator } from '../websites/website-traffic-coordinator.js';
+import { createWebsiteHttpHealthInspector } from '@yunpanel/host-runtime/website-http-health-inspector';
+import { createApplicationDeployQueue } from '../applications/application-deploy-queue.js';
+import { createWebsiteDatabaseBackupAdapter } from '../backup/website-database-backup-adapter.js';
+import { createWordPressToolkitService } from '../wordpress/wordpress-toolkit-service.js';
+import { ApplicationEnvironmentRegistryError } from '../applications/application-environment-registry.js';
+import { mountApplicationOperationsRoutes, ApplicationOperationsHttpError } from '../applications/application-operations-http.js';
+import { mountApplicationConfigurationRoutes } from '../applications/application-configuration-http.js';
+import { mountApplicationPassengerMigrationRoutes } from '../applications/application-passenger-migration-http.js';
+import { mountApplicationProcessRoutes } from '../applications/application-process-http.js';
+import { createApplicationRegistry, ApplicationRegistryError } from '../applications/application-registry.js';
+import { ApplicationRuntimeBindingRegistryError } from '../applications/application-runtime-binding-registry.js';
+import { createDomainRemovalBackupImpactProvider } from '../domains/domain-removal-backup-impact.js';
+import { isBackupHttpError, mountBackupRoutes } from '../backup/backup-http.js';
+import { createBackupProductionRuntime } from '../backup/backup-production-runtime.js';
+import { createBackupResourceProvider } from '../backup/backup-resource-provider.js';
+import { CertificateRegistryError, createCertificateRegistry } from '../certificates/certificate-registry.js';
+import { CertificateMaterialError, createCertificateMaterialManager } from '../certificates/certificate-material-manager.js';
+import { mountCertificateRoutes } from '../certificates/certificate-http.js';
+import { createApp as createCoreApp, resolveDeploymentDiagnostics } from './core-app.js';
+import { DatabaseBindingHttpError, mountDatabaseBindingRoutes } from '../databases/database-binding-http.js';
+import { DatabaseBindingRegistryError } from '../databases/database-binding-registry.js';
+import { createDatabaseCredentialApplyService, DatabaseCredentialApplyError } from '../databases/database-credential-apply-service.js';
+import { DatabaseCredentialHttpError, mountDatabaseCredentialRoutes } from '../databases/database-credential-http.js';
+import { mountDatabaseSetupRoutes } from '../databases/database-setup-http.js';
+import { DatabaseCredentialRegistryError } from '../databases/database-credential-registry.js';
+import { DatabaseHttpError, databaseHttpInternals, mountDatabaseRoutes } from '../databases/database-http.js';
+import { mountPhpMyAdminHandoffRoutes } from '../databases/phpmyadmin-handoff-http.js';
+import { PhpMyAdminHandoffError } from '../databases/phpmyadmin-handoff-service.js';
+import { mountWebsiteDatabaseDataRoutes } from '../databases/website-database-data-http.js';
+import { mountWebsiteDatabaseDeleteRoutes, WebsiteDatabaseDeleteHttpError } from '../databases/website-database-delete-http.js';
+import { createDnsHostingRegistry } from '../dns/dns-hosting-registry.js';
+import { DnsZoneMailDkimRetirementHttpError } from '../dns/dns-zone-mail-dkim-retirement-http.js';
+import {
+  createDnsProviderCredentialRegistry,
+  DnsProviderCredentialRegistryError,
+} from '../dns/dns-provider-credential-registry.js';
+import { createDnsReadinessService, DnsReadinessError } from '../dns/dns-readiness.js';
+import { createDomainRegistry, DomainRegistryError } from '../domains/domain-registry.js';
+import {
+  createDomainHandler,
+  createDomainReparentHandler,
+  createDomainReparentPreviewHandler,
+  createDomainUpdateHandler,
+  createDomainUpdatePreviewHandler,
+} from '../domains/domain-http.js';
+import {
+  DomainSuspensionHttpError,
+  mountDomainSuspensionRoutes,
+} from '../domains/domain-suspension-http.js';
+import {
+  WebsiteSuspensionHttpError,
+  mountWebsiteSuspensionRoutes,
+} from '../websites/website-suspension-http.js';
+import {
+  DomainRemovalHttpError,
+  mountDomainRemovalRoutes,
+} from '../domains/domain-removal-http.js';
+import {
+  WebsiteRemovalHttpError,
+  mountWebsiteRemovalRoutes,
+} from '../websites/website-removal-http.js';
+import { mountDockerWorkloadRoutes } from '../docker/docker-workload-http.js';
+import { createDockerWorkloadRegistry, DockerWorkloadRegistryError } from '../docker/docker-workload-registry.js';
+import { mountExternalLifecycleRoutes } from '../domains/external-lifecycle-http.js';
+import { ExternalLifecycleRegistryError } from '../domains/external-lifecycle-registry.js';
+import { DnsRequirementsServiceError } from '../dns/dns-requirements-service.js';
+import { createJobRegistry, JobRegistryError } from '../jobs/job-registry.js';
+import { mountElFinderHandoffRoutes } from '../files/elfinder-handoff-http.js';
+import { ElFinderHandoffError } from '../files/elfinder-handoff-service.js';
+import { mountMailAliasRoutes } from '../mail/mail-alias-http.js';
+import { createWebsiteMailBackupGuard } from '../mail/website-mail-backup-guard.js';
+import { createMailAliasRegistry, MailAliasRegistryError } from '../mail/mail-alias-registry.js';
+import { createMailConfigurationService, MailConfigurationError } from '../mail/mail-configuration.js';
+import { MailConfigurationHttpError, mountMailConfigurationRoutes } from '../mail/mail-configuration-http.js';
+import { MailDataHttpError, mountMailDataRoutes } from '../mail/mail-data-http.js';
+import { createMailDataOperationsService, MailDataOperationsError } from '../mail/mail-data-operations.js';
+import { MailDomainDeleteHttpError, mountMailDomainDeleteRoute } from '../mail/mail-domain-delete-http.js';
+import { createMailDeleteFinalizeService, MailDeleteFinalizeError } from '../mail/mail-delete-finalize.js';
+import { createMailDeleteImpactService, MailDeleteImpactError } from '../mail/mail-delete-impact.js';
+import { mountMailDeleteImpactRoutes } from '../mail/mail-delete-impact-http.js';
+import { MailDkimConfigurationError } from '../mail/mail-dkim-configuration.js';
+import { createMailDkimDnsService, MailDkimDnsError } from '../mail/mail-dkim-dns.js';
+import { MailDkimDnsHttpError, mountMailDkimDnsRoutes } from '../mail/mail-dkim-dns-http.js';
+import { mountMailDkimRoutes, MailDkimHttpError } from '../mail/mail-dkim-http.js';
+import { createMailDkimRegistry, MailDkimRegistryError } from '../mail/mail-dkim-registry.js';
+import {
+  createMailDkimRetirementRegistry,
+  MailDkimRetirementRegistryError,
+} from '../mail/mail-dkim-retirement-registry.js';
+import { MailDiagnosticsHttpError, mountMailDiagnosticsRoutes } from '../mail/mail-diagnostics-http.js';
+import { createMailDomainRegistry } from '../mail/mail-domain-registry.js';
+import { mountMailServiceIdentityRoutes } from '../mail/mail-service-identity-http.js';
+import { MailServiceIdentityRegistryError } from '../mail/mail-service-identity-registry.js';
+import { MailSrsConfigurationError } from '../mail/mail-srs-configuration.js';
+import { MailSrsHttpError, mountMailSrsRoutes } from '../mail/mail-srs-http.js';
+import { MailSrsSecretRegistryError } from '../mail/mail-srs-secret-registry.js';
+import { mountMailboxForwardingRoutes } from '../mail/mailbox-forwarding-http.js';
+import {
+  createMailboxForwardingRegistry,
+  MailboxForwardingRegistryError,
+} from '../mail/mailbox-forwarding-registry.js';
+import { MailboxQuotaHttpError, mountMailboxQuotaRoutes } from '../mail/mailbox-quota-http.js';
+import { createMailboxQuotaRegistry, MailboxQuotaRegistryError } from '../mail/mailbox-quota-registry.js';
+import { createMailboxRegistry, MailboxRegistryError } from '../mail/mailbox-registry.js';
+import { mountMailboxRoutes } from '../mail/mailbox-http.js';
+import { MailboxPasswordError } from '../mail/mailbox-password.js';
+import { LogHttpError, mountLogRoutes } from '../runtime/log-http.js';
+import { mountLicenseEntitlementRoutes } from '../panel/license-entitlement-http.js';
+import { LicenseEntitlementError } from '../panel/license-entitlement-service.js';
+import { mountMailSmarthostRoutes } from '../mail/mail-smarthost-http.js';
+import { mountProtectedPathRoutes } from '../files/protected-path-http.js';
+import { mountApiKeyRoutes } from '../auth/api-key-http.js';
+import { mountAutomationRoutes } from './automation-http.js';
+import { ManagedServiceHttpError, mountManagedServiceRoutes } from '../runtime/managed-service-http.js';
+import { mountNodeRuntimeRoutes, NodeRuntimeHttpError } from '../applications/node-runtime-http.js';
+import { requirePanelRouteAccess } from './panel-http-guard.js';
+import { PowerDnsAuthoritativeServiceError } from '../dns/powerdns-authoritative-service.js';
+import { mountPowerDnsRoutes, PowerDnsHttpError } from '../dns/powerdns-http.js';
+import { PowerDnsSecretRegistryError } from '../dns/powerdns-secret-registry.js';
+import { createDnsZoneRetirementService } from '../dns/dns-zone-retirement.js';
+import { ResourceImpactError } from '../websites/resource-impact.js';
+import { mountResourceImpactRoutes } from '../websites/resource-impact-http.js';
+import { createAllWebsiteImpactProviders } from '../websites/website-delete-impact-providers.js';
+import { RoundcubeConfigurationError } from '../mail/roundcube-configuration.js';
+import { RoundcubeConfigurationHttpError, mountRoundcubeConfigurationRoutes } from '../mail/roundcube-configuration-http.js';
+import {
+  mountRoundcubeDomainMappingRoutes,
+  RoundcubeDomainMappingHttpError,
+} from '../mail/roundcube-domain-mapping-http.js';
+import { RoundcubeDomainMappingRegistryError } from '../mail/roundcube-domain-mapping-registry.js';
+import { RoundcubeDomainMappingServiceError } from '../mail/roundcube-domain-mapping-service.js';
+import { RoundcubeSecretRegistryError } from '../mail/roundcube-secret-registry.js';
+import { createServerRegistry, RegistryError } from '../runtime/server-registry.js';
+import { ServerDnsIdentityRegistryError } from '../dns/server-dns-identity-registry.js';
+import { SiteCreateError } from '../provisioning/site-create.js';
+import { createLocalSiteCreator, mountSiteCreateRoutes } from '../provisioning/site-create-http.js';
+import { createTenantSiteService } from '../hosting/tenant-site-service.js';
+import { mountTenantSiteRoutes } from '../hosting/tenant-site-http.js';
+import { mountSiteFileRoutes, SiteFileHttpError } from '../files/site-file-http.js';
+import { mountWebsiteStaticCopyRoutes } from '../websites/website-static-copy-http.js';
+import { SiteFileManagerError } from '../files/site-file-manager.js';
+import { SiteFileWorkerError } from '../files/site-file-worker.js';
+import { mountTerminalCapabilityRoutes } from '../terminal/terminal-capability-http.js';
+import { TerminalCapabilityError } from '../terminal/terminal-capability-registry.js';
+import { mountTtydSessionRoutes } from '../terminal/ttyd-session-http.js';
+import { TtydSessionError } from '../terminal/ttyd-session-manager.js';
+import { mountWebsiteRoutes } from '../websites/website-http.js';
+import { WebsiteMigrationBindError } from '../migration/website-migration-bind.js';
+import { WebsiteMigrationCreateError } from '../migration/website-migration-create.js';
+import { mountWebsiteMigrationRoutes } from '../migration/website-migration-http.js';
+import { createWebsiteMigrationLedger, WebsiteMigrationLedgerError } from '../migration/website-migration-ledger.js';
+import { createWebsiteMigrationPolicyStore, WebsiteMigrationPolicyError } from '../migration/website-migration-policy.js';
+import { WebsiteMigrationPreviewError } from '../migration/website-migration-preview.js';
+import { WebsiteMigrationRollbackError } from '../migration/website-migration-rollback.js';
+import { createWebsiteRegistry, WebsiteRegistryError } from '../websites/website-registry.js';
+import { WebsiteProvisioningHandlerError } from '../provisioning/website-provisioning-handlers.js';
+import { mountWebsiteProvisioningRoutes, WebsiteProvisioningHttpError } from '../provisioning/website-provisioning-http.js';
+import { WebsiteProvisioningOrchestratorError } from '../provisioning/website-provisioning-orchestrator.js';
+import { WebsiteProvisioningRegistryError } from '../provisioning/website-provisioning-registry.js';
+import { SiteMutationLockError } from '../websites/site-mutation-lock.js';
+import { mountWebsiteSftpKeyRoutes, WebsiteSftpKeyHttpError } from '../websites/website-sftp-key-http.js';
+import { WebsiteSftpKeyRegistryError } from '../websites/website-sftp-key-registry.js';
+import { WebsiteSftpKeyServiceError } from '../websites/website-sftp-key-service.js';
+import { mountWebsiteCronRoutes, WebsiteCronHttpError } from '../websites/website-cron-http.js';
+import { WebsiteCronApplyServiceError } from '../websites/website-cron-apply-service.js';
+import { WebsiteCronRegistryError } from '../websites/website-cron-registry.js';
+import { mountWebsitePhpToolsRoutes } from '../php/website-php-tools-http.js';
+import { WebsitePhpToolsServiceError } from '../php/website-php-tools-service.js';
+import { PhpCliToolError, CacheIsolationError } from '@yunpanel/host-runtime';
+import { mountWebsiteCacheRoutes } from '../websites/website-cache-http.js';
+import { WebsiteCacheServiceError } from '../websites/website-cache-service.js';
+import { WebsiteCachePolicyRegistryError } from '../websites/website-cache-policy-registry.js';
+import { mountPanelSettingsRoutes, PanelSettingsHttpError } from '../panel/panel-settings-http.js';
+import { PanelSettingsRegistryError } from '../panel/panel-settings-registry.js';
+import { createWebsiteBackupSetProvider } from '../backup/website-backup-set.js';
+import { createWebsiteBackupBrowser } from '../backup/website-backup-browser.js';
+import { isWebsiteBackupHttpError, mountWebsiteBackupRoutes } from '../backup/website-backup-http.js';
+import { createWebsiteBackupService, WebsiteBackupError } from '../backup/website-backup-service.js';
+import { createResticRepositoryRegistry, ResticRepositoryRegistryError } from '../backup/restic-repository-registry.js';
+import { createRcloneRemoteRegistry, RcloneRemoteRegistryError } from '../backup/rclone-remote-registry.js';
+import { isBackupRepositoryHttpError, mountBackupRepositoryRoutes } from '../backup/backup-repository-http.js';
+import { createWebsiteBackupOperationRegistry, WebsiteBackupOperationRegistryError } from '../backup/website-backup-operation-registry.js';
+import { createWebsiteBackupOperationService, WebsiteBackupOperationServiceError } from '../backup/website-backup-operation-service.js';
+import { createWebsiteRestoreService, WebsiteRestoreError } from '../backup/website-restore-service.js';
+import { isWebsiteRestoreHttpError, mountWebsiteRestoreRoutes } from '../backup/website-restore-http.js';
+import { mountWebsiteAnalyticsRoutes, WebsiteAnalyticsHttpError } from '../websites/website-analytics-http.js';
+import { isPleskImporterHttpError, mountPleskImporterRoutes } from '../migration/plesk-importer-http.js';
+import { PleskImporterError } from '../migration/plesk-importer.js';
+import { createSiteHealthService, SiteHealthError } from '../websites/site-health-service.js';
+import { mountSiteHealthRoutes, SiteHealthHttpError } from '../websites/site-health-http.js';
+import { createSystemWatchdogService, SystemWatchdogError } from '../runtime/system-watchdog-service.js';
+import { mountSystemWatchdogRoutes, SystemWatchdogHttpError } from '../runtime/system-watchdog-http.js';
+import { createOperationalNotificationService, OperationalNotificationError } from '../panel/operational-notification-service.js';
+import { mountOperationalNotificationRoutes, OperationalNotificationHttpError } from '../panel/operational-notification-http.js';
+import { createFirewallService, FirewallServiceError } from '../runtime/firewall-service.js';
+import { mountFirewallRoutes, FirewallHttpError } from '../runtime/firewall-http.js';
+import { createNftablesManager, NftablesManagerError } from '@yunpanel/host-runtime';
+import {
+  createProductionExitGateService,
+  mountProductionExitGateRoutes,
+  ProductionExitGateError,
+  evaluateProductionExitGate,
+  PRODUCTION_EXIT_GATE_VERSION,
+  EXIT_GATE_STATUSES,
+  EXIT_GATE_CATEGORIES,
+} from '../panel/production-exit-gate.js';
+import {
+  mountNonResellerCapabilitiesRoutes,
+  NON_RESELLER_INVENTORY,
+  TASK_GROUPS,
+  assertNoResellerBrandingPollution,
+  assertTenantBoundaryForCapability,
+  getCapabilityById,
+  listCapabilities,
+  ResellerBrandingDeferredError,
+  CapabilityRegistryError,
+} from '../hosting/non-reseller-capabilities.js';
+import {
+  mountOsExternalParityRoutes,
+  OS_EQUIVALENCE_INVENTORY,
+  EXTERNAL_PARITY_INVENTORY,
+  DEFERRED_BILLING_INVENTORY,
+  FORBIDDEN_BILLING_KEYS,
+  assertNoResellerBillingPollution,
+  assertResellerBillingDeferred,
+  assertPreserveLinuxTenantIsolation,
+  ResellerBillingDeferredError,
+  LinuxIsolationViolationError,
+  listOsEquivalenceAdapters,
+  listExternalParityAdapters,
+  listDeferredBillingItems,
+} from '../hosting/os-external-parity.js';
+
+const DOCKER_COMPOSE_API_CONTEXT = Symbol.for('yunpanel.docker-compose-api-context');
+
+export {
+  API_VERSION,
+  SCHEMA_VERSION,
+  DEFAULT_STALE_THRESHOLD_MS,
+  FRESHNESS_STATUSES,
+  DEPLOYMENT_COMPARISON_STATUSES,
+  sanitizeDiagnosticInfo,
+  resolveDeploymentDiagnostics,
+  compareDeploymentVersions,
+  evaluateFreshnessState,
+  evaluateDeploymentEvidence,
+  requireDeploymentDiagnosticsAccess,
+} from './core-app.js';
+export { createSystemWatchdogService, SystemWatchdogError } from '../runtime/system-watchdog-service.js';
+export { mountSystemWatchdogRoutes, SystemWatchdogHttpError } from '../runtime/system-watchdog-http.js';
+export { createOperationalNotificationService, OperationalNotificationError } from '../panel/operational-notification-service.js';
+export { mountOperationalNotificationRoutes, OperationalNotificationHttpError } from '../panel/operational-notification-http.js';
+export { createFirewallService, FirewallServiceError } from '../runtime/firewall-service.js';
+export { mountFirewallRoutes, FirewallHttpError } from '../runtime/firewall-http.js';
+export {
+  createProductionExitGateService,
+  mountProductionExitGateRoutes,
+  ProductionExitGateError,
+  evaluateProductionExitGate,
+  PRODUCTION_EXIT_GATE_VERSION,
+  EXIT_GATE_STATUSES,
+  EXIT_GATE_CATEGORIES,
+} from '../panel/production-exit-gate.js';
+export {
+  mountNonResellerCapabilitiesRoutes,
+  NON_RESELLER_INVENTORY,
+  TASK_GROUPS,
+  assertNoResellerBrandingPollution,
+  assertTenantBoundaryForCapability,
+  getCapabilityById,
+  listCapabilities,
+  ResellerBrandingDeferredError,
+  CapabilityRegistryError,
+} from '../hosting/non-reseller-capabilities.js';
+export {
+  mountOsExternalParityRoutes,
+  OS_EQUIVALENCE_INVENTORY,
+  EXTERNAL_PARITY_INVENTORY,
+  DEFERRED_BILLING_INVENTORY,
+  FORBIDDEN_BILLING_KEYS,
+  assertNoResellerBillingPollution,
+  assertResellerBillingDeferred,
+  assertPreserveLinuxTenantIsolation,
+  ResellerBillingDeferredError,
+  LinuxIsolationViolationError,
+  listOsEquivalenceAdapters,
+  listExternalParityAdapters,
+  listDeferredBillingItems,
+} from '../hosting/os-external-parity.js';
+
+function localServerRegistryView(registry, localServerId) {
+  if (!localServerId) return registry;
+  return new Proxy(registry, {
+    get(target, property) {
+      if (property === 'getServer') {
+        return async (serverId) => {
+          if (serverId !== localServerId) return null;
+          const server = await target.getServer(serverId);
+          return server?.executionMode === 'local' ? server : null;
+        };
+      }
+      if (property === 'listServers') {
+        return async () => (await target.listServers()).filter((server) => server.id === localServerId && server.executionMode === 'local');
+      }
+      const value = target[property];
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
+// These options default to in-memory stores for tests. Production passes
+// `requireDurableStores: true` so a missing file-backed store fails startup.
+const FILE_BACKED_STORE_OPTIONS = Object.freeze([
+  'registry', 'jobRegistry', 'certificateRegistry', 'applicationRegistry', 'dockerWorkloadRegistry',
+  'websiteRegistry', 'websiteMigrationPolicy', 'migrationLedger', 'domainRegistry', 'dnsHostingRegistry',
+  'dnsProviderCredentialRegistry', 'mailDomainRegistry', 'mailDkimRegistry', 'mailDkimRetirementRegistry',
+  'mailboxRegistry', 'mailboxQuotaRegistry', 'mailboxForwardingRegistry', 'mailAliasRegistry',
+]);
+
+export function createApp(allOptions = {}) {
+  if (allOptions.requireDurableStores === true) {
+    const missing = FILE_BACKED_STORE_OPTIONS.filter((name) => allOptions[name] == null);
+    if (missing.length > 0) throw new Error(`Production wiring is missing file-backed stores: ${missing.join(', ')}`);
+  }
+  const {
+  requireDurableStores = false,
+  registry = createServerRegistry(),
+  jobRegistry = createJobRegistry(),
+  aiToolRegistry = null,
+  aiAudit = null,
+  aiPolicyOverrides = {},
+  aiPolicyStore = null,
+  aiProviderRegistry = null,
+  aiConversationService = null,
+  certificateRegistry = createCertificateRegistry(),
+  certificateMaterialManager = createCertificateMaterialManager(),
+  certificateMaterialGc = null,
+  applicationRegistry = createApplicationRegistry(),
+  dockerWorkloadRegistry = createDockerWorkloadRegistry({
+    serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
+  }),
+  websiteRegistry = createWebsiteRegistry({
+    serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
+    getApplication: async (applicationId) => applicationRegistry.getApplication(applicationId),
+    getDockerWorkload: async (workloadId) => dockerWorkloadRegistry.getWorkload(workloadId),
+  }),
+  websiteMigrationPolicy = createWebsiteMigrationPolicyStore(),
+  migrationLedger = createWebsiteMigrationLedger(),
+  domainRegistry = createDomainRegistry({
+    serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
+    getWebsite: async (websiteId) => websiteRegistry.getWebsite(websiteId),
+    websiteBindingRequired: () => websiteMigrationPolicy.snapshot().websiteBindingRequired,
+  }),
+  dnsHostingRegistry = createDnsHostingRegistry({
+    getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
+  }),
+  dnsProviderCredentialRegistry = createDnsProviderCredentialRegistry({
+    getDnsZone: async (dnsZoneId) => dnsHostingRegistry.getZone(dnsZoneId),
+  }),
+  serverDnsIdentityRegistry = null,
+  powerDnsAuthoritativeService = null,
+  powerDnsSecretRegistry = null,
+  dnsZoneTemplateRegistry = null,
+  dnsZoneReapplyRuntime = null,
+  dnsZoneRetirementImpactService = null,
+  dnsZoneOwnershipRegistry = null,
+  dnsZoneRetirementPolicy = null,
+  databaseBindingRegistry = null,
+  databaseCredentialRegistry = null,
+  databaseCredentialApplyService = null,
+  phpMyAdminHandoffService = null,
+  elFinderHandoffService = null,
+  siteFileManager = null,
+  websiteStaticCopyService = null,
+  websitePhpCopyService = null,
+  databaseInventoryProvider = null,
+  databaseHealthProvider = null,
+  dnsReadinessService = null,
+  dnsRequirementsService = null,
+  dnsRecordManager = createCloudflareDnsManager(),
+  mailDomainRegistry = createMailDomainRegistry({
+    getWebDomain: async (domainId) => domainRegistry.getDomain(domainId),
+  }),
+  mailDkimRegistry = createMailDkimRegistry({
+    getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
+  }),
+  mailDkimRetirementRegistry = createMailDkimRetirementRegistry({
+    getDkimKey: async (mailDomainId) => mailDkimRegistry.getKey(mailDomainId),
+  }),
+  mailDataInspector = createMailDataInspector(),
+  mailDataBackupManager = createMailDataBackupManager(),
+  mailDataOperationsService = null,
+  mailDiagnosticsInspector = createMailDiagnosticsInspector(),
+  mailQueueInspector = createMailQueueInspector(),
+  mailProtocolHealthInspector = createMailProtocolHealthInspector(),
+  mailDeliveryDiagnosticsService = null,
+  mailDeleteImpactService = null,
+  mailDeleteFinalizeService = null,
+  mailDkimConfigurationService = null,
+  mailDkimDnsService = null,
+  mailServiceIdentityRegistry = null,
+  mailDiscoveryEndpointResolver = null,
+  roundcubeWebmailEndpointResolver = null,
+  mailSrsConfigurationService = null,
+  mailAntivirusHealthInspector = null,
+  panelSettingsRegistry = null,
+  userAdminStore = null,
+  mailboxRegistry = createMailboxRegistry({
+    getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
+  }),
+  mailboxQuotaRegistry = createMailboxQuotaRegistry({
+    getMailbox: async (mailboxId) => mailboxRegistry.getMailbox(mailboxId),
+  }),
+  mailboxQuotaInspector = createMailboxQuotaInspector(),
+  mailboxForwardingRegistry = createMailboxForwardingRegistry({
+    getMailbox: async (mailboxId) => mailboxRegistry.getMailbox(mailboxId),
+  }),
+  mailAliasRegistry = createMailAliasRegistry({
+    getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
+    listMailboxes: (filter) => mailboxRegistry.listMailboxes(filter),
+  }),
+  mailConfigurationService = null,
+  roundcubeConfigurationService = null,
+  roundcubeDomainMappingRegistry = null,
+  roundcubeDomainMappingService = null,
+  environment = process.env.NODE_ENV,
+  journalLogReader = null,
+  nginxLogReader = null,
+  jobLogStore = null,
+  localServerId = null,
+  terminalCapabilityRegistry = null,
+  ttydSessionManager = null,
+  websiteProvisioningRuntime = null,
+  websiteSftpKeyRegistry = null,
+  websiteSftpKeyService = null,
+  websiteCronApplyService = null,
+  websitePhpToolsService = null,
+  websitePhpToolActionService = null,
+  websiteCacheService = null,
+  siteMutationLock = null,
+  panelSettingsService = null,
+  databaseBackupService = null,
+  domainSuspensionRuntime = null,
+  domainRemovalRuntime = null,
+  websiteRemovalRuntime = null,
+  websiteSuspensionRuntime = null,
+  websiteCronImpactProvider = null,
+  resticRepositoryRegistry = null,
+  resticManager = null,
+  rcloneRemoteRegistry = null,
+  rcloneManager = null,
+  websiteBackupService = null,
+  websiteRestoreService = null,
+  backupOperationRegistry = null,
+  durableJobRegistry = null,
+  pleskImporter = null,
+  operationalNotificationService = null,
+  firewallService = null,
+  nftablesManager = null,
+  licenseEntitlementService = null,
+  ...options
+} = allOptions;
+  const hostingAccounts = allOptions.hostingAccountStore
+    ?? userAdminStore?.hostingAccounts
+    ?? options.hostingAccountStore
+    ?? options.authStore?.hostingAccounts
+    ?? options.authStore?.users?.hostingAccounts
+    ?? null;
+  const customerLookup = typeof allOptions.customerLookup === 'function'
+    ? allOptions.customerLookup
+    : hostingAccounts && typeof hostingAccounts.getCustomer === 'function'
+      ? (id) => hostingAccounts.getCustomer(id)
+      : null;
+  const core = createCoreApp({
+    ...options,
+    registry,
+    domainRegistry,
+    jobRegistry,
+    certificateRegistry,
+    certificateMaterialManager,
+    applicationRegistry,
+    environment,
+    localServerId,
+    dnsHostingRegistry,
+    dnsProviderCredentialRegistry,
+    websiteRegistry,
+    siteMutationLock,
+    customerLookup,
+  });
+  const app = express();
+  let resolvedOperationalNotificationService = null;
+  app.disable('x-powered-by');
+  app.boundaryOptions = {
+    websiteRegistry,
+    domainRegistry,
+    databaseBindingRegistry,
+    databaseCredentialRegistry,
+    mailDomainRegistry,
+    mailboxRegistry,
+    mailAliasRegistry,
+    jobRegistry,
+    localServerId,
+    customerLookup,
+  };
+  app.use(createTenantBoundaryMiddleware({
+    ...options,
+    websiteRegistry,
+    customerLookup,
+    websiteLookup: async (id) => websiteRegistry.getWebsite(id),
+  }));
+  const localRegistry = localServerRegistryView(registry, localServerId);
+  const applicationEnvironmentRegistry = options.applicationEnvironmentRegistry ?? null;
+  const passengerMigrationPreviewService = options.applicationPassengerMigrationPreviewService ?? null;
+  const passengerMigrationService = options.applicationPassengerMigrationService ?? null;
+  const runtimeBindingRegistry = options.runtimeBindingRegistry ?? null;
+  const readiness = dnsReadinessService ?? createDnsReadinessService({
+    dnsHostingRegistry,
+    domainRegistry,
+    serverRegistry: registry,
+    dnsProviderCredentialRegistry,
+  });
+  const dnsRetirementImpact = dnsZoneRetirementImpactService ?? (
+    localServerId && powerDnsSecretRegistry
+      ? createDnsZoneRetirementService({
+        domainRegistry,
+        powerDnsSecretRegistry,
+        ownershipRegistry: dnsZoneOwnershipRegistry,
+        mailDomainRegistry,
+        jobRegistry,
+        provisioningRegistry: typeof websiteProvisioningRuntime?.registry?.listForDnsZone === 'function'
+          ? websiteProvisioningRuntime.registry
+          : null,
+        retentionPolicy: dnsZoneRetirementPolicy,
+        localServerId,
+      })
+      : null
+  );
+  if (dnsRetirementImpact !== null && typeof dnsRetirementImpact.preview !== 'function') {
+    throw new Error('DNS zone retirement impact service is invalid');
+  }
+  const databaseCredentialApply = databaseCredentialApplyService ?? (
+    databaseBindingRegistry && databaseCredentialRegistry
+      ? createDatabaseCredentialApplyService({ databaseBindingRegistry, databaseCredentialRegistry, jobRegistry })
+      : null
+  );
+  const mailConfig = mailConfigurationService ?? createMailConfigurationService({
+    mailDomainRegistry,
+    mailboxRegistry,
+    mailAliasRegistry,
+    mailboxQuotaRegistry,
+    mailboxForwardingRegistry,
+    ...(mailServiceIdentityRegistry ? { domainRegistry, mailServiceIdentityRegistry } : {}),
+    ...(mailSrsConfigurationService ? { mailSrsConfigurationService } : {}),
+    ...(roundcubeDomainMappingRegistry ? { roundcubeDomainMappingRegistry } : {}),
+  });
+  const mailDeleteImpact = mailDeleteImpactService ?? createMailDeleteImpactService({
+    mailDomainRegistry,
+    domainRegistry,
+    mailboxRegistry,
+    mailAliasRegistry,
+    mailboxQuotaRegistry,
+    mailboxForwardingRegistry,
+    mailDkimRegistry,
+    jobRegistry,
+    mailDataInspector,
+    ...(roundcubeDomainMappingRegistry ? { roundcubeDomainMappingRegistry } : {}),
+    localServerId,
+  });
+  const canCreateMailDeleteFinalize = typeof mailboxRegistry?.deleteMailbox === 'function'
+    && typeof mailDomainRegistry?.deleteMailDomain === 'function'
+    && typeof jobRegistry?.getJob === 'function';
+  const mailDeleteFinalize = mailDeleteFinalizeService ?? (canCreateMailDeleteFinalize
+    ? createMailDeleteFinalizeService({
+      mailboxRegistry,
+      mailDomainRegistry,
+      mailDeleteImpactService: mailDeleteImpact,
+      jobRegistry,
+    })
+    : null);
+  const mailDataOperations = mailDataOperationsService ?? createMailDataOperationsService({
+    mailDomainRegistry,
+    domainRegistry,
+    mailboxRegistry,
+    mailDataInspector,
+    mailDataBackupManager,
+    mailDeleteImpactService: mailDeleteImpact,
+    jobRegistry,
+    localServerId,
+  });
+  const removalBackupImpactProvider = backupOperationRegistry
+    && databaseBindingRegistry
+    && localServerId
+    ? createDomainRemovalBackupImpactProvider({
+      backupOperationRegistry,
+      domainRegistry,
+      websiteRegistry,
+      databaseBindingRegistry,
+      mailDomainRegistry,
+      localServerId,
+    })
+    : null;
+  const backupJobStorePath = options.backupJobStorePath ?? null;
+  const projectBackupLocked = options.projectBackupLocked ?? null;
+  const dockerComposeProjectRegistry = options.dockerComposeProjectRegistry ?? null;
+  const dockerComposeObserver = options.dockerComposeObserver ?? null;
+  const backupRuntime = backupOperationRegistry && backupJobStorePath && projectBackupLocked
+    && dockerComposeProjectRegistry && dockerComposeObserver && applicationEnvironmentRegistry
+    ? createBackupProductionRuntime({
+      jobRegistry,
+      jobStorePath: backupJobStorePath,
+      backupOperationRegistry,
+      applicationRegistry,
+      applicationEnvironmentRegistry,
+      dockerComposeProjectRegistry,
+      dockerComposeObserver,
+      loadDatabaseInventory: (serverId) => databaseHttpInternals.latestDatabaseSnapshot(jobRegistry, serverId),
+      mailDataOperationsService: mailDataOperations,
+      projectBackupLocked,
+    })
+    : null;
+  const canCreateDkimDnsService = typeof dnsHostingRegistry?.listZones === 'function'
+    && typeof dnsProviderCredentialRegistry?.getForZone === 'function'
+    && typeof dnsProviderCredentialRegistry?.materialize === 'function'
+    && typeof dnsRecordManager?.inspectRecord === 'function'
+    && typeof jobRegistry?.enqueue === 'function' && typeof jobRegistry?.listJobs === 'function';
+  const dkimDns = mailDkimDnsService ?? (canCreateDkimDnsService ? createMailDkimDnsService({
+    mailDomainRegistry,
+    mailDkimRegistry,
+    mailDkimRetirementRegistry,
+    domainRegistry,
+    dnsHostingRegistry,
+    dnsProviderCredentialRegistry,
+    dnsRecordManager,
+    jobRegistry,
+    localServerId,
+  }) : null);
+  app.disable('x-powered-by');
+  app.use(express.json({ limit: '256kb' }));
+  if (licenseEntitlementService) {
+    mountLicenseEntitlementRoutes(app, {
+      licenseEntitlementService,
+      auditStore: options.auditStore ?? options.authStore?.audit ?? aiAudit ?? null,
+    });
+  }
+  if (aiToolRegistry !== null) {
+    mountAiRoutes(app, {
+      registry: aiToolRegistry,
+      audit: aiAudit,
+      policyOverrides: aiPolicyOverrides,
+      policyStore: aiPolicyStore,
+      providerRegistry: aiProviderRegistry,
+      conversationService: aiConversationService,
+      licenseEntitlementService,
+    });
+  }
+  const resolvedResticManager = resticManager ?? (
+    databaseBindingRegistry || resticRepositoryRegistry ? createResticManager() : null
+  );
+  if (resolvedResticManager && typeof resolvedResticManager.cleanOrphanedPasswordFiles === 'function') {
+    resolvedResticManager.cleanOrphanedPasswordFiles().catch(() => {});
+  }
+  const resolvedResticRepositoryRegistry = resticRepositoryRegistry ?? (
+    databaseBindingRegistry && resolvedResticManager ? createResticRepositoryRegistry({
+      resticManager: resolvedResticManager,
+      masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY ?? null,
+    }) : null
+  );
+  const resolvedRcloneRemoteRegistry = rcloneRemoteRegistry ?? (
+    databaseBindingRegistry ? createRcloneRemoteRegistry({
+      rcloneManager: rcloneManager ?? createRcloneManager(),
+      masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY ?? null,
+    }) : null
+  );
+
+  if (resolvedResticRepositoryRegistry || resolvedRcloneRemoteRegistry) {
+    mountBackupRepositoryRoutes(app, {
+      resticRepositoryRegistry: resolvedResticRepositoryRegistry,
+      rcloneRemoteRegistry: resolvedRcloneRemoteRegistry,
+      localServerId,
+    });
+  }
+  const backupResourceProviderForRequest = (request) => createBackupResourceProvider({
+    serverRegistry: localRegistry,
+    dockerComposeProjectRegistry: request[DOCKER_COMPOSE_API_CONTEXT]?.projectRegistry ?? dockerComposeProjectRegistry,
+    applicationRegistry,
+    applicationEnvironmentRegistry,
+    websiteRegistry,
+    databaseBindingRegistry,
+    loadDatabaseInventory: (serverId) => databaseHttpInternals.latestDatabaseSnapshot(jobRegistry, serverId),
+    mailDomainRegistry,
+    domainRegistry,
+    mailDataOperationsService: mailDataOperations,
+  });
+  mountBackupRoutes(app, {
+    backupResourceProviderForRequest,
+    ...(backupRuntime ? {
+      backupOperationRegistry,
+      backupOrchestratorForRequest: async (_request, provider) => backupRuntime.createOrchestrator(provider),
+    } : {}),
+  });
+  mountCertificateRoutes(app, {
+    domainRegistry,
+    certificateRegistry,
+    certificateMaterialManager,
+    jobRegistry,
+    localServerId,
+    certificateMaterialGc,
+  });
+  app.post('/api/domains', requirePanelRouteAccess, createDomainHandler(domainRegistry, { localServerId, dockerComposeProjectRegistry, jobRegistry, siteMutationLock }));
+  app.post('/api/domains/:domainId/update-preview', requirePanelRouteAccess, createDomainUpdatePreviewHandler(domainRegistry, { localServerId, dockerComposeProjectRegistry, jobRegistry }));
+  app.patch('/api/domains/:domainId', requirePanelRouteAccess, createDomainUpdateHandler(domainRegistry, { jobRegistry, certificateRegistry, localServerId, provisioningRegistry: websiteProvisioningRuntime?.registry ?? null, dockerComposeProjectRegistry, siteMutationLock }));
+  app.post('/api/domains/:domainId/reparent-preview', requirePanelRouteAccess, createDomainReparentPreviewHandler(domainRegistry, { localServerId }));
+  app.post('/api/domains/:domainId/reparent', requirePanelRouteAccess, createDomainReparentHandler(domainRegistry, { localServerId, siteMutationLock }));
+  if (domainSuspensionRuntime) {
+    mountDomainSuspensionRoutes(app, { runtime: domainSuspensionRuntime });
+  }
+  if (websiteSuspensionRuntime) {
+    mountWebsiteSuspensionRoutes(app, { runtime: websiteSuspensionRuntime });
+  }
+  if (domainRemovalRuntime) {
+    mountDomainRemovalRoutes(app, { runtime: domainRemovalRuntime });
+  }
+  if (websiteRemovalRuntime) {
+    mountWebsiteRemovalRoutes(app, {
+      runtime: websiteRemovalRuntime,
+      siteMutationLock,
+      websiteRegistry,
+      localServerId,
+    });
+  }
+  const websiteTrafficCoordinator = options.websiteTrafficCoordinator
+    ?? (options.websiteTrafficLedger
+      ? createWebsiteTrafficCoordinator({
+        domainRegistry,
+        websiteRegistry,
+        hostingAccounts,
+        websiteTrafficLedger: options.websiteTrafficLedger,
+        websiteTrafficEnforcer: options.websiteTrafficEnforcer ?? null,
+        ...(options.websiteTrafficSitesDir ? { sitesDir: options.websiteTrafficSitesDir } : {}),
+        ...(options.websiteTrafficAllowedLogDir ? { allowedLogDir: options.websiteTrafficAllowedLogDir } : {}),
+        ...(options.now ? { now: options.now } : {}),
+      })
+      : null);
+  const onDomainActivated = options.onDomainActivated
+    ?? (websiteTrafficCoordinator ? () => websiteTrafficCoordinator.reconcileTrafficEnforcement({ syncLedger: false }) : null);
+  if (websiteProvisioningRuntime) {
+    if (typeof websiteProvisioningRuntime.configureDomainControlPlane !== 'function') {
+      throw new Error('Website provisioning runtime cannot configure Domain control-plane dependencies');
+    }
+    websiteProvisioningRuntime.configureDomainControlPlane({
+      domainRegistry,
+      ...(onDomainActivated ? { onDomainActivated } : {}),
+    });
+    if (applicationEnvironmentRegistry) {
+      if (typeof websiteProvisioningRuntime.configurePassengerEnvironment !== 'function') {
+        throw new Error('Website provisioning runtime cannot configure Passenger environment dependencies');
+      }
+      websiteProvisioningRuntime.configurePassengerEnvironment({ applicationEnvironmentRegistry });
+    }
+    if (runtimeBindingRegistry) {
+      if (typeof websiteProvisioningRuntime.configurePassengerControlPlane !== 'function') {
+        throw new Error('Website provisioning runtime cannot configure Passenger control-plane dependencies');
+      }
+      websiteProvisioningRuntime.configurePassengerControlPlane({
+        applicationRegistry,
+        websiteRegistry,
+        domainRegistry,
+        runtimeBindingRegistry,
+        localServerId,
+      });
+    }
+  }
+  const customerDatabaseQuotaCoordinator = options.databaseQuotaCoordinator
+    ?? (hostingAccounts
+      ? createCustomerDatabaseQuotaCoordinator({ hostingAccounts, databaseBindingRegistry })
+      : null);
+  const siteCreateDependencies = {
+    registry: localRegistry,
+    applicationRegistry,
+    dockerWorkloadRegistry,
+    dockerComposeProjectRegistry,
+    websiteRegistry,
+    domainRegistry,
+    mailDomainRegistry,
+    serverDnsIdentityRegistry,
+    dnsZoneTemplateRegistry,
+    databaseBindingRegistry,
+    databaseQuotaCoordinator: customerDatabaseQuotaCoordinator,
+    localServerId,
+    userAdminStore,
+    licenseEntitlementService,
+    websiteProvisioningRegistry: websiteProvisioningRuntime?.registry ?? null,
+    websiteProvisioningRuntime,
+    siteMutationLock,
+  };
+  mountSiteCreateRoutes(app, siteCreateDependencies);
+  if (options.apiKeyStore && options.tenantSiteStore && websiteProvisioningRuntime && localServerId) {
+    mountTenantSiteRoutes(app, { service: createTenantSiteService({
+      siteCreator: createLocalSiteCreator(siteCreateDependencies), provisioning: websiteProvisioningRuntime,
+      domainRegistry, websiteRegistry, store: options.tenantSiteStore, localServerId, publication: core.domainPublication, jobRegistry,
+      removal: websiteRemovalRuntime,
+    }) });
+  }
+  if (websiteProvisioningRuntime) {
+    mountWebsiteProvisioningRoutes(app, {
+      registry: websiteProvisioningRuntime.registry,
+      orchestrator: websiteProvisioningRuntime,
+      isolationMigration: websiteProvisioningRuntime.isolationMigration,
+      websiteRegistry,
+      localServerId,
+      siteMutationLock,
+      licenseEntitlementService,
+    });
+  }
+  mountResourceImpactRoutes(app, {
+    registry: localRegistry,
+    applicationRegistry,
+    websiteRegistry,
+    domainRegistry,
+    certificateRegistry,
+    jobRegistry,
+    dnsHostingRegistry,
+    mailDomainRegistry,
+    localServerId,
+    ...(dnsRetirementImpact ? {
+      dnsRetirementImpactProvider: async ({ domainIds }) => Promise.all(domainIds.map(async (domainId) => {
+        const preview = await dnsRetirementImpact.preview({ domainId });
+        return Object.freeze({
+          domainId,
+          state: preview.retirementPlanReady ? 'ready' : 'blocked',
+          previewDigest: preview.previewDigest,
+          zoneSnapshotDigest: preview.zone.snapshotDigest,
+          ownershipEvidenceDigest: preview.zone.exists
+            ? preview.zone.ownershipOrigin?.evidenceDigest ?? null
+            : null,
+          snapshotRetentionDays: preview.zone.exists && preview.retention.configured
+            ? preview.retention.snapshotRetentionDays
+            : null,
+          blockers: Object.freeze([...preview.blockers]),
+        });
+      })),
+    } : {}),
+    additionalProviders: {
+      ...(removalBackupImpactProvider ? { backups: removalBackupImpactProvider } : {}),
+      ...(roundcubeDomainMappingRegistry
+        && typeof roundcubeDomainMappingRegistry.listActiveMappings === 'function'
+        && typeof roundcubeDomainMappingRegistry.listInFlight === 'function'
+        ? {
+          webmailMappings: async ({ domainIds }) => {
+            const affected = new Set(domainIds);
+            const [active, inFlight] = await Promise.all([
+              roundcubeDomainMappingRegistry.listActiveMappings(
+                localServerId ? { serverId: localServerId } : {},
+              ),
+              roundcubeDomainMappingRegistry.listInFlight(
+                localServerId ? { serverId: localServerId } : {},
+              ),
+            ]);
+            return [...active, ...inFlight]
+              .filter((mapping) => affected.has(mapping.webDomainId))
+              .sort((left, right) => left.id.localeCompare(right.id));
+          },
+        }
+        : {}),
+      dockerWorkloads: async ({ dockerWorkloadId }) => {
+        if (!dockerWorkloadId) return [];
+        const workload = await dockerWorkloadRegistry.getWorkload(dockerWorkloadId);
+        if (!workload) throw new Error('Docker workload reference is unavailable');
+        return [{ id: workload.id, state: workload.state }];
+      },
+      mailboxes: async ({ domainIds }) => {
+        const impactedDomains = new Set(domainIds);
+        const mailDomainIds = new Set((await mailDomainRegistry.listMailDomains())
+          .filter((item) => item.webDomainId !== null && impactedDomains.has(item.webDomainId))
+          .map((item) => item.id));
+        return (await mailboxRegistry.listMailboxes())
+          .filter((item) => mailDomainIds.has(item.mailDomainId))
+          .map((item) => ({ id: item.id, state: item.enabled ? 'enabled' : 'disabled' }));
+      },
+      ...(websiteCronImpactProvider ? { crons: websiteCronImpactProvider } : {}),
+      ...createAllWebsiteImpactProviders({
+        databaseBindingRegistry,
+        websiteSftpKeyRegistry: websiteSftpKeyRegistry ?? websiteSftpKeyService?.keyRegistry ?? null,
+        runtimeBindingRegistry,
+        websiteRegistry,
+      }),
+    },
+  });
+  mountExternalLifecycleRoutes(app, {
+    dnsHostingRegistry,
+    dnsProviderCredentialRegistry,
+    dnsReadinessService: readiness,
+    dnsRecordManager,
+    domainRegistry,
+    jobRegistry,
+    localServerId,
+    mailDomainRegistry,
+    serverRegistry: localRegistry,
+    serverDnsIdentityRegistry,
+    mailDkimRegistry,
+    roundcubeDomainMappingRegistry,
+    dnsRequirementsService,
+  });
+  if ((serverDnsIdentityRegistry === null) !== (powerDnsAuthoritativeService === null)) {
+    throw new Error('Server DNS identity registry and PowerDNS authoritative service must be configured together');
+  }
+  if (serverDnsIdentityRegistry && powerDnsAuthoritativeService) {
+    mountPowerDnsRoutes(app, {
+      dnsIdentityRegistry: serverDnsIdentityRegistry,
+      authoritativeService: powerDnsAuthoritativeService,
+      dnsZoneTemplateRegistry,
+      dnsZoneReapplyRuntime,
+      jobRegistry,
+      dnsZoneOwnershipRegistry,
+      ...(powerDnsSecretRegistry ? { domainRegistry, powerDnsSecretRegistry } : {}),
+      ...(dnsRetirementImpact
+        && typeof dnsRetirementImpact.captureDeletionSnapshot === 'function'
+        && typeof dnsRetirementImpact.inspectDeletion === 'function'
+        && typeof dnsRetirementImpact.deleteCapturedSnapshot === 'function'
+        ? { dnsZoneRetirementService: dnsRetirementImpact }
+        : {}),
+      ...(typeof websiteProvisioningRuntime?.registry?.listForDnsZone === 'function'
+        ? { websiteProvisioningRegistry: websiteProvisioningRuntime.registry }
+        : {}),
+      ...(mailServiceIdentityRegistry ? {
+        mailDomainRegistry,
+        mailDkimRegistry,
+        mailDkimRetirementRegistry,
+        mailServiceIdentityRegistry,
+        mailDiscoveryEndpointResolver,
+        roundcubeWebmailEndpointResolver,
+      } : {}),
+    });
+  }
+  if (localServerId && typeof jobRegistry?.listJobs === 'function') app.use(createWebsiteMailBackupGuard({ jobRegistry, localServerId }));
+  mountMailAliasRoutes(app, { mailAliasRegistry, mailDomainRegistry, domainRegistry, localServerId });
+  mountMailboxRoutes(app, {
+    mailboxRegistry,
+    mailAliasRegistry,
+    mailboxQuotaRegistry,
+    mailboxForwardingRegistry,
+    mailDomainRegistry,
+    domainRegistry,
+    mailDeleteFinalizeService: mailDeleteFinalize,
+    localServerId,
+  });
+  mountMailDeleteImpactRoutes(app, { mailDeleteImpactService: mailDeleteImpact });
+  mountMailDataRoutes(app, { mailDataOperationsService: mailDataOperations });
+  if (mailDeleteFinalize) mountMailDomainDeleteRoute(app, { mailDeleteFinalizeService: mailDeleteFinalize });
+  mountMailboxQuotaRoutes(app, {
+    mailboxQuotaRegistry,
+    mailboxQuotaInspector,
+    mailboxRegistry,
+    mailDomainRegistry,
+    domainRegistry,
+    localServerId,
+  });
+  mountMailboxForwardingRoutes(app, {
+    mailboxForwardingRegistry,
+    mailboxRegistry,
+    mailDomainRegistry,
+    domainRegistry,
+    localServerId,
+  });
+  mountMailDkimRoutes(app, {
+    mailDkimRegistry,
+    mailDkimRetirementRegistry,
+    mailDkimConfigurationService,
+    mailDkimDnsService: dkimDns,
+    mailDomainRegistry,
+    domainRegistry,
+    jobRegistry: mailDkimConfigurationService ? jobRegistry : null,
+    localServerId,
+  });
+  if (dkimDns) mountMailDkimDnsRoutes(app, { mailDkimDnsService: dkimDns });
+  mountMailDiagnosticsRoutes(app, {
+    mailDiagnosticsInspector,
+    mailQueueInspector,
+    mailProtocolHealthInspector,
+    mailDkimRegistry,
+    mailDomainRegistry,
+    domainRegistry,
+    mailboxRegistry,
+    mailboxQuotaRegistry,
+    mailboxForwardingRegistry,
+    mailSrsConfigurationService,
+    mailAntivirusHealthInspector,
+    journalLogReader,
+    panelSettingsRegistry,
+    localServerId,
+    mailDeliveryDiagnosticsService,
+    mailServiceIdentityRegistry,
+    // Reuse the existing SMTP adapter for the allowlisted local Postfix MTA.
+    // External auth-mailer environment credentials do not select this route.
+    transport: localServerId ? createAuthMailer({ host: '127.0.0.1', port: 25, user: null, pass: null, secure: false }) : null,
+  });
+  if (mailServiceIdentityRegistry) {
+    mountMailServiceIdentityRoutes(app, {
+      mailServiceIdentityRegistry,
+      mailDomainRegistry,
+      domainRegistry,
+      jobRegistry,
+      localServerId,
+    });
+  }
+  if (mailSrsConfigurationService) {
+    mountMailSrsRoutes(app, {
+      mailSrsConfigurationService,
+      jobRegistry,
+      localServerId,
+    });
+  }
+  mountMailConfigurationRoutes(app, {
+    mailConfigurationService: mailConfig,
+    mailDomainRegistry,
+    domainRegistry,
+    jobRegistry,
+    localServerId,
+  });
+  if (roundcubeConfigurationService) {
+    mountRoundcubeConfigurationRoutes(app, {
+      roundcubeConfigurationService,
+      jobRegistry,
+      localServerId,
+    });
+  }
+  if (roundcubeDomainMappingService) {
+    mountRoundcubeDomainMappingRoutes(app, {
+      service: roundcubeDomainMappingService,
+    });
+  }
+  mountDockerWorkloadRoutes(app, { dockerWorkloadRegistry, localServerId });
+  mountApplicationConfigurationRoutes(app, { applicationRegistry, jobRegistry, websiteRegistry, localServerId });
+  mountApplicationProcessRoutes(app, { applicationRegistry, jobRegistry, websiteRegistry, localServerId });
+  if ((passengerMigrationPreviewService === null) !== (passengerMigrationService === null)) {
+    throw new Error('Application Passenger migration services must be configured together');
+  }
+  if (passengerMigrationPreviewService && passengerMigrationService) {
+    mountApplicationPassengerMigrationRoutes(app, {
+      previewService: passengerMigrationPreviewService,
+      migrationService: passengerMigrationService,
+    });
+  }
+  const websiteOwnerQuotasLookup = typeof allOptions.websiteOwnerQuotasLookup === 'function'
+    ? allOptions.websiteOwnerQuotasLookup
+    : hostingAccounts && typeof hostingAccounts.getWebsiteOwnerQuotas === 'function'
+      ? (websiteId) => hostingAccounts.getWebsiteOwnerQuotas(websiteId)
+      : null;
+  const siteConsumptionTrafficInspector = options.siteConsumptionTrafficInspector ?? options.websiteTrafficLedger ?? null;
+  const siteConsumptionInspector = options.siteConsumptionInspector ?? createSiteConsumptionInspector({
+    websiteRegistry,
+    domainRegistry,
+    databaseBindingRegistry,
+    systemInspector: options.siteConsumptionSystemInspector ?? createLinuxSiteConsumptionAdapter({
+      websiteRegistry,
+      domainRegistry,
+      databaseBindingRegistry,
+      localServerId,
+      ...(options.siteConsumptionPathContractOptions ? { pathContractOptions: options.siteConsumptionPathContractOptions } : {}),
+      ...(siteConsumptionTrafficInspector ? { trafficInspector: siteConsumptionTrafficInspector } : {}),
+      ...(options.siteConsumptionAllowCurrentUserWithoutSetpriv ? { allowCurrentUserWithoutSetpriv: true } : {}),
+    }),
+  });
+  const siteTrafficMetaLookup = options.siteTrafficMetaLookup
+    ?? (websiteTrafficCoordinator ? (websiteId) => websiteTrafficCoordinator.resolveSiteTrafficMeta(websiteId) : null);
+  mountWebsiteRoutes(app, {
+    websiteRegistry,
+    domainRegistry,
+    localServerId,
+    customerLookup,
+    siteConsumptionInspector,
+    websiteOwnerQuotasLookup,
+    diskQuotaCapabilityLookup: options.diskQuotaCapabilityLookup ?? null,
+    siteTrafficMetaLookup,
+  });
+  mountWebsiteAnalyticsRoutes(app, {
+    websiteRegistry,
+    domainRegistry,
+    localServerId,
+    goaccessManager: options.goaccessManager,
+  });
+  const siteHealthService = options.siteHealthService ?? createSiteHealthService({
+    websiteRegistry,
+    domainRegistry,
+    serverRegistry: registry,
+    certificateRegistry,
+    dnsReadinessService: readiness,
+    dnsRecordManager,
+  });
+  mountSiteHealthRoutes(app, {
+    siteHealthService,
+    websiteRegistry,
+    domainRegistry,
+    localServerId,
+  });
+  const queueDeploy = options.queueDeploy
+    ?? (applicationRegistry && applicationEnvironmentRegistry && jobRegistry
+      ? createApplicationDeployQueue({ applicationRegistry, applicationEnvironmentRegistry, jobRegistry, websiteRegistry, domainRegistry, runtimeBindingRegistry, localServerId, siteMutationLock })
+      : null);
+  mountApplicationOperationsRoutes(app, {
+    runtimeBindingRegistry, siteMutationLock,
+    websiteRegistry,
+    domainRegistry,
+    applicationRegistry,
+    applicationEnvironmentRegistry,
+    jobRegistry,
+    queueDeploy,
+    registry,
+    siteHealthService,
+    journalLogReader,
+    nginxLogReader,
+    localServerId,
+    now: options.now ?? (() => Date.now()),
+  });
+  const systemWatchdogService = options.systemWatchdogService ?? createSystemWatchdogService({
+    serverRegistry: registry,
+    jobRegistry,
+    localRuntime: options.localRuntime ?? null,
+    localJobExecutor: options.localJobExecutor ?? null,
+    inspectServices: options.inspectServices ?? null,
+    serviceControl: options.serviceControl ?? null,
+    daemons: options.daemons ?? {},
+  });
+  mountSystemWatchdogRoutes(app, {
+    watchdogService: systemWatchdogService,
+    registry,
+    localServerId,
+  });
+  const productionExitGateService = options.productionExitGateService ?? createProductionExitGateService({
+    env: process.env,
+  });
+  mountProductionExitGateRoutes(app, {
+    exitGateService: productionExitGateService,
+  });
+  mountNonResellerCapabilitiesRoutes(app);
+  mountOsExternalParityRoutes(app);
+
+  let wordpressToolkitService = null;
+  if (databaseBindingRegistry) {
+    const databaseBackupAdapter = options.databaseBackupAdapter ?? (options.databaseManager ? createWebsiteDatabaseBackupAdapter({ databaseManager: options.databaseManager }) : null);
+    const mailBackupAdapter = options.mailBackupAdapter ?? (typeof mailboxRegistry?.exportDomainBackup === 'function'
+      && typeof mailAliasRegistry?.exportDomainBackup === 'function' && typeof mailboxQuotaRegistry?.exportMailboxBackup === 'function'
+      && typeof mailboxForwardingRegistry?.exportMailboxBackup === 'function' ? createWebsiteMailBackupAdapter({
+        domainRegistry, mailDomainRegistry, mailboxRegistry, mailAliasRegistry, mailboxQuotaRegistry,
+        mailboxForwardingRegistry, mailConfigurationService: mailConfig,
+      }) : null);
+    const environmentBackupAdapter = options.environmentBackupAdapter ?? (typeof applicationEnvironmentRegistry?.exportApplicationBackup === 'function'
+      ? createWebsiteEnvironmentBackupAdapter({ applicationRegistry, applicationEnvironmentRegistry, domainRegistry,
+        runtimeManager: options.environmentRuntimeRestoreManager ?? createApplicationEnvironmentBackupManager() }) : null);
+    const dnsBackupAdapter = options.dnsBackupAdapter ?? (powerDnsSecretRegistry && dnsRetirementImpact
+      ? createWebsiteDnsBackupAdapter({ websiteRegistry, domainRegistry, powerDnsSecretRegistry, ownershipInspector: dnsRetirementImpact }) : null);
+    const candidateHostingBackupAdapter = options.hostingBackupAdapter ?? createWebsiteHostingBackupAdapter({ websiteRegistry,domainRegistry,applicationRegistry,
+      certificateRegistry,runtimeBindingRegistry,dockerComposeProjectRegistry,provisioningRegistry:websiteProvisioningRuntime?.registry,
+      nginxManager: options.nginxManager ?? null,
+      beforeDomainActivate: options.beforeDomainActivate ?? null,
+      onDomainActivated });
+    const hostingBackupAdapter = options.hostingBackupAdapter ?? (candidateHostingBackupAdapter.configured ? candidateHostingBackupAdapter : null);
+    const websiteBackupSetProvider = createWebsiteBackupSetProvider({
+      websiteRegistry,
+      domainRegistry,
+      databaseBindingRegistry,
+      mailDomainRegistry,
+      applicationRegistry,
+      applicationEnvironmentRegistry,
+      dockerComposeProjectRegistry,
+      localServerId,
+      ...(options.nginxManager?.renderOptions?.sitesDir ? { nginxConfigRoot: options.nginxManager.renderOptions.sitesDir } : {}),
+    });
+    const resolvedWebsiteBackupService = websiteBackupService ?? (
+      resolvedResticRepositoryRegistry && resolvedResticManager ? createWebsiteBackupService({
+        websiteRegistry,
+        resticRepositoryRegistry: resolvedResticRepositoryRegistry,
+        resticManager: resolvedResticManager,
+        websiteBackupSetProvider,
+        localServerId,
+        jobRegistry,
+        databaseBackupAdapter,
+        mailBackupAdapter,
+        environmentBackupAdapter,
+        dnsBackupAdapter,
+        hostingBackupAdapter,
+      }) : null
+    );
+    const resolvedWebsiteRestoreReceiptStore = options.websiteRestoreReceiptStore ?? createWebsiteRestoreReceiptStore();
+    const resolvedWebsiteRestoreService = websiteRestoreService ?? (
+      resolvedResticRepositoryRegistry && resolvedResticManager ? createWebsiteRestoreService({
+        websiteRegistry,
+        resticRepositoryRegistry: resolvedResticRepositoryRegistry,
+        resticManager: resolvedResticManager,
+        websiteBackupSetProvider,
+        healthInspector: createWebsiteHttpHealthInspector(),
+        localServerId,
+        jobRegistry,
+        receiptStore: resolvedWebsiteRestoreReceiptStore,
+        websiteBackupService: resolvedWebsiteBackupService,
+        databaseBackupAdapter,
+        mailBackupAdapter,
+        environmentBackupAdapter,
+        dnsBackupAdapter,
+        hostingBackupAdapter,
+      }) : null
+    );
+    const resolvedWebsiteBackupOperationRegistry = options.websiteBackupOperationRegistry ?? createWebsiteBackupOperationRegistry({
+      filePath: options.websiteBackupOperationStorePath ?? null,
+    });
+    const websiteBackupBrowser = resolvedResticRepositoryRegistry
+      ? createWebsiteBackupBrowser({
+        websiteRegistry,
+        resticRepositoryRegistry: resolvedResticRepositoryRegistry,
+        websiteBackupSetProvider,
+        localServerId,
+        websiteBackupOperationRegistry: resolvedWebsiteBackupOperationRegistry,
+        backupScheduleProvider: options.backupScheduleRegistry,
+      })
+      : null;
+    const resolvedWebsiteBackupOperationService = options.websiteBackupOperationService ?? (
+      (resolvedWebsiteBackupService || resolvedWebsiteRestoreService) ? createWebsiteBackupOperationService({
+        registry: resolvedWebsiteBackupOperationRegistry,
+        onOperationFailed: (operation, error) => resolvedOperationalNotificationService?.notifyBackupFailure({
+          websiteId: operation.websiteId,
+          repositoryId: operation.repositoryId ?? null,
+          operationId: operation.id,
+          operationType: operation.kind === 'restore' ? 'restore' : 'backup',
+          error,
+        }),
+        websiteBackupService: resolvedWebsiteBackupService,
+        websiteRestoreService: resolvedWebsiteRestoreService,
+        websiteRegistry,
+        resticRepositoryRegistry: resolvedResticRepositoryRegistry,
+        resticManager: resolvedResticManager,
+        receiptStore: resolvedWebsiteRestoreReceiptStore,
+        jobRegistry,
+        durableJobRegistry: durableJobRegistry ?? options.durableJobRegistry ?? (jobRegistry?.storeLock ? jobRegistry : null),
+        backupOperationRegistry: backupOperationRegistry ?? options.backupOperationRegistry ?? null,
+        authorizeActor: options.authorizeWebsiteActor,
+        siteMutationLock,
+        websiteBackupSetProvider,
+        databaseBackupAdapter,
+        mailBackupAdapter,
+        environmentBackupAdapter,
+        backupScheduleRegistry: options.backupScheduleRegistry,
+        dnsBackupAdapter,
+        hostingBackupAdapter,
+        authorizeScheduledActor: options.authorizeWebsiteBackupSchedule,
+        getAutomationUser: options.getAutomationUser,
+      }) : null
+    );
+    if (typeof options.onWebsiteBackupRuntime === 'function') options.onWebsiteBackupRuntime(resolvedWebsiteBackupOperationService);
+    if (websitePhpToolsService && siteFileManager && options.authorizeWebsiteActor && siteMutationLock && resolvedWebsiteBackupService && resolvedWebsiteRestoreService) {
+      wordpressToolkitService = createWordPressToolkitService({ tools: websitePhpToolsService, jobRegistry, domainRegistry,
+        websiteProvisioningRegistry: websiteProvisioningRuntime?.registry,
+        authorizeActor: options.authorizeWebsiteActor, siteMutationLock, siteFileManager,
+        databaseBindingRegistry, databaseCredentialRegistry, secretStore: options.operationSecretStore, databaseManager: options.databaseManager,
+        resticRepositoryRegistry: resolvedResticRepositoryRegistry, websiteBackupService: resolvedWebsiteBackupService, websiteRestoreService: resolvedWebsiteRestoreService });
+      if (typeof options.onWordPressToolkitRuntime === 'function') options.onWordPressToolkitRuntime(wordpressToolkitService);
+    }
+    mountWebsiteBackupRoutes(app, {
+      websiteBackupSetProvider,
+      websiteBackupService: resolvedWebsiteBackupService,
+      websiteBackupBrowser,
+      websiteBackupOperationService: resolvedWebsiteBackupOperationService,
+      websiteRestoreService: resolvedWebsiteRestoreService,
+      localServerId,
+    });
+    if (resolvedWebsiteRestoreService) {
+      mountWebsiteRestoreRoutes(app, {
+        websiteRestoreService: resolvedWebsiteRestoreService,
+        websiteBackupOperationService: resolvedWebsiteBackupOperationService,
+        localServerId,
+      });
+    }
+  }
+  mountWebsiteMigrationRoutes(app, {
+    websiteRegistry,
+    domainRegistry,
+    applicationRegistry,
+    websiteMigrationPolicy,
+    migrationLedger,
+    localServerId,
+  });
+  if (websiteSftpKeyService) {
+    mountWebsiteSftpKeyRoutes(app, {
+      sftpKeyService: websiteSftpKeyService,
+      licenseEntitlementService,
+    });
+  }
+  if (websiteCronApplyService) {
+    mountWebsiteCronRoutes(app, { websiteCronApplyService });
+  }
+  if (websitePhpToolsService) {
+    mountWebsitePhpToolsRoutes(app, {
+      websitePhpToolsService,
+      websitePhpToolActionService,
+      wordpressToolkitService,
+    });
+  }
+  if (websiteCacheService) {
+    mountWebsiteCacheRoutes(app, {
+      websiteCacheService,
+    });
+  }
+  if (panelSettingsService) {
+    const wrappedPanelSettingsService = {
+      ...panelSettingsService,
+      getSystemSettings: async (...args) => {
+        const data = await panelSettingsService.getSystemSettings(...args);
+        return {
+          ...data,
+          deployment: resolveDeploymentDiagnostics(),
+        };
+      },
+      updateSystemSettings: (...args) => panelSettingsService.updateSystemSettings(...args),
+    };
+    mountPanelSettingsRoutes(app, {
+      panelSettingsService: wrappedPanelSettingsService,
+    });
+  }
+  if (pleskImporter) {
+    mountPleskImporterRoutes(app, { pleskImporter });
+  }
+  mountManagedServiceRoutes(app, { registry: localRegistry, jobRegistry });
+  mountNodeRuntimeRoutes(app, { registry: localRegistry, jobRegistry });
+  const databaseMetadataMutation = {
+    withApplicationLock: siteMutationLock?.withApplicationLock ?? null,
+    authorizeActor: options.authorizeWebsiteActor ?? null,
+  };
+  if (databaseBindingRegistry) {
+    mountDatabaseBindingRoutes(app, {
+      ...databaseMetadataMutation,
+      registry: localRegistry,
+      websiteRegistry,
+      jobRegistry,
+      databaseBindingRegistry,
+      databaseCredentialRegistry,
+      databaseQuotaCoordinator: customerDatabaseQuotaCoordinator,
+      requireDatabaseName: databaseHttpInternals.requireDatabaseName,
+      ensureDatabaseIdle: databaseHttpInternals.ensureDatabaseIdle,
+      latestDatabaseSnapshot: databaseHttpInternals.latestDatabaseSnapshot,
+    });
+  }
+  if (databaseBindingRegistry) {
+    mountWebsiteDatabaseDataRoutes(app, {
+      registry: localRegistry,
+      websiteRegistry,
+      databaseBindingRegistry,
+      jobRegistry,
+      ensureDatabaseIdle: databaseHttpInternals.ensureDatabaseIdle,
+    });
+  }
+  if (databaseBindingRegistry && databaseCredentialRegistry && databaseInventoryProvider
+    && typeof jobRegistry.getJob === 'function') {
+    mountWebsiteDatabaseDeleteRoutes(app, {
+      ...databaseMetadataMutation,
+      registry: localRegistry,
+      websiteRegistry,
+      databaseBindingRegistry,
+      databaseCredentialRegistry,
+      jobRegistry,
+      databaseInventoryProvider,
+      ensureDatabaseIdle: databaseHttpInternals.ensureDatabaseIdle,
+    });
+  }
+  if (databaseBindingRegistry && databaseCredentialRegistry && databaseCredentialApply) {
+    if (databaseInventoryProvider) mountDatabaseSetupRoutes(app, {
+      registry: localRegistry, websiteRegistry, databaseBindingRegistry, databaseCredentialRegistry,
+      databaseCredentialApplyService: databaseCredentialApply, databaseInventoryProvider, siteMutationLock,
+      databaseQuotaCoordinator: customerDatabaseQuotaCoordinator,
+      auditStore: options.auditStore ?? options.authStore?.audit ?? aiAudit ?? null,
+      authorizeActor: options.authorizeWebsiteActor ?? null,
+    });
+    mountDatabaseCredentialRoutes(app, {
+      ...databaseMetadataMutation,
+      registry: localRegistry,
+      websiteRegistry,
+      databaseBindingRegistry,
+      databaseCredentialRegistry,
+      databaseCredentialApplyService: databaseCredentialApply,
+      jobRegistry,
+      ensureDatabaseIdle: databaseHttpInternals.ensureDatabaseIdle,
+    });
+  }
+  if (phpMyAdminHandoffService) {
+    mountPhpMyAdminHandoffRoutes(app, {
+      registry: localRegistry,
+      phpMyAdminHandoffService,
+    });
+  }
+  if (elFinderHandoffService) {
+    mountElFinderHandoffRoutes(app, {
+      registry: localRegistry,
+      elFinderHandoffService,
+    });
+  }
+  if (siteFileManager) {
+    const withManagedDiskWriteQuota = options.withManagedDiskWriteQuota
+      ?? (hostingAccounts
+        ? createCustomerManagedDiskWriteGuard({
+          hostingAccounts,
+          siteConsumptionInspector,
+        })
+        : null);
+    mountSiteFileRoutes(app, {
+      siteFileManager,
+      withManagedDiskWriteQuota,
+    });
+  }
+  if (websiteStaticCopyService) mountWebsiteStaticCopyRoutes(app, { service: websiteStaticCopyService });
+  if (websitePhpCopyService) mountWebsiteStaticCopyRoutes(app, { service: websitePhpCopyService, php: true });
+  mountDatabaseRoutes(app, {
+    registry: localRegistry,
+    jobRegistry,
+    databaseBindingRegistry,
+    databaseCredentialRegistry,
+    databaseInventoryProvider,
+    databaseHealthProvider,
+  });
+  mountLogRoutes(app, {
+    registry, applicationRegistry, jobRegistry, websiteRegistry, journalLogReader, nginxLogReader, jobLogStore, localServerId,
+  });
+  if (options.apiKeyStore) {
+    mountAutomationRoutes(app);
+    mountApiKeyRoutes(app, { apiKeyStore: options.apiKeyStore, audit: options.auditStore ?? options.authStore?.audit ?? null });
+  }
+  if (options.protectedPathAuthManager) {
+    mountProtectedPathRoutes(app, { domainRegistry, protectedPathAuthManager: options.protectedPathAuthManager, localServerId,
+      audit: options.auditStore ?? options.authStore?.audit ?? null });
+  }
+  if (options.mailSmarthostRegistry && options.mailSmarthostManager) {
+    mountMailSmarthostRoutes(app, {
+      registry, localServerId, smarthostRegistry: options.mailSmarthostRegistry, smarthostManager: options.mailSmarthostManager,
+      audit: options.auditStore ?? options.authStore?.audit ?? null,
+    });
+  }
+  mountTerminalCapabilityRoutes(app, {
+    terminalCapabilityRegistry,
+    serverRegistry: registry,
+    websiteRegistry,
+    dockerComposeProjectRegistry,
+    dockerContainerConsoleInspector: options.dockerContainerConsoleInspector ?? null,
+    localServerId,
+    licenseEntitlementService,
+  });
+  if (ttydSessionManager) {
+    mountTtydSessionRoutes(app, {
+      terminalCapabilityRegistry,
+      ttydSessionManager,
+    });
+  }
+  resolvedOperationalNotificationService = operationalNotificationService ?? createOperationalNotificationService({
+    authMailer: options.authMailer ?? (options.operationalNotificationStore ? createAuthMailer() : null),
+    filePath: options.operationalNotificationStore ?? null,
+    ownerEmailLookup: options.ownerEmailLookup ?? null,
+    ...(options.operationalNotificationStore ? { defaultOwnerEmail: null } : {}),
+    certificateRegistry,
+    domainRegistry,
+    websiteRegistry,
+    jobRegistry,
+    userAdminStore: options.userAdminStore ?? null,
+    hostingAccountStore: hostingAccounts,
+    customerLookup,
+    localServerId,
+  });
+  mountOperationalNotificationRoutes(app, {
+    notificationService: resolvedOperationalNotificationService,
+  });
+  options.onOperationalNotificationService?.(resolvedOperationalNotificationService);
+  const resolvedNftablesManager = nftablesManager ?? createNftablesManager();
+  const resolvedAuditStore = options.auditStore ?? options.authStore?.audit ?? aiAudit ?? null;
+  const resolvedFirewallService = firewallService ?? createFirewallService({
+    nftablesManager: resolvedNftablesManager,
+    auditStore: resolvedAuditStore,
+    serverRegistry: localRegistry,
+    localServerId,
+  });
+  mountFirewallRoutes(app, {
+    firewallService: resolvedFirewallService,
+    registry: localRegistry,
+    localServerId,
+  });
+  app.use(core);
+  app.use((error, request, response, next) => {
+    if (response.headersSent) return next(error);
+    if (
+      (Number.isInteger(error?.status) && error.status >= 400 && error.status < 600 && typeof error?.code === 'string')
+      || isBackupHttpError(error)
+      || isBackupRepositoryHttpError(error)
+      || isWebsiteBackupHttpError(error)
+      || isWebsiteRestoreHttpError(error)
+      || isPleskImporterHttpError(error)
+      || error instanceof PleskImporterError
+      || error instanceof ResticRepositoryRegistryError
+      || error instanceof RcloneRemoteRegistryError
+      || error instanceof WebsiteBackupError
+      || error instanceof WebsiteBackupOperationRegistryError
+      || error instanceof WebsiteBackupOperationServiceError
+      || error instanceof ApplicationRuntimeBindingRegistryError
+      || error instanceof DatabaseBindingHttpError
+      || error instanceof DatabaseBindingRegistryError
+      || error instanceof DatabaseCredentialApplyError
+      || error instanceof DatabaseCredentialHttpError
+      || error instanceof DatabaseCredentialRegistryError
+      || error instanceof DatabaseHttpError
+      || error instanceof WebsiteDatabaseDeleteHttpError
+      || error instanceof PhpMyAdminHandoffError
+      || error instanceof ApplicationOperationsHttpError
+      || error instanceof ApplicationEnvironmentRegistryError
+      || error instanceof ElFinderHandoffError
+      || error instanceof SiteFileHttpError
+      || error instanceof SiteFileManagerError
+      || error instanceof SiteFileWorkerError
+      || error instanceof CertificateMaterialError
+      || error instanceof CertificateRegistryError
+      || error instanceof ApplicationRegistryError
+      || error instanceof DomainRegistryError
+      || error instanceof DomainSuspensionHttpError
+      || error instanceof DockerWorkloadRegistryError
+      || error instanceof DnsZoneMailDkimRetirementHttpError
+      || error instanceof DnsProviderCredentialRegistryError
+      || error instanceof DnsReadinessError
+      || error instanceof CloudflareDnsManagerError
+      || error instanceof ExternalLifecycleRegistryError
+      || error instanceof DnsRequirementsServiceError
+      || error instanceof RegistryError
+      || error instanceof JobRegistryError
+      || error instanceof LogHttpError
+      || error instanceof ManagedServiceHttpError
+      || error instanceof MailAliasRegistryError
+      || error instanceof MailConfigurationError
+      || error instanceof MailConfigurationHttpError
+      || error instanceof MailDataBackupError
+      || error instanceof MailDataHttpError
+      || error instanceof MailDataInspectorError
+      || error instanceof MailDataOperationsError
+      || error instanceof MailDomainDeleteHttpError
+      || error instanceof MailDeleteFinalizeError
+      || error instanceof MailDeleteImpactError
+      || error instanceof MailDkimConfigurationError
+      || error instanceof MailDkimDnsError
+      || error instanceof MailDkimDnsHttpError
+      || error instanceof MailDkimHttpError
+      || error instanceof MailDkimRegistryError
+      || error instanceof MailDkimRetirementRegistryError
+      || error instanceof MailDiagnosticsHttpError
+      || error instanceof MailDiagnosticsInspectorError
+      || error instanceof MailServiceIdentityRegistryError
+      || error instanceof MailSrsConfigurationError
+      || error instanceof MailSrsHttpError
+      || error instanceof MailSrsSecretRegistryError
+      || error instanceof MailboxForwardingRegistryError
+      || error instanceof MailboxQuotaRegistryError
+      || error instanceof MailboxQuotaHttpError
+      || error instanceof MailboxRegistryError
+      || error instanceof MailboxPasswordError
+      || error instanceof NodeRuntimeHttpError
+      || error instanceof PowerDnsAuthoritativeServiceError
+      || error instanceof PowerDnsHttpError
+      || error instanceof PowerDnsSecretRegistryError
+      || error instanceof ResourceImpactError
+      || error instanceof RoundcubeConfigurationError
+      || error instanceof RoundcubeConfigurationHttpError
+      || error instanceof RoundcubeDomainMappingHttpError
+      || error instanceof RoundcubeDomainMappingRegistryError
+      || error instanceof RoundcubeDomainMappingServiceError
+      || error instanceof RoundcubeSecretRegistryError
+      || error instanceof ServerDnsIdentityRegistryError
+      || error instanceof SiteCreateError
+      || error instanceof TerminalCapabilityError
+      || error instanceof TtydSessionError
+      || error instanceof WebsiteMigrationBindError
+      || error instanceof WebsiteMigrationCreateError
+      || error instanceof WebsiteMigrationLedgerError
+      || error instanceof WebsiteMigrationPolicyError
+      || error instanceof WebsiteMigrationPreviewError
+      || error instanceof WebsiteMigrationRollbackError
+      || error instanceof WebsiteProvisioningHandlerError
+      || error instanceof WebsiteProvisioningHttpError
+      || error instanceof WebsiteProvisioningOrchestratorError
+      || error instanceof WebsiteProvisioningRegistryError
+      || error instanceof SiteMutationLockError
+      || error instanceof WebsiteRegistryError
+      || error instanceof WebsiteSftpKeyHttpError
+      || error instanceof WebsiteSftpKeyRegistryError
+      || error instanceof WebsiteSftpKeyServiceError
+      || error instanceof WebsiteCronHttpError
+      || error instanceof WebsiteCronApplyServiceError
+      || error instanceof WebsiteCronRegistryError
+      || error instanceof WebsitePhpToolsServiceError
+      || error instanceof PhpCliToolError
+      || error instanceof WebsiteCacheServiceError
+      || error instanceof WebsiteCachePolicyRegistryError
+      || error instanceof CacheIsolationError
+      || error instanceof PanelSettingsRegistryError
+      || error instanceof PanelSettingsHttpError
+      || error instanceof WebsiteAnalyticsHttpError
+      || error instanceof SiteHealthError
+      || error instanceof SiteHealthHttpError
+      || error instanceof SystemWatchdogError
+      || error instanceof SystemWatchdogHttpError
+      || error instanceof OperationalNotificationError
+      || error instanceof OperationalNotificationHttpError
+      || error instanceof FirewallServiceError
+      || error instanceof FirewallHttpError
+      || error instanceof NftablesManagerError
+      || error instanceof ProductionExitGateError
+      || error instanceof LicenseEntitlementError
+    ) {
+      return response.status(error.status).json({
+        error: {
+          code: error.code,
+          message: error.message,
+          ...(error.capability ? { capability: error.capability } : {}),
+          ...(error.reason ? { reason: error.reason } : {}),
+        },
+      });
+    }
+    if (error instanceof DurableJobRegistryError) {
+      return response.status(503).json({ error: { code: error.code, message: error.message } });
+    }
+    const invalidJson = error instanceof SyntaxError && error.status === 400;
+    const bodyTooLarge = error?.type === 'entity.too.large' || error?.status === 413;
+    if (!invalidJson && !bodyTooLarge) {
+      console.error('[yunpanel-api] Unhandled error:', error);
+    }
+    return response.status(bodyTooLarge ? 413 : invalidJson ? 400 : 500).json({
+      error: {
+        code: bodyTooLarge ? 'request_body_too_large' : invalidJson ? 'invalid_json' : 'internal_error',
+        message: bodyTooLarge ? 'Request body is too large' : invalidJson ? 'Invalid JSON body' : 'Unexpected server error',
+      },
+    });
+  });
+  return app;
+}

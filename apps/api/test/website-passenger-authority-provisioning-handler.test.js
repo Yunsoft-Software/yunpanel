@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createApplicationRuntimeBindingRegistry } from '../src/application-runtime-binding-registry.js';
-import { createWebsitePassengerAuthorityProvisioningHandler } from '../src/website-passenger-authority-provisioning-handler.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createApplicationRuntimeBindingRegistry } from '../src/applications/application-runtime-binding-registry.js';
+import { createWebsitePassengerAuthorityProvisioningHandler } from '../src/provisioning/website-passenger-authority-provisioning-handler.js';
 
 const applicationId = '9d4a4727-1aba-4d35-95fe-21db67042ce9';
 const serverId = '57f8611c-0af7-4d2f-8291-2fe7dbab22fe';

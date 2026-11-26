@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWebsitePassengerHealthProvisioningHandler } from '../src/website-passenger-health-provisioning-handler.js';
+import { createWebsitePassengerHealthProvisioningHandler } from '../src/provisioning/website-passenger-health-provisioning-handler.js';
 
 const applicationId = '9d4a4727-1aba-4d35-95fe-21db67042ce9';
 const websiteId = '5c1c0247-139f-45d2-a6ac-c8a4bb00bc75';

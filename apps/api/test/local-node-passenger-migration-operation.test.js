@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   assertNodePassengerMigrationExecutionContext,
   createLocalNodePassengerMigrationOperation,
-} from '../src/local-node-passenger-migration-operation.js';
+} from '../src/applications/local-node-passenger-migration-operation.js';
 
 const applicationId = '9d4a4727-1aba-4d35-95fe-21db67042ce9';
 const jobId = 'd2fe443b-0fa6-4f98-a061-6f41b7f2684e';

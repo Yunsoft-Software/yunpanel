@@ -3,9 +3,9 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createDnsZoneOwnershipRegistry } from '../src/dns-zone-ownership-registry.js';
-import { createDnsZoneRetirementService } from '../src/dns-zone-retirement.js';
-import { mountPowerDnsRoutes } from '../src/powerdns-http.js';
+import { createDnsZoneOwnershipRegistry } from '../src/dns/dns-zone-ownership-registry.js';
+import { createDnsZoneRetirementService } from '../src/dns/dns-zone-retirement.js';
+import { mountPowerDnsRoutes } from '../src/dns/powerdns-http.js';
 
 const serverId = '42345678-1234-4234-8234-123456789012';
 const domainId = '12345678-1234-4234-8234-123456789012';

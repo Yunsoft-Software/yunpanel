@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { domainNginxSettingsForTarget } from '../src/domain-nginx-settings.js';
+import { domainNginxSettingsForTarget } from '../src/domains/domain-nginx-settings.js';
 import { createOperationEnvelope, OPERATIONS } from '@yunpanel/protocol';
 import { createNginxManager } from '@yunpanel/host-runtime';
-import { createDomainRegistry } from '../src/domain-registry.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';

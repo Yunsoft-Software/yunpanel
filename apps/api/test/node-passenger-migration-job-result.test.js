@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { sanitizeNodePassengerMigrationResult } from '../src/node-passenger-migration-job-result.js';
+import { sanitizeNodePassengerMigrationResult } from '../src/applications/node-passenger-migration-job-result.js';
 
 const APPLICATION_ID = '11111111-1111-4111-8111-111111111111';
 const RELEASE_ID = '22222222-2222-4222-8222-222222222222';

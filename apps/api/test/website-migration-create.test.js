@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWebsiteForMigration, WebsiteMigrationCreateError } from '../src/website-migration-create.js';
-import { createWebsiteMigrationLedger } from '../src/website-migration-ledger.js';
-import { previewWebsiteMigration } from '../src/website-migration-preview.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
+import { createWebsiteForMigration, WebsiteMigrationCreateError } from '../src/migration/website-migration-create.js';
+import { createWebsiteMigrationLedger } from '../src/migration/website-migration-ledger.js';
+import { previewWebsiteMigration } from '../src/migration/website-migration-preview.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const domainId = '0ef7e00b-1b85-4938-b726-247c94679c66';

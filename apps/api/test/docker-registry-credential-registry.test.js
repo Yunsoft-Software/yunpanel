@@ -7,7 +7,7 @@ import test from 'node:test';
 import {
   createDockerRegistryCredentialRegistry,
   DockerRegistryCredentialRegistryError,
-} from '../src/docker-registry-credential-registry.js';
+} from '../src/docker/docker-registry-credential-registry.js';
 
 const projectId = '0bb78242-03a6-429f-9d17-7725c521437c';
 

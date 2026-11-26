@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { siteCreateProvisioningPlan as dnsAwareSiteCreateProvisioningPlan } from '../src/site-create-dns-provisioning.js';
-import { siteCreateHttpInternals } from '../src/site-create-http.js';
-import { siteCreateProvisioningPlan as mailAwareSiteCreateProvisioningPlan } from '../src/site-create-mail-provisioning.js';
+import { siteCreateProvisioningPlan as dnsAwareSiteCreateProvisioningPlan } from '../src/provisioning/site-create-dns-provisioning.js';
+import { siteCreateHttpInternals } from '../src/provisioning/site-create-http.js';
+import { siteCreateProvisioningPlan as mailAwareSiteCreateProvisioningPlan } from '../src/provisioning/site-create-mail-provisioning.js';
 
 test('site-create HTTP uses the DNS-aware provisioning planner on the local panel host', () => {
   assert.equal(

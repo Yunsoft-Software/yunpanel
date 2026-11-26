@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createDnsReadinessService, dnsReadinessInternals, DnsReadinessError } from '../src/dns-readiness.js';
+import { createDnsReadinessService, dnsReadinessInternals, DnsReadinessError } from '../src/dns/dns-readiness.js';
 
 const ZONE_ID = 'zone-1';
 const DOMAIN_ID = 'domain-1';

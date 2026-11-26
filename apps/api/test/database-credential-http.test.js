@@ -7,26 +7,26 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import express from 'express';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createAuthenticatedApi } from '../src/auth-http.js';
-import { createAuthStore } from '../src/auth-store.js';
-import { mountDatabaseBindingRoutes } from '../src/database-binding-http.js';
-import { createDatabaseBindingRegistry } from '../src/database-binding-registry.js';
-import { createDatabaseCredentialApplyService } from '../src/database-credential-apply-service.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
+import { createAuthStore } from '../src/auth/auth-store.js';
+import { mountDatabaseBindingRoutes } from '../src/databases/database-binding-http.js';
+import { createDatabaseBindingRegistry } from '../src/databases/database-binding-registry.js';
+import { createDatabaseCredentialApplyService } from '../src/databases/database-credential-apply-service.js';
 import {
   createDatabaseCredentialRegistry,
   databaseCredentialRegistryInternals,
-} from '../src/database-credential-registry.js';
+} from '../src/databases/database-credential-registry.js';
 import {
   DatabaseCredentialHttpError,
   mountDatabaseCredentialRoutes,
-} from '../src/database-credential-http.js';
-import { databaseHttpInternals } from '../src/database-http.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createSiteMutationLock } from '../src/site-mutation-lock.js';
-import { createSiteResourceBoundary } from '../src/site-resource-boundary.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
+} from '../src/databases/database-credential-http.js';
+import { databaseHttpInternals } from '../src/databases/database-http.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createSiteMutationLock } from '../src/websites/site-mutation-lock.js';
+import { createSiteResourceBoundary } from '../src/http/site-resource-boundary.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
 
 const serverId = '12345678-1234-4234-8234-123456789012';
 const bindingId = '22345678-1234-4234-8234-123456789012';

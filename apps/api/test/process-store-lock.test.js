@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createProcessStoreLock } from '../src/process-store-lock.js';
+import { createProcessStoreLock } from '../src/runtime/process-store-lock.js';
 
 test('process store lock waits for a live writer and then runs the next transaction', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-store-lock-'));
@@ -238,7 +238,7 @@ test('two real processes reclaiming the same dead-owner lock never hold it at th
   await writeFile(`${filePath}.lock`, JSON.stringify({
     version: 1, pid: deadPid, token: '66666666-6666-4666-8666-666666666666', createdAt: new Date().toISOString(),
   }));
-  const moduleUrl = pathToFileURL(fileURLToPath(new URL('../src/process-store-lock.js', import.meta.url))).href;
+  const moduleUrl = pathToFileURL(fileURLToPath(new URL('../src/runtime/process-store-lock.js', import.meta.url))).href;
   const children = [['fast', 30], ['slow', 150]].map(([name, delayMs]) => {
     const child = spawn(process.execPath, [
       '--input-type=module', '-e', RACE_CHILD, moduleUrl, filePath, logPath, goPath, String(deadPid), String(delayMs), name,

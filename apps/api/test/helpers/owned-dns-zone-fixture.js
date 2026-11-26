@@ -1,4 +1,4 @@
-import { websiteDnsZoneProvisioningInternals } from '../../src/website-dns-zone-provisioning-handler.js';
+import { websiteDnsZoneProvisioningInternals } from '../../src/provisioning/website-dns-zone-provisioning-handler.js';
 
 export function ownedDnsZoneOperation(domain) {
   const records = [

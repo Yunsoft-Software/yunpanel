@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import http from 'node:http';
 import test from 'node:test';
-import { createApiKeyStore } from '../src/api-key-store.js';
-import { createApp } from '../src/app.js';
-import { createServerRegistry } from '../src/server-registry.js';
+import { createApiKeyStore } from '../src/auth/api-key-store.js';
+import { createApp } from '../src/http/app.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
 import { ownerManagementContext, withPanelContext } from './helpers/panel-auth-fixture.js';
 
 const customer = Object.freeze({

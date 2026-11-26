@@ -4,7 +4,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   WebsiteDatabaseDataHttpError,
   mountWebsiteDatabaseDataRoutes,
-} from '../src/website-database-data-http.js';
+} from '../src/databases/website-database-data-http.js';
 
 const serverId = '12345678-1234-4234-8234-123456789012';
 const websiteId = '22345678-1234-4234-8234-123456789012';

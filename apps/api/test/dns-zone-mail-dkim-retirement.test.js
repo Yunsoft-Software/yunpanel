@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   createDnsZoneMailDkimRetirementService,
   DnsZoneMailDkimRetirementError,
-} from '../src/dns-zone-mail-dkim-retirement.js';
+} from '../src/dns/dns-zone-mail-dkim-retirement.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const domainId = '8bc307db-9e2d-4c3f-91ea-49e740d259a9';

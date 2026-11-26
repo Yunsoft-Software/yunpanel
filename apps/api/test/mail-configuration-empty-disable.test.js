@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mailSqlTemplatePolicy, mailSubmissionTemplatePolicy } from '@yunpanel/config-templates';
-import { createMailConfigurationService } from '../src/mail-configuration.js';
+import { createMailConfigurationService } from '../src/mail/mail-configuration.js';
 
 const accountHash = ['$argon2id', 'v=19', 'm=65536,t=3,p=1', Buffer.alloc(16, 5).toString('base64').replace(/=+$/, ''), Buffer.alloc(32, 6).toString('base64').replace(/=+$/, '')].join('$');
 

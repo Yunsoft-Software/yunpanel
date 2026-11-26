@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { once } from 'node:events';
-import { createAuthenticatedApi, createLiveConnectionAuthenticator } from '../src/auth-http.js';
+import { createAuthenticatedApi, createLiveConnectionAuthenticator } from '../src/auth/auth-http.js';
 
 const origin = 'https://panel.example.test';
 const cookie = '__Host-yunpanel_session=valid-session';
@@ -432,7 +432,7 @@ test('insecure or noncanonical production origins cannot start the API', () => {
 });
 
 test('real store setup/login/session/logout flow works over HTTP', async (t) => {
-  const { createAuthStore } = await import('../src/auth-store.js');
+  const { createAuthStore } = await import('../src/auth/auth-store.js');
   const { randomBytes } = await import('node:crypto');
   const { TOTP } = await import('otpauth');
   const now = 1_700_000_010_000;

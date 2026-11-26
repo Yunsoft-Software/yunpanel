@@ -3,8 +3,8 @@ import test from 'node:test';
 import {
   DnsZoneMailDkimRetirementHttpError,
   mountDnsZoneMailDkimRetirementRoutes,
-} from '../src/dns-zone-mail-dkim-retirement-http.js';
-import { DnsZoneMailDkimRetirementError } from '../src/dns-zone-mail-dkim-retirement.js';
+} from '../src/dns/dns-zone-mail-dkim-retirement-http.js';
+import { DnsZoneMailDkimRetirementError } from '../src/dns/dns-zone-mail-dkim-retirement.js';
 
 function createFakeApp() {
   const routes = new Map();

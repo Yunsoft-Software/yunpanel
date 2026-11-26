@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   createLocalRoundcubeConfigOperation,
   LocalRoundcubeConfigOperationError,
-} from '../src/local-roundcube-config-operation.js';
+} from '../src/mail/local-roundcube-config-operation.js';
 
 const payload = Object.freeze({
   previewSha256: 'a'.repeat(64),

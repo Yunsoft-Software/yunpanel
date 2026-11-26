@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { requireToolGatewaySession } from '../src/tool-gateway-session-policy.js';
+import { requireToolGatewaySession } from '../src/auth/tool-gateway-session-policy.js';
 
 const manager = { user: { role: 'site_manager', websiteIds: ['site-a'] } };
 const phpMyAdminGateway = { id: 'phpmyadmin', accessPath: '/api/phpmyadmin-gateway-access' };

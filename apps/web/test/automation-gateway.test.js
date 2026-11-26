@@ -6,11 +6,11 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createPanelServer } from '../server.js';
-import { createApiKeyStore } from '../../api/src/api-key-store.js';
-import { createApp } from '../../api/src/app.js';
-import { createAuthenticatedApi } from '../../api/src/auth-http.js';
-import { createAutomationHandler } from '../../api/src/automation-http.js';
-import { createServerRegistry } from '../../api/src/server-registry.js';
+import { createApiKeyStore } from '../../api/src/auth/api-key-store.js';
+import { createApp } from '../../api/src/http/app.js';
+import { createAuthenticatedApi } from '../../api/src/auth/auth-http.js';
+import { createAutomationHandler } from '../../api/src/http/automation-http.js';
+import { createServerRegistry } from '../../api/src/runtime/server-registry.js';
 
 // Real chain: public web gateway -> API auth entry (proxy token checked) -> app.
 const proxyToken = 'p'.repeat(43);

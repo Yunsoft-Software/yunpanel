@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { runRunningDatabaseRestoreRecoveryFromStores } from '../src/job-running-database-restore-recovery-runtime.js';
+import { runRunningDatabaseRestoreRecoveryFromStores } from '../src/jobs/job-running-database-restore-recovery-runtime.js';
 
 const serverId = '12345678-1234-4234-8234-123456789012';
 const jobId = '22345678-1234-4234-8234-123456789012';

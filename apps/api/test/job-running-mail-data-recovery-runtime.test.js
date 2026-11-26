@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { runRunningMailDataRecoveryFromStores } from '../src/job-running-mail-data-recovery-runtime.js';
+import { runRunningMailDataRecoveryFromStores } from '../src/jobs/job-running-mail-data-recovery-runtime.js';
 
 const serverId = 'server-1';
 const jobId = '12345678-1234-4234-8234-123456789012';

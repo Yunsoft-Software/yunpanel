@@ -12,7 +12,7 @@ import {
   mountSiteHealthRoutes,
   SiteHealthHttpError,
   siteHealthHttpInternals,
-} from '../src/local-api-health.js';
+} from '../src/runtime/local-api-health.js';
 
 function requestFixture({ statusCode = 200, body = '{"status":"ok"}', requestError = null, timeout = false } = {}) {
   const calls = [];

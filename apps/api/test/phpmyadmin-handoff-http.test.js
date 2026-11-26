@@ -4,10 +4,10 @@ import express from 'express';
 import test from 'node:test';
 import {
   mountPhpMyAdminHandoffRoutes,
-} from '../src/phpmyadmin-handoff-http.js';
+} from '../src/databases/phpmyadmin-handoff-http.js';
 import {
   PhpMyAdminHandoffError,
-} from '../src/phpmyadmin-handoff-service.js';
+} from '../src/databases/phpmyadmin-handoff-service.js';
 
 const serverId = randomUUID();
 const websiteId = randomUUID();

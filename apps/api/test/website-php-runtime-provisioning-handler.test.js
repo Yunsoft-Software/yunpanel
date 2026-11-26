@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWebsitePhpRuntimeProvisioningHandler } from '../src/website-php-runtime-provisioning-handler.js';
+import { createWebsitePhpRuntimeProvisioningHandler } from '../src/provisioning/website-php-runtime-provisioning-handler.js';
 
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 const releaseOperationId = '4d7d1c87-c088-4c1d-bb44-7f370d315672';

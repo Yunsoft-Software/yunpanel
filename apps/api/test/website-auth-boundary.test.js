@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { once } from 'node:events';
 import test from 'node:test';
-import { createApp } from '../src/app.js';
-import { createAuthenticatedApi } from '../src/auth-http.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
+import { createApp } from '../src/http/app.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
 
 const origin = 'https://panel.example.test';
 const csrfToken = 'website-boundary-csrf';

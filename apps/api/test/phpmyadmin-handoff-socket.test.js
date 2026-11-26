@@ -8,8 +8,8 @@ import {
   createPhpMyAdminHandoffConsumerHandler,
   phpMyAdminHandoffSocketInternals,
   startPhpMyAdminHandoffSocket,
-} from '../src/phpmyadmin-handoff-socket.js';
-import { PhpMyAdminHandoffError } from '../src/phpmyadmin-handoff-service.js';
+} from '../src/databases/phpmyadmin-handoff-socket.js';
+import { PhpMyAdminHandoffError } from '../src/databases/phpmyadmin-handoff-service.js';
 
 const capability = 'A'.repeat(43);
 const sessionDigest = 'd'.repeat(64);

@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createApp } from '../src/app.js';
-import { createCertificateRegistry } from '../src/certificate-registry.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
-import { startCertificateRenewalScheduler } from '../src/certificate-renewal-scheduler.js';
+import { createApp } from '../src/http/app.js';
+import { createCertificateRegistry } from '../src/certificates/certificate-registry.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
+import { startCertificateRenewalScheduler } from '../src/certificates/certificate-renewal-scheduler.js';
 import { withPanelContext, ownerManagementContext, readOnlyManagementContext } from './helpers/panel-auth-fixture.js';
 
 // Execute the web workspace renewal-wiring test suite

@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   createMailDiscoveryService,
   MailDiscoveryServiceError,
-} from '../src/mail-discovery-service.js';
+} from '../src/mail/mail-discovery-service.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';

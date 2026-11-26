@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import http from 'node:http';
 import test from 'node:test';
-import { createApp } from '../src/core-app.js';
+import { createApp } from '../src/http/core-app.js';
 import { withPanelContext } from './helpers/panel-auth-fixture.js';
 
 async function fixture(t) {

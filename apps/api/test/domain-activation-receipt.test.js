@@ -3,7 +3,7 @@ import { chmod, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createDomainActivationReceiptStore } from '../src/domain-activation-receipt.js';
+import { createDomainActivationReceiptStore } from '../src/domains/domain-activation-receipt.js';
 
 const serverId = 'server-1';
 const jobId = '12345678-1234-4234-8234-123456789012';

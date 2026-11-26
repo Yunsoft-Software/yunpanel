@@ -7,7 +7,7 @@ import test from 'node:test';
 import {
   createRcloneRemoteRegistry,
   RcloneRemoteRegistryError,
-} from '../src/rclone-remote-registry.js';
+} from '../src/backup/rclone-remote-registry.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const remoteId = '0bb78242-03a6-429f-9d17-7725c521437c';

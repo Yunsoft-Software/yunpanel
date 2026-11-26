@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mailSqlTemplatePolicy, mailSubmissionTemplatePolicy } from '@yunpanel/config-templates';
-import { createMailConfigurationService } from '../src/mail-configuration.js';
+import { createMailConfigurationService } from '../src/mail/mail-configuration.js';
 
 function fixtureHash() {
   const salt = Buffer.alloc(16, 7).toString('base64').replace(/=+$/, '');

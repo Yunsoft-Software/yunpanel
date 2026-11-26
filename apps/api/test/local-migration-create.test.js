@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { LocalMigrationCliError, runLocalMigrationCommand } from '../src/local-migration-cli.js';
+import { LocalMigrationCliError, runLocalMigrationCommand } from '../src/migration/local-migration-cli.js';
 
 test('migration command creates a fresh local server without a pre-existing server UUID', async () => {
   const events = [];

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mountAiRoutes } from '../src/ai-http.js';
+import { mountAiRoutes } from '../src/ai/ai-http.js';
 
 test('AI HTTP mounts conversation routes when conversationService is provided', () => {
   const routes = [];

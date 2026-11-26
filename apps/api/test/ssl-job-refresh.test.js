@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createCertificateRegistry } from '../src/certificate-registry.js';
-import { createJobRegistry } from '../src/job-registry.js';
+import { createCertificateRegistry } from '../src/certificates/certificate-registry.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
 import {
   verifyRenewalOutcome,
   verifyCertificateRenewalOutcome,
   runCertificateRenewalSweep,
-} from '../src/certificate-renewal-scheduler.js';
-import { certificateHttpInternals } from '../src/certificate-http.js';
+} from '../src/certificates/certificate-renewal-scheduler.js';
+import { certificateHttpInternals } from '../src/certificates/certificate-http.js';
 
 // Execute the web workspace job-refresh test suite
 import '../../web/test/ssl-job-refresh.test.js';

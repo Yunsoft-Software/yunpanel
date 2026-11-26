@@ -3,7 +3,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { recordRecoveryAuditOutcome, recoveryAuditInternals } from '../src/recovery-audit.js';
+import { recordRecoveryAuditOutcome, recoveryAuditInternals } from '../src/jobs/recovery-audit.js';
 
 function fixture(t) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'yunpanel-recovery-audit-'));

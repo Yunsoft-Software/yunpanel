@@ -10,7 +10,7 @@ import {
   jobArchivePathFor,
   jobRetentionDaysFromEnv,
   JobRegistryError,
-} from '../src/job-registry.js';
+} from '../src/jobs/job-registry.js';
 
 const DAY = 24 * 60 * 60 * 1000;
 

@@ -4,7 +4,7 @@ import {
   CertificateMaterialGcError,
   createCertificateMaterialGc,
   DEFAULT_CERTIFICATE_RETENTION_DAYS,
-} from '../src/certificate-material-gc.js';
+} from '../src/certificates/certificate-material-gc.js';
 
 function createMockCertificateRegistry(certificates) {
   const certs = certificates.map((c) => ({ ...c }));

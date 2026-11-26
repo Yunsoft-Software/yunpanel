@@ -7,7 +7,7 @@ import {
   createDomainSuspensionOperationRegistry,
   domainSuspensionOperationPublicView,
   DomainSuspensionOperationRegistryError,
-} from '../src/domain-suspension-operation-registry.js';
+} from '../src/domains/domain-suspension-operation-registry.js';
 
 const operationId = '12345678-1234-4234-8234-123456789012';
 const domainId = '22345678-1234-4234-8234-123456789012';

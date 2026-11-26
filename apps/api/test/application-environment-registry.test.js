@@ -6,7 +6,7 @@ import test from 'node:test';
 import {
   ApplicationEnvironmentRegistryError,
   createApplicationEnvironmentRegistry,
-} from '../src/application-environment-registry.js';
+} from '../src/applications/application-environment-registry.js';
 
 const APPLICATION_ID = '9d4a4727-1aba-4d35-95fe-21db67042ce9';
 

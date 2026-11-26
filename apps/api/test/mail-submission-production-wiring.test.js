@@ -8,7 +8,7 @@ const hostSource = (name) => readFile(new URL(`../../../packages/host-runtime/sr
 
 test('managed mail desired state always composes security and authenticated submission', async () => {
   const [configuration, submission, applyPlan] = await Promise.all([
-    apiSource('mail-configuration.js'),
+    apiSource('mail/mail-configuration.js'),
     configSource('mail-submission.js'),
     configSource('mail-apply-plan.js'),
   ]);

@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import test from 'node:test';
-import { mountMailboxRoutes } from '../src/mailbox-http.js';
-import { MailboxRegistryError } from '../src/mailbox-registry.js';
-import { createSiteResourceBoundary, needsSiteResourceJson } from '../src/site-resource-boundary.js';
-import { createTenantBoundaryMiddleware } from '../src/tenant-boundary.js';
+import { mountMailboxRoutes } from '../src/mail/mailbox-http.js';
+import { MailboxRegistryError } from '../src/mail/mailbox-registry.js';
+import { createSiteResourceBoundary, needsSiteResourceJson } from '../src/http/site-resource-boundary.js';
+import { createTenantBoundaryMiddleware } from '../src/http/tenant-boundary.js';
 
 const localServerId = randomUUID();
 const websiteId = randomUUID();

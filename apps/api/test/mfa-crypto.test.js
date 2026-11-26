@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { TOTP, Secret } from 'otpauth';
-import { createMfaVault, createTotpEnrollment, matchTotp, createRecoveryCodes, recoveryDigest } from '../src/mfa-crypto.js';
+import { createMfaVault, createTotpEnrollment, matchTotp, createRecoveryCodes, recoveryDigest } from '../src/auth/mfa-crypto.js';
 
 test('MFA envelopes are randomized and bound to a user and master key', () => {
   const key = randomBytes(32);

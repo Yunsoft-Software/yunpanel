@@ -3,8 +3,8 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const indexUrl = new URL('../src/index.js', import.meta.url);
-const appUrl = new URL('../src/management-app.js', import.meta.url);
-const localHostOperationsUrl = new URL('../src/local-host-operations.js', import.meta.url);
+const appUrl = new URL('../src/http/management-app.js', import.meta.url);
+const localHostOperationsUrl = new URL('../src/runtime/local-host-operations.js', import.meta.url);
 const envUrl = new URL('../../../.env.example', import.meta.url);
 const postinstUrl = new URL('../../../packaging/debian/postinst', import.meta.url);
 

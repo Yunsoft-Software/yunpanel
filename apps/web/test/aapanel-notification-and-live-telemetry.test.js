@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router';
-import { localRuntimeInternals } from '../../api/src/local-runtime.js';
+import { localRuntimeInternals } from '../../api/src/runtime/local-runtime.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const workspaceDir = path.resolve(__dirname, '../src/workspace');
@@ -49,7 +49,7 @@ async function loadWorkspaceModules() {
 
 test('local-runtime sets DEFAULT_SNAPSHOT_INTERVAL_MS to 5_000 for 5-second live server telemetry', () => {
   assert.equal(localRuntimeInternals.defaultSnapshotIntervalMs, 5_000);
-  const runtimeSource = fs.readFileSync(path.resolve(__dirname, '../../api/src/local-runtime.js'), 'utf8');
+  const runtimeSource = fs.readFileSync(path.resolve(__dirname, '../../api/src/runtime/local-runtime.js'), 'utf8');
   assert.match(runtimeSource, /const DEFAULT_SNAPSHOT_INTERVAL_MS = 5_000;/);
 });
 

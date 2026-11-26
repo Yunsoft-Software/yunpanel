@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createDomainRegistry, DomainRegistryError } from '../src/domain-registry.js';
+import { createDomainRegistry, DomainRegistryError } from '../src/domains/domain-registry.js';
 
 const serverId = '57f8611c-0af7-4d2f-8291-2fe7dbab22fe';
 const websiteId = '5c1c0247-139f-45d2-a6ac-c8a4bb00bc75';

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { managedServicePolicy } from '../../../packages/host-runtime/src/managed-service-manager.js';
 import { MANAGED_SERVICE_IDS } from '@yunpanel/protocol';
-import { managedServiceStatePolicy } from '../src/managed-service-state-policy.js';
+import { managedServiceStatePolicy } from '../src/runtime/managed-service-state-policy.js';
 
 test('API service result policy matches the host runtime command catalog exactly', () => {
   assert.deepEqual(managedServicePolicy.services.map((entry) => entry.id), MANAGED_SERVICE_IDS);

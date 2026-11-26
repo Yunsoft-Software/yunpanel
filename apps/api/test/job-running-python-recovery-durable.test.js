@@ -6,17 +6,17 @@ import path from 'node:path';
 import test from 'node:test';
 import { createPythonSiteManager } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { startConfiguredLocalRuntime } from '../src/configured-local-runtime.js';
-import { createDurableJobRegistry } from '../src/durable-job-registry.js';
-import { createJobRegistry } from '../src/job-registry.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { startConfiguredLocalRuntime } from '../src/runtime/configured-local-runtime.js';
+import { createDurableJobRegistry } from '../src/jobs/durable-job-registry.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
 import {
   runRunningPythonDeploymentRecoveryFromStores,
   runRunningPythonRestartRecoveryFromStores,
   runRunningPythonRollbackRecoveryFromStores,
-} from '../src/job-running-python-recovery-runtime.js';
-import { createPythonOperationReceiptStore } from '../src/python-operation-receipt.js';
-import { createServerRegistry } from '../src/server-registry.js';
+} from '../src/jobs/job-running-python-recovery-runtime.js';
+import { createPythonOperationReceiptStore } from '../src/applications/python-operation-receipt.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
 
 const hostname = 'python-recovery-host';
 const stoppedConsumers = async () => ({ apiActive: false, agentActive: false });

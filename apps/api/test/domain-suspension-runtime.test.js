@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createDomainSuspensionOperationRegistry } from '../src/domain-suspension-operation-registry.js';
+import { createDomainSuspensionOperationRegistry } from '../src/domains/domain-suspension-operation-registry.js';
 import {
   createDomainSuspensionRuntime,
   domainSuspensionRuntimeInternals,
-} from '../src/domain-suspension-runtime.js';
+} from '../src/domains/domain-suspension-runtime.js';
 
 const operationId = '12345678-1234-4234-8234-123456789012';
 const domainId = '22345678-1234-4234-8234-123456789012';

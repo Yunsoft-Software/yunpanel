@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import net from 'node:net';
 import { once } from 'node:events';
-import { createAuthMailer, validateEmail } from '../src/auth-mailer.js';
+import { createAuthMailer, validateEmail } from '../src/auth/auth-mailer.js';
 
 test('createAuthMailer with custom transport sends mail with proper envelope and headers', async () => {
   const sent = [];

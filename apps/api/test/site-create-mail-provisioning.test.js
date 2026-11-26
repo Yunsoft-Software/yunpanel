@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { siteCreateProvisioningPlan } from '../src/site-create-mail-provisioning.js';
+import { siteCreateProvisioningPlan } from '../src/provisioning/site-create-mail-provisioning.js';
 
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';

@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { hostingAuthFixture } from '../test-support/hosting-auth-fixture.js';
-import { createHostingAccountStore } from '../src/hosting-account-store.js';
+import { createHostingAccountStore } from '../src/hosting/hosting-account-store.js';
 
 test('two independent SQLite writers cannot consume the same final customer slot', { timeout: 15000 }, async (t) => {
   const directory = mkdtempSync(join(tmpdir(), 'yunpanel-hosting-race-'));

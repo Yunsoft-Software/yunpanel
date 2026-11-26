@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createLiveSessionRegistry } from '../src/live-session-registry.js';
+import { createLiveSessionRegistry } from '../src/auth/live-session-registry.js';
 import {
   createTerminalCapabilityRegistry,
   TerminalCapabilityError,
-} from '../src/terminal-capability-registry.js';
+} from '../src/terminal/terminal-capability-registry.js';
 
 const serverTarget = {
   scope: 'server', serverId: 'server-1', user: 'root', cwd: '/root',

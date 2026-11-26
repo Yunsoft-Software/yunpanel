@@ -5,16 +5,16 @@ import {mkdtemp,readFile,writeFile,rm,mkdir,access} from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {createNginxManager,createResticManager,createWebsiteRestoreReceiptStore,createWebsiteTrafficEnforcer} from '@yunpanel/host-runtime';
-import {createApplicationEnvironmentRegistry} from '../src/application-environment-registry.js';
-import {createDomainRegistry} from '../src/domain-registry.js';
-import {createWebsiteBackupSetProvider} from '../src/website-backup-set.js';
-import {createWebsiteBackupService} from '../src/website-backup-service.js';
-import {createWebsiteEnvironmentBackupAdapter} from '../src/website-environment-backup-adapter.js';
-import {createWebsiteHostingBackupAdapter} from '../src/website-hosting-backup-adapter.js';
-import {createWebsiteResourceBackupCodec} from '../src/website-resource-backup-codec.js';
-import {createWebsiteRestoreService} from '../src/website-restore-service.js';
-import {createWebsiteTrafficCoordinator} from '../src/website-traffic-coordinator.js';
-import {safeLocalOperationError} from '../src/local-execution-error.js';
+import {createApplicationEnvironmentRegistry} from '../src/applications/application-environment-registry.js';
+import {createDomainRegistry} from '../src/domains/domain-registry.js';
+import {createWebsiteBackupSetProvider} from '../src/backup/website-backup-set.js';
+import {createWebsiteBackupService} from '../src/backup/website-backup-service.js';
+import {createWebsiteEnvironmentBackupAdapter} from '../src/backup/website-environment-backup-adapter.js';
+import {createWebsiteHostingBackupAdapter} from '../src/backup/website-hosting-backup-adapter.js';
+import {createWebsiteResourceBackupCodec} from '../src/backup/website-resource-backup-codec.js';
+import {createWebsiteRestoreService} from '../src/backup/website-restore-service.js';
+import {createWebsiteTrafficCoordinator} from '../src/websites/website-traffic-coordinator.js';
+import {safeLocalOperationError} from '../src/runtime/local-execution-error.js';
 
 const sha256=value=>createHash('sha256').update(value).digest('hex');
 
@@ -395,7 +395,7 @@ test('legacy pre-traffic snapshot validates with legacy render and preserves liv
 
 test('index.js and management-app.js wire the live nginxManager into hosting backup adapter and backup set provider',async()=>{
  const indexSource=await readFile(new URL('../src/index.js',import.meta.url),'utf8');
- const managementSource=await readFile(new URL('../src/management-app.js',import.meta.url),'utf8');
+ const managementSource=await readFile(new URL('../src/http/management-app.js',import.meta.url),'utf8');
  assert.match(indexSource,/websiteProvisioningRuntime,\s*nginxManager,/);
  assert.match(indexSource,/beforeDomainActivate,\s*onDomainActivated/);
  assert.match(managementSource,/createWebsiteHostingBackupAdapter\(\{[\s\S]*?nginxManager:\s*options\.nginxManager\s*\?\?\s*null[\s\S]*?beforeDomainActivate:\s*options\.beforeDomainActivate\s*\?\?\s*null[\s\S]*?onDomainActivated/);

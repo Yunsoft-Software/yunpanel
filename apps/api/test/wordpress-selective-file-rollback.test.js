@@ -6,10 +6,10 @@ import { chmod, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createWordPressSelectiveFileRollback } from '../src/wordpress-selective-file-rollback.js';
+import { createWordPressSelectiveFileRollback } from '../src/wordpress/wordpress-selective-file-rollback.js';
 
 const linux = { skip: process.platform !== 'linux' && 'Requires Linux directory file descriptors' };
-const serviceUrl = new URL('../src/wordpress-selective-file-rollback.js', import.meta.url);
+const serviceUrl = new URL('../src/wordpress/wordpress-selective-file-rollback.js', import.meta.url);
 const relativePath = 'wp-content/plugins/shop/plugin.php';
 const original = '<?php /* Production plugin */';
 const replacement = '<?php /* Promoted plugin */';

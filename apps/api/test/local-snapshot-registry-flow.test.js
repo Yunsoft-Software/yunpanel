@@ -3,8 +3,8 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { startLocalRuntime } from '../src/local-runtime.js';
-import { createServerRegistry } from '../src/server-registry.js';
+import { startLocalRuntime } from '../src/runtime/local-runtime.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
 
 async function fixture(t) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-local-snapshot-'));

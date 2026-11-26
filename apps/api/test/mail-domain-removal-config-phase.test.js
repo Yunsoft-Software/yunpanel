@@ -5,7 +5,7 @@ import test from 'node:test';
 import {
   createMailDomainRemovalConfigPhase,
   MailDomainRemovalConfigPhaseError,
-} from '../src/mail-domain-removal-config-phase.js';
+} from '../src/mail/mail-domain-removal-config-phase.js';
 
 const operationId = randomUUID();
 const mailDomainId = randomUUID();

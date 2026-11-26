@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mountWebsiteProvisioningRoutes } from '../src/website-provisioning-http.js';
-import { createWebsiteProvisioningRuntime } from '../src/website-provisioning-runtime.js';
+import { mountWebsiteProvisioningRoutes } from '../src/provisioning/website-provisioning-http.js';
+import { createWebsiteProvisioningRuntime } from '../src/provisioning/website-provisioning-runtime.js';
 
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
 const localServerId = '28dc1532-a2cb-4f29-9e0d-05f793652fa3';

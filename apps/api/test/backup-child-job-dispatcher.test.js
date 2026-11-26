@@ -4,7 +4,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   BackupChildDispatcherError,
   createBackupChildJobDispatcher,
-} from '../src/backup-child-job-dispatcher.js';
+} from '../src/backup/backup-child-job-dispatcher.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const inventoryJobId = '1dff50cb-0840-413c-a9d1-d069f8e87743';

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createJobRegistry } from '../src/job-registry.js';
-import { createLocalJobExecutor } from '../src/local-job-executor.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { createLocalJobExecutor } from '../src/runtime/local-job-executor.js';
 
 const serverId = 'local-server';
 const packageResult = {

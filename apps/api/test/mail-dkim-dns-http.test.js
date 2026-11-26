@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import test from 'node:test';
-import { MailDkimDnsError } from '../src/mail-dkim-dns.js';
-import { MailDkimDnsHttpError, mountMailDkimDnsRoutes } from '../src/mail-dkim-dns-http.js';
+import { MailDkimDnsError } from '../src/mail/mail-dkim-dns.js';
+import { MailDkimDnsHttpError, mountMailDkimDnsRoutes } from '../src/mail/mail-dkim-dns-http.js';
 
 const mailDomainId = randomUUID();
 const previewDigest = 'a'.repeat(64);

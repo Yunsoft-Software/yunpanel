@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   createDomainRemovalBackupImpactProvider,
   DomainRemovalBackupImpactError,
-} from '../src/domain-removal-backup-impact.js';
+} from '../src/domains/domain-removal-backup-impact.js';
 
 function executionStep(stepId, resourceType, input) {
   return {

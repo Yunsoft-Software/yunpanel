@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import test from 'node:test';
-import { MailAliasRegistryError } from '../src/mail-alias-registry.js';
-import { mountMailAliasRoutes } from '../src/mail-alias-http.js';
+import { MailAliasRegistryError } from '../src/mail/mail-alias-registry.js';
+import { mountMailAliasRoutes } from '../src/mail/mail-alias-http.js';
 
 const localServerId = randomUUID();
 const remoteServerId = randomUUID();

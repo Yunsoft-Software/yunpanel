@@ -13,7 +13,7 @@ import {
   isTransientJobError,
   isPermanentJobError,
   TRANSIENT_JOB_ERROR_CODES,
-} from '../src/job-registry.js';
+} from '../src/jobs/job-registry.js';
 
 test('agent jobs move through queued, running and succeeded states exactly once', async () => {
   let clock = Date.parse('2026-09-08T21:00:00.000Z');

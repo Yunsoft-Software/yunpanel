@@ -4,7 +4,7 @@ import {
   JobRecoveryRuntimeError,
   resolveJobRecoveryPaths,
   runTerminalRecoveryFromStores,
-} from '../src/job-recovery-runtime.js';
+} from '../src/jobs/job-recovery-runtime.js';
 
 const identity = Object.freeze({ serverId: 'server-1', jobId: '12345678-1234-4234-8234-123456789012' });
 

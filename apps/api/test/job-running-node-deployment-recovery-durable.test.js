@@ -5,13 +5,13 @@ import path from 'node:path';
 import test from 'node:test';
 import { nodeServiceName } from '@yunpanel/config-templates';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createDurableJobRegistry } from '../src/durable-job-registry.js';
-import { createJobRecoveryContextReader } from '../src/job-recovery-context.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { createNodeDeploymentReceiptStore } from '../src/node-deployment-receipt.js';
-import { recoverRunningNodeDeployment } from '../src/job-running-node-deployment-recovery.js';
-import { createServerRegistry } from '../src/server-registry.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createDurableJobRegistry } from '../src/jobs/durable-job-registry.js';
+import { createJobRecoveryContextReader } from '../src/jobs/job-recovery-context.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { createNodeDeploymentReceiptStore } from '../src/applications/node-deployment-receipt.js';
+import { recoverRunningNodeDeployment } from '../src/jobs/job-running-node-deployment-recovery.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
 
 const previousReleaseId = 'ff830043-9752-4640-83b4-3a1998de78a0';
 

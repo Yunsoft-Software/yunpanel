@@ -4,9 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createDurableJobRegistry } from '../src/durable-job-registry.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { reconcileCompletedJob } from '../src/job-reconciliation.js';
+import { createDurableJobRegistry } from '../src/jobs/durable-job-registry.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { reconcileCompletedJob } from '../src/jobs/job-reconciliation.js';
 
 async function fixture(t) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-legacy-reconciliation-'));

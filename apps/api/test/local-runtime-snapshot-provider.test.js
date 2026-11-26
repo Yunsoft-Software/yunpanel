@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { startLocalRuntime, LocalRuntimeError } from '../src/local-runtime.js';
+import { startLocalRuntime, LocalRuntimeError } from '../src/runtime/local-runtime.js';
 
 const serverId = 'server-1';
 const hostname = 'host-1.example.local';

@@ -5,7 +5,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   createMailDeleteFinalizeService,
   MailDeleteFinalizeError,
-} from '../src/mail-delete-finalize.js';
+} from '../src/mail/mail-delete-finalize.js';
 
 const mailDomainId = randomUUID();
 const mailboxId = randomUUID();

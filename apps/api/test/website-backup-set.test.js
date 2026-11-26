@@ -4,7 +4,7 @@ import {
   WebsiteBackupSetError,
   createWebsiteBackupSetProvider,
   normalizeWebsiteBackupSet,
-} from '../src/website-backup-set.js';
+} from '../src/backup/website-backup-set.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const otherServerId = 'd0bc7f95-bdbd-4375-904f-50c532fc3faa';

@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   createPowerDnsAuthoritativeService,
   PowerDnsAuthoritativeServiceError,
-} from '../src/powerdns-authoritative-service.js';
+} from '../src/dns/powerdns-authoritative-service.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const apiKey = 'A'.repeat(43);

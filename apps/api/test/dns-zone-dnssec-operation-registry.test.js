@@ -7,7 +7,7 @@ import {
   createDnsZoneDnssecOperationRegistry,
   dnsZoneDnssecOperationPublicView,
   DnsZoneDnssecOperationRegistryError,
-} from '../src/dns-zone-dnssec-operation-registry.js';
+} from '../src/dns/dns-zone-dnssec-operation-registry.js';
 
 const domainId = '8bc307db-9e2d-4c3f-91ea-49e740d259a9';
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';

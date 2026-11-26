@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWebsiteProvisioningRuntime } from '../src/website-provisioning-runtime.js';
+import { createWebsiteProvisioningRuntime } from '../src/provisioning/website-provisioning-runtime.js';
 
 function hostDependencies() {
   return {

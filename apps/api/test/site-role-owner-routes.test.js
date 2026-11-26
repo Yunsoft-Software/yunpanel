@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import http from 'node:http';
 import test from 'node:test';
-import { createApp } from '../src/app.js';
-import { createDnsHostingRegistry } from '../src/dns-hosting-registry.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createServerRegistry } from '../src/server-registry.js';
+import { createApp } from '../src/http/app.js';
+import { createDnsHostingRegistry } from '../src/dns/dns-hosting-registry.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
 import { ownerManagementContext, withPanelContext } from './helpers/panel-auth-fixture.js';
 
 // Audit 2026-10-27: requirePanelRouteAccess and the site resource boundary let

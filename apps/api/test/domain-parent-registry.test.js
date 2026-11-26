@@ -3,7 +3,7 @@ import test from 'node:test';
 import { mkdtemp, readFile, writeFile, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createDomainRegistry, DomainRegistryError } from '../src/domain-registry.js';
+import { createDomainRegistry, DomainRegistryError } from '../src/domains/domain-registry.js';
 
 const input = (primaryDomain = 'example.com.tr', extra = {}) => ({
   serverId: 'local', primaryDomain, targetType: 'proxy', target: { upstreamPort: 4301 }, ...extra,

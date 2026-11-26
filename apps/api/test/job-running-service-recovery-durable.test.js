@@ -4,11 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createDurableJobRegistry } from '../src/durable-job-registry.js';
-import { createJobRecoveryContextReader } from '../src/job-recovery-context.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { recoverRunningServiceControl } from '../src/job-running-service-recovery.js';
-import { createServerRegistry } from '../src/server-registry.js';
+import { createDurableJobRegistry } from '../src/jobs/durable-job-registry.js';
+import { createJobRecoveryContextReader } from '../src/jobs/job-recovery-context.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { recoverRunningServiceControl } from '../src/jobs/job-running-service-recovery.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
 
 function nginxState(active) {
   return {

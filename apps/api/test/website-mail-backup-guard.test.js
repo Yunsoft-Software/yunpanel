@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createWebsiteMailBackupGuard } from '../src/website-mail-backup-guard.js';
+import { createWebsiteMailBackupGuard } from '../src/mail/website-mail-backup-guard.js';
 
 test('mail writes are blocked during a website restore while reads and unrelated writes continue', async () => {
   const guard = createWebsiteMailBackupGuard({ localServerId: 'owned-server', jobRegistry: {

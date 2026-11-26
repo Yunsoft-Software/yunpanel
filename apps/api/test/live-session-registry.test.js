@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createLiveSessionRegistry } from '../src/live-session-registry.js';
+import { createLiveSessionRegistry } from '../src/auth/live-session-registry.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createWebsiteRemovalOperationRegistry } from '../src/website-removal-operation-registry.js';
+import { createWebsiteRemovalOperationRegistry } from '../src/websites/website-removal-operation-registry.js';
 
 test('live session registry closes only the revoked session and removes registrations once', () => {
   const registry = createLiveSessionRegistry();

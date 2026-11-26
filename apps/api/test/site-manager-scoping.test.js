@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createAuthStore } from '../src/auth-store.js';
-import { createOwnerMfaPolicy } from '../src/owner-mfa-policy.js';
-import { describePanelAccess } from '../src/panel-access.js';
+import { createAuthStore } from '../src/auth/auth-store.js';
+import { createOwnerMfaPolicy } from '../src/auth/owner-mfa-policy.js';
+import { describePanelAccess } from '../src/panel/panel-access.js';
 
 test('site_manager role has site_management access mode and scoped permissions', async () => {
   const store = createAuthStore({ filePath: ':memory:' });

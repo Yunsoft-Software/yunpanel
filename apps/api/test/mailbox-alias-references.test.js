@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mailboxAliasReferences } from '../src/mailbox-alias-references.js';
+import { mailboxAliasReferences } from '../src/mail/mailbox-alias-references.js';
 
 const mailbox = { id: 'mailbox-a', mailDomainId: 'mail-domain-a', address: 'user@example.test' };
 const local = { id: 'local-alias', destinations: [mailbox.address] };
@@ -38,7 +38,7 @@ test('global registry read failure cannot be treated as no foreign references', 
   } }, mailbox));
 });
 
-import { createMailDeleteImpactService } from '../src/mail-delete-impact.js';
+import { createMailDeleteImpactService } from '../src/mail/mail-delete-impact.js';
 function impactService(listAliases) {
   return createMailDeleteImpactService({
     localServerId: 'server-a',

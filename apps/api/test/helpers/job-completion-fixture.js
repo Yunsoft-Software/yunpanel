@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { reconcileCompletedJob } from '../../src/job-reconciliation.js';
+import { reconcileCompletedJob } from '../../src/jobs/job-reconciliation.js';
 
 export async function completeNextJob(jobRegistry, {
   serverId,

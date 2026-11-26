@@ -7,11 +7,11 @@ import {
   WebsiteRestoreHttpError,
   isWebsiteRestoreHttpError,
   mountWebsiteRestoreRoutes,
-} from '../src/website-restore-http.js';
-import { WebsiteRestoreError } from '../src/website-restore-service.js';
-import { createWebsiteBackupOperationService } from '../src/website-backup-operation-service.js';
-import { createWebsiteBackupOperationRegistry } from '../src/website-backup-operation-registry.js';
-import { createJobRegistry } from '../src/job-registry.js';
+} from '../src/backup/website-restore-http.js';
+import { WebsiteRestoreError } from '../src/backup/website-restore-service.js';
+import { createWebsiteBackupOperationService } from '../src/backup/website-backup-operation-service.js';
+import { createWebsiteBackupOperationRegistry } from '../src/backup/website-backup-operation-registry.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
 
 const ownerAuth = Object.freeze({
   id: '11111111-1111-4111-8111-111111111111',

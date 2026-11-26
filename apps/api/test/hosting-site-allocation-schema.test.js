@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { hostingAuthFixture } from '../test-support/hosting-auth-fixture.js';
-import { initializeHostingAccountSchema, rollbackEmptyHostingAccountSchema } from '../src/hosting-account-schema.js';
-import { rollbackEmptyHostingSiteAllocationSchema } from '../src/hosting-site-allocation-schema.js';
+import { initializeHostingAccountSchema, rollbackEmptyHostingAccountSchema } from '../src/hosting/hosting-account-schema.js';
+import { rollbackEmptyHostingSiteAllocationSchema } from '../src/hosting/hosting-site-allocation-schema.js';
 
 const code = (expected) => (error) => error.code === expected;
 function fixture(t) {

@@ -3,7 +3,7 @@ import http from 'node:http';
 import { once } from 'node:events';
 import express from 'express';
 import test from 'node:test';
-import { LogHttpError, mountLogRoutes } from '../src/log-http.js';
+import { LogHttpError, mountLogRoutes } from '../src/runtime/log-http.js';
 import { ownerManagementContext, readOnlyManagementContext, withPanelContext } from './helpers/panel-auth-fixture.js';
 
 const SERVER_ID = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DnsZoneTemplateRegistryError } from '../src/dns-zone-template-registry.js';
-import { createDnsZoneTemplateRollbackService } from '../src/dns-zone-template-rollback.js';
+import { DnsZoneTemplateRegistryError } from '../src/dns/dns-zone-template-registry.js';
+import { createDnsZoneTemplateRollbackService } from '../src/dns/dns-zone-template-rollback.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const targetRecords = Object.freeze([

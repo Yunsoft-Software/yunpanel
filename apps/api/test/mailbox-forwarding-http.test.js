@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import test from 'node:test';
-import { mountMailboxForwardingRoutes } from '../src/mailbox-forwarding-http.js';
-import { MailboxForwardingRegistryError } from '../src/mailbox-forwarding-registry.js';
+import { mountMailboxForwardingRoutes } from '../src/mail/mailbox-forwarding-http.js';
+import { MailboxForwardingRegistryError } from '../src/mail/mailbox-forwarding-registry.js';
 
 const localServerId = randomUUID();
 const remoteServerId = randomUUID();

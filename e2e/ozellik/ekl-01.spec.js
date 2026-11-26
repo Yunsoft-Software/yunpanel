@@ -130,12 +130,12 @@ test.describe('EKL-01 Uygulama kurucu/katalog; site ve DB kurulum bütünlüğü
 
   test('fiziksel kanıt: sunucuda katalog tanımları, docker compose generator çıktısı ve EKL-01 yetenek kaydı', async () => {
     // 1. Sunucuda docker-plesk-catalog.js kaynak dosyasının fiziksel mevcudiyeti
-    const catalogFileExists = runSsh('test -f /usr/lib/yunpanel/apps/api/src/docker-plesk-catalog.js && echo "CATALOG_FILE_OK"');
+    const catalogFileExists = runSsh('test -f /usr/lib/yunpanel/apps/api/src/docker/docker-plesk-catalog.js && echo "CATALOG_FILE_OK"');
     expect(catalogFileExists).toBe('CATALOG_FILE_OK');
 
     // 2. Sunucuda Node.js ortamında katalog listesi ve şablon sayısının fiziksel doğrulanması
     const catalogCount = runSsh(`node -e '
-      import("/usr/lib/yunpanel/apps/api/src/docker-plesk-catalog.js").then(m => {
+      import("/usr/lib/yunpanel/apps/api/src/docker/docker-plesk-catalog.js").then(m => {
         const apps = m.listEasypanelOneClickApps();
         const dck = m.PLESK_DOCKER_CATALOG;
         console.log(JSON.stringify({ oneClickCount: apps.length, dockerCatalogCount: dck.length }));
@@ -148,7 +148,7 @@ test.describe('EKL-01 Uygulama kurucu/katalog; site ve DB kurulum bütünlüğü
 
     // 3. Sunucuda prepareOneClickAppProvision fonksiyonunun fiziksel compose üretimi ve parola tuzlama doğrulaması
     const provisionTest = runSsh(`node -e '
-      import("/usr/lib/yunpanel/apps/api/src/docker-plesk-catalog.js").then(m => {
+      import("/usr/lib/yunpanel/apps/api/src/docker/docker-plesk-catalog.js").then(m => {
         const prep = m.prepareOneClickAppProvision({ templateId: "postgres", projectName: "test_pg" });
         console.log(JSON.stringify({
           projectName: prep.projectName,
@@ -164,7 +164,7 @@ test.describe('EKL-01 Uygulama kurucu/katalog; site ve DB kurulum bütünlüğü
 
     // 4. non-reseller-capabilities envanterinde EKL-01 yeteneğinin tanımını doğrula
     const capOutput = runSsh(`node -e '
-      import("/usr/lib/yunpanel/apps/api/src/non-reseller-capabilities.js").then(m => {
+      import("/usr/lib/yunpanel/apps/api/src/hosting/non-reseller-capabilities.js").then(m => {
         const c = m.getCapabilityById("EKL-01");
         console.log(JSON.stringify({ id: c.id, title: c.title, category: c.category }));
       });

@@ -7,7 +7,7 @@ import {
   previewManagedMailEmptyConfiguration,
   secureManagedMailPreview,
 } from '@yunpanel/config-templates';
-import { createMailConfigurationService, MailConfigurationError } from '../src/mail-configuration.js';
+import { createMailConfigurationService, MailConfigurationError } from '../src/mail/mail-configuration.js';
 
 function phc(saltByte, hashByte) {
   return ['$argon2id', 'v=19', 'm=65536,t=3,p=1', Buffer.alloc(16, saltByte).toString('base64').replace(/=+$/, ''), Buffer.alloc(32, hashByte).toString('base64').replace(/=+$/, '')].join('$');

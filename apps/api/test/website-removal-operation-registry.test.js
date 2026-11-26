@@ -6,10 +6,10 @@ import path from 'node:path';
 
 import {
   createWebsiteRemovalOperationRegistry,
-} from '../src/website-removal-operation-registry.js';
+} from '../src/websites/website-removal-operation-registry.js';
 import {
   createWebsiteRemovalPreview,
-} from '../src/website-removal-plan.js';
+} from '../src/websites/website-removal-plan.js';
 
 async function withTempDir(fn) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'ws-rem-reg-test-'));

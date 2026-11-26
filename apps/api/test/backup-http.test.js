@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createJobRegistry } from '../src/job-registry.js';
-import { BackupHttpError, backupHttpInternals, mountBackupRoutes } from '../src/backup-http.js';
-import { requirePanelRouteAccess } from '../src/panel-http-guard.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { BackupHttpError, backupHttpInternals, mountBackupRoutes } from '../src/backup/backup-http.js';
+import { requirePanelRouteAccess } from '../src/http/panel-http-guard.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const operationId = '2c387b02-8747-458a-b509-8f531d4d149e';
@@ -268,16 +268,16 @@ import {
   createWebsiteBackupOperationRegistry,
   WebsiteBackupOperationRegistryError,
   websiteBackupOperationPublicView,
-} from '../src/website-backup-operation-registry.js';
+} from '../src/backup/website-backup-operation-registry.js';
 import {
   createWebsiteBackupOperationService,
   WebsiteBackupOperationServiceError,
-} from '../src/website-backup-operation-service.js';
+} from '../src/backup/website-backup-operation-service.js';
 import {
   mountWebsiteBackupRoutes,
   WebsiteBackupHttpError,
   isWebsiteBackupHttpError,
-} from '../src/website-backup-http.js';
+} from '../src/backup/website-backup-http.js';
 
 const websiteActor = { sessionId: '11111111-1111-4111-8111-111111111111', userId: '22222222-2222-4222-8222-222222222222', role: 'owner' };
 function websiteFixture() {

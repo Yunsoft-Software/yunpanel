@@ -11,7 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { stageLocalMigrationRestore } from '../src/local-migration-restore-stage.js';
+import { stageLocalMigrationRestore } from '../src/migration/local-migration-restore-stage.js';
 
 const backupDirectory = '/var/backups/yunpanel/migration-2026-09-10T15-00-00-000Z';
 const sha256 = 'a'.repeat(64);

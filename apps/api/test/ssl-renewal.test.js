@@ -7,25 +7,25 @@ import React, { StrictMode, createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { MemoryRouter } from 'react-router';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createApp } from '../src/app.js';
-import { createServerRegistry } from '../src/server-registry.js';
+import { createApp } from '../src/http/app.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
 import { withPanelContext, ownerManagementContext, readOnlyManagementContext } from './helpers/panel-auth-fixture.js';
 import {
   createCertificateRegistry,
   compareTlsPresentation,
   certificateDiagnosis,
   CertificateRegistryError,
-} from '../src/certificate-registry.js';
+} from '../src/certificates/certificate-registry.js';
 import {
   verifyRenewalOutcome,
   verifyCertificateRenewalOutcome,
   runCertificateRenewalSweep,
   startCertificateRenewalScheduler,
-} from '../src/certificate-renewal-scheduler.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
+} from '../src/certificates/certificate-renewal-scheduler.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
 import { completeNextJob } from './helpers/job-completion-fixture.js';
-import { certificateHttpInternals } from '../src/certificate-http.js';
+import { certificateHttpInternals } from '../src/certificates/certificate-http.js';
 import {
   createSslRenewal,
   renewalMetadata as clientRenewalMetadata,

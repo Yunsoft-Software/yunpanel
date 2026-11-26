@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import test from 'node:test';
-import { MailDataHttpError, mountMailDataRoutes } from '../src/mail-data-http.js';
+import { MailDataHttpError, mountMailDataRoutes } from '../src/mail/mail-data-http.js';
 
 const mailboxId = randomUUID();
 const mailDomainId = randomUUID();

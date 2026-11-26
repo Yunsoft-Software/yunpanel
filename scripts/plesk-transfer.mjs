@@ -5,7 +5,7 @@ import {
   PleskOfflineTransferError,
   previewPleskOfflineTransfer,
   stagePleskOfflineTransfer,
-} from '../apps/api/src/plesk-offline-transfer.js';
+} from '../apps/api/src/migration/plesk-offline-transfer.js';
 
 const flags = new Map([
   ['--bundle-dir', 'bundleDirectory'],

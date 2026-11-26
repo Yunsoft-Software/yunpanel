@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createWebsiteMigrationLedger } from '../src/website-migration-ledger.js';
-import { createWebsiteMigrationPolicyStore } from '../src/website-migration-policy.js';
-import { rollbackWebsiteMigrationBinding, WebsiteMigrationRollbackError } from '../src/website-migration-rollback.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createWebsiteMigrationLedger } from '../src/migration/website-migration-ledger.js';
+import { createWebsiteMigrationPolicyStore } from '../src/migration/website-migration-policy.js';
+import { rollbackWebsiteMigrationBinding, WebsiteMigrationRollbackError } from '../src/migration/website-migration-rollback.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const applicationId = '340344cf-4e57-4f70-946a-3c6e919e951d';

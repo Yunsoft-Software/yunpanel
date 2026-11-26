@@ -6,7 +6,7 @@ import test from 'node:test';
 import {
   createRoundcubeConfigOperationReceiptStore,
   RoundcubeConfigOperationReceiptError,
-} from '../src/roundcube-config-operation-receipt.js';
+} from '../src/mail/roundcube-config-operation-receipt.js';
 
 const SERVER = '10714f5d-8646-4f9a-a8e9-b80439ff6305';
 const JOB = '12345678-1234-4234-8234-123456789012';

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { DatabaseJobResultError, sanitizeDatabaseJobResult } from '../src/database-job-result.js';
+import { DatabaseJobResultError, sanitizeDatabaseJobResult } from '../src/databases/database-job-result.js';
 
 const base = { engine: 'mariadb', version: '10.11.13-MariaDB' };
 

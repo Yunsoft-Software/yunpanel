@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import test from 'node:test';
-import { AuthError } from '../src/auth-error.js';
+import { AuthError } from '../src/auth/auth-error.js';
 import {
   TenantBoundaryError,
   assertCustomerBelongsToReseller,
@@ -10,21 +10,21 @@ import {
   createTenantBoundaryMiddleware,
   extractActorTenant,
   sanitizeTenantCollection,
-} from '../src/tenant-boundary.js';
+} from '../src/http/tenant-boundary.js';
 import {
   validateCustomerQuotas,
   assertCustomerQuotaCapacity,
   assertCustomerQuotaWithinResellerCapacity,
-} from '../src/customer-quotas.js';
-import { createHostingAccountStore } from '../src/hosting-account-store.js';
-import { hostingWebsiteDigest } from '../src/hosting-site-allocation-store.js';
+} from '../src/hosting/customer-quotas.js';
+import { createHostingAccountStore } from '../src/hosting/hosting-account-store.js';
+import { hostingWebsiteDigest } from '../src/hosting/hosting-site-allocation-store.js';
 import { hostingAuthFixture } from '../test-support/hosting-auth-fixture.js';
-import { handleHostingAccountAdmin } from '../src/hosting-account-http.js';
+import { handleHostingAccountAdmin } from '../src/hosting/hosting-account-http.js';
 import {
   createSystemWatchdogService,
   SystemWatchdogError,
   mountSystemWatchdogRoutes,
-} from '../src/local-api-health.js';
+} from '../src/runtime/local-api-health.js';
 
 // ============================================================================
 // PART 1: Role and Tenant Isolation Violation Scenarios

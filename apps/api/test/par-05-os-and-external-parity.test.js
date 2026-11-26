@@ -15,8 +15,8 @@ import {
   listExternalParityAdapters,
   listDeferredBillingItems,
   mountOsExternalParityRoutes,
-} from '../src/os-external-parity.js';
-import { TenantBoundaryError } from '../src/tenant-boundary.js';
+} from '../src/hosting/os-external-parity.js';
+import { TenantBoundaryError } from '../src/http/tenant-boundary.js';
 
 // ============================================================================
 // 1. OS EQUIVALENCE BOUNDARIES & ADAPTER CONTRACTS (WIN-01 .. WIN-06)

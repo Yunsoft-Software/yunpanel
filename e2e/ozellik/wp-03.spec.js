@@ -82,7 +82,7 @@ test.describe('WP-03 Toplu yönetim ve plugin/theme setleri', () => {
 
     // 5. Fiziksel kanıt 2: non-reseller-capabilities envanterinde WP-03 yeteneğinin tanımlı olduğunu doğrula
     const capOutput = runSsh(`node -e '
-      import("/usr/lib/yunpanel/apps/api/src/non-reseller-capabilities.js").then(m => {
+      import("/usr/lib/yunpanel/apps/api/src/hosting/non-reseller-capabilities.js").then(m => {
         const c = m.getCapabilityById("WP-03");
         console.log(JSON.stringify({ id: c.id, status: c.status, serviceAdapters: c.serviceAdapters }));
       });

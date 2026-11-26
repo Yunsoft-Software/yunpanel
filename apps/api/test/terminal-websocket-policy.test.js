@@ -1,15 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { terminalWebSocketInternals } from '../src/terminal-websocket.js';
-import { createLicenseEntitlementService } from '../src/license-entitlement-service.js';
-import { computePublicKeyId, ENTITLEMENT_ISSUER, ENTITLEMENT_TOKEN_TYPE, YUNPANEL_PRODUCT_CODE } from '../src/license-entitlement-verifier.js';
+import { terminalWebSocketInternals } from '../src/terminal/terminal-websocket.js';
+import { createLicenseEntitlementService } from '../src/panel/license-entitlement-service.js';
+import { computePublicKeyId, ENTITLEMENT_ISSUER, ENTITLEMENT_TOKEN_TYPE, YUNPANEL_PRODUCT_CODE } from '../src/panel/license-entitlement-verifier.js';
 import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { captureOwnedTerminalIdentity, captureTerminalGenerationBoundary, createOwnedTerminalLifecycle, observeTerminalChild, terminalProcessInternals } from '../src/terminal-process-manager.js';
+import { captureOwnedTerminalIdentity, captureTerminalGenerationBoundary, createOwnedTerminalLifecycle, observeTerminalChild, terminalProcessInternals } from '../src/terminal/terminal-process-manager.js';
 
 const WEBSITE_ID = '11111111-1111-4111-8111-111111111111';
 const OTHER_WEBSITE_ID = '22222222-2222-4222-8222-222222222222';

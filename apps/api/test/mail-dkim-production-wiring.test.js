@@ -8,8 +8,8 @@ const text = (name) => readFile(source(name), 'utf8');
 test('production API shares managed DKIM desired-state and DNS-retirement state with HTTP and local execution', async () => {
   const [indexSource, appSource, configuredSource] = await Promise.all([
     text('index.js'),
-    text('management-app.js'),
-    text('configured-local-runtime.js'),
+    text('http/management-app.js'),
+    text('runtime/configured-local-runtime.js'),
   ]);
 
   assert.match(indexSource, /YUNPANEL_MAIL_DKIM_ROOT/);
@@ -37,7 +37,7 @@ test('production package and lost-ack recovery use canonical DKIM private and re
   const [envSource, postinst, runtimeSource] = await Promise.all([
     readFile(new URL('../../../.env.example', import.meta.url), 'utf8'),
     readFile(new URL('../../../packaging/debian/postinst', import.meta.url), 'utf8'),
-    text('job-running-mail-dkim-recovery-runtime.js'),
+    text('jobs/job-running-mail-dkim-recovery-runtime.js'),
   ]);
   assert.match(envSource, /^YUNPANEL_MAIL_DKIM_ROOT=.data\/mail-dkim$/m);
   assert.match(envSource, /^YUNPANEL_MAIL_DKIM_RETIREMENT_STORE=.data\/mail-dkim-retirement-registry\.json$/m);

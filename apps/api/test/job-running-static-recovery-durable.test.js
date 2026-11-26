@@ -8,12 +8,12 @@ import {
   createStaticDeploymentReceiptStore,
 } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createDurableJobRegistry } from '../src/durable-job-registry.js';
-import { createJobRecoveryContextReader } from '../src/job-recovery-context.js';
-import { recoverRunningStaticDeployment } from '../src/job-running-static-recovery.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { createServerRegistry } from '../src/server-registry.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createDurableJobRegistry } from '../src/jobs/durable-job-registry.js';
+import { createJobRecoveryContextReader } from '../src/jobs/job-recovery-context.js';
+import { recoverRunningStaticDeployment } from '../src/jobs/job-running-static-recovery.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-static-recovery-'));

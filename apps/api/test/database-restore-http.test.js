@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DatabaseBackupOperationsError } from '../src/database-backup-operations.js';
-import { JobRegistryError } from '../src/job-registry.js';
+import { DatabaseBackupOperationsError } from '../src/databases/database-backup-operations.js';
+import { JobRegistryError } from '../src/jobs/job-registry.js';
 import {
   DatabaseRestoreHttpError,
   mountDatabaseRestoreRoutes,
-} from '../src/database-restore-http.js';
+} from '../src/databases/database-restore-http.js';
 
 const serverId = '12345678-1234-4234-8234-123456789012';
 const databaseName = 'app_main';

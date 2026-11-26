@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import http from 'node:http';
 import test from 'node:test';
-import { createApiKeyStore } from '../src/api-key-store.js';
-import { createAuthenticatedApi } from '../src/auth-http.js';
-import { createApp } from '../src/app.js';
-import { createAutomationHandler } from '../src/automation-http.js';
-import { createServerRegistry } from '../src/server-registry.js';
+import { createApiKeyStore } from '../src/auth/api-key-store.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
+import { createApp } from '../src/http/app.js';
+import { createAutomationHandler } from '../src/http/automation-http.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
 
 // The real auth entry and the real app: /api/automation/* is reachable only with a key.
 async function fixture(t) {

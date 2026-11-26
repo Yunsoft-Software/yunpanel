@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MANAGED_SERVICE_IDS, OPERATIONS } from '@yunpanel/protocol';
-import { createJobRegistry, JobRegistryError } from '../src/job-registry.js';
+import { createJobRegistry, JobRegistryError } from '../src/jobs/job-registry.js';
 
 const serverId = 'server-1';
 const servicePackages = {

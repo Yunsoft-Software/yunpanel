@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWebsiteProvisioningWorker } from '../src/website-provisioning-worker.js';
+import { createWebsiteProvisioningWorker } from '../src/provisioning/website-provisioning-worker.js';
 
 const NOW = Date.parse('2026-11-06T12:00:00.000Z');
 const owner = { sessionId: 'session-1', userId: 'user-1', role: 'owner' };

@@ -3,9 +3,9 @@ import { once } from 'node:events';
 import http from 'node:http';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createApp } from '../src/app.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { createServerRegistry } from '../src/server-registry.js';
+import { createApp } from '../src/http/app.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
 import { withPanelContext } from './helpers/panel-auth-fixture.js';
 
 function inventory() {

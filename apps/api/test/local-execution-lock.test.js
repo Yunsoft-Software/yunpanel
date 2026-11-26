@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { acquireLocalExecutionLock, LocalExecutionLockError } from '../src/local-execution-lock.js';
+import { acquireLocalExecutionLock, LocalExecutionLockError } from '../src/runtime/local-execution-lock.js';
 
 async function withLockDir(callback) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-local-lock-'));

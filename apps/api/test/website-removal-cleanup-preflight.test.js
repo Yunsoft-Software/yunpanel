@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWebsiteRemovalRuntime } from '../src/website-removal-runtime.js';
+import { createWebsiteRemovalRuntime } from '../src/websites/website-removal-runtime.js';
 import { removalFixture, removalPreview } from '../test-support/website-removal-fixture.js';
 
 test('preview blocks before destructive work when Unix ownership evidence is unavailable',async()=>{

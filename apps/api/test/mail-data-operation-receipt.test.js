@@ -8,7 +8,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   createMailDataOperationReceiptStore,
   MailDataOperationReceiptError,
-} from '../src/mail-data-operation-receipt.js';
+} from '../src/mail/mail-data-operation-receipt.js';
 
 const serverId = randomUUID();
 const jobId = randomUUID();

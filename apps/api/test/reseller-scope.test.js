@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AuthError } from '../src/auth-error.js';
+import { AuthError } from '../src/auth/auth-error.js';
 import {
   assertCustomerCreationScope, assertCustomerManagement, assertCustomerWebsiteAccess,
   assertResellerManagement, validateHostingAccount,
-} from '../src/reseller-scope.js';
+} from '../src/hosting/reseller-scope.js';
 
 const owner = Object.freeze({ id: 'owner', role: 'owner', active: true });
 const reseller = Object.freeze({ id: 'reseller-a', kind: 'reseller', resellerId: null, active: true });

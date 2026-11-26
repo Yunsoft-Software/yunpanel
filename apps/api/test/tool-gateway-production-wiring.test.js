@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const authUrl = new URL('../src/auth-http.js', import.meta.url);
+const authUrl = new URL('../src/auth/auth-http.js', import.meta.url);
 const apiIndexUrl = new URL('../src/index.js', import.meta.url);
 const webServerUrl = new URL('../../web/server.js', import.meta.url);
 

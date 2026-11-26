@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createWordPressCloneService } from '../src/wordpress-clone-service.js';
-import { normalizeWordPressActionOptions } from '../src/wordpress-toolkit-service.js';
-import { executeSiteFileOperation } from '../src/site-file-worker.js';
+import { createWordPressCloneService } from '../src/wordpress/wordpress-clone-service.js';
+import { normalizeWordPressActionOptions } from '../src/wordpress/wordpress-toolkit-service.js';
+import { executeSiteFileOperation } from '../src/files/site-file-worker.js';
 import { managedFilesystemDependencies } from './fixtures/managed-filesystem.js';
 
 const sourceId = '11111111-1111-4111-8111-111111111111', targetId = '22222222-2222-4222-8222-222222222222';

@@ -7,8 +7,8 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   createJobIdempotencyLookup,
   JobIdempotencyLookupError,
-} from '../src/job-idempotency-lookup.js';
-import { createJobRegistry } from '../src/job-registry.js';
+} from '../src/jobs/job-idempotency-lookup.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
 
 const key = `general-backup-step:${'a'.repeat(64)}`;
 

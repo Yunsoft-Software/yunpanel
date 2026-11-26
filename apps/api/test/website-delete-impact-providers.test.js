@@ -7,7 +7,7 @@ import {
   createRuntimeBindingImpactProvider,
   createSftpKeyImpactProvider,
   createUnixIdentityImpactProvider,
-} from '../src/website-delete-impact-providers.js';
+} from '../src/websites/website-delete-impact-providers.js';
 
 test('createDatabaseImpactProvider returns database bindings for website', async () => {
   const bindings = [

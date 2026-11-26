@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createAiToolRuntime } from '../src/ai-tool-runtime.js';
+import { createAiToolRuntime } from '../src/ai/ai-tool-runtime.js';
 
 function fixture() {
   const server = { id: 'server-1', serverId: 'server-1', executionMode: 'local' };

@@ -12,15 +12,15 @@ import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createPanelServer } from '../server.js';
-import { createAuthStore } from '../../api/src/auth-store.js';
-import { createAuthenticatedApi } from '../../api/src/auth-http.js';
+import { createAuthStore } from '../../api/src/auth/auth-store.js';
+import { createAuthenticatedApi } from '../../api/src/auth/auth-http.js';
 import {
   API_VERSION,
   SCHEMA_VERSION,
   DEPLOYMENT_COMPARISON_STATUSES,
   createApp as createCoreApp,
   resolveDeploymentDiagnostics,
-} from '../../api/src/core-app.js';
+} from '../../api/src/http/core-app.js';
 import {
   FRONTEND_VERSION,
   FRONTEND_SCHEMA_VERSION,

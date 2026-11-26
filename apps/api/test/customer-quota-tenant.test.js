@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createHostingAccountStore } from '../src/hosting-account-store.js';
+import { createHostingAccountStore } from '../src/hosting/hosting-account-store.js';
 import { hostingAuthFixture } from '../test-support/hosting-auth-fixture.js';
 import {
   validateCustomerQuotas,
   assertCustomerQuotaCapacity,
   assertCustomerQuotaWithinResellerCapacity,
-} from '../src/customer-quotas.js';
-import { handleHostingAccountAdmin } from '../src/hosting-account-http.js';
+} from '../src/hosting/customer-quotas.js';
+import { handleHostingAccountAdmin } from '../src/hosting/hosting-account-http.js';
 
 function setup(t) {
   const f = hostingAuthFixture();

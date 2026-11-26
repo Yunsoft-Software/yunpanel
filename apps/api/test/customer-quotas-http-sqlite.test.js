@@ -9,27 +9,27 @@ import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { nginxConfigFileName } from '@yunpanel/config-templates';
 import { inspectNativeDiskQuotaSupport } from '@yunpanel/host-runtime';
-import { createApp } from '../src/app.js';
-import { createAuthenticatedApi } from '../src/auth-http.js';
-import { createAuthStore } from '../src/auth-store.js';
+import { createApp } from '../src/http/app.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
+import { createAuthStore } from '../src/auth/auth-store.js';
 import {
   createCustomerDatabaseQuotaCoordinator,
   validateCustomerQuotaEnforcement,
-} from '../src/customer-quotas.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createDatabaseBindingRegistry } from '../src/database-binding-registry.js';
-import { createWebsiteTrafficCoordinator } from '../src/website-traffic-coordinator.js';
-import { executeSiteFileOperation } from '../src/site-file-worker.js';
+} from '../src/hosting/customer-quotas.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createDatabaseBindingRegistry } from '../src/databases/database-binding-registry.js';
+import { createWebsiteTrafficCoordinator } from '../src/websites/website-traffic-coordinator.js';
+import { executeSiteFileOperation } from '../src/files/site-file-worker.js';
 import {
   computePublicKeyId,
   ENTITLEMENT_ISSUER,
   ENTITLEMENT_TOKEN_TYPE,
   YUNPANEL_PRODUCT_CODE,
-} from '../src/license-entitlement-verifier.js';
-import { createLicenseEntitlementService } from '../src/license-entitlement-service.js';
+} from '../src/panel/license-entitlement-verifier.js';
+import { createLicenseEntitlementService } from '../src/panel/license-entitlement-service.js';
 
 const PASSWORD = 'Stage2-Quota-Password!2026';
 const PUBLIC_ORIGIN = 'http://127.0.0.1:4173';

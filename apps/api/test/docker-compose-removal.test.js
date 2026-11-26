@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createDockerComposeRemoval } from '../src/docker-compose-removal.js';
+import { createDockerComposeRemoval } from '../src/docker/docker-compose-removal.js';
 
 const projectId = '0bb78242-03a6-429f-9d17-7725c521437c';
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';

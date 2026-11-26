@@ -4,7 +4,7 @@ import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { createDatabaseDumpManager, createDatabaseRestoreManager } from '@yunpanel/host-runtime';
-import { createWebsiteDatabaseBackupAdapter } from '../src/website-database-backup-adapter.js';
+import { createWebsiteDatabaseBackupAdapter } from '../src/backup/website-database-backup-adapter.js';
 
 const websiteId = '11111111-1111-4111-8111-111111111111';
 const bindingId = '22222222-2222-4222-8222-222222222222';

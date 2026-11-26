@@ -14,7 +14,7 @@ import test from 'node:test';
 import {
   createMailDkimRegistry,
   MailDkimRegistryError,
-} from '../src/mail-dkim-registry.js';
+} from '../src/mail/mail-dkim-registry.js';
 
 const mailDomainId = randomUUID();
 const mailDomain = Object.freeze({

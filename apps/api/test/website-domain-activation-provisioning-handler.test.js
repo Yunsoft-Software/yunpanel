@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createWebsiteDomainActivationProvisioningHandler } from '../src/website-domain-activation-provisioning-handler.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createWebsiteDomainActivationProvisioningHandler } from '../src/provisioning/website-domain-activation-provisioning-handler.js';
 
 const serverId = '57f8611c-0af7-4d2f-8291-2fe7dbab22fe';
 const websiteId = '5c1c0247-139f-45d2-a6ac-c8a4bb00bc75';

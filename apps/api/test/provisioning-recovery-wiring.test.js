@@ -12,13 +12,13 @@ import {
   mountWebsiteProvisioningRoutes,
   WebsiteProvisioningHttpError,
   websiteProvisioningHttpInternals,
-} from '../src/website-provisioning-http.js';
-import { requirePanelRouteAccess } from '../src/panel-http-guard.js';
+} from '../src/provisioning/website-provisioning-http.js';
+import { requirePanelRouteAccess } from '../src/http/panel-http-guard.js';
 
 const source = (file) => readFile(new URL(file, import.meta.url), 'utf8');
 
 test('provisioning recovery HTTP routes enforce panel route access and strict parameter validators', async () => {
-  const code = await source('../src/website-provisioning-http.js');
+  const code = await source('../src/provisioning/website-provisioning-http.js');
 
   // Route declarations use requirePanelRouteAccess guard
   assert.match(code, /app\.get\('\/api\/sites\/:websiteId\/provisioning\/latest',\s*requirePanelRouteAccess/);
@@ -59,8 +59,8 @@ test('provisioning recovery controller and panel wire multi-tenant session isola
 });
 
 test('job recovery commands and runtime enforce terminal status and isolation', async () => {
-  const commandCode = await source('../src/job-recovery-command.js');
-  const runtimeCode = await source('../src/job-recovery-runtime.js');
+  const commandCode = await source('../src/jobs/job-recovery-command.js');
+  const runtimeCode = await source('../src/jobs/job-recovery-runtime.js');
 
   assert.match(commandCode, /const TERMINAL_STATUSES = new Set\(\['succeeded', 'failed'\]\)/);
   assert.match(commandCode, /requireStoppedConsumers\(serviceStatus\)/);
@@ -255,12 +255,12 @@ test('provisioning HTTP server boundary enforces fail-closed authorization acros
 });
 
 test('provisioning recovery wires backend atomic lock and fail-closed concurrency protection', async () => {
-  const httpCode = await source('../src/website-provisioning-http.js');
-  const appCode = await source('../src/management-app.js');
+  const httpCode = await source('../src/provisioning/website-provisioning-http.js');
+  const appCode = await source('../src/http/management-app.js');
   const controllerCode = await source('../../web/src/workspace/provisioning-recovery.js');
 
   // Backend wires siteMutationLock and translates SiteMutationLockError to 409
-  assert.match(httpCode, /import\s*\{\s*SiteMutationLockError\s*\}\s*from\s*'\.\/site-mutation-lock\.js'/);
+  assert.match(httpCode, /import\s*\{\s*SiteMutationLockError\s*\}\s*from\s*'\.\.\/websites\/site-mutation-lock\.js'/);
   assert.match(httpCode, /siteMutationLock\s*=\s*null/);
   assert.match(httpCode, /withOptionalLock\(operation\.websiteId/);
   assert.match(httpCode, /error\s*instanceof\s*SiteMutationLockError/);

@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { createApplicationEnvironmentRegistry } from '../src/application-environment-registry.js';
+import { createApplicationEnvironmentRegistry } from '../src/applications/application-environment-registry.js';
 
 async function fixture(t) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'yp-env-backup-'));

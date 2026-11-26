@@ -6,7 +6,7 @@ import test from 'node:test';
 import {
   createWebsiteProvisioningRegistry,
   WebsiteProvisioningRegistryError,
-} from '../src/website-provisioning-registry.js';
+} from '../src/provisioning/website-provisioning-registry.js';
 
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 const secondOperationId = '4d5a28d3-67b5-4ff4-854d-508d3f720c4d';

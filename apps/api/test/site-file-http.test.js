@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import http from 'node:http';
 import test from 'node:test';
-import { createApp } from '../src/app.js';
+import { createApp } from '../src/http/app.js';
 import { withPanelContext } from './helpers/panel-auth-fixture.js';
 
 const WEBSITE_ID = '33333333-3333-4333-8333-333333333333';
@@ -201,7 +201,7 @@ test('permissions use the existing Website file manager and reject malformed req
 });
 
 test('permissions preserve the file manager failure instead of returning updated success', async (t) => {
-  const { SiteFileWorkerError } = await import('../src/site-file-worker.js');
+  const { SiteFileWorkerError } = await import('../src/files/site-file-worker.js');
   const { request } = await fixture(t, { execute: async () => { throw new SiteFileWorkerError('site_file_permission_denied', 'Permission denied', 403); } });
   const response = await request(`/api/websites/${WEBSITE_ID}/files/permissions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: 'index.html', mode: '0640' }) });
   assert.equal(response.status, 403);

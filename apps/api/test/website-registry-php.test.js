@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createWebsiteRegistry, websiteRegistryInternals } from '../src/website-registry.js';
+import { createWebsiteRegistry, websiteRegistryInternals } from '../src/websites/website-registry.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';

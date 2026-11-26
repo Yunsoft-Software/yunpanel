@@ -3,9 +3,9 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import express from 'express';
-import { mountMailboxRoutes } from '../src/mailbox-http.js';
-import { createSiteResourceBoundary, needsSiteResourceJson } from '../src/site-resource-boundary.js';
-import { createTenantBoundaryMiddleware } from '../src/tenant-boundary.js';
+import { mountMailboxRoutes } from '../src/mail/mailbox-http.js';
+import { createSiteResourceBoundary, needsSiteResourceJson } from '../src/http/site-resource-boundary.js';
+import { createTenantBoundaryMiddleware } from '../src/http/tenant-boundary.js';
 
 // Also run client/web removal wiring checks
 import '../../web/test/mailbox-removal-wiring.test.js';
@@ -13,11 +13,11 @@ import '../../web/test/mailbox-access-preparation.test.js';
 import '../../web/test/mailbox-access-guard.test.js';
 import '../../web/test/admin-layout.test.js';
 
-const appUrl = new URL('../src/management-app.js', import.meta.url);
-const mailboxHttpUrl = new URL('../src/mailbox-http.js', import.meta.url);
-const finalizeUrl = new URL('../src/mail-delete-finalize.js', import.meta.url);
-const impactUrl = new URL('../src/mail-delete-impact.js', import.meta.url);
-const dataOpsUrl = new URL('../src/mail-data-operations.js', import.meta.url);
+const appUrl = new URL('../src/http/management-app.js', import.meta.url);
+const mailboxHttpUrl = new URL('../src/mail/mailbox-http.js', import.meta.url);
+const finalizeUrl = new URL('../src/mail/mail-delete-finalize.js', import.meta.url);
+const impactUrl = new URL('../src/mail/mail-delete-impact.js', import.meta.url);
+const dataOpsUrl = new URL('../src/mail/mail-data-operations.js', import.meta.url);
 
 test('production app wires fresh impact into mail data delete and guarded finalization', async () => {
   const source = await readFile(appUrl, 'utf8');

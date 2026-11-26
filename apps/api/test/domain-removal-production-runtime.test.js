@@ -5,10 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   createDomainRemovalProductionRuntime,
-} from '../src/domain-removal-production-runtime.js';
+} from '../src/domains/domain-removal-production-runtime.js';
 import {
   WebsiteCronImpactError,
-} from '../src/website-cron-impact.js';
+} from '../src/websites/website-cron-impact.js';
 
 async function withTempDir(fn) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'domain-removal-prod-test-'));

@@ -5,7 +5,7 @@ import {
   mountPowerDnsRoutes,
   PowerDnsHttpError,
   powerDnsHttpInternals,
-} from '../src/powerdns-http.js';
+} from '../src/dns/powerdns-http.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 

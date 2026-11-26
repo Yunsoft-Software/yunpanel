@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   createWebsiteProvisioningHandlers,
   websiteProvisioningIsolationInternals,
-} from '../src/website-provisioning-handlers-isolation.js';
+} from '../src/provisioning/website-provisioning-handlers-isolation.js';
 
 test('the production isolation handler preserves PHP retirement with exact provisioning scope', async () => {
   const calls = [], result = { satisfied: true, poolRemoved: true, socketRemoved: true };

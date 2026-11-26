@@ -5,12 +5,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { mailForwardingTemplatePolicy, mailSpamPolicyTemplatePolicy } from '@yunpanel/config-templates';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createMailAliasRegistry } from '../src/mail-alias-registry.js';
-import { createMailConfigurationService } from '../src/mail-configuration.js';
-import { createMailDomainRegistry } from '../src/mail-domain-registry.js';
-import { createMailboxRegistry } from '../src/mailbox-registry.js';
-import { createServerRegistry } from '../src/server-registry.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createMailAliasRegistry } from '../src/mail/mail-alias-registry.js';
+import { createMailConfigurationService } from '../src/mail/mail-configuration.js';
+import { createMailDomainRegistry } from '../src/mail/mail-domain-registry.js';
+import { createMailboxRegistry } from '../src/mail/mailbox-registry.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
 
 test('saved delivery rules alter the normal mail plan without exposing data and are removed from the active scope', async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), 'yunpanel-mail-delivery-plan-'));

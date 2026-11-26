@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AuthError } from '../src/auth-error.js';
-import { handleHostingAccountAdmin, hostingAccountQuery, isHostingAccountPath } from '../src/hosting-account-http.js';
+import { AuthError } from '../src/auth/auth-error.js';
+import { handleHostingAccountAdmin, hostingAccountQuery, isHostingAccountPath } from '../src/hosting/hosting-account-http.js';
 
 const code = (expected) => (error) => error.code === expected;
 function fixture(options = {}) {

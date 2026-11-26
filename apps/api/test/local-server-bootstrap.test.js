@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   createLocalServerForRuntime,
   LocalServerMigrationError,
-} from '../src/local-server-migration.js';
+} from '../src/migration/local-server-migration.js';
 
 function fixture({ jobs = [], apiActive = false, agentActive = false } = {}) {
   const events = [];

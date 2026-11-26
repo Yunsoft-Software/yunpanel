@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import express from 'express';
-import { createTenantBoundaryMiddleware } from '../src/tenant-boundary.js';
-import { createSiteResourceBoundary } from '../src/site-resource-boundary.js';
-import { mountWebsiteAnalyticsRoutes, WebsiteAnalyticsHttpError } from '../src/website-analytics-http.js';
+import { createTenantBoundaryMiddleware } from '../src/http/tenant-boundary.js';
+import { createSiteResourceBoundary } from '../src/http/site-resource-boundary.js';
+import { mountWebsiteAnalyticsRoutes, WebsiteAnalyticsHttpError } from '../src/websites/website-analytics-http.js';
 import { GoAccessManagerError } from '@yunpanel/host-runtime';
 import { INTEGRATED_TOOL_GATEWAYS } from '../../../packages/protocol/src/tool-gateway.js';
-import { requireToolGatewaySession } from '../src/tool-gateway-session-policy.js';
+import { requireToolGatewaySession } from '../src/auth/tool-gateway-session-policy.js';
 
 const serverId = '33333333-3333-4333-8333-333333333333';
 const foreignServerId = '44444444-4444-4444-8444-444444444444';

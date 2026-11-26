@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import express from 'express';
 import test from 'node:test';
-import { createMailConfigurationService, MailConfigurationError } from '../src/mail-configuration.js';
-import { MailboxRegistryError } from '../src/mailbox-registry.js';
-import { mountMailboxRoutes } from '../src/mailbox-http.js';
+import { createMailConfigurationService, MailConfigurationError } from '../src/mail/mail-configuration.js';
+import { MailboxRegistryError } from '../src/mail/mailbox-registry.js';
+import { mountMailboxRoutes } from '../src/mail/mailbox-http.js';
 
 const owner = Object.freeze({
   user: { role: 'owner' },

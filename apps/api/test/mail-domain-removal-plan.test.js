@@ -5,7 +5,7 @@ import test from 'node:test';
 import {
   createMailDomainRemovalPlanService,
   MailDomainRemovalPlanError,
-} from '../src/mail-domain-removal-plan.js';
+} from '../src/mail/mail-domain-removal-plan.js';
 
 const serverId = randomUUID();
 const webDomainId = randomUUID();

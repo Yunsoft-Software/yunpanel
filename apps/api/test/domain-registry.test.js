@@ -3,10 +3,10 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createDomainRegistry, DomainRegistryError } from '../src/domain-registry.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createDomainRegistry, DomainRegistryError } from '../src/domains/domain-registry.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
 
 test('real file-backed legacy Domain binding waits for the shared routing namespace reservation', async t => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yp-domain-bind-reservation-'));

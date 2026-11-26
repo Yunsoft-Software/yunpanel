@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createDnsZoneRecordsService, DnsZoneRecordsError, dnsZoneRecordsInternals } from '../src/dns-zone-records.js';
+import { createDnsZoneRecordsService, DnsZoneRecordsError, dnsZoneRecordsInternals } from '../src/dns/dns-zone-records.js';
 import { ownedDnsZoneOperation } from './helpers/owned-dns-zone-fixture.js';
 
 const domainId = '8bc307db-9e2d-4c3f-91ea-49e740d259a9';

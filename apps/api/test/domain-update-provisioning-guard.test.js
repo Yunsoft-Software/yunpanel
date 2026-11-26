@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createDomainUpdateHandler } from '../src/domain-http.js';
+import { createDomainUpdateHandler } from '../src/domains/domain-http.js';
 
 const NOW = Date.parse('2026-11-06T12:00:00.000Z');
 const domain = { id: '11111111-1111-4111-8111-111111111111', serverId: 'local', websiteId: 'site-1' };

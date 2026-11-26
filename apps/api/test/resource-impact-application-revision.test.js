@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resourceImpactInternals } from '../src/resource-impact.js';
+import { resourceImpactInternals } from '../src/websites/resource-impact.js';
 
 test('Application impact reference pins desired revision for destructive previews', () => {
   const value=resourceImpactInternals.applicationReference({

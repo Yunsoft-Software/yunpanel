@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { startConfiguredLocalRuntime } from '../src/configured-local-runtime.js';
+import { startConfiguredLocalRuntime } from '../src/runtime/configured-local-runtime.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const jobId = '12345678-1234-4234-8234-123456789012';

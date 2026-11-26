@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import test from 'node:test';
-import { JobRegistryError } from '../src/job-registry.js';
+import { JobRegistryError } from '../src/jobs/job-registry.js';
 import {
   MailConfigurationHttpError,
   mountMailConfigurationRoutes,
-} from '../src/mail-configuration-http.js';
+} from '../src/mail/mail-configuration-http.js';
 
 const localServerId = randomUUID();
 const remoteServerId = randomUUID();
@@ -496,7 +496,7 @@ test('Read Only cannot preview or apply managed mail mutations', async (t) => {
 });
 
 test('native durable mail request survives a lost reply, rejects changed input and stays private to its actor', async t => {
-  const { createJobRegistry } = await import('../src/job-registry.js');
+  const { createJobRegistry } = await import('../src/jobs/job-registry.js');
   const registry = createJobRegistry(); await registry.init();
   const actorId=randomUUID(),requestId=randomUUID();let currentActor=actorId,previewCount=0;
   const app=express();app.use(express.json());app.use((req,_res,next)=>{req.auth={...owner,user:{...owner.user,id:currentActor}};next();});

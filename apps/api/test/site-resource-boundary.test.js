@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createSiteResourceBoundary, needsSiteResourceJson } from '../src/site-resource-boundary.js';
+import { createSiteResourceBoundary, needsSiteResourceJson } from '../src/http/site-resource-boundary.js';
 const websites = [{id:'site-a',serverId:'server',applicationId:'app-a'},{id:'site-b',serverId:'server',applicationId:'app-b'}];
 const domains = [{id:'domain-a',websiteId:'site-a',serverId:'server',certificateId:'cert-a'},{id:'domain-b',websiteId:'site-b',serverId:'server',certificateId:'cert-b'}];
 const bindings = [{id:'binding-a',websiteId:'site-a',serverId:'server',applicationId:'app-a',databaseName:'alpha'},{id:'binding-b',websiteId:'site-b',serverId:'server',applicationId:'app-b',databaseName:'beta'}];

@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   DnsZoneDesiredStateError,
   renderDnsZoneDesiredState,
-} from '../src/dns-zone-desired-state.js';
+} from '../src/dns/dns-zone-desired-state.js';
 
 const serverId = '11111111-1111-4111-8111-111111111111';
 

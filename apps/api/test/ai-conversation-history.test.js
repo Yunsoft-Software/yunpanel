@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { conversationScope, conversationVisible, createConversationPager, AiHistoryError } from '../src/ai-conversation-history.js';
+import { conversationScope, conversationVisible, createConversationPager, AiHistoryError } from '../src/ai/ai-conversation-history.js';
 const siteA = '11111111-1111-4111-8111-111111111111';
 const siteB = '22222222-2222-4222-8222-222222222222';
 const auth = (id = 'owner-a') => ({ user: { id, role: 'owner' }, access: { mode: 'management', permissions: ['*'] }, security: { managementAllowed: true } });

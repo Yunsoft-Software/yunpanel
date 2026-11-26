@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   mountTtydSessionRoutes,
-} from '../src/ttyd-session-http.js';
-import { TtydSessionError } from '../src/ttyd-session-manager.js';
+} from '../src/terminal/ttyd-session-http.js';
+import { TtydSessionError } from '../src/terminal/ttyd-session-manager.js';
 
 const capability = 'T'.repeat(43);
 const target = Object.freeze({

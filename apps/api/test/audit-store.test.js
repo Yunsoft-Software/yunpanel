@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
-import { AuditStoreError, createAuditStore } from '../src/audit-store.js';
+import { AuditStoreError, createAuditStore } from '../src/auth/audit-store.js';
 
 function fixture(t) {
   const db = new DatabaseSync(':memory:');

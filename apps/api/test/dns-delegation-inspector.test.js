@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   createDnsDelegationInspector,
   DnsDelegationInspectorError,
-} from '../src/dns-delegation-inspector.js';
+} from '../src/dns/dns-delegation-inspector.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 

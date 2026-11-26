@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import test from 'node:test';
-import { MailboxQuotaHttpError, mountMailboxQuotaRoutes } from '../src/mailbox-quota-http.js';
-import { MailboxQuotaRegistryError } from '../src/mailbox-quota-registry.js';
+import { MailboxQuotaHttpError, mountMailboxQuotaRoutes } from '../src/mail/mailbox-quota-http.js';
+import { MailboxQuotaRegistryError } from '../src/mail/mailbox-quota-registry.js';
 
 const localServerId = randomUUID();
 const remoteServerId = randomUUID();

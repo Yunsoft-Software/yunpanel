@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { runRunningServiceControlRecoveryFromStores } from '../src/job-running-service-recovery-runtime.js';
+import { runRunningServiceControlRecoveryFromStores } from '../src/jobs/job-running-service-recovery-runtime.js';
 
 const serverId = 'server-1';
 const jobId = '12345678-1234-4234-8234-123456789012';

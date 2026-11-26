@@ -3,8 +3,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createJobRecoveryContextReader } from '../src/job-recovery-context.js';
-import { JOB_RESOURCE_TYPES } from '../src/job-resource-types.js';
+import { createJobRecoveryContextReader } from '../src/jobs/job-recovery-context.js';
+import { JOB_RESOURCE_TYPES } from '../src/jobs/job-resource-types.js';
 
 const jobId = '12345678-1234-4234-8234-123456789012';
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { jobRunningMailDkimRecoveryRuntimeInternals } from '../src/job-running-mail-dkim-recovery-runtime.js';
+import { jobRunningMailDkimRecoveryRuntimeInternals } from '../src/jobs/job-running-mail-dkim-recovery-runtime.js';
 
 test('DKIM recovery resolves the canonical production mail-DKIM state root', () => {
   const paths = jobRunningMailDkimRecoveryRuntimeInternals.resolveMailDkimRecoveryPaths({

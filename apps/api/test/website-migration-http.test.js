@@ -3,11 +3,11 @@ import express from 'express';
 import http from 'node:http';
 import { once } from 'node:events';
 import test from 'node:test';
-import { WebsiteMigrationBindError } from '../src/website-migration-bind.js';
-import { WebsiteMigrationCreateError } from '../src/website-migration-create.js';
-import { mountWebsiteMigrationRoutes } from '../src/website-migration-http.js';
-import { WebsiteMigrationPolicyError } from '../src/website-migration-policy.js';
-import { WebsiteMigrationRollbackError } from '../src/website-migration-rollback.js';
+import { WebsiteMigrationBindError } from '../src/migration/website-migration-bind.js';
+import { WebsiteMigrationCreateError } from '../src/migration/website-migration-create.js';
+import { mountWebsiteMigrationRoutes } from '../src/migration/website-migration-http.js';
+import { WebsiteMigrationPolicyError } from '../src/migration/website-migration-policy.js';
+import { WebsiteMigrationRollbackError } from '../src/migration/website-migration-rollback.js';
 
 const domainId = '0ef7e00b-1b85-4938-b726-247c94679c66';
 const websiteId = '46b95b12-600a-4f31-b269-cc9af195ee21';

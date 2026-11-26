@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWebsitePassengerEnvironmentStateProvisioningHandler } from '../src/website-passenger-environment-state-provisioning-handler.js';
+import { createWebsitePassengerEnvironmentStateProvisioningHandler } from '../src/provisioning/website-passenger-environment-state-provisioning-handler.js';
 
 const applicationId = '9d4a4727-1aba-4d35-95fe-21db67042ce9';
 const operationId = 'ff830043-9752-4640-83b4-3a1998de78a0';

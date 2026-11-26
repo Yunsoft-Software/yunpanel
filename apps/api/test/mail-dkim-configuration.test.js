@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   createMailDkimConfigurationService,
   MailDkimConfigurationError,
-} from '../src/mail-dkim-configuration.js';
+} from '../src/mail/mail-dkim-configuration.js';
 
 function pair(byte) {
   const generated = generateKeyPairSync('rsa', {

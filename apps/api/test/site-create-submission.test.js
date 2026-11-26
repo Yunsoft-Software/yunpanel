@@ -8,21 +8,21 @@ import test from 'node:test';
 import '../../web/test/site-create-submission.test.js';
 import '../../web/test/site-create-result-wiring.test.js';
 
-import { createApp } from '../src/app.js';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createAuthenticatedApi } from '../src/auth-http.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createDnsHostingRegistry } from '../src/dns-hosting-registry.js';
-import { createDockerWorkloadRegistry } from '../src/docker-workload-registry.js';
-import { createMailDomainRegistry } from '../src/mail-domain-registry.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createWebsiteProvisioningRuntime } from '../src/website-provisioning-runtime.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
+import { createApp } from '../src/http/app.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createDnsHostingRegistry } from '../src/dns/dns-hosting-registry.js';
+import { createDockerWorkloadRegistry } from '../src/docker/docker-workload-registry.js';
+import { createMailDomainRegistry } from '../src/mail/mail-domain-registry.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createWebsiteProvisioningRuntime } from '../src/provisioning/website-provisioning-runtime.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
 import {
   mountSiteCreateRoutes,
   siteCreateHttpInternals,
-} from '../src/site-create-http.js';
-import { createHostingSiteCreateService } from '../src/hosting-site-create-service.js';
+} from '../src/provisioning/site-create-http.js';
+import { createHostingSiteCreateService } from '../src/hosting/hosting-site-create-service.js';
 import {
   createSiteSubmission,
   EMPTY_SITE_SUBMISSION,
@@ -38,7 +38,7 @@ import {
   recoveryOperation,
 } from '../../web/src/workspace/provisioning-recovery.js';
 import { advanceProvisioning } from '../../web/src/workspace/provisioning-advance.js';
-import { createSiteMutationLock } from '../src/site-mutation-lock.js';
+import { createSiteMutationLock } from '../src/websites/site-mutation-lock.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

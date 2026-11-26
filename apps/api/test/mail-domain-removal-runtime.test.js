@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 
-import { createMailDomainRemovalOperationRegistry } from '../src/mail-domain-removal-operation-registry.js';
+import { createMailDomainRemovalOperationRegistry } from '../src/mail/mail-domain-removal-operation-registry.js';
 import {
   createMailDomainRemovalRuntime,
   MailDomainRemovalRuntimeError,
-} from '../src/mail-domain-removal-runtime.js';
+} from '../src/mail/mail-domain-removal-runtime.js';
 
 const operationId = '12345678-1234-4234-8234-123456789012';
 const parentOperationId = '22345678-1234-4234-8234-123456789012';

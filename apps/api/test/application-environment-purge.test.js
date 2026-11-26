@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createApplicationEnvironmentRegistry } from '../src/application-environment-registry.js';
+import { createApplicationEnvironmentRegistry } from '../src/applications/application-environment-registry.js';
 
 test('Application environment purge removes variables, credentials and metadata without requiring live Application', async () => {
   const applicationId='11111111-1111-4111-8111-111111111111';

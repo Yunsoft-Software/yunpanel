@@ -4,14 +4,14 @@ import { lstat, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } fro
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createDurableJobRegistry } from '../src/durable-job-registry.js';
-import { resolveJobRecoveryPaths } from '../src/job-recovery-runtime.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { createLocalJobExecutor } from '../src/local-job-executor.js';
-import { runRunningPhpToolRecoveryFromStores } from '../src/job-running-php-tool-recovery-runtime.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createWebsitePhpToolOperationReceiptStore } from '../src/website-php-tool-operation-receipt.js';
-import { createWordPressSelectiveTransferJournal } from '../src/wordpress-selective-transfer-journal.js';
+import { createDurableJobRegistry } from '../src/jobs/durable-job-registry.js';
+import { resolveJobRecoveryPaths } from '../src/jobs/job-recovery-runtime.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { createLocalJobExecutor } from '../src/runtime/local-job-executor.js';
+import { runRunningPhpToolRecoveryFromStores } from '../src/jobs/job-running-php-tool-recovery-runtime.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createWebsitePhpToolOperationReceiptStore } from '../src/php/website-php-tool-operation-receipt.js';
+import { createWordPressSelectiveTransferJournal } from '../src/wordpress/wordpress-selective-transfer-journal.js';
 
 const linux = { skip: process.platform !== 'linux' && 'Requires native Linux file recovery' };
 const hostname = 'selective-recovery-host';

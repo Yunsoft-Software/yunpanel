@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWebsiteProvisioningPlan } from '../src/website-provisioning-plan.js';
-import { withWebsiteIsolationSteps } from '../src/site-create-provisioning-isolation.js';
+import { createWebsiteProvisioningPlan } from '../src/provisioning/website-provisioning-plan.js';
+import { withWebsiteIsolationSteps } from '../src/provisioning/site-create-provisioning-isolation.js';
 
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
 const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';

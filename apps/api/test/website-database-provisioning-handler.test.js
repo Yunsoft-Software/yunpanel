@@ -5,7 +5,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   createWebsiteDatabaseProvisioningHandler,
   WebsiteDatabaseProvisioningError,
-} from '../src/website-database-provisioning-handler.js';
+} from '../src/provisioning/website-database-provisioning-handler.js';
 
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 const serverId = '11111111-1111-4111-8111-111111111111';

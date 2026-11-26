@@ -114,7 +114,7 @@ test.describe('WP-05 WordPress Yedek/restore, bakım ve arama motoru indeksleme 
 
     // 10. Fiziksel kanıt 5: non-reseller-capabilities envanterinde WP-05 yeteneğinin varlığını doğrula
     const capOutput = runSsh(`node -e '
-      import("/usr/lib/yunpanel/apps/api/src/non-reseller-capabilities.js").then(m => {
+      import("/usr/lib/yunpanel/apps/api/src/hosting/non-reseller-capabilities.js").then(m => {
         const c = m.getCapabilityById("WP-05");
         console.log(JSON.stringify({ id: c.id, category: c.category, status: c.status, serviceAdapters: c.serviceAdapters }));
       });

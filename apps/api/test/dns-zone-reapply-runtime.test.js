@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { createDnsZoneReapplyOperationRegistry } from '../src/dns-zone-reapply-operation-registry.js';
-import { createDnsZoneReapplyRuntime } from '../src/dns-zone-reapply-runtime.js';
+import { createDnsZoneReapplyOperationRegistry } from '../src/dns/dns-zone-reapply-operation-registry.js';
+import { createDnsZoneReapplyRuntime } from '../src/dns/dns-zone-reapply-runtime.js';
 
 const operationId = 'f77d9d70-3f77-4be9-b257-0ade06401fb7';
 const domainId = '8bc307db-9e2d-4c3f-91ea-49e740d259a9';

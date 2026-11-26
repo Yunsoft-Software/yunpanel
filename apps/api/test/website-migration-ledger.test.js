@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createWebsiteMigrationLedger, WebsiteMigrationLedgerError } from '../src/website-migration-ledger.js';
+import { createWebsiteMigrationLedger, WebsiteMigrationLedgerError } from '../src/migration/website-migration-ledger.js';
 
 const domainId = '0ef7e00b-1b85-4938-b726-247c94679c66';
 const applicationId = '340344cf-4e57-4f70-946a-3c6e919e951d';

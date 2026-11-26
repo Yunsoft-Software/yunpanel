@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createDockerWorkloadRegistry, DockerWorkloadRegistryError } from '../src/docker-workload-registry.js';
+import { createDockerWorkloadRegistry, DockerWorkloadRegistryError } from '../src/docker/docker-workload-registry.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const workloadId = '0bb78242-03a6-429f-9d17-7725c521437c';

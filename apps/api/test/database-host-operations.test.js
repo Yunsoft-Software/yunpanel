@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createLocalHostOperations } from '../src/local-host-operations.js';
+import { createLocalHostOperations } from '../src/runtime/local-host-operations.js';
 
 const calls = [];
 const databaseManager = {

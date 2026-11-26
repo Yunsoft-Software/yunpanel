@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createPanelSettingsRegistry } from '../src/panel-settings-registry.js';
-import { createPanelSettingsService } from '../src/panel-settings-service.js';
+import { createPanelSettingsRegistry } from '../src/panel/panel-settings-registry.js';
+import { createPanelSettingsService } from '../src/panel/panel-settings-service.js';
 
 test('PanelSettingsService - getSystemSettings and updateSystemSettings', async (t) => {
   const tempDir = await mkdtemp(path.join(tmpdir(), 'yunpanel-settings-test-'));

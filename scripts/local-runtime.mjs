@@ -2,12 +2,12 @@
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { API_VERSION } from '../apps/api/src/core-app.js';
+import { API_VERSION } from '../apps/api/src/http/core-app.js';
 import {
   resolveLocalMigrationBackupDirectory,
   verifyLocalMigrationBackup,
-} from '../apps/api/src/local-migration-backup.js';
-import { runLocalMigrationCommand } from '../apps/api/src/local-migration-cli.js';
+} from '../apps/api/src/migration/local-migration-backup.js';
+import { runLocalMigrationCommand } from '../apps/api/src/migration/local-migration-cli.js';
 
 const scriptPath = fileURLToPath(import.meta.url);
 const PACKAGED_SCRIPT_ROOT = '/usr/lib/yunpanel/scripts';

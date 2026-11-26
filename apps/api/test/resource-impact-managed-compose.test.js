@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { previewResourceImpact } from '../src/resource-impact.js';
+import { previewResourceImpact } from '../src/websites/resource-impact.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const websiteId = '5b504f8f-4341-4a55-a6fb-86c6eb282e61';

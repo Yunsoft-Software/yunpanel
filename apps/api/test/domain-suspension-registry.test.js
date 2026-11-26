@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createDomainRegistry, DomainRegistryError } from '../src/domain-registry.js';
+import { createDomainRegistry, DomainRegistryError } from '../src/domains/domain-registry.js';
 
 const domainId = '12345678-1234-4234-8234-123456789012';
 const operationId = '22345678-1234-4234-8234-123456789012';

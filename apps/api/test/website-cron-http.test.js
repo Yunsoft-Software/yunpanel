@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import express from 'express';
-import { mountWebsiteCronRoutes, WebsiteCronHttpError } from '../src/website-cron-http.js';
+import { mountWebsiteCronRoutes, WebsiteCronHttpError } from '../src/websites/website-cron-http.js';
 
 const websiteId = '12345678-1234-4234-8234-123456789012';
 const taskId = '22345678-1234-4234-8234-123456789012';

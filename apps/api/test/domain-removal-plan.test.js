@@ -5,7 +5,7 @@ import {
   createDomainRemovalPreview,
   DomainRemovalPlanError,
   domainRemovalPlanInternals,
-} from '../src/domain-removal-plan.js';
+} from '../src/domains/domain-removal-plan.js';
 
 const checksum = 'a'.repeat(64);
 const dnsPreviewDigest = 'b'.repeat(64);

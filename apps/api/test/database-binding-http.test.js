@@ -5,7 +5,7 @@ import test from 'node:test';
 import {
   DatabaseBindingHttpError,
   mountDatabaseBindingRoutes,
-} from '../src/database-binding-http.js';
+} from '../src/databases/database-binding-http.js';
 
 const serverId = randomUUID();
 const bindingId = randomUUID();

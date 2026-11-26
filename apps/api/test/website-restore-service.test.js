@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   WebsiteRestoreError,
   createWebsiteRestoreService,
-} from '../src/website-restore-service.js';
+} from '../src/backup/website-restore-service.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const otherServerId = 'd0bc7f95-bdbd-4375-904f-50c532fc3faa';
@@ -407,7 +407,7 @@ test('WebsiteBackupOperationRegistry persists only allowlisted restore phase and
   const { mkdtemp, rm } = await import('node:fs/promises');
   const os = await import('node:os');
   const path = await import('node:path');
-  const { createWebsiteBackupOperationRegistry } = await import('../src/website-backup-operation-registry.js');
+  const { createWebsiteBackupOperationRegistry } = await import('../src/backup/website-backup-operation-registry.js');
 
   const root = await mkdtemp(path.join(os.tmpdir(), 'yp-t900-op-registry-'));
   t.after(() => rm(root, { recursive: true, force: true }));

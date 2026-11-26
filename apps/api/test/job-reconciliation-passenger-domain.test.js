@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { jobReconciliationInternals } from '../src/job-reconciliation.js';
+import { jobReconciliationInternals } from '../src/jobs/job-reconciliation.js';
 
 const applicationId = '9d4a4727-1aba-4d35-95fe-21db67042ce9';
 const serverId = '57f8611c-0af7-4d2f-8291-2fe7dbab22fe';

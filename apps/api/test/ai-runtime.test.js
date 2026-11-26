@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createAiActionPlan, verifyAiActionExecution } from '../src/ai-action-plan.js';
-import { createAiToolRuntime } from '../src/ai-tool-runtime.js';
+import { createAiActionPlan, verifyAiActionExecution } from '../src/ai/ai-action-plan.js';
+import { createAiToolRuntime } from '../src/ai/ai-tool-runtime.js';
 
 const ownerAuth = {
   user: { id: 'owner-1', role: 'owner' },

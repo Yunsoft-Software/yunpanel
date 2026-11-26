@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createWebsiteMigrationPolicyStore } from '../src/website-migration-policy.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createWebsiteMigrationPolicyStore } from '../src/migration/website-migration-policy.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const websiteId = '46b95b12-600a-4f31-b269-cc9af195ee21';

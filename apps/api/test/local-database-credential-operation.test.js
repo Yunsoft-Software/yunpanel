@@ -4,7 +4,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   createLocalDatabaseCredentialOperation,
   LocalDatabaseCredentialOperationError,
-} from '../src/local-database-credential-operation.js';
+} from '../src/databases/local-database-credential-operation.js';
 
 const serverId = '42345678-1234-4234-8234-123456789012';
 const credentialId = '12345678-1234-4234-8234-123456789012';

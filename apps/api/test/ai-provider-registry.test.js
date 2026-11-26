@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAiProviderRegistry, AiProviderRegistryError } from '../src/ai-provider-registry.js';
+import { createAiProviderRegistry, AiProviderRegistryError } from '../src/ai/ai-provider-registry.js';
 
 const TEST_MASTER_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { jobReconciliationInternals } from '../src/job-reconciliation.js';
+import { jobReconciliationInternals } from '../src/jobs/job-reconciliation.js';
 
 function job({ expectedRevision = 4, desiredStatus = 'enabled' } = {}) {
   return {

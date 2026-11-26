@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isAgentRoute } from '../src/auth-http.js';
+import { isAgentRoute } from '../src/auth/auth-http.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const applicationId = '9d4a4727-1aba-4d35-95fe-21db67042ce9';

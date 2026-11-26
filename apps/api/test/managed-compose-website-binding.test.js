@@ -4,7 +4,7 @@ import {
   ManagedComposeWebsiteBindingError,
   normalizeManagedComposeWebsiteBinding,
   resolveManagedComposeWebsiteBinding,
-} from '../src/managed-compose-website-binding.js';
+} from '../src/docker/managed-compose-website-binding.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const otherServerId = 'c8e93a53-6b7b-41bb-a55f-eddb6fe6aa23';

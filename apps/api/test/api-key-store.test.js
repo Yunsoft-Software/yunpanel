@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { ApiKeyStoreError, createApiKeyStore } from '../src/api-key-store.js';
+import { ApiKeyStoreError, createApiKeyStore } from '../src/auth/api-key-store.js';
 
 async function fixture(t) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yp-api-keys-'));

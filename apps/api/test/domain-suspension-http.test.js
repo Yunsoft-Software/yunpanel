@@ -3,8 +3,8 @@ import test from 'node:test';
 import {
   DomainSuspensionHttpError,
   mountDomainSuspensionRoutes,
-} from '../src/domain-suspension-http.js';
-import { DomainSuspensionRuntimeError } from '../src/domain-suspension-runtime.js';
+} from '../src/domains/domain-suspension-http.js';
+import { DomainSuspensionRuntimeError } from '../src/domains/domain-suspension-runtime.js';
 
 const domainId = '12345678-1234-4234-8234-123456789012';
 const operationId = '22345678-1234-4234-8234-123456789012';

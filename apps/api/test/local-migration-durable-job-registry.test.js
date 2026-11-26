@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createJobRegistry } from '../src/job-registry.js';
-import { createMigrationJobRegistry } from '../src/local-migration-cli.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { createMigrationJobRegistry } from '../src/migration/local-migration-cli.js';
 
 async function fixture(t) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-migration-durable-'));

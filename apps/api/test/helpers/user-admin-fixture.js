@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
-import { createUserAdminStore } from '../../src/user-admin-store.js';
-import { AuthError } from '../../src/auth-error.js';
+import { createUserAdminStore } from '../../src/auth/user-admin-store.js';
+import { AuthError } from '../../src/auth/auth-error.js';
 
 // Real SQLite/FK/transactions; controlled password and session adapters.
 // These tests do NOT claim native Argon2 or HTTP/MFA-login integration.

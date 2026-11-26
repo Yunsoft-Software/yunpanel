@@ -82,7 +82,7 @@ test.describe('WP-06 WordPress güvenlik denetimi, sıkılaştırma ve zafiyet g
 
     // 5. Fiziksel kanıt 2: non-reseller-capabilities envanterinde WP-06 yeteneğinin tanımını doğrula
     const capOutput = runSsh(`node -e '
-      import("/usr/lib/yunpanel/apps/api/src/non-reseller-capabilities.js").then(m => {
+      import("/usr/lib/yunpanel/apps/api/src/hosting/non-reseller-capabilities.js").then(m => {
         const c = m.getCapabilityById("WP-06");
         console.log(JSON.stringify({ id: c.id, title: c.title, status: c.status }));
       });

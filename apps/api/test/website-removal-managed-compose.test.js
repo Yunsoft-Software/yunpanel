@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWebsiteRemovalPreview } from '../src/website-removal-plan.js';
-import { createWebsiteRemovalOperationRegistry } from '../src/website-removal-operation-registry.js';
-import { createWebsiteRemovalRuntime } from '../src/website-removal-runtime.js';
+import { createWebsiteRemovalPreview } from '../src/websites/website-removal-plan.js';
+import { createWebsiteRemovalOperationRegistry } from '../src/websites/website-removal-operation-registry.js';
+import { createWebsiteRemovalRuntime } from '../src/websites/website-removal-runtime.js';
 
 function fixture() {
   const binding = { projectId: '70b6a777-5fdf-4e64-89e8-14bf2e34953e', serviceName: 'web', targetPort: 80, protocol: 'tcp' };

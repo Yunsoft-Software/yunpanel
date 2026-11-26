@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createOperationEnvelope, OPERATIONS } from '@yunpanel/protocol';
 import { renderPhpSiteConfig } from '@yunpanel/config-templates';
-import { domainNginxSettingsForTarget } from '../src/domain-nginx-settings.js';
+import { domainNginxSettingsForTarget } from '../src/domains/domain-nginx-settings.js';
 
 const redirectRules = [
   { source: '/eski', target: 'https://yeni.example.com/', status: 301, match: 'exact' },

@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {
   createWebsiteCacheService,
   WebsiteCacheServiceError,
-} from '../src/website-cache-service.js';
-import { createWebsiteCachePolicyRegistry } from '../src/website-cache-policy-registry.js';
+} from '../src/websites/website-cache-service.js';
+import { createWebsiteCachePolicyRegistry } from '../src/websites/website-cache-policy-registry.js';
 
 const WEBSITE_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const UNIX_USER = 'yunapp-0123456789ab';

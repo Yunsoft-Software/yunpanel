@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createBackupDependencyGraph, BackupDependencyGraphError } from '../src/backup-dependency-graph.js';
-import { createBackupManifest } from '../src/backup-manifest.js';
-import { databaseBackupResources } from '../src/database-backup-resource.js';
-import { mailDataBackupResource } from '../src/mail-data-backup-resource.js';
+import { createBackupDependencyGraph, BackupDependencyGraphError } from '../src/backup/backup-dependency-graph.js';
+import { createBackupManifest } from '../src/backup/backup-manifest.js';
+import { databaseBackupResources } from '../src/databases/database-backup-resource.js';
+import { mailDataBackupResource } from '../src/mail/mail-data-backup-resource.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const websiteId = '2c387b02-8747-458a-b509-8f531d4d149e';

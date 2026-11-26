@@ -4,7 +4,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   JobRunningMailDkimRecoveryError,
   recoverRunningMailDkim,
-} from '../src/job-running-mail-dkim-recovery.js';
+} from '../src/jobs/job-running-mail-dkim-recovery.js';
 
 const serverId = 'local-server';
 const jobId = 'mail-dkim-job-001';

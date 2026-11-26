@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import test from 'node:test';
-import { JobRegistryError } from '../src/job-registry.js';
-import { MailSrsHttpError, mountMailSrsRoutes } from '../src/mail-srs-http.js';
+import { JobRegistryError } from '../src/jobs/job-registry.js';
+import { MailSrsHttpError, mountMailSrsRoutes } from '../src/mail/mail-srs-http.js';
 
 const localServerId = randomUUID();
 const owner = Object.freeze({

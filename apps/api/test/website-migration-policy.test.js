@@ -6,7 +6,7 @@ import test from 'node:test';
 import {
   createWebsiteMigrationPolicyStore,
   WebsiteMigrationPolicyError,
-} from '../src/website-migration-policy.js';
+} from '../src/migration/website-migration-policy.js';
 
 const digest = 'a'.repeat(64);
 const otherDigest = 'b'.repeat(64);

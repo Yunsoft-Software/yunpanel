@@ -4,7 +4,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   DatabaseHttpError,
   mountDatabaseRoutes,
-} from '../src/database-http.js';
+} from '../src/databases/database-http.js';
 
 const serverId = '12345678-1234-4234-8234-123456789012';
 const databaseName = 'app_main';

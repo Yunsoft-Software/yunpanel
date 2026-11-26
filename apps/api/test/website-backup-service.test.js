@@ -4,22 +4,22 @@ import {
   WebsiteBackupError,
   createWebsiteBackupService,
   isWebsiteBackupError,
-} from '../src/website-backup-service.js';
+} from '../src/backup/website-backup-service.js';
 import {
   createDisasterRecoveryScope,
   normalizeDisasterRecoveryScope,
   maskDisasterRecoverySecrets,
   DISASTER_RECOVERY_CATEGORIES,
-} from '../src/backup-manifest.js';
+} from '../src/backup/backup-manifest.js';
 import {
   verifyDisasterRecoveryRestore,
   BackupPlanError,
-} from '../src/backup-plan.js';
-import { createBackupResourceProvider } from '../src/backup-resource-provider.js';
+} from '../src/backup/backup-plan.js';
+import { createBackupResourceProvider } from '../src/backup/backup-resource-provider.js';
 import {
   sanitizeDisasterRecoveryRestoreResult,
   DatabaseRestoreJobResultError,
-} from '../src/database-restore-job-result.js';
+} from '../src/databases/database-restore-job-result.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const otherServerId = 'd0bc7f95-bdbd-4375-904f-50c532fc3faa';

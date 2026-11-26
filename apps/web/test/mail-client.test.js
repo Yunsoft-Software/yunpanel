@@ -9,16 +9,16 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium, expect } from '@playwright/test';
 import { createServer as createViteServer } from 'vite';
-import { createAuthenticatedApi } from '../../api/src/auth-http.js';
-import { createAuthStore } from '../../api/src/auth-store.js';
-import { createDomainRegistry } from '../../api/src/domain-registry.js';
-import { createJobRegistry } from '../../api/src/job-registry.js';
-import { createMailDomainRegistry } from '../../api/src/mail-domain-registry.js';
-import { createMailboxRegistry } from '../../api/src/mailbox-registry.js';
-import { createApp } from '../../api/src/management-app.js';
-import { createOwnerMfaPolicy } from '../../api/src/owner-mfa-policy.js';
-import { createServerRegistry } from '../../api/src/server-registry.js';
-import { createWebsiteRegistry } from '../../api/src/website-registry.js';
+import { createAuthenticatedApi } from '../../api/src/auth/auth-http.js';
+import { createAuthStore } from '../../api/src/auth/auth-store.js';
+import { createDomainRegistry } from '../../api/src/domains/domain-registry.js';
+import { createJobRegistry } from '../../api/src/jobs/job-registry.js';
+import { createMailDomainRegistry } from '../../api/src/mail/mail-domain-registry.js';
+import { createMailboxRegistry } from '../../api/src/mail/mailbox-registry.js';
+import { createApp } from '../../api/src/http/management-app.js';
+import { createOwnerMfaPolicy } from '../../api/src/auth/owner-mfa-policy.js';
+import { createServerRegistry } from '../../api/src/runtime/server-registry.js';
+import { createWebsiteRegistry } from '../../api/src/websites/website-registry.js';
 import { waitForJob } from '../src/api.js';
 import {
   applyMailConfiguration,

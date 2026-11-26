@@ -4,7 +4,7 @@ import {
   mountWebsiteProvisioningRoutes,
   WebsiteProvisioningHttpError,
   websiteProvisioningHttpInternals,
-} from '../src/website-provisioning-http.js';
+} from '../src/provisioning/website-provisioning-http.js';
 
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';

@@ -10,11 +10,11 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium, expect } from '@playwright/test';
 import { createCrowdsecManager } from '@yunpanel/host-runtime';
-import { createAuthenticatedApi } from '../../api/src/auth-http.js';
-import { createAuthStore } from '../../api/src/auth-store.js';
-import { createApp } from '../../api/src/management-app.js';
-import { createFirewallService } from '../../api/src/firewall-service.js';
-import { createServerRegistry } from '../../api/src/server-registry.js';
+import { createAuthenticatedApi } from '../../api/src/auth/auth-http.js';
+import { createAuthStore } from '../../api/src/auth/auth-store.js';
+import { createApp } from '../../api/src/http/management-app.js';
+import { createFirewallService } from '../../api/src/runtime/firewall-service.js';
+import { createServerRegistry } from '../../api/src/runtime/server-registry.js';
 import { createPanelServer } from '../server.js';
 import { isFirewallStatusVerified } from '../src/workspace/firewall-model.js';
 

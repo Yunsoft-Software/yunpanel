@@ -3,9 +3,9 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { websiteProvisioningRetirementInternals as policy } from '../src/website-provisioning-retirement-provider.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { websiteProvisioningRetirementInternals as policy } from '../src/provisioning/website-provisioning-retirement-provider.js';
 
 // Pure policy inputs. They do not stand in for a running host or claim that a
 // provisioning/removal service has executed. Native25 supplies that acceptance.

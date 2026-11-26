@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createDockerWorkloadRegistry } from '../src/docker-workload-registry.js';
-import { createMailDomainRegistry } from '../src/mail-domain-registry.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createSite, previewSiteCreate } from '../src/site-create-base.js';
-import { siteCreateProvisioningPlan } from '../src/site-create-provisioning.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createDockerWorkloadRegistry } from '../src/docker/docker-workload-registry.js';
+import { createMailDomainRegistry } from '../src/mail/mail-domain-registry.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createSite, previewSiteCreate } from '../src/provisioning/site-create-base.js';
+import { siteCreateProvisioningPlan } from '../src/provisioning/site-create-provisioning.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
 
 async function fixture() {
   const registry = createServerRegistry();

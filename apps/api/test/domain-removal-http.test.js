@@ -180,7 +180,7 @@ express.json = () => (req, res, next) => next();
 
 import {
   mountDomainRemovalRoutes,
-} from '../src/domain-removal-http.js';
+} from '../src/domains/domain-removal-http.js';
 
 function createTestApp(runtime) {
   const app = express();

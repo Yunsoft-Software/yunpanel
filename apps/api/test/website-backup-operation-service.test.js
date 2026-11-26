@@ -1,17 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createJobRegistry } from '../src/job-registry.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { websiteRestoreTransactionId } from '../src/website-restore-service.js';
+import { websiteRestoreTransactionId } from '../src/backup/website-restore-service.js';
 import {
   createWebsiteBackupOperationRegistry,
   WebsiteBackupOperationRegistryError,
   websiteBackupOperationPublicView,
-} from '../src/website-backup-operation-registry.js';
+} from '../src/backup/website-backup-operation-registry.js';
 import {
   createWebsiteBackupOperationService,
   WebsiteBackupOperationServiceError,
-} from '../src/website-backup-operation-service.js';
+} from '../src/backup/website-backup-operation-service.js';
 
 const websiteId = '11111111-1111-4111-8111-111111111111';
 const serverId = '22222222-2222-4222-8222-222222222222';

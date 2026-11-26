@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { createJobRegistry } from '../src/job-registry.js';
-import { createDurableJobRegistry } from '../src/durable-job-registry.js';
-import { createLocalJobExecutor } from '../src/local-job-executor.js';
-import { createSystemWatchdogService } from '../src/system-watchdog-service.js';
-import { reconcileTerminalRecovery } from '../src/job-recovery-command.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { createDurableJobRegistry } from '../src/jobs/durable-job-registry.js';
+import { createLocalJobExecutor } from '../src/runtime/local-job-executor.js';
+import { createSystemWatchdogService } from '../src/runtime/system-watchdog-service.js';
+import { reconcileTerminalRecovery } from '../src/jobs/job-recovery-command.js';
 import { OPERATIONS } from '@yunpanel/protocol';
 
 test('watchdog keeps real durable work running past five minutes and the executor saves its verified success', async t => {

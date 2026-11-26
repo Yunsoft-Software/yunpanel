@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createJobRegistry, JobRegistryError } from '../src/job-registry.js';
+import { createJobRegistry, JobRegistryError } from '../src/jobs/job-registry.js';
 
 const MAIL_DOMAIN_ID = '11111111-1111-4111-8111-111111111111';
 const PREVIEW_DIGEST = 'a'.repeat(64);

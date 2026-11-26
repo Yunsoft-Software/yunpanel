@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createSiteMutationLock } from '../src/site-mutation-lock.js';
+import { createSiteMutationLock } from '../src/websites/site-mutation-lock.js';
 
 const applicationId = '22222222-2222-4222-8222-222222222222';
 const websiteId = '33333333-3333-4333-8333-333333333333';

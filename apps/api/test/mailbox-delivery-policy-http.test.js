@@ -6,14 +6,14 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createAuthenticatedApi } from '../src/auth-http.js';
-import { createAuthStore } from '../src/auth-store.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createMailDomainRegistry } from '../src/mail-domain-registry.js';
-import { createMailboxRegistry } from '../src/mailbox-registry.js';
-import { createApp } from '../src/management-app.js';
-import { createOwnerMfaPolicy } from '../src/owner-mfa-policy.js';
-import { createServerRegistry } from '../src/server-registry.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
+import { createAuthStore } from '../src/auth/auth-store.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createMailDomainRegistry } from '../src/mail/mail-domain-registry.js';
+import { createMailboxRegistry } from '../src/mail/mailbox-registry.js';
+import { createApp } from '../src/http/management-app.js';
+import { createOwnerMfaPolicy } from '../src/auth/owner-mfa-policy.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
 
 test('Owner delivery policy routes enforce auth, CSRF, revision and local mailbox scope', async (t) => {
   const directory = await mkdtemp(path.join(tmpdir(), 'yunpanel-mail-delivery-policy-http-'));

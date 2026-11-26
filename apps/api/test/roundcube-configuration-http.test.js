@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import test from 'node:test';
-import { JobRegistryError } from '../src/job-registry.js';
+import { JobRegistryError } from '../src/jobs/job-registry.js';
 import {
   RoundcubeConfigurationHttpError,
   mountRoundcubeConfigurationRoutes,
-} from '../src/roundcube-configuration-http.js';
+} from '../src/mail/roundcube-configuration-http.js';
 
 const localServerId = randomUUID();
 const previewSha256 = 'a'.repeat(64);

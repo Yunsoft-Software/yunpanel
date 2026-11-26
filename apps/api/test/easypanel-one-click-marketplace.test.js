@@ -8,13 +8,13 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { createDockerComposeObserver } from '@yunpanel/host-runtime';
-import { createDockerComposeProjectRegistry } from '../src/docker-compose-project-registry.js';
-import { createDockerComposeEnvironmentRegistry } from '../src/docker-compose-environment-registry.js';
-import { createDockerRegistryCredentialRegistry } from '../src/docker-registry-credential-registry.js';
-import { createDockerComposeOperationsService } from '../src/docker-compose-operations.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { mountDockerComposeRoutes } from '../src/docker-compose-http.js';
-import { createSiteMutationLock } from '../src/site-mutation-lock.js';
+import { createDockerComposeProjectRegistry } from '../src/docker/docker-compose-project-registry.js';
+import { createDockerComposeEnvironmentRegistry } from '../src/docker/docker-compose-environment-registry.js';
+import { createDockerRegistryCredentialRegistry } from '../src/docker/docker-registry-credential-registry.js';
+import { createDockerComposeOperationsService } from '../src/docker/docker-compose-operations.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { mountDockerComposeRoutes } from '../src/docker/docker-compose-http.js';
+import { createSiteMutationLock } from '../src/websites/site-mutation-lock.js';
 import {
   DockerPleskCatalogError,
   EASYPANEL_ONE_CLICK_APPS,
@@ -23,7 +23,7 @@ import {
   prepareOneClickAppProvision,
   provisionOneClickApp,
   resolveDockerProxyRule,
-} from '../src/docker-plesk-catalog.js';
+} from '../src/docker/docker-plesk-catalog.js';
 
 const SERVER_ID = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

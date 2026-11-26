@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createAiToolRuntime } from '../src/ai-tool-runtime.js';
+import { createAiToolRuntime } from '../src/ai/ai-tool-runtime.js';
 import { OPERATIONS } from '@yunpanel/protocol';
 
 function makeFixture() {

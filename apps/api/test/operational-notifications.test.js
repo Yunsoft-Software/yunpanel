@@ -6,11 +6,11 @@ import {
   createOperationalNotificationService,
   OperationalNotificationError,
   operationalNotificationInternals,
-} from '../src/operational-notification-service.js';
+} from '../src/panel/operational-notification-service.js';
 import {
   mountOperationalNotificationRoutes,
   OperationalNotificationHttpError,
-} from '../src/operational-notification-http.js';
+} from '../src/panel/operational-notification-http.js';
 import {
   NOTIFICATION_EVENT_TYPES,
   NOTIFICATION_SEVERITY,
@@ -18,8 +18,8 @@ import {
   NOTIFICATION_CHANNELS,
   DELIVERY_STATUS,
   DEFAULT_NOTIFICATION_PREFERENCES,
-} from '../src/operational-notification-types.js';
-import { maskSecrets, isSensitiveKey } from '../src/secret-masker.js';
+} from '../src/panel/operational-notification-types.js';
+import { maskSecrets, isSensitiveKey } from '../src/auth/secret-masker.js';
 
 // ============================================================================
 // Test Doubles and Fixtures

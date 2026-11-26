@@ -4,7 +4,7 @@ import {
   DatabaseBackupResourceError,
   databaseBackupIdentity,
   databaseBackupResources,
-} from '../src/database-backup-resource.js';
+} from '../src/databases/database-backup-resource.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const inventoryJobId = '84e0ccf3-13b7-4abe-b8aa-68fc22d6f2c8';

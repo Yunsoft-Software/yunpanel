@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   createPleskImporter,
   PleskImporterError,
-} from '../src/plesk-importer.js';
+} from '../src/migration/plesk-importer.js';
 
 const localServerId = '99bc760a-d508-4ae6-92be-efdedee9658d';
 

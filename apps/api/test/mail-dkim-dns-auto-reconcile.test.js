@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import test from 'node:test';
-import { mountMailDkimRoutes } from '../src/mail-dkim-http.js';
-import { MailDkimHttpError } from '../src/mail-dkim-http.js';
-import { MailDkimRegistryError } from '../src/mail-dkim-registry.js';
-import { JobRegistryError } from '../src/job-registry.js';
+import { mountMailDkimRoutes } from '../src/mail/mail-dkim-http.js';
+import { MailDkimHttpError } from '../src/mail/mail-dkim-http.js';
+import { MailDkimRegistryError } from '../src/mail/mail-dkim-registry.js';
+import { JobRegistryError } from '../src/jobs/job-registry.js';
 
 const serverId = randomUUID();
 const webDomain = { id: randomUUID(), serverId, primaryDomain: 'example.com' };

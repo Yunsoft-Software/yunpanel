@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MANAGED_SERVICE_IDS, OPERATIONS } from '@yunpanel/protocol';
-import { managedServiceHttpInternals } from '../src/managed-service-http.js';
+import { managedServiceHttpInternals } from '../src/runtime/managed-service-http.js';
 
 const serverId = 'server-1';
 const inspectResult = MANAGED_SERVICE_IDS.map((id) => ({

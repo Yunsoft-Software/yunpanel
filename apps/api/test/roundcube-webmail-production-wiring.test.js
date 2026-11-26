@@ -11,7 +11,7 @@ async function text(name) {
 test('production bootstrap persists and shares one Roundcube Domain mapping registry', async () => {
   const [indexSource, appSource, postinstSource] = await Promise.all([
     text('index.js'),
-    text('management-app.js'),
+    text('http/management-app.js'),
     readFile(new URL('../../../packaging/debian/postinst', import.meta.url), 'utf8'),
   ]);
 
@@ -34,9 +34,9 @@ test('production bootstrap persists and shares one Roundcube Domain mapping regi
 
 test('PowerDNS mail desired state receives only live shared webmail readiness', async () => {
   const [appSource, powerDnsSource, mailIntentSource] = await Promise.all([
-    text('management-app.js'),
-    text('powerdns-http.js'),
-    text('dns-zone-mail-intent.js'),
+    text('http/management-app.js'),
+    text('dns/powerdns-http.js'),
+    text('dns/dns-zone-mail-intent.js'),
   ]);
 
   assert.match(appSource, /mountPowerDnsRoutes\(app,\s*\{[\s\S]*?roundcubeWebmailEndpointResolver,[\s\S]*?\}\)/);
@@ -51,9 +51,9 @@ test('PowerDNS mail desired state receives only live shared webmail readiness', 
 test('Domain removal uses the same mapping inventory and durable mapping lifecycle', async () => {
   const [indexSource, productionSource, runtimeSource, operationSource] = await Promise.all([
     text('index.js'),
-    text('domain-removal-production-runtime.js'),
-    text('domain-removal-runtime.js'),
-    text('domain-removal-operation-registry.js'),
+    text('domains/domain-removal-production-runtime.js'),
+    text('domains/domain-removal-runtime.js'),
+    text('domains/domain-removal-operation-registry.js'),
   ]);
 
   assert.match(indexSource, /createMailDomainRemovalProductionRuntime\(\{[\s\S]*?roundcubeDomainMappingRegistry,[\s\S]*?roundcubeDomainMappingService,[\s\S]*?\}\)/);
@@ -72,8 +72,8 @@ test('Domain removal uses the same mapping inventory and durable mapping lifecyc
 test('Mail Domain configuration, impact and removal runtime wire shared Roundcube mapping registry', async () => {
   const [indexSource, appSource, mailRemovalSource] = await Promise.all([
     text('index.js'),
-    text('management-app.js'),
-    text('mail-domain-removal-production-runtime.js'),
+    text('http/management-app.js'),
+    text('mail/mail-domain-removal-production-runtime.js'),
   ]);
 
   assert.match(indexSource, /createMailConfigurationService\(\{[\s\S]*?roundcubeDomainMappingRegistry,[\s\S]*?\}\)/);

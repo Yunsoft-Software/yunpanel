@@ -3,10 +3,10 @@ import test from 'node:test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createLiveSessionRegistry } from '../src/live-session-registry.js';
-import { createWebsiteRemovalOperationRegistry } from '../src/website-removal-operation-registry.js';
-import { createWebsiteRemovalRuntime } from '../src/website-removal-runtime.js';
-import { mountWebsiteRemovalRoutes } from '../src/website-removal-http.js';
+import { createLiveSessionRegistry } from '../src/auth/live-session-registry.js';
+import { createWebsiteRemovalOperationRegistry } from '../src/websites/website-removal-operation-registry.js';
+import { createWebsiteRemovalRuntime } from '../src/websites/website-removal-runtime.js';
+import { mountWebsiteRemovalRoutes } from '../src/websites/website-removal-http.js';
 import { removalFixture, removalPreview, removalStart, removalContinue, deferred } from '../test-support/website-removal-fixture.js';
 
 const code = (expected) => (error) => error.code === expected;

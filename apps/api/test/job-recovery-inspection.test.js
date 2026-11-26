@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { inspectDurableJobRecovery, JobRecoveryInspectionError } from '../src/job-recovery-inspection.js';
+import { inspectDurableJobRecovery, JobRecoveryInspectionError } from '../src/jobs/job-recovery-inspection.js';
 
 function createRegistry({
   recovery = null,

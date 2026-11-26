@@ -23,7 +23,7 @@ import {
   domainRemovalOperationPublicView,
   domainRemovalOperationRegistryInternals,
   DomainRemovalOperationRegistryError,
-} from '../src/domain-removal-operation-registry.js';
+} from '../src/domains/domain-removal-operation-registry.js';
 
 const checksum = 'a'.repeat(64);
 const impactDigest = 'b'.repeat(64);

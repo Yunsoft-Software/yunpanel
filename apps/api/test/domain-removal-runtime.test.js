@@ -6,12 +6,12 @@ import path from 'node:path';
 import test from 'node:test';
 import { createNginxManager } from '@yunpanel/host-runtime';
 
-import { createDomainRemovalOperationRegistry } from '../src/domain-removal-operation-registry.js';
+import { createDomainRemovalOperationRegistry } from '../src/domains/domain-removal-operation-registry.js';
 import {
   createDomainRemovalRuntime,
   domainRemovalRuntimeInternals,
   DomainRemovalRuntimeError,
-} from '../src/domain-removal-runtime.js';
+} from '../src/domains/domain-removal-runtime.js';
 
 const checksum = 'a'.repeat(64);
 const impactDigest = 'b'.repeat(64);
@@ -2747,7 +2747,7 @@ test('routing step suspends an unpublished draft or failed Domain directly throu
     suspensionOperationId: null,
     lastError,
   };
-  const { domainRemovalPlanInternals } = await import('../src/domain-removal-plan.js');
+  const { domainRemovalPlanInternals } = await import('../src/domains/domain-removal-plan.js');
   const draftChecksum = domainRemovalPlanInternals.draftDomainChecksum(draftRecord);
   const base = leafRemovalPreview();
   const preview = {

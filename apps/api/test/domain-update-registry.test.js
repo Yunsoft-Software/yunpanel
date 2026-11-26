@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createDomainRegistry, DomainRegistryError, domainRegistryInternals } from '../src/domain-registry.js';
+import { createDomainRegistry, DomainRegistryError, domainRegistryInternals } from '../src/domains/domain-registry.js';
 
 const input = (primaryDomain = 'old.example.com', overrides = {}) => ({
   serverId: 'local', primaryDomain, aliases: ['www.old.example.com'], targetType: 'proxy',

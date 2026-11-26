@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   createMailDeleteImpactService,
   MailDeleteImpactError,
-} from '../src/mail-delete-impact.js';
+} from '../src/mail/mail-delete-impact.js';
 
 const serverId = randomUUID();
 const remoteServerId = randomUUID();

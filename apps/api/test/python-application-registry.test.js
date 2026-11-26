@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
-import { createApplicationRegistry, ApplicationRegistryError } from '../src/application-registry.js';
-import { resolveWebsiteDomainTarget } from '../src/website-domain-target.js';
+import { createApplicationRegistry, ApplicationRegistryError } from '../src/applications/application-registry.js';
+import { resolveWebsiteDomainTarget } from '../src/websites/website-domain-target.js';
 
 test('python application stores normalized runtime configuration and release lifecycle', async () => {
   let clock = Date.parse('2026-09-20T00:00:00.000Z');

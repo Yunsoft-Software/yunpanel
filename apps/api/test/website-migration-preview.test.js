@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { previewWebsiteMigration, WebsiteMigrationPreviewError } from '../src/website-migration-preview.js';
+import { previewWebsiteMigration, WebsiteMigrationPreviewError } from '../src/migration/website-migration-preview.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const staticAppId = '5a5ea77f-2d7d-43f7-a455-1ed9e5cb41be';

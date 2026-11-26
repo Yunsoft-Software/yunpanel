@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { advanceWebsiteRemovalCronCleanup, WebsiteRemovalCronCleanupError } from '../src/website-removal-cron-cleanup.js';
+import { advanceWebsiteRemovalCronCleanup, WebsiteRemovalCronCleanupError } from '../src/websites/website-removal-cron-cleanup.js';
 import { appId, jobFor, serverId, siteId, task, taskId, otherId } from './fixtures/cron-removal-fixture.js';
 
 function removalOperation() {

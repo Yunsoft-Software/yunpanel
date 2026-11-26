@@ -6,13 +6,13 @@ import path from 'node:path';
 import test from 'node:test';
 import { pythonApplicationUser, pythonServiceName } from '@yunpanel/config-templates';
 import { AGENT_PROTOCOL_VERSION, OPERATIONS, validateOperationEnvelope } from '@yunpanel/protocol';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createWebsiteProvisioningRuntime } from '../src/website-provisioning-runtime.js';
-import { createWebsitePythonApplicationReleaseProvisioningHandler } from '../src/website-python-application-release-provisioning-handler.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
-import { createWebsiteRemovalCleanupAdapters } from '../src/website-removal-cleanup-adapters.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createWebsiteProvisioningRuntime } from '../src/provisioning/website-provisioning-runtime.js';
+import { createWebsitePythonApplicationReleaseProvisioningHandler } from '../src/provisioning/website-python-application-release-provisioning-handler.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
+import { createWebsiteRemovalCleanupAdapters } from '../src/websites/website-removal-cleanup-adapters.js';
 
 async function createRealRegistries(t, prefix) {
   const base = await mkdtemp(path.join(os.tmpdir(), prefix));

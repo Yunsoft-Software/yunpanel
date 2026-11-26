@@ -10,12 +10,12 @@ import { createDockerComposeObserver } from '@yunpanel/host-runtime';
 import {
   createDockerComposeProjectRegistry,
   DockerComposeProjectRegistryError,
-} from '../src/docker-compose-project-registry.js';
-import { createDockerComposeEnvironmentRegistry } from '../src/docker-compose-environment-registry.js';
-import { createDockerRegistryCredentialRegistry } from '../src/docker-registry-credential-registry.js';
-import { createDockerComposeOperationsService } from '../src/docker-compose-operations.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { mountDockerComposeRoutes } from '../src/docker-compose-http.js';
+} from '../src/docker/docker-compose-project-registry.js';
+import { createDockerComposeEnvironmentRegistry } from '../src/docker/docker-compose-environment-registry.js';
+import { createDockerRegistryCredentialRegistry } from '../src/docker/docker-registry-credential-registry.js';
+import { createDockerComposeOperationsService } from '../src/docker/docker-compose-operations.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { mountDockerComposeRoutes } from '../src/docker/docker-compose-http.js';
 import {
   DockerPleskCatalogError,
   generateComposeFromCatalogInput,
@@ -24,7 +24,7 @@ import {
   resolveDockerProxyRule,
   searchDockerCatalog,
   searchDockerCatalogLive,
-} from '../src/docker-plesk-catalog.js';
+} from '../src/docker/docker-plesk-catalog.js';
 
 const SERVER_ID = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const PROJECT_ID = '0bb78242-03a6-429f-9d17-7725c521437c';

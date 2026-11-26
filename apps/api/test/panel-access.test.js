@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { describePanelAccess, readOnlyPermission, requireReadOnlyRequest, READ_ONLY_PERMISSIONS } from '../src/panel-access.js';
+import { describePanelAccess, readOnlyPermission, requireReadOnlyRequest, READ_ONLY_PERMISSIONS } from '../src/panel/panel-access.js';
 
 const reader = { id: 's1', user: { id: 'reader', role: 'read_only' }, csrfToken: 'csrf', security: { ownerMfaRequired: false, enrollmentRequired: false, managementAllowed: false } };
 const owner = { ...reader, user: { id: 'owner', role: 'owner' }, security: { ownerMfaRequired: true, enrollmentRequired: false, managementAllowed: true } };

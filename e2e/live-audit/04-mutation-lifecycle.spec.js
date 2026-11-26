@@ -103,7 +103,7 @@ test('@mutation 06 DB backend binds only the newly created schema to the owned W
 });
 test('@mutation 07 DB credential create/apply creates real grants and updates the same site screen',async({liveApi,page})=>{
  test.setTimeout(120000);const m=owned();expect(m.fixture.binding?.id).toBeTruthy();
- const {databaseCredentialRegistryInternals}=await import('../../apps/api/src/database-credential-registry.js');
+ const {databaseCredentialRegistryInternals}=await import('../../apps/api/src/databases/database-credential-registry.js');
  const username=databaseCredentialRegistryInternals.usernameFor(m.fixture.binding.id);
  let credential;if(m.fixture.credential?.id){credential=check(await apiCall(liveApi.api,liveApi.csrf,'GET','/api/panel/servers/'+m.serverId+'/database-bindings/'+m.fixture.binding.id+'/credential'),'credential.existing');}else credential=check(await apiCall(liveApi.api,liveApi.csrf,'POST','/api/panel/servers/'+m.serverId+'/database-bindings/'+m.fixture.binding.id+'/credential',{privileges:['SELECT','INSERT','UPDATE','DELETE','CREATE','ALTER','INDEX','DROP'],confirmation:'create-database-credential:'+m.fixture.binding.id+':'+username}),'credential.create',[201]);
  const current=manifest();current.fixture.credential=credential;saveManifest(current);

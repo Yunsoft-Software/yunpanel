@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mountDatabaseRoutes } from '../src/database-http.js';
+import { mountDatabaseRoutes } from '../src/databases/database-http.js';
 
 const serverId = '12345678-1234-4234-8234-123456789012';
 const websiteId = '22345678-1234-4234-8234-123456789012';

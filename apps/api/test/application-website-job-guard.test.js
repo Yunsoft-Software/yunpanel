@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { assertApplicationWebsiteIdle } from '../src/application-website-job-guard.js';
+import { assertApplicationWebsiteIdle } from '../src/applications/application-website-job-guard.js';
 
 test('both backup and WordPress jobs block linked Application mutations, with sibling Website isolation', async () => {
   for (const operation of [OPERATIONS.WEBSITE_BACKUP_ACTION, OPERATIONS.WEBSITE_PHP_ACTION]) {

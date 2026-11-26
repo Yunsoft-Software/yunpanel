@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { aiHttpInternals, mountAiRoutes } from '../src/ai-http.js';
+import { aiHttpInternals, mountAiRoutes } from '../src/ai/ai-http.js';
 
 test('AI HTTP policy bodies reject implicit or malformed revision/confirmation state', () => {
   assert.deepEqual(

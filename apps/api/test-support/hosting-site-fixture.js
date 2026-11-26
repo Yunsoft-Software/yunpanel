@@ -1,6 +1,6 @@
 import { hostingAuthFixture } from './hosting-auth-fixture.js';
-import { createHostingAccountStore } from '../src/hosting-account-store.js';
-import { hostingWebsiteDigest } from '../src/hosting-site-allocation-store.js';
+import { createHostingAccountStore } from '../src/hosting/hosting-account-store.js';
+import { hostingWebsiteDigest } from '../src/hosting/hosting-site-allocation-store.js';
 
 export const uuid = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 export function website(n = 1, changes = {}) {

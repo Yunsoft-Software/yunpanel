@@ -7,7 +7,7 @@ import {
   createDnsZoneRetirementOperationRegistry,
   dnsZoneRetirementOperationPublicView,
   DnsZoneRetirementOperationRegistryError,
-} from '../src/dns-zone-retirement-operation-registry.js';
+} from '../src/dns/dns-zone-retirement-operation-registry.js';
 import { powerDnsZoneManagerInternals } from '@yunpanel/host-runtime/powerdns-zone-manager';
 
 const operationId = '12345678-1234-4234-8234-123456789012';

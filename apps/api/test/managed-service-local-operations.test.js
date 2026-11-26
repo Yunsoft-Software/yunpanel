@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createLocalHostOperations, LOCAL_HOST_OPERATIONS } from '../src/local-host-operations.js';
+import { createLocalHostOperations, LOCAL_HOST_OPERATIONS } from '../src/runtime/local-host-operations.js';
 
 test('local host operations dispatch managed service inspect install and control', async () => {
   const calls = [];

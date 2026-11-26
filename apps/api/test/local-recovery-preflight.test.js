@@ -7,8 +7,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { localMigrationBackupInternals } from '../src/local-migration-backup.js';
-import { preflightLocalRecoveryBackup } from '../src/local-recovery-preflight.js';
+import { localMigrationBackupInternals } from '../src/migration/local-migration-backup.js';
+import { preflightLocalRecoveryBackup } from '../src/migration/local-recovery-preflight.js';
 
 const execFileAsync = promisify(execFile);
 const sourceServerId = '4f286f93-c2bc-43b6-9e4c-850ed95fbe4a';

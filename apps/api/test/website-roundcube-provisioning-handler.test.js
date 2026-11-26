@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   createWebsiteRoundcubeProvisioningHandler,
   WebsiteRoundcubeProvisioningError,
-} from '../src/website-roundcube-provisioning-handler.js';
+} from '../src/provisioning/website-roundcube-provisioning-handler.js';
 
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';

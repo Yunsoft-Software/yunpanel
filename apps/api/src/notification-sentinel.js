@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { hostname as readHostname } from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { createAuthMailer } from './auth-mailer.js';
+import { createAuthMailer } from './auth/auth-mailer.js';
 
 const FAILURES_BEFORE_ALERT = 2;
 const PROBE_TIMEOUT_MS = 10_000;

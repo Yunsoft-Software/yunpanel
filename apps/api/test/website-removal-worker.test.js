@@ -3,9 +3,9 @@ import test from 'node:test';
 import { mkdtemp, readFile, rm, writeFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createWebsiteRemovalOperationRegistry } from '../src/website-removal-operation-registry.js';
-import { createWebsiteRemovalRuntime } from '../src/website-removal-runtime.js';
-import { createWebsiteRemovalWorker } from '../src/website-removal-worker.js';
+import { createWebsiteRemovalOperationRegistry } from '../src/websites/website-removal-operation-registry.js';
+import { createWebsiteRemovalRuntime } from '../src/websites/website-removal-runtime.js';
+import { createWebsiteRemovalWorker } from '../src/websites/website-removal-worker.js';
 import { removalFixture, removalStart, deferred } from '../test-support/website-removal-fixture.js';
 
 const actor = { userId:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',sessionId:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',role:'owner' };

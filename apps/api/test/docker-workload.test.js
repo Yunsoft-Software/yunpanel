@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import express from 'express';
-import { mountDockerWorkloadRoutes } from '../src/docker-workload-http.js';
-import { createDockerWorkloadRegistry, DockerWorkloadRegistryError } from '../src/docker-workload-registry.js';
+import { mountDockerWorkloadRoutes } from '../src/docker/docker-workload-http.js';
+import { createDockerWorkloadRegistry, DockerWorkloadRegistryError } from '../src/docker/docker-workload-registry.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 

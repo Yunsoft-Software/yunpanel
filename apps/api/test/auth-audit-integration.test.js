@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import test from 'node:test';
-import { createAuthStore } from '../src/auth-store.js';
+import { createAuthStore } from '../src/auth/auth-store.js';
 
 const ownerPassword = randomBytes(32).toString('base64url');
 const userPassword = randomBytes(32).toString('base64url');

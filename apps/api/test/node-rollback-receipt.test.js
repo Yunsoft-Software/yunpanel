@@ -3,7 +3,7 @@ import { chmod, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createNodeRollbackReceiptStore, NodeRollbackReceiptError } from '../src/node-rollback-receipt.js';
+import { createNodeRollbackReceiptStore, NodeRollbackReceiptError } from '../src/applications/node-rollback-receipt.js';
 
 const serverId = 'server-1';
 const jobId = '7f217caa-0f0f-4569-a657-30a97bcb7ca0';

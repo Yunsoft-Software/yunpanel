@@ -7,21 +7,21 @@ import test from 'node:test';
 import { cronTaskFileName, renderCronTaskFile } from '@yunpanel/config-templates';
 import { createWebsiteCronManager } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createDurableJobRegistry } from '../src/durable-job-registry.js';
-import { inspectDurableJobRecovery } from '../src/job-recovery-inspection.js';
-import { JobRecoveryRuntimeError } from '../src/job-recovery-runtime.js';
-import { createJobRegistry } from '../src/job-registry.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createDurableJobRegistry } from '../src/jobs/durable-job-registry.js';
+import { inspectDurableJobRecovery } from '../src/jobs/job-recovery-inspection.js';
+import { JobRecoveryRuntimeError } from '../src/jobs/job-recovery-runtime.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
 import {
   recoverRunningCron,
   JobRunningCronRecoveryError,
   jobRunningCronRecoveryInternals,
-} from '../src/job-running-cron-recovery.js';
-import { runRunningCronRecoveryFromStores } from '../src/job-running-cron-recovery-runtime.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createWebsiteCronOperationReceiptStore } from '../src/website-cron-operation-receipt.js';
-import { createWebsiteCronRegistry } from '../src/website-cron-registry.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
+} from '../src/jobs/job-running-cron-recovery.js';
+import { runRunningCronRecoveryFromStores } from '../src/jobs/job-running-cron-recovery-runtime.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createWebsiteCronOperationReceiptStore } from '../src/websites/website-cron-operation-receipt.js';
+import { createWebsiteCronRegistry } from '../src/websites/website-cron-registry.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
 import { parseJobRecoveryArguments, runJobRecoveryCli } from '../../../scripts/job-recovery.mjs';
 
 const serverId = '11111111-1111-4111-8111-111111111111';

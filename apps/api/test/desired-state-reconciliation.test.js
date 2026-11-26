@@ -8,17 +8,17 @@ import {
   LIFECYCLE_OUTCOMES,
   reconcileCompletedJob,
   jobReconciliationInternals,
-} from '../src/job-reconciliation.js';
+} from '../src/jobs/job-reconciliation.js';
 import {
   createCertificateRegistry,
   certificateDiagnosis,
-} from '../src/certificate-registry.js';
+} from '../src/certificates/certificate-registry.js';
 import {
   verifyRenewalOutcome,
   verifyCertificateRenewalOutcome,
-} from '../src/certificate-renewal-scheduler.js';
-import { renderDnsZoneDesiredState } from '../src/dns-zone-desired-state.js';
-import { createJobRegistry } from '../src/job-registry.js';
+} from '../src/certificates/certificate-renewal-scheduler.js';
+import { renderDnsZoneDesiredState } from '../src/dns/dns-zone-desired-state.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
 
 // --- Fixtures & Mock Helpers ---
 

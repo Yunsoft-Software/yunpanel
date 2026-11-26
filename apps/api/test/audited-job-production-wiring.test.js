@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createWebsiteCachePolicyRegistry } from '../src/website-cache-policy-registry.js';
-import { createWebsiteCacheService } from '../src/website-cache-service.js';
-import { createWebsitePhpToolsService } from '../src/website-php-tools-service.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createWebsiteCachePolicyRegistry } from '../src/websites/website-cache-policy-registry.js';
+import { createWebsiteCacheService } from '../src/websites/website-cache-service.js';
+import { createWebsitePhpToolsService } from '../src/php/website-php-tools-service.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
 
 const indexUrl = new URL('../src/index.js', import.meta.url);
 
@@ -65,7 +65,7 @@ test('new Website services accept the production registry contracts', () => {
 
 test('production mounts Website service routes through the shared panel guard', async () => {
   const source = await readFile(indexUrl, 'utf8');
-  const appSource = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
+  const appSource = await readFile(new URL('../src/http/app.js', import.meta.url), 'utf8');
 
   assert.match(source, /websitePhpToolsService,[\s\S]*websiteCacheService,/);
   assert.doesNotMatch(appSource, /core\.requirePanelRouteAccess/);

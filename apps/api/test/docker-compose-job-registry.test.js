@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createJobRegistry } from '../src/job-registry.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
 
 const serverId = 'local-server';
 const projectId = '0bb78242-03a6-429f-9d17-7725c521437c';

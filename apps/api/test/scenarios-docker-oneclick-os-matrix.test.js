@@ -32,22 +32,22 @@ import {
   dockerComposeValidatorInternals,
   summarizeDockerComposeConfig,
 } from '../../../packages/host-runtime/src/docker-compose-validator.js';
-import { DatabaseHttpError, mountDatabaseRoutes } from '../src/database-http.js';
-import { createDockerComposeProjectRegistry } from '../src/docker-compose-project-registry.js';
-import { createDockerComposeEnvironmentRegistry } from '../src/docker-compose-environment-registry.js';
-import { createDockerRegistryCredentialRegistry } from '../src/docker-registry-credential-registry.js';
-import { createDockerComposeOperationsService } from '../src/docker-compose-operations.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { mountDockerComposeRoutes } from '../src/docker-compose-http.js';
-import { createSiteMutationLock } from '../src/site-mutation-lock.js';
-import { RegistryError } from '../src/server-registry.js';
+import { DatabaseHttpError, mountDatabaseRoutes } from '../src/databases/database-http.js';
+import { createDockerComposeProjectRegistry } from '../src/docker/docker-compose-project-registry.js';
+import { createDockerComposeEnvironmentRegistry } from '../src/docker/docker-compose-environment-registry.js';
+import { createDockerRegistryCredentialRegistry } from '../src/docker/docker-registry-credential-registry.js';
+import { createDockerComposeOperationsService } from '../src/docker/docker-compose-operations.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { mountDockerComposeRoutes } from '../src/docker/docker-compose-http.js';
+import { createSiteMutationLock } from '../src/websites/site-mutation-lock.js';
+import { RegistryError } from '../src/runtime/server-registry.js';
 import {
    EASYPANEL_ONE_CLICK_APPS,
   PLESK_DOCKER_CATALOG,
   inferDockerHubPortPreset,
   provisionOneClickApp,
   searchDockerCatalogLive,
-} from '../src/docker-plesk-catalog.js';
+} from '../src/docker/docker-plesk-catalog.js';
 
 const LOCAL_SERVER_ID = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const FOREIGN_SERVER_ID = '11111111-2222-4333-8444-555555555555';

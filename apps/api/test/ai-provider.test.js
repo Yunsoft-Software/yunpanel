@@ -9,7 +9,7 @@ import express from 'express';
 import {
   createAiProviderAdapter,
   AiProviderError,
-} from '../src/ai-provider.js';
+} from '../src/ai/ai-provider.js';
 import {
   createOpenAiCompatibleAdapter,
   createAnthropicAdapter,
@@ -17,14 +17,14 @@ import {
   createOpenRouterAdapter,
   createProviderFromConfig,
   sanitizeApiKey,
-} from '../src/ai-provider-adapters.js';
+} from '../src/ai/ai-provider-adapters.js';
 import {
   createAiProviderRegistry,
-} from '../src/ai-provider-registry.js';
-import { createAiConversationService } from '../src/ai-conversation-service.js';
-import { createAiToolRegistry } from '../src/ai-tool-registry.js';
-import { DEFAULT_AI_TOOL_DEFINITIONS } from '../src/ai-tool-catalog.js';
-import { mountAiRoutes } from '../src/ai-http.js';
+} from '../src/ai/ai-provider-registry.js';
+import { createAiConversationService } from '../src/ai/ai-conversation-service.js';
+import { createAiToolRegistry } from '../src/ai/ai-tool-registry.js';
+import { DEFAULT_AI_TOOL_DEFINITIONS } from '../src/ai/ai-tool-catalog.js';
+import { mountAiRoutes } from '../src/ai/ai-http.js';
 
 const TEST_MASTER_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 

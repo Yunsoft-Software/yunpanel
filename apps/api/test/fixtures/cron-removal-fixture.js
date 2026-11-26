@@ -1,4 +1,4 @@
-import { createCronRemovalRequest } from '../../src/website-cron-removal-request.js';
+import { createCronRemovalRequest } from '../../src/websites/website-cron-removal-request.js';
 export const siteId = '11111111-1111-4111-8111-111111111111';
 export const serverId = '22222222-2222-4222-8222-222222222222';
 export const appId = '33333333-3333-4333-8333-333333333333';

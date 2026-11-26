@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { recoverRunningStaticDeployment } from '../src/job-running-static-recovery.js';
+import { recoverRunningStaticDeployment } from '../src/jobs/job-running-static-recovery.js';
 
 const serverId = 'server-1';
 const jobId = '216e4db8-468b-4e2f-a021-3ab31e0f4123';

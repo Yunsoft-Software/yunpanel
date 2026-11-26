@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
-import { createLiveSessionRegistry } from '../src/live-session-registry.js';
+import { createLiveSessionRegistry } from '../src/auth/live-session-registry.js';
 import {
   createTtydSessionManager,
   ttydSessionInternals,
-} from '../src/ttyd-session-manager.js';
+} from '../src/terminal/ttyd-session-manager.js';
 
 const sessionId = '12345678-1234-4234-8234-123456789012';
 const applicationId = '22345678-1234-4234-8234-123456789012';

@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createNginxManager } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createLocalHostOperations } from '../src/local-host-operations.js';
-import { createJobRegistry, jobPublicView } from '../src/job-registry.js';
-import { reconcileCompletedJob } from '../src/job-reconciliation.js';
+import { createLocalHostOperations } from '../src/runtime/local-host-operations.js';
+import { createJobRegistry, jobPublicView } from '../src/jobs/job-registry.js';
+import { reconcileCompletedJob } from '../src/jobs/job-reconciliation.js';
 
 const certificate = { certName: 'example.com', certificatePath: '/etc/letsencrypt/live/example.com/cert.pem',
   fullchainPath: '/etc/letsencrypt/live/example.com/fullchain.pem', privateKeyPath: '/etc/letsencrypt/live/example.com/privkey.pem',

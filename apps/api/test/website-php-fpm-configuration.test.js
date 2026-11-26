@@ -6,10 +6,10 @@ import express from 'express';
 import {
   createWebsitePhpToolsService,
   WebsitePhpToolsServiceError,
-} from '../src/website-php-tools-service.js';
-import { mountWebsitePhpToolsRoutes } from '../src/website-php-tools-http.js';
-import { createLocalWebsitePhpToolOperation } from '../src/local-website-php-tool-operation.js';
-import { websitePhpToolActionPreview } from '../src/website-php-tool-action.js';
+} from '../src/php/website-php-tools-service.js';
+import { mountWebsitePhpToolsRoutes } from '../src/php/website-php-tools-http.js';
+import { createLocalWebsitePhpToolOperation } from '../src/php/local-website-php-tool-operation.js';
+import { websitePhpToolActionPreview } from '../src/php/website-php-tool-action.js';
 
 const WEBSITE_ID = '11111111-1111-4111-8111-111111111111';
 const APP_ID = '22222222-2222-4222-8222-222222222222';

@@ -6,7 +6,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createAuthStore } from '../src/auth-store.js';
+import { createAuthStore } from '../src/auth/auth-store.js';
 
 const script = fileURLToPath(new URL('../../../scripts/auth.mjs', import.meta.url));
 function run(args, env, input = '') {

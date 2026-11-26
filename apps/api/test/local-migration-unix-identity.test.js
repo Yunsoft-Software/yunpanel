@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   compareLocalMigrationUnixIdentities,
   localMigrationUnixIdentityInternals,
-} from '../src/local-migration-unix-identity.js';
+} from '../src/migration/local-migration-unix-identity.js';
 
 const backupDirectory = '/var/backups/yunpanel/migration-2026-09-10T15-00-00-000Z';
 const archivePath = `${backupDirectory}/state.tar`;

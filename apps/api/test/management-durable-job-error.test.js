@@ -3,12 +3,12 @@ import { randomBytes } from 'node:crypto';
 import http from 'node:http';
 import { once } from 'node:events';
 import test from 'node:test';
-import { createApp } from '../src/app.js';
-import { createAuthStore } from '../src/auth-store.js';
-import { createAuthenticatedApi } from '../src/auth-http.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { DurableJobRegistryError } from '../src/durable-job-registry.js';
+import { createApp } from '../src/http/app.js';
+import { createAuthStore } from '../src/auth/auth-store.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { DurableJobRegistryError } from '../src/jobs/durable-job-registry.js';
 
 test('global management routes expose a durable mutation guard as actionable 503', async t => {
   const store = createAuthStore({ filePath: ':memory:' });

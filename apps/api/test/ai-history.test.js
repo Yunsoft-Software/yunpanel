@@ -3,10 +3,10 @@ import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/pr
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createAiConversationService, AiConversationError } from '../src/ai-conversation-service.js';
-import { mountAiRoutes } from '../src/ai-http.js';
-import { conversationScope, createConversationPager } from '../src/ai-conversation-history.js';
-import { createProcessStoreLock } from '../src/process-store-lock.js';
+import { createAiConversationService, AiConversationError } from '../src/ai/ai-conversation-service.js';
+import { mountAiRoutes } from '../src/ai/ai-http.js';
+import { conversationScope, createConversationPager } from '../src/ai/ai-conversation-history.js';
+import { createProcessStoreLock } from '../src/runtime/process-store-lock.js';
 
 const siteA = '11111111-1111-4111-8111-111111111111';
 const siteB = '22222222-2222-4222-8222-222222222222';

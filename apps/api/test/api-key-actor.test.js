@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import test from 'node:test';
-import { apiKeyActor, createApiKeyActorAuthorizer } from '../src/api-key-actor.js';
-import { createApiKeyStore } from '../src/api-key-store.js';
-import { createAuthStore } from '../src/auth-store.js';
-import { createTenantSiteStore } from '../src/tenant-site-store.js';
+import { apiKeyActor, createApiKeyActorAuthorizer } from '../src/auth/api-key-actor.js';
+import { createApiKeyStore } from '../src/auth/api-key-store.js';
+import { createAuthStore } from '../src/auth/auth-store.js';
+import { createTenantSiteStore } from '../src/hosting/tenant-site-store.js';
 
 // Real auth store, key store and tenant records: host jobs and removal re-check the
 // actor at execution time, so a key acts only while it and its Owner are live and

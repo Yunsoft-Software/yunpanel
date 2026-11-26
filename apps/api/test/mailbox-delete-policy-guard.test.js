@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import test from 'node:test';
-import { mountMailboxRoutes } from '../src/mailbox-http.js';
-import { MailboxRegistryError } from '../src/mailbox-registry.js';
+import { mountMailboxRoutes } from '../src/mail/mailbox-http.js';
+import { MailboxRegistryError } from '../src/mail/mailbox-registry.js';
 
 const mailboxId = randomUUID();
 const mailDomainId = randomUUID();

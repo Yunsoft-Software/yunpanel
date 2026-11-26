@@ -7,27 +7,27 @@ import {
   createDomainSuspensionService,
   DomainSuspensionError,
   domainSuspensionInternals,
-} from '../src/domain-suspension.js';
+} from '../src/domains/domain-suspension.js';
 import {
   createDomainSuspensionRuntime,
   DomainSuspensionRuntimeError,
   domainSuspensionRuntimeInternals,
-} from '../src/domain-suspension-runtime.js';
+} from '../src/domains/domain-suspension-runtime.js';
 import {
   createDomainSuspensionOperationRegistry,
   domainSuspensionOperationPublicView,
   DomainSuspensionOperationRegistryError,
-} from '../src/domain-suspension-operation-registry.js';
+} from '../src/domains/domain-suspension-operation-registry.js';
 import {
   createWebsiteSuspensionRuntime,
   WebsiteSuspensionRuntimeError,
-} from '../src/website-suspension-runtime.js';
+} from '../src/websites/website-suspension-runtime.js';
 import {
   createWebsiteSuspensionOperationRegistry,
-} from '../src/website-suspension-operation-registry.js';
+} from '../src/websites/website-suspension-operation-registry.js';
 import {
   createSiteResourceBoundary,
-} from '../src/site-resource-boundary.js';
+} from '../src/http/site-resource-boundary.js';
 
 const domainId = '12345678-1234-4234-8234-123456789012';
 const operationId = '22345678-1234-4234-8234-123456789012';

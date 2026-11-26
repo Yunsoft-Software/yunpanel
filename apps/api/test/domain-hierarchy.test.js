@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { validateDomainParent, validateDomainHierarchy } from '../src/domain-hierarchy.js';
+import { validateDomainParent, validateDomainHierarchy } from '../src/domains/domain-hierarchy.js';
 
 const root = { id: 'root', serverId: 'local', primaryDomain: 'example.com.tr' };
 const child = { id: 'child', serverId: 'local', primaryDomain: 'api.example.com.tr', parentDomainId: 'root' };

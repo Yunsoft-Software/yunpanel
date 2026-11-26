@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createJobRegistry, JobRegistryError } from '../src/job-registry.js';
+import { createJobRegistry, JobRegistryError } from '../src/jobs/job-registry.js';
 
 const serverId = '10714f5d-8646-4f9a-a8e9-b80439ff6305';
 const payload = Object.freeze({

@@ -8,8 +8,8 @@ const text = (name) => readFile(source(name), 'utf8');
 test('production DKIM key lifecycle uses persistent registry, managed-mail idle guard and host retirement evidence', async () => {
   const [indexSource, httpSource, registrySource] = await Promise.all([
     text('index.js'),
-    text('mail-dkim-http.js'),
-    text('mail-dkim-registry.js'),
+    text('mail/mail-dkim-http.js'),
+    text('mail/mail-dkim-registry.js'),
   ]);
 
   assert.match(indexSource, /createMailDkimRegistry\(\{[\s\S]*?keyRoot:\s*mailDkimRootPath,[\s\S]*?\}\)/);

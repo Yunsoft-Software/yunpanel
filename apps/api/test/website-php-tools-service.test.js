@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   createWebsitePhpToolsService,
   WebsitePhpToolsServiceError,
-} from '../src/website-php-tools-service.js';
+} from '../src/php/website-php-tools-service.js';
 
 const WEBSITE_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const APP_ID = '11111111-1111-4111-8111-111111111111';

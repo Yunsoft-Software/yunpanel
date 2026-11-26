@@ -14,33 +14,33 @@ import {
 } from '@yunpanel/host-runtime';
 import { dockerComposeManagerInternals } from '../../../packages/host-runtime/src/docker-compose-manager.js';
 import { DOCKER_COMPOSE_OPERATIONS, OPERATIONS } from '@yunpanel/protocol';
-import { apiKeyActor, createApiKeyActorAuthorizer } from '../src/api-key-actor.js';
-import { createApiKeyStore } from '../src/api-key-store.js';
-import { createApp } from '../src/app.js';
-import { createAuthenticatedApi } from '../src/auth-http.js';
-import { createAuthStore } from '../src/auth-store.js';
-import { createOwnerMfaPolicy } from '../src/owner-mfa-policy.js';
-import { createDockerComposeApiHandler } from '../src/docker-compose-api-handler.js';
-import { createDockerComposeOperationReceiptStore } from '../src/docker-compose-operation-receipt.js';
-import { DockerComposeRecoveryError } from '../src/docker-compose-recovery.js';
-import { createDockerComposeRuntime } from '../src/docker-compose-runtime.js';
-import { createDockerVolumeOperationReceiptStore } from '../src/docker-volume-operation-receipt.js';
+import { apiKeyActor, createApiKeyActorAuthorizer } from '../src/auth/api-key-actor.js';
+import { createApiKeyStore } from '../src/auth/api-key-store.js';
+import { createApp } from '../src/http/app.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
+import { createAuthStore } from '../src/auth/auth-store.js';
+import { createOwnerMfaPolicy } from '../src/auth/owner-mfa-policy.js';
+import { createDockerComposeApiHandler } from '../src/docker/docker-compose-api-handler.js';
+import { createDockerComposeOperationReceiptStore } from '../src/docker/docker-compose-operation-receipt.js';
+import { DockerComposeRecoveryError } from '../src/docker/docker-compose-recovery.js';
+import { createDockerComposeRuntime } from '../src/docker/docker-compose-runtime.js';
+import { createDockerVolumeOperationReceiptStore } from '../src/docker/docker-volume-operation-receipt.js';
 import {
   createDockerVolumeOperationsService,
   DockerVolumeOperationsError,
-} from '../src/docker-volume-operations.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createDurableJobRegistry } from '../src/durable-job-registry.js';
-import { createJobRegistry, JobRegistryError } from '../src/job-registry.js';
+} from '../src/docker/docker-volume-operations.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createDurableJobRegistry } from '../src/jobs/durable-job-registry.js';
+import { createJobRegistry, JobRegistryError } from '../src/jobs/job-registry.js';
 import {
   createLocalDockerVolumeOperation,
   LocalDockerVolumeOperationError,
-} from '../src/local-docker-volume-operation.js';
-import { createLocalHostOperations, createPanelJobAuthorizer } from '../src/local-host-operations.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createSiteMutationLock } from '../src/site-mutation-lock.js';
-import { createTenantSiteStore } from '../src/tenant-site-store.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
+} from '../src/docker/local-docker-volume-operation.js';
+import { createLocalHostOperations, createPanelJobAuthorizer } from '../src/runtime/local-host-operations.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createSiteMutationLock } from '../src/websites/site-mutation-lock.js';
+import { createTenantSiteStore } from '../src/hosting/tenant-site-store.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
 
 async function resolveLocalDockerCommand() {
   for (const candidate of ['/usr/bin/docker', '/usr/local/bin/docker']) {

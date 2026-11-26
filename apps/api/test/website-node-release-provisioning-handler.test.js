@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   createWebsiteNodeReleaseProvisioningHandler,
   WebsiteNodeReleaseProvisioningError,
-} from '../src/website-node-release-provisioning-handler.js';
+} from '../src/provisioning/website-node-release-provisioning-handler.js';
 
 const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';
 const deploymentId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';

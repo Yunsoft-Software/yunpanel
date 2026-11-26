@@ -5,7 +5,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   createRoundcubeWebmailEndpointResolver,
   RoundcubeWebmailEndpointResolverError,
-} from '../src/roundcube-webmail-endpoint-resolver.js';
+} from '../src/mail/roundcube-webmail-endpoint-resolver.js';
 
 const mailDomain = Object.freeze({
   id: '11111111-1111-4111-8111-111111111111',

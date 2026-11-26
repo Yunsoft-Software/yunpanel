@@ -7,7 +7,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   CertificateOperationReceiptError,
   createCertificateOperationReceiptStore,
-} from '../src/certificate-operation-receipt.js';
+} from '../src/certificates/certificate-operation-receipt.js';
 
 const serverId = 'server-1';
 const jobId = '7f217caa-0f0f-4569-a657-30a97bcb7ca0';

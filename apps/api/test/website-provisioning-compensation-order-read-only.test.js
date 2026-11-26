@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   canBeginCompensationInOrder,
   findBlockingLaterCompensationStep,
-} from '../src/website-provisioning-compensation-order.js';
+} from '../src/provisioning/website-provisioning-compensation-order.js';
 
 function operation(later) {
   return {

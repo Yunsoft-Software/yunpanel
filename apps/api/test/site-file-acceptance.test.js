@@ -4,11 +4,11 @@ import { once } from 'node:events';
 import http from 'node:http';
 import test from 'node:test';
 import express from 'express';
-import { createSiteResourceBoundary } from '../src/site-resource-boundary.js';
-import { createTenantBoundaryMiddleware } from '../src/tenant-boundary.js';
-import { mountSiteFileRoutes, SiteFileHttpError } from '../src/site-file-http.js';
-import { mountElFinderHandoffRoutes } from '../src/elfinder-handoff-http.js';
-import { ElFinderHandoffError } from '../src/elfinder-handoff-service.js';
+import { createSiteResourceBoundary } from '../src/http/site-resource-boundary.js';
+import { createTenantBoundaryMiddleware } from '../src/http/tenant-boundary.js';
+import { mountSiteFileRoutes, SiteFileHttpError } from '../src/files/site-file-http.js';
+import { mountElFinderHandoffRoutes } from '../src/files/elfinder-handoff-http.js';
+import { ElFinderHandoffError } from '../src/files/elfinder-handoff-service.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const siteAId = '11111111-1111-4111-8111-111111111111';

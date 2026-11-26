@@ -3,11 +3,11 @@ import test from 'node:test';
 import {
   createLicenseEntitlementService,
   LicenseEntitlementError,
-} from '../src/license-entitlement-service.js';
+} from '../src/panel/license-entitlement-service.js';
 import {
   mountWebsiteSftpKeyRoutes,
   WebsiteSftpKeyHttpError,
-} from '../src/website-sftp-key-http.js';
+} from '../src/websites/website-sftp-key-http.js';
 
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
 const keyId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';

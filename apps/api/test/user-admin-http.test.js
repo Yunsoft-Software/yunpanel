@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import http from 'node:http';
 import { test } from 'node:test';
-import { createAuthenticatedApi } from '../src/auth-http.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
 import { fixture } from './helpers/user-admin-fixture.js';
 
 // Actual HTTP boundary + real SQLite user store; session/password adapters are controlled.

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { createMailConfigurationService, MailConfigurationError } from '../src/mail-configuration.js';
+import { createMailConfigurationService, MailConfigurationError } from '../src/mail/mail-configuration.js';
 
 const SERVER_ID = '10714f5d-8646-4f9a-a8e9-b80439ff6305';
 const WEB_DOMAIN_ID = '0b83fb4d-d9d5-4a88-9975-977f015427c5';

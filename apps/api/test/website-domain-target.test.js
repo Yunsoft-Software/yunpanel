@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DomainRegistryError } from '../src/domain-registry.js';
-import { resolveWebsiteDomainTarget } from '../src/website-domain-target.js';
+import { DomainRegistryError } from '../src/domains/domain-registry.js';
+import { resolveWebsiteDomainTarget } from '../src/websites/website-domain-target.js';
 import { createNginxManager } from '@yunpanel/host-runtime';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';

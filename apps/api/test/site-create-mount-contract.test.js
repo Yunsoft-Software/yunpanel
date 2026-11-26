@@ -6,7 +6,7 @@ import test from 'node:test';
 // middleware boundaries. No Express listener, real auth, hashing or host here.
 // The child enables Node's built-in module mocks without changing npm test flags.
 test('mounted site create route awaits users, preserves partial results and existing guard/envelope contracts', () => {
-  const routeUrl = new URL('../src/site-create-http.js', import.meta.url).href;
+  const routeUrl = new URL('../src/provisioning/site-create-http.js', import.meta.url).href;
   const script = `
     import assert from 'node:assert/strict';
     import { mock } from 'node:test';
@@ -16,7 +16,7 @@ test('mounted site create route awaits users, preserves partial results and exis
     let creates = 0, previews = 0, planner = null, replay = false, createError = false, calls = 0;
     const guard = () => {};
     class SiteCreateError extends Error { constructor(code, message, status = 400) { super(message); this.code = code; this.status = status; } }
-    mock.module(new URL('./panel-http-guard.js', route).href, { namedExports: { requirePanelRouteAccess: guard } });
+    mock.module(new URL('../http/panel-http-guard.js', route).href, { namedExports: { requirePanelRouteAccess: guard } });
     mock.module(new URL('./site-create-isolation-guard.js', route).href, { namedExports: {
       SiteCreateError,
       createSite: async (options) => {

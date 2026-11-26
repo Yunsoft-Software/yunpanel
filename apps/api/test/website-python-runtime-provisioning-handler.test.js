@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   createWebsitePythonRuntimeProvisioningHandler,
   WebsitePythonRuntimeProvisioningError,
-} from '../src/website-python-runtime-provisioning-handler.js';
+} from '../src/provisioning/website-python-runtime-provisioning-handler.js';
 
 const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';

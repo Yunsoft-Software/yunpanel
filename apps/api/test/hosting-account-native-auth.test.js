@@ -7,7 +7,7 @@ import * as crypto from 'node:crypto';
 test('real auth store shares hosting profiles and revokes a native login session', {
   skip: typeof crypto.argon2 !== 'function' ? 'Requires target Node native Argon2; not exercised on Node22' : false,
 }, async (t) => {
-  const { createAuthStore } = await import('../src/auth-store.js');
+  const { createAuthStore } = await import('../src/auth/auth-store.js');
   const store = createAuthStore({ filePath: ':memory:' });
   t.after(() => store.close());
   const password = 'test-only-hosting-password';

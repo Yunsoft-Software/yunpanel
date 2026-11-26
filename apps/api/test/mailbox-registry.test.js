@@ -5,13 +5,13 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { renderDovecotPasswdFile } from '@yunpanel/config-templates';
-import { createMailDomainRegistry } from '../src/mail-domain-registry.js';
+import { createMailDomainRegistry } from '../src/mail/mail-domain-registry.js';
 import {
   createMailboxRegistry,
   MailboxRegistryError,
   rewrapMailboxSnapshot,
-} from '../src/mailbox-registry.js';
-import { verifyMailboxPassword } from '../src/mailbox-password.js';
+} from '../src/mail/mailbox-registry.js';
+import { verifyMailboxPassword } from '../src/mail/mailbox-password.js';
 
 const mailDomainId = randomUUID();
 const managedDomain = Object.freeze({ id: mailDomainId, domainName: 'example.com', managementMode: 'local' });

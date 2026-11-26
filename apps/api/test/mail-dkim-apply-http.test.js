@@ -3,10 +3,10 @@ import { randomUUID } from 'node:crypto';
 import express from 'express';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { JobRegistryError } from '../src/job-registry.js';
-import { MailDkimConfigurationError } from '../src/mail-dkim-configuration.js';
-import { MailDkimHttpError, mountMailDkimRoutes } from '../src/mail-dkim-http.js';
-import { MailDkimRegistryError } from '../src/mail-dkim-registry.js';
+import { JobRegistryError } from '../src/jobs/job-registry.js';
+import { MailDkimConfigurationError } from '../src/mail/mail-dkim-configuration.js';
+import { MailDkimHttpError, mountMailDkimRoutes } from '../src/mail/mail-dkim-http.js';
+import { MailDkimRegistryError } from '../src/mail/mail-dkim-registry.js';
 
 const serverId = randomUUID();
 const webDomain = { id: randomUUID(), serverId, primaryDomain: 'example.com' };

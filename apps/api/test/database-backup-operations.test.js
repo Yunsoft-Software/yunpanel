@@ -4,7 +4,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   DatabaseBackupOperationsError,
   createDatabaseBackupOperationsService,
-} from '../src/database-backup-operations.js';
+} from '../src/databases/database-backup-operations.js';
 
 const serverId = '12345678-1234-4234-8234-123456789012';
 const backupId = '22345678-1234-4234-8234-123456789012';

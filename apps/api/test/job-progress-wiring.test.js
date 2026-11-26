@@ -8,7 +8,7 @@ import '../../web/test/job-progress-wiring.test.js';
 const source = (file) => readFile(new URL(file, import.meta.url), 'utf8');
 
 test('Backend job-progress wiring: provisioning routes enforce exact confirmation tokens and panel route guard', async () => {
-  const httpCode = await source('../src/website-provisioning-http.js');
+  const httpCode = await source('../src/provisioning/website-provisioning-http.js');
 
   // Verify route guards and declaration
   assert.match(httpCode, /app\.post\('\/api\/sites\/provisioning\/:operationId\/continue',\s*requirePanelRouteAccess/);
@@ -22,14 +22,14 @@ test('Backend job-progress wiring: provisioning routes enforce exact confirmatio
 });
 
 test('Backend job-progress wiring: app.js wires siteMutationLock into website provisioning routes', async () => {
-  const appCode = await source('../src/management-app.js');
+  const appCode = await source('../src/http/management-app.js');
 
   assert.match(appCode, /mountWebsiteProvisioningRoutes\(/);
   assert.match(appCode, /siteMutationLock/);
 });
 
 test('Backend job-progress wiring: job registry exports public view and safe error classification', async () => {
-  const registryCode = await source('../src/job-registry.js');
+  const registryCode = await source('../src/jobs/job-registry.js');
 
   assert.match(registryCode, /export function jobPublicView/);
   assert.match(registryCode, /export function classifyJobError/);
@@ -39,7 +39,7 @@ test('Backend job-progress wiring: job registry exports public view and safe err
 });
 
 test('Backend job-progress wiring: audited job registry preserves safe metadata and links audit entries', async () => {
-  const auditCode = await source('../src/audited-job-registry.js');
+  const auditCode = await source('../src/jobs/audited-job-registry.js');
 
   assert.match(auditCode, /export function createAuditedJobRegistry/);
   assert.match(auditCode, /audit\.linkJob/);
@@ -60,7 +60,7 @@ test('Web-to-API wiring parity: web provisioning client calls exact backend endp
 });
 
 test('Backend job-progress wiring: provisioning routes release siteMutationLock before sending response', async () => {
-  const httpCode = await source('../src/website-provisioning-http.js');
+  const httpCode = await source('../src/provisioning/website-provisioning-http.js');
 
   assert.match(httpCode, /const result = await withOptionalLock\(operation\.websiteId, async \(\) => \{\s*return orchestrator\.runNext\(id, actor\);\s*\}\);/);
 });

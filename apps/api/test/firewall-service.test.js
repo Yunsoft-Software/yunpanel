@@ -12,7 +12,7 @@ import {
   parseAllowedRulesFromRuleset,
   parseListeningSockets,
   isTargetAuthorized,
-} from '../src/firewall-service.js';
+} from '../src/runtime/firewall-service.js';
 import {
   createNftablesManager,
   NftablesManagerError,

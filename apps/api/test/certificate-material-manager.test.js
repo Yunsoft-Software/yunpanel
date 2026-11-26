@@ -8,7 +8,7 @@ import test from 'node:test';
 import {
   CertificateMaterialError,
   createCertificateMaterialManager,
-} from '../src/certificate-material-manager.js';
+} from '../src/certificates/certificate-material-manager.js';
 
 const execFileAsync = promisify(execFile);
 

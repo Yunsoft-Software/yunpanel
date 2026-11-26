@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createDockerWorkloadRegistry } from '../src/docker-workload-registry.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createSite, previewSiteCreate } from '../src/site-create.js';
-import { siteCreateProvisioningPlan } from '../src/site-create-provisioning-isolation.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createDockerWorkloadRegistry } from '../src/docker/docker-workload-registry.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createSite, previewSiteCreate } from '../src/provisioning/site-create.js';
+import { siteCreateProvisioningPlan } from '../src/provisioning/site-create-provisioning-isolation.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
 
 const CHILD_OPERATION = '531071bb-d40d-4444-94ba-c9545144febc';
 

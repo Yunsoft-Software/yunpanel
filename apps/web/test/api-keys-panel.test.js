@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { createApiKeyStore } from '../../api/src/api-key-store.js';
+import { createApiKeyStore } from '../../api/src/auth/api-key-store.js';
 
 register('./jsx-loader.js', import.meta.url);
 const { default: ApiKeysPanel, apiKeyRequest } = await import('../src/workspace/ApiKeysPanel.jsx');

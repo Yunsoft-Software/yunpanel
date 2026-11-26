@@ -5,7 +5,7 @@ import { renderCronTaskFile } from '@yunpanel/config-templates';
 import {
   createWebsiteCronReconciliationProvider,
   WebsiteCronReconciliationError,
-} from '../src/website-cron-reconciliation.js';
+} from '../src/websites/website-cron-reconciliation.js';
 
 const localServerId = '12345678-1234-4234-8234-123456789012';
 const websiteId = '22345678-1234-4234-8234-123456789012';

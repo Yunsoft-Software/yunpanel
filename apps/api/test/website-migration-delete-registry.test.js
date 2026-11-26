@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWebsiteRegistry, WebsiteRegistryError, websiteRegistryInternals } from '../src/website-registry.js';
+import { createWebsiteRegistry, WebsiteRegistryError, websiteRegistryInternals } from '../src/websites/website-registry.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const applicationId = '340344cf-4e57-4f70-946a-3c6e919e951d';

@@ -4,7 +4,7 @@ import {
   createDomainRegistry,
   DomainRegistryError,
   domainRegistryInternals,
-} from '../src/domain-registry.js';
+} from '../src/domains/domain-registry.js';
 
 const domainId = '12345678-1234-4234-8234-123456789012';
 const childId = '22345678-1234-4234-8234-123456789012';

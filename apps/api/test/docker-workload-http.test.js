@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import express from 'express';
-import { mountDockerWorkloadRoutes } from '../src/docker-workload-http.js';
+import { mountDockerWorkloadRoutes } from '../src/docker/docker-workload-http.js';
 
 const management = Object.freeze({
   user: { role: 'owner' },

@@ -4,8 +4,8 @@ import {
   createElFinderHandoffService,
   ElFinderHandoffError,
   elFinderHandoffInternals,
-} from '../src/elfinder-handoff-service.js';
-import { createLiveSessionRegistry } from '../src/live-session-registry.js';
+} from '../src/files/elfinder-handoff-service.js';
+import { createLiveSessionRegistry } from '../src/auth/live-session-registry.js';
 
 const serverId = '12345678-1234-4234-8234-123456789012';
 const websiteId = '22345678-1234-4234-8234-123456789012';

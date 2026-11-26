@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   createWebsiteProvisioningHandlers,
   WebsiteProvisioningHandlerError,
-} from '../src/website-provisioning-handlers.js';
+} from '../src/provisioning/website-provisioning-handlers.js';
 
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
 const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';

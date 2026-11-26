@@ -91,15 +91,15 @@ import {
   startLocalRuntime,
   LocalRuntimeError,
   localRuntimeInternals,
-} from '../../api/src/local-runtime.js';
-import { createServerRegistry } from '../../api/src/server-registry.js';
-import { requirePanelRouteAccess } from '../../api/src/panel-http-guard.js';
+} from '../../api/src/runtime/local-runtime.js';
+import { createServerRegistry } from '../../api/src/runtime/server-registry.js';
+import { requirePanelRouteAccess } from '../../api/src/http/panel-http-guard.js';
 import {
   createSiteResourceBoundary,
   needsSiteResourceJson,
-} from '../../api/src/site-resource-boundary.js';
-import { createHostingSiteAllocationStore } from '../../api/src/hosting-site-allocation-store.js';
-import { AuthError } from '../../api/src/auth-error.js';
+} from '../../api/src/http/site-resource-boundary.js';
+import { createHostingSiteAllocationStore } from '../../api/src/hosting/hosting-site-allocation-store.js';
+import { AuthError } from '../../api/src/auth/auth-error.js';
 import {
   siteFixture,
   website as fixtureWebsite,

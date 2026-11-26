@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { compileBackupSchedule } from '../src/backup-schedule-time.js';
+import { compileBackupSchedule } from '../src/backup/backup-schedule-time.js';
 
 test('backup daily preset follows the selected IANA timezone and advances after the current minute', () => {
   const schedule = compileBackupSchedule('0 2 * * *', 'Europe/Istanbul');

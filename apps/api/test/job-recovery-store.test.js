@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createJobRecoveryStore, JobRecoveryStoreError } from '../src/job-recovery-store.js';
+import { createJobRecoveryStore, JobRecoveryStoreError } from '../src/jobs/job-recovery-store.js';
 
 async function fixture(t) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-job-recovery-'));

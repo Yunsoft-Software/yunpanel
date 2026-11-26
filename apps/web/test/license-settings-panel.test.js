@@ -11,22 +11,22 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { chromium } from '@playwright/test';
 import { createPanelServer } from '../server.js';
-import { createApp } from '../../api/src/app.js';
-import { createAiConversationService } from '../../api/src/ai-conversation-service.js';
-import { createAiProviderRegistry } from '../../api/src/ai-provider-registry.js';
-import { createAiToolRegistry } from '../../api/src/ai-tool-registry.js';
-import { DEFAULT_AI_TOOL_DEFINITIONS } from '../../api/src/ai-tool-catalog.js';
-import { createAuthenticatedApi } from '../../api/src/auth-http.js';
-import { createAuthStore } from '../../api/src/auth-store.js';
+import { createApp } from '../../api/src/http/app.js';
+import { createAiConversationService } from '../../api/src/ai/ai-conversation-service.js';
+import { createAiProviderRegistry } from '../../api/src/ai/ai-provider-registry.js';
+import { createAiToolRegistry } from '../../api/src/ai/ai-tool-registry.js';
+import { DEFAULT_AI_TOOL_DEFINITIONS } from '../../api/src/ai/ai-tool-catalog.js';
+import { createAuthenticatedApi } from '../../api/src/auth/auth-http.js';
+import { createAuthStore } from '../../api/src/auth/auth-store.js';
 import {
   computePublicKeyId,
   ENTITLEMENT_ISSUER,
   ENTITLEMENT_TOKEN_TYPE,
   FREE_BASELINE_CAPABILITIES,
   PREMIUM_CAPABILITIES,
-} from '../../api/src/license-entitlement-verifier.js';
-import { createLicenseEntitlementService } from '../../api/src/license-entitlement-service.js';
-import { createServerRegistry } from '../../api/src/server-registry.js';
+} from '../../api/src/panel/license-entitlement-verifier.js';
+import { createLicenseEntitlementService } from '../../api/src/panel/license-entitlement-service.js';
+import { createServerRegistry } from '../../api/src/runtime/server-registry.js';
 
 register('./jsx-loader.js', import.meta.url);
 

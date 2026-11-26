@@ -1,38 +1,38 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
-import { AuthError } from '../src/auth-error.js';
+import { AuthError } from '../src/auth/auth-error.js';
 import { siteFixture, website, allocation, uuid } from '../test-support/hosting-site-fixture.js';
 import { hostingAuthFixture } from '../test-support/hosting-auth-fixture.js';
-import { createHostingAccountStore } from '../src/hosting-account-store.js';
+import { createHostingAccountStore } from '../src/hosting/hosting-account-store.js';
 import {
   initializeHostingAccountSchema,
   rollbackEmptyHostingAccountSchema,
-} from '../src/hosting-account-schema.js';
+} from '../src/hosting/hosting-account-schema.js';
 import {
   hostingWebsitesForCapacity,
   initializeHostingSiteAllocationSchema,
   rollbackEmptyHostingSiteAllocationSchema,
-} from '../src/hosting-site-allocation-schema.js';
+} from '../src/hosting/hosting-site-allocation-schema.js';
 import {
   hostingWebsiteDigest,
-} from '../src/hosting-site-allocation-store.js';
+} from '../src/hosting/hosting-site-allocation-store.js';
 import {
   validateHostingAccount,
   assertCustomerCreationScope,
   assertCustomerManagement,
   assertResellerManagement,
-} from '../src/reseller-scope.js';
+} from '../src/hosting/reseller-scope.js';
 import {
   validateResellerLimits,
   assertResellerCapacity,
   countResellerUsage,
-} from '../src/reseller-limits.js';
+} from '../src/hosting/reseller-limits.js';
 import {
   validateCustomerQuotas,
   assertCustomerQuotaCapacity,
   assertCustomerQuotaWithinResellerCapacity,
-} from '../src/customer-quotas.js';
+} from '../src/hosting/customer-quotas.js';
 
 test('PAR-01 / RS-01: Pure scope and limit policies execute before auth/state wiring', () => {
   // Pure hosting account validations

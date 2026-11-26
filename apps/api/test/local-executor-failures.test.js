@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createLocalJobExecutor } from '../src/local-job-executor.js';
+import { createLocalJobExecutor } from '../src/runtime/local-job-executor.js';
 
 const serverId = 'local-server';
 const id = '12345678-1234-4234-8234-123456789012';

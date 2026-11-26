@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveWebsiteRestoreSelection, assertWebsiteSnapshotContent } from '../src/website-restore-selection.js';
+import { resolveWebsiteRestoreSelection, assertWebsiteSnapshotContent } from '../src/backup/website-restore-selection.js';
 const app = '/var/lib/yunpanel/apps/site-a', data = '/var/lib/yunpanel/data/site-a', staged = '/var/lib/yunpanel/backups/resources/website/site-a';
 const set = { targetPaths: [app, data, staged], files: { targetPaths: [app] }, data: { targetPaths: [data] }, databases: [{ dumpHook: { stagedDumpPath: staged + '/databases/main.sql' } }], mail: [], dns: [] };
 test('full restore always supplies explicit Website roots, never an unfiltered repository restore', () => {

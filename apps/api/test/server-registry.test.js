@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createServerRegistry, RegistryError } from '../src/server-registry.js';
+import { createServerRegistry, RegistryError } from '../src/runtime/server-registry.js';
 
 async function withRegistry(callback) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-registry-'));

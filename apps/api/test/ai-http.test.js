@@ -6,11 +6,11 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import express from 'express';
-import { aiHttpInternals, mountAiRoutes } from '../src/ai-http.js';
-import { createAiConversationService } from '../src/ai-conversation-service.js';
-import { createAiToolRegistry } from '../src/ai-tool-registry.js';
-import { DEFAULT_AI_TOOL_DEFINITIONS } from '../src/ai-tool-catalog.js';
-import { createAuthenticatedApi } from '../src/auth-http.js';
+import { aiHttpInternals, mountAiRoutes } from '../src/ai/ai-http.js';
+import { createAiConversationService } from '../src/ai/ai-conversation-service.js';
+import { createAiToolRegistry } from '../src/ai/ai-tool-registry.js';
+import { DEFAULT_AI_TOOL_DEFINITIONS } from '../src/ai/ai-tool-catalog.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
 
 test('AI HTTP request parsers reject extra fields and non-string confirmation material', () => {
   assert.deepEqual(aiHttpInternals.previewBody({ input: { websiteId: 'site-1' } }), { input: { websiteId: 'site-1' } });

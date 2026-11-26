@@ -1,8 +1,8 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { createMfaStore } from '../src/mfa-store.js';
-import { AuthError } from '../src/auth-error.js';
-import { newToken, tokenDigest } from '../src/mfa-crypto.js';
+import { createMfaStore } from '../src/auth/mfa-store.js';
+import { AuthError } from '../src/auth/auth-error.js';
+import { newToken, tokenDigest } from '../src/auth/mfa-crypto.js';
 
 /** Real SQLite/crypto fixture; ONLY the pre-existing password KDF is a test double. */
 export function mfaFixture(t, { filePath = ':memory:', masterKey = randomBytes(32), clock = { value: 1_700_000_010_000 }, seed = true, passwordVerifier } = {}) {

@@ -3,7 +3,7 @@ import test from 'node:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { initializeHostingAccountSchema as initialize, rollbackEmptyHostingAccountSchema as rollback } from '../src/hosting-account-schema.js';
+import { initializeHostingAccountSchema as initialize, rollbackEmptyHostingAccountSchema as rollback } from '../src/hosting/hosting-account-schema.js';
 import { hostingAuthFixture } from '../test-support/hosting-auth-fixture.js';
 
 function setup(t) {

@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createJobLogStore } from '../src/job-log-store.js';
+import { createJobLogStore } from '../src/jobs/job-log-store.js';
 
 const JOB_ID = '216e4db8-468b-4e2f-a021-3ab31e0f4123';
 

@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   prepareRootAuthStateOwnership,
   RootAuthStateMigrationError,
-} from '../src/root-auth-state-migration.js';
+} from '../src/auth/root-auth-state-migration.js';
 
 function metadata({ uid, mode, type = 'file', symlink = false }) {
   return {

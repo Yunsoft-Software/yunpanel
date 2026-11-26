@@ -4,12 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createDockerWorkloadRegistry } from '../src/docker-workload-registry.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
-import { createWebsiteProvisioningRuntime } from '../src/website-provisioning-runtime.js';
-import { createWebsiteRemovalCleanupAdapters } from '../src/website-removal-cleanup-adapters.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createDockerWorkloadRegistry } from '../src/docker/docker-workload-registry.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
+import { createWebsiteProvisioningRuntime } from '../src/provisioning/website-provisioning-runtime.js';
+import { createWebsiteRemovalCleanupAdapters } from '../src/websites/website-removal-cleanup-adapters.js';
 
 async function fixture(t) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yp-proxy-removal-'));

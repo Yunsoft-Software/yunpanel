@@ -3,8 +3,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { mountDockerComposeRoutes } from '../src/docker-compose-http.js';
-import { createSiteMutationLock } from '../src/site-mutation-lock.js';
+import { mountDockerComposeRoutes } from '../src/docker/docker-compose-http.js';
+import { createSiteMutationLock } from '../src/websites/site-mutation-lock.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const projectId = '0bb78242-03a6-429f-9d17-7725c521437c';

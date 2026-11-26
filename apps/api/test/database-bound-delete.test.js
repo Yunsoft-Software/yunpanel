@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import test from 'node:test';
-import { DatabaseHttpError, mountDatabaseRoutes } from '../src/database-http.js';
+import { DatabaseHttpError, mountDatabaseRoutes } from '../src/databases/database-http.js';
 
 const serverId = randomUUID();
 const owner = Object.freeze({

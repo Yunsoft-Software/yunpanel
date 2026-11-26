@@ -4,7 +4,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   createDatabaseCredentialApplyService,
   DatabaseCredentialApplyError,
-} from '../src/database-credential-apply-service.js';
+} from '../src/databases/database-credential-apply-service.js';
 
 const serverId = '12345678-1234-4234-8234-123456789012';
 const bindingId = '22345678-1234-4234-8234-123456789012';

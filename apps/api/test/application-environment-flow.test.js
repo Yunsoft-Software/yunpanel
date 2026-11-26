@@ -2,14 +2,14 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createApp } from '../src/app.js';
-import { createApplicationEnvironmentRegistry } from '../src/application-environment-registry.js';
-import { createApplicationRegistry } from '../src/application-registry.js';
-import { createCertificateRegistry } from '../src/certificate-registry.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { reconcileCompletedJob } from '../src/job-reconciliation.js';
+import { createApp } from '../src/http/app.js';
+import { createApplicationEnvironmentRegistry } from '../src/applications/application-environment-registry.js';
+import { createApplicationRegistry } from '../src/applications/application-registry.js';
+import { createCertificateRegistry } from '../src/certificates/certificate-registry.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { reconcileCompletedJob } from '../src/jobs/job-reconciliation.js';
 import { withPanelContext } from './helpers/panel-auth-fixture.js';
 
 async function withServer(app, callback) {

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AuthError } from '../src/auth-error.js';
+import { AuthError } from '../src/auth/auth-error.js';
 import { hostingAuthFixture } from '../test-support/hosting-auth-fixture.js';
-import { createHostingAccountStore } from '../src/hosting-account-store.js';
+import { createHostingAccountStore } from '../src/hosting/hosting-account-store.js';
 
 const credentials = {
   hashPassword: async (pass) => `fixture-hash:${pass}`,

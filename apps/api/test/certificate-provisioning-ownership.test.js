@@ -6,7 +6,7 @@ import test from 'node:test';
 import {
   createCertificateRegistry,
   CertificateRegistryError,
-} from '../src/certificate-registry.js';
+} from '../src/certificates/certificate-registry.js';
 
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
-import { DEFAULT_AI_TOOL_DEFINITIONS } from '../src/ai-tool-catalog.js';
+import { DEFAULT_AI_TOOL_DEFINITIONS } from '../src/ai/ai-tool-catalog.js';
 import {
   AiToolRegistryError,
   createAiToolRegistry,
@@ -9,10 +9,10 @@ import {
   createAiMcpAdapter,
   AiMcpError,
   MCP_ERROR_CODES,
-} from '../src/ai-tool-registry.js';
-import { evaluateAiToolPolicy } from '../src/ai-policy.js';
-import { createAiActionPlan } from '../src/ai-action-plan.js';
-import { mountAiRoutes, mountAiMcpRoutes, aiHttpInternals } from '../src/ai-http.js';
+} from '../src/ai/ai-tool-registry.js';
+import { evaluateAiToolPolicy } from '../src/ai/ai-policy.js';
+import { createAiActionPlan } from '../src/ai/ai-action-plan.js';
+import { mountAiRoutes, mountAiMcpRoutes, aiHttpInternals } from '../src/ai/ai-http.js';
 
 const ownerAuth = Object.freeze({
   user: Object.freeze({ id: 'owner-1', role: 'owner' }),

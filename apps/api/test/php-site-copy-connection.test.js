@@ -5,9 +5,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { siteFileManagerInternals } from '../src/site-file-manager.js';
+import { siteFileManagerInternals } from '../src/files/site-file-manager.js';
 
-const WORKER = fileURLToPath(new URL('../src/php-site-copy-connection-worker.js', import.meta.url));
+const WORKER = fileURLToPath(new URL('../src/php/php-site-copy-connection-worker.js', import.meta.url));
 const uid = process.getuid?.();
 
 function credential(databaseName) {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createDnsZoneDnssecService } from '../src/dns-zone-dnssec.js';
+import { createDnsZoneDnssecService } from '../src/dns/dns-zone-dnssec.js';
 
 const domainId = '8bc307db-9e2d-4c3f-91ea-49e740d259a9';
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';

@@ -8,22 +8,22 @@ import path from 'node:path';
 import test from 'node:test';
 import { chromium } from '@playwright/test';
 import { createPanelServer } from '../server.js';
-import { createApp } from '../../api/src/app.js';
-import { createApplicationRegistry } from '../../api/src/application-registry.js';
-import { createAuthenticatedApi } from '../../api/src/auth-http.js';
-import { createAuthStore } from '../../api/src/auth-store.js';
-import { createCertificateRegistry } from '../../api/src/certificate-registry.js';
-import { createDomainRegistry } from '../../api/src/domain-registry.js';
-import { createJobRegistry } from '../../api/src/job-registry.js';
-import { createServerRegistry } from '../../api/src/server-registry.js';
-import { createWebsiteRegistry } from '../../api/src/website-registry.js';
+import { createApp } from '../../api/src/http/app.js';
+import { createApplicationRegistry } from '../../api/src/applications/application-registry.js';
+import { createAuthenticatedApi } from '../../api/src/auth/auth-http.js';
+import { createAuthStore } from '../../api/src/auth/auth-store.js';
+import { createCertificateRegistry } from '../../api/src/certificates/certificate-registry.js';
+import { createDomainRegistry } from '../../api/src/domains/domain-registry.js';
+import { createJobRegistry } from '../../api/src/jobs/job-registry.js';
+import { createServerRegistry } from '../../api/src/runtime/server-registry.js';
+import { createWebsiteRegistry } from '../../api/src/websites/website-registry.js';
 import {
   computePublicKeyId,
   ENTITLEMENT_ISSUER,
   ENTITLEMENT_TOKEN_TYPE,
   PREMIUM_CAPABILITIES,
-} from '../../api/src/license-entitlement-verifier.js';
-import { createLicenseEntitlementService } from '../../api/src/license-entitlement-service.js';
+} from '../../api/src/panel/license-entitlement-verifier.js';
+import { createLicenseEntitlementService } from '../../api/src/panel/license-entitlement-service.js';
 
 function generateEd25519KeyPair() {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');

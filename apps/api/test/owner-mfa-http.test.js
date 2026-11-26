@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { once } from 'node:events';
-import { createAuthenticatedApi } from '../src/auth-http.js';
-import { AuthError } from '../src/auth-error.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
+import { AuthError } from '../src/auth/auth-error.js';
 
 async function fixture(t, { development = false, origin = 'https://panel.example.test', ownerMfaRequired = true } = {}) {
   let enrolled = false;

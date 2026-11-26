@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   createRoundcubeDomainMappingRegistry,
   RoundcubeDomainMappingRegistryError,
-} from '../src/roundcube-domain-mapping-registry.js';
+} from '../src/mail/roundcube-domain-mapping-registry.js';
 
 const mailDomainId = '11111111-1111-4111-8111-111111111111';
 const webDomainId = '22222222-2222-4222-8222-222222222222';

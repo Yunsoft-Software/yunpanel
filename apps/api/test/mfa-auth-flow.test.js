@@ -8,8 +8,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { TOTP } from 'otpauth';
-import { createAuthStore } from '../src/auth-store.js';
-import { createAuthenticatedApi } from '../src/auth-http.js';
+import { createAuthStore } from '../src/auth/auth-store.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
 
 const origin = 'https://panel.example.test';
 const password = randomBytes(32).toString('base64url');

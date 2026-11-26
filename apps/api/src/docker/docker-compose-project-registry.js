@@ -1,0 +1,733 @@
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
+import { isIP, SocketAddress } from 'node:net';
+import path from 'node:path';
+import { assertUuid } from '@yunpanel/shared';
+import { normalizeEnvironmentMasterKey } from '../applications/application-environment-registry.js';
+import { readJsonWithFallback, writeTextAtomic } from '@yunpanel/shared/json-file-store';
+
+const STORE_VERSION = 1;
+const ALGORITHM = 'aes-256-gcm';
+const PROJECT_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,62}$/;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const SERVICE_NAME_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,62}$/;
+const RESOURCE_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
+const PORT_PROTOCOLS = new Set(['tcp', 'udp']);
+const STORAGE_KINDS = new Set(['bind', 'ephemeral', 'named_volume']);
+const STORAGE_SCOPES = new Set(['host', 'project']);
+const MAX_SERVICE_PORTS = 64;
+const MAX_SERVICE_MOUNTS = 128;
+
+export class DockerComposeProjectRegistryError extends Error {
+  constructor(code, message, status = 400) {
+    super(message);
+    this.name = 'DockerComposeProjectRegistryError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+function normalizeUuid(value, field) {
+  try { return assertUuid(value, field); }
+  catch { throw new DockerComposeProjectRegistryError(`invalid_${field.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)}`, `${field} must be a UUID`); }
+}
+
+function normalizeProjectName(value) {
+  if (typeof value !== 'string' || !PROJECT_NAME_PATTERN.test(value)) {
+    throw new DockerComposeProjectRegistryError('docker_compose_project_name_invalid', 'Docker Compose project name is invalid');
+  }
+  return value;
+}
+
+function normalizeMasterKey(value) {
+  try { return normalizeEnvironmentMasterKey(value); }
+  catch {
+    throw new DockerComposeProjectRegistryError('invalid_secret_master_key', 'Docker Compose project encryption key is invalid', 500);
+  }
+}
+
+function requireMasterKey(value) {
+  if (!value) throw new DockerComposeProjectRegistryError('secret_store_unavailable', 'Secret master key is not configured', 503);
+  return value;
+}
+
+function validTimestamp(value) {
+  if (typeof value !== 'string' || value.length !== 24 || !Number.isFinite(Date.parse(value))
+    || new Date(value).toISOString() !== value) {
+    throw new DockerComposeProjectRegistryError('docker_compose_project_state_invalid', 'Docker Compose project timestamp is invalid', 409);
+  }
+  return value;
+}
+
+function normalizeNameArray(value, field, pattern = RESOURCE_NAME_PATTERN, maximum = 128) {
+  if (!Array.isArray(value) || value.length > maximum || value.some((item) => typeof item !== 'string' || !pattern.test(item))
+    || new Set(value).size !== value.length) {
+    throw new DockerComposeProjectRegistryError('docker_compose_validation_invalid', `Docker Compose ${field} summary is invalid`);
+  }
+  return [...value].sort();
+}
+
+function canonicalIp(value) {
+  const family = isIP(value);
+  if (!family) return null;
+  try {
+    return new SocketAddress({ address: value, family: family === 4 ? 'ipv4' : 'ipv6', port: 0 }).address;
+  } catch {
+    return null;
+  }
+}
+
+export function publishedHostsOverlap(leftHostIp, rightHostIp) {
+  const left = leftHostIp ?? null;
+  const right = rightHostIp ?? null;
+  if (left === null || right === null) return true;
+  if (left === right) return true;
+  const leftFamily = isIP(left);
+  const rightFamily = isIP(right);
+  if (left === '0.0.0.0' && rightFamily === 4) return true;
+  if (right === '0.0.0.0' && leftFamily === 4) return true;
+  if (left === '::' && rightFamily === 6) return true;
+  if (right === '::' && leftFamily === 6) return true;
+  return false;
+}
+
+export function publishedPortsOverlap(left, right) {
+  if (!left || !right) return false;
+  const leftPort = left.publishedPort ?? left.port;
+  const rightPort = right.publishedPort ?? right.port;
+  if (!Number.isSafeInteger(leftPort) || !Number.isSafeInteger(rightPort) || leftPort !== rightPort) {
+    return false;
+  }
+  const leftProtocol = (left.protocol ?? 'tcp').toLowerCase();
+  const rightProtocol = (right.protocol ?? 'tcp').toLowerCase();
+  if (leftProtocol !== rightProtocol) return false;
+  return publishedHostsOverlap(left.hostIp ?? left.host ?? null, right.hostIp ?? right.host ?? null);
+}
+
+function publishedPortAllocationKey(port) {
+  const host = port.hostIp ?? null;
+  const protocol = (port.protocol ?? 'tcp').toLowerCase();
+  return `${host === null ? '*' : host}|${port.publishedPort}|${protocol}`;
+}
+
+function collectProjectPublishedPorts(services) {
+  const result = [];
+  for (const service of services ?? []) {
+    for (const port of service?.publishedPorts ?? []) {
+      result.push({ serviceName: service.name, ...port });
+    }
+  }
+  return result;
+}
+
+function assertNoPublishedPortConflict(projects, { serverId, excludeProjectId = null, services, previousServices = null }) {
+  const previousKeys = previousServices
+    ? new Set(collectProjectPublishedPorts(previousServices).map(publishedPortAllocationKey))
+    : null;
+  const requested = collectProjectPublishedPorts(services).filter(
+    (port) => !previousKeys || !previousKeys.has(publishedPortAllocationKey(port)),
+  );
+  if (requested.length === 0) return;
+  for (const other of projects) {
+    if (!other || other.serverId !== serverId || other.id === excludeProjectId) continue;
+    const existing = collectProjectPublishedPorts(other.services);
+    for (const candidate of requested) {
+      for (const bound of existing) {
+        if (publishedPortsOverlap(candidate, bound)) {
+          throw new DockerComposeProjectRegistryError(
+            'docker_compose_published_port_conflict',
+            `Published host port ${candidate.hostIp ?? '*'}:${candidate.publishedPort}/${candidate.protocol} is already allocated by Compose project "${other.projectName}"`,
+            409,
+          );
+        }
+      }
+    }
+  }
+}
+
+function normalizePublishedPorts(value, code = 'docker_compose_validation_invalid') {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > MAX_SERVICE_PORTS) {
+    throw new DockerComposeProjectRegistryError(code, 'Docker Compose published port summary is invalid', code === 'docker_compose_project_state_invalid' ? 409 : 400);
+  }
+  const identities = new Set();
+  const output = value.map((port) => {
+    if (!port || typeof port !== 'object' || Array.isArray(port)
+      || Object.keys(port).length !== 4
+      || Object.keys(port).some((key) => !['hostIp', 'publishedPort', 'targetPort', 'protocol'].includes(key))
+      || (port.hostIp !== null && (typeof port.hostIp !== 'string' || canonicalIp(port.hostIp) !== port.hostIp))
+      || !Number.isSafeInteger(port.publishedPort) || port.publishedPort < 1 || port.publishedPort > 65535
+      || !Number.isSafeInteger(port.targetPort) || port.targetPort < 1 || port.targetPort > 65535
+      || typeof port.protocol !== 'string' || !PORT_PROTOCOLS.has(port.protocol)) {
+      throw new DockerComposeProjectRegistryError(code, 'Docker Compose published port summary is invalid', code === 'docker_compose_project_state_invalid' ? 409 : 400);
+    }
+    const identity = `${port.hostIp ?? '*'}:${port.publishedPort}/${port.protocol}`;
+    if (identities.has(identity)) {
+      throw new DockerComposeProjectRegistryError(code, 'Docker Compose published port summary contains duplicates', code === 'docker_compose_project_state_invalid' ? 409 : 400);
+    }
+    identities.add(identity);
+    return { ...port };
+  });
+  return output.sort((left, right) => (left.hostIp ?? '').localeCompare(right.hostIp ?? '')
+    || left.publishedPort - right.publishedPort
+    || left.targetPort - right.targetPort
+    || left.protocol.localeCompare(right.protocol));
+}
+
+function safeStoragePath(value, { absolute = false } = {}) {
+  return typeof value === 'string' && value.length >= 1 && value.length <= 4096
+    && !/[\u0000-\u001f\u007f]/.test(value) && (!absolute || path.posix.isAbsolute(value));
+}
+
+function validProjectBindSource(value) {
+  if (value === './') return true;
+  if (typeof value !== 'string' || !value.startsWith('./') || !safeStoragePath(value)) return false;
+  const segments = value.slice(2).split('/');
+  return segments.length > 0 && segments.every((segment) => segment.length > 0 && segment !== '.' && segment !== '..');
+}
+
+function normalizeStorageMounts(value, code = 'docker_compose_validation_invalid') {
+  if (value === undefined) return [];
+  const status = code === 'docker_compose_project_state_invalid' ? 409 : 400;
+  if (!Array.isArray(value) || value.length > MAX_SERVICE_MOUNTS) {
+    throw new DockerComposeProjectRegistryError(code, 'Docker Compose storage mount summary is invalid', status);
+  }
+  const targets = new Set();
+  const output = value.map((mount) => {
+    if (!mount || typeof mount !== 'object' || Array.isArray(mount)
+      || Object.keys(mount).length !== 5
+      || Object.keys(mount).some((key) => !['kind', 'source', 'sourceScope', 'target', 'readOnly'].includes(key))
+      || typeof mount.kind !== 'string' || !STORAGE_KINDS.has(mount.kind)
+      || !safeStoragePath(mount.target, { absolute: true })
+      || typeof mount.readOnly !== 'boolean' || targets.has(mount.target)) {
+      throw new DockerComposeProjectRegistryError(code, 'Docker Compose storage mount summary is invalid', status);
+    }
+    targets.add(mount.target);
+    if (mount.kind === 'ephemeral') {
+      if (mount.source !== null || mount.sourceScope !== null) {
+        throw new DockerComposeProjectRegistryError(code, 'Docker Compose ephemeral storage identity is invalid', status);
+      }
+      return { ...mount };
+    }
+    if (typeof mount.sourceScope !== 'string' || !STORAGE_SCOPES.has(mount.sourceScope)
+      || typeof mount.source !== 'string') {
+      throw new DockerComposeProjectRegistryError(code, 'Docker Compose storage source identity is invalid', status);
+    }
+    if (mount.kind === 'named_volume') {
+      if (mount.sourceScope !== 'project' || !RESOURCE_NAME_PATTERN.test(mount.source)) {
+        throw new DockerComposeProjectRegistryError(code, 'Docker Compose named volume identity is invalid', status);
+      }
+      return { ...mount };
+    }
+    if ((mount.sourceScope === 'project' && !validProjectBindSource(mount.source))
+      || (mount.sourceScope === 'host' && !safeStoragePath(mount.source, { absolute: true }))) {
+      throw new DockerComposeProjectRegistryError(code, 'Docker Compose bind mount identity is invalid', status);
+    }
+    return { ...mount };
+  });
+  return output.sort((left, right) => left.target.localeCompare(right.target)
+    || left.kind.localeCompare(right.kind)
+    || String(left.source ?? '').localeCompare(String(right.source ?? '')));
+}
+
+function normalizeServiceSummary(service, code = 'docker_compose_validation_invalid') {
+  if (!service || typeof service !== 'object' || Array.isArray(service)
+    || Object.keys(service).some((key) => !['name', 'imageConfigured', 'buildConfigured', 'publishedPorts', 'storageMounts'].includes(key))
+    || Object.keys(service).length < 3 || Object.keys(service).length > 5
+    || typeof service.name !== 'string' || !SERVICE_NAME_PATTERN.test(service.name)
+    || typeof service.imageConfigured !== 'boolean' || typeof service.buildConfigured !== 'boolean') {
+    throw new DockerComposeProjectRegistryError(code, 'Docker Compose service summary is invalid', code === 'docker_compose_project_state_invalid' ? 409 : 400);
+  }
+  return {
+    name: service.name,
+    imageConfigured: service.imageConfigured,
+    buildConfigured: service.buildConfigured,
+    publishedPorts: normalizePublishedPorts(service.publishedPorts, code),
+    storageMounts: normalizeStorageMounts(service.storageMounts, code),
+  };
+}
+
+function normalizeVolumeDetails(value, code = 'docker_compose_validation_invalid') {
+  if (value === undefined) return null;
+  const status = code === 'docker_compose_project_state_invalid' ? 409 : 400;
+  if (!Array.isArray(value) || value.length > 128) {
+    throw new DockerComposeProjectRegistryError(code, 'Docker Compose volume details are invalid', status);
+  }
+  const seen = new Set();
+  const output = value.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+      || Object.keys(entry).length !== 4
+      || Object.keys(entry).some((key) => !['name', 'scope', 'external', 'runtimeName'].includes(key))
+      || typeof entry.name !== 'string' || !RESOURCE_NAME_PATTERN.test(entry.name)
+      || typeof entry.scope !== 'string' || !STORAGE_SCOPES.has(entry.scope)
+      || typeof entry.external !== 'boolean'
+      || typeof entry.runtimeName !== 'string' || entry.runtimeName.length < 1 || entry.runtimeName.length > 256
+      || /[\u0000-\u001f\u007f]/.test(entry.runtimeName)
+      || seen.has(entry.name)) {
+      throw new DockerComposeProjectRegistryError(code, 'Docker Compose volume details are invalid', status);
+    }
+    seen.add(entry.name);
+    return Object.freeze({
+      name: entry.name,
+      scope: entry.scope,
+      external: entry.external,
+      runtimeName: entry.runtimeName,
+    });
+  });
+  return Object.freeze(output.sort((left, right) => left.name.localeCompare(right.name)));
+}
+
+function projectOwnedVolumeKeys(projectName, volumeDetails) {
+  if (!Array.isArray(volumeDetails)) return [];
+  return volumeDetails
+    .filter((entry) => entry.scope === 'project' && entry.external !== true && entry.runtimeName === `${projectName}_${entry.name}`)
+    .map((entry) => entry.name)
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function mergeOwnedVolumeKeys(projectName, previousOwned = [], previousDetails = null, nextDetails = null) {
+  const keys = new Set();
+  for (const key of previousOwned ?? []) {
+    if (typeof key === 'string' && RESOURCE_NAME_PATTERN.test(key)) keys.add(key);
+  }
+  for (const key of projectOwnedVolumeKeys(projectName, previousDetails)) keys.add(key);
+  for (const key of projectOwnedVolumeKeys(projectName, nextDetails)) keys.add(key);
+  return Object.freeze([...keys].sort((left, right) => left.localeCompare(right)));
+}
+
+function normalizeValidation(value, projectName, document) {
+  const bytes = Buffer.byteLength(document);
+  const sha256 = createHash('sha256').update(document).digest('hex');
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || value.version !== 1 || value.projectName !== projectName
+    || value.composeSha256 !== sha256 || value.composeBytes !== bytes
+    || value.validated !== true || value.sideEffects !== false
+    || !Number.isSafeInteger(value.serviceCount) || value.serviceCount < 1 || value.serviceCount > 64
+    || !Array.isArray(value.services) || value.services.length !== value.serviceCount
+    || !Number.isSafeInteger(value.secretCount) || value.secretCount < 0 || value.secretCount > 128
+    || !Number.isSafeInteger(value.configCount) || value.configCount < 0 || value.configCount > 128) {
+    throw new DockerComposeProjectRegistryError('docker_compose_validation_invalid', 'Docker Compose validation evidence does not match the project document');
+  }
+  const services = value.services.map((service) => normalizeServiceSummary(service));
+  const serviceNames = services.map((service) => service.name);
+  if (new Set(serviceNames).size !== serviceNames.length) {
+    throw new DockerComposeProjectRegistryError('docker_compose_validation_invalid', 'Docker Compose service identities must be unique');
+  }
+  let networkDetails = null;
+  if (Array.isArray(value.networkDetails)) {
+    networkDetails = value.networkDetails.map((net) => {
+      if (!net || typeof net !== 'object' || typeof net.name !== 'string' || typeof net.scope !== 'string') {
+        throw new DockerComposeProjectRegistryError('docker_compose_validation_invalid', 'Docker Compose network details are invalid');
+      }
+      if (net.scope !== 'project') {
+        throw new DockerComposeProjectRegistryError('docker_compose_validation_invalid', 'Docker Compose networks must have project scope');
+      }
+      return Object.freeze({ name: net.name, scope: net.scope });
+    });
+  }
+  const volumeDetails = normalizeVolumeDetails(value.volumeDetails, 'docker_compose_validation_invalid');
+  return Object.freeze({
+    composeSha256: sha256,
+    composeBytes: bytes,
+    services: Object.freeze(services.map((service) => Object.freeze({
+      ...service,
+      publishedPorts: Object.freeze(service.publishedPorts.map((port) => Object.freeze({ ...port }))),
+      storageMounts: Object.freeze(service.storageMounts.map((mount) => Object.freeze({ ...mount }))),
+    })).sort((a, b) => a.name.localeCompare(b.name))),
+    networks: Object.freeze(normalizeNameArray(value.networks, 'network')),
+    ...(networkDetails ? { networkDetails: Object.freeze(networkDetails) } : {}),
+    volumes: Object.freeze(normalizeNameArray(value.volumes, 'volume')),
+    ...(volumeDetails ? { volumeDetails } : {}),
+    secretCount: value.secretCount,
+    configCount: value.configCount,
+  });
+}
+
+function encryptedShape(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== 3
+    || !['ciphertext', 'iv', 'tag'].every((field) => typeof value[field] === 'string' && value[field].length > 0)) {
+    throw new DockerComposeProjectRegistryError('docker_compose_project_state_invalid', 'Docker Compose encrypted document state is invalid', 409);
+  }
+  let iv;
+  let tag;
+  try {
+    iv = Buffer.from(value.iv, 'base64');
+    tag = Buffer.from(value.tag, 'base64');
+    Buffer.from(value.ciphertext, 'base64');
+  } catch {
+    throw new DockerComposeProjectRegistryError('docker_compose_project_state_invalid', 'Docker Compose encrypted document state is invalid', 409);
+  }
+  if (iv.length !== 12 || tag.length !== 16) {
+    throw new DockerComposeProjectRegistryError('docker_compose_project_state_invalid', 'Docker Compose encrypted document metadata is invalid', 409);
+  }
+  return { ...value };
+}
+
+function encryptDocument(masterKey, projectId, revision, document) {
+  const key = requireMasterKey(masterKey);
+  const iv = randomBytes(12);
+  const cipher = createCipheriv(ALGORITHM, key, iv);
+  cipher.setAAD(Buffer.from(`${projectId}:compose:${revision}`, 'utf8'));
+  const encrypted = Buffer.concat([cipher.update(document, 'utf8'), cipher.final()]);
+  return Object.freeze({
+    ciphertext: encrypted.toString('base64'),
+    iv: iv.toString('base64'),
+    tag: cipher.getAuthTag().toString('base64'),
+  });
+}
+
+function decryptDocument(masterKey, record) {
+  const key = requireMasterKey(masterKey);
+  try {
+    const decipher = createDecipheriv(ALGORITHM, key, Buffer.from(record.encryptedDocument.iv, 'base64'));
+    decipher.setAAD(Buffer.from(`${record.id}:compose:${record.revision}`, 'utf8'));
+    decipher.setAuthTag(Buffer.from(record.encryptedDocument.tag, 'base64'));
+    const document = Buffer.concat([
+      decipher.update(Buffer.from(record.encryptedDocument.ciphertext, 'base64')),
+      decipher.final(),
+    ]).toString('utf8');
+    if (Buffer.byteLength(document) !== record.composeBytes
+      || createHash('sha256').update(document).digest('hex') !== record.composeSha256) {
+      throw new Error('digest mismatch');
+    }
+    return document;
+  } catch {
+    throw new DockerComposeProjectRegistryError('docker_compose_project_decrypt_failed', 'Docker Compose project document could not be decrypted', 500);
+  }
+}
+
+function cloneService(service) {
+  return Object.freeze({
+    ...service,
+    publishedPorts: Object.freeze(service.publishedPorts.map((port) => Object.freeze({ ...port }))),
+    storageMounts: Object.freeze(service.storageMounts.map((mount) => Object.freeze({ ...mount }))),
+  });
+}
+
+function publicProject(record) {
+  return Object.freeze({
+    id: record.id,
+    serverId: record.serverId,
+    projectName: record.projectName,
+    revision: record.revision,
+    composeSha256: record.composeSha256,
+    composeBytes: record.composeBytes,
+    services: Object.freeze(record.services.map(cloneService)),
+    networks: Object.freeze([...record.networks]),
+    volumes: Object.freeze([...record.volumes]),
+    ...(Array.isArray(record.volumeDetails)
+      ? { volumeDetails: Object.freeze(record.volumeDetails.map((entry) => Object.freeze({ ...entry }))) }
+      : {}),
+    ...(Array.isArray(record.ownedVolumes)
+      ? { ownedVolumes: Object.freeze([...record.ownedVolumes]) }
+      : {}),
+    secretCount: record.secretCount,
+    configCount: record.configCount,
+    documentConfigured: true,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  });
+}
+
+function validatePersisted(value) {
+  const allowedFields = new Set([
+    'id', 'serverId', 'projectName', 'revision', 'composeSha256', 'composeBytes', 'services',
+    'networks', 'networkDetails', 'volumes', 'volumeDetails', 'ownedVolumes', 'secretCount', 'configCount', 'encryptedDocument', 'createdAt', 'updatedAt',
+  ]);
+  const requiredFields = new Set([
+    'id', 'serverId', 'projectName', 'revision', 'composeSha256', 'composeBytes', 'services',
+    'networks', 'volumes', 'secretCount', 'configCount', 'encryptedDocument', 'createdAt', 'updatedAt',
+  ]);
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).some((key) => !allowedFields.has(key))
+    || Array.from(requiredFields).some((key) => !(key in value))
+    || !Number.isSafeInteger(value.revision) || value.revision < 1
+    || typeof value.composeSha256 !== 'string' || !SHA256_PATTERN.test(value.composeSha256)
+    || !Number.isSafeInteger(value.composeBytes) || value.composeBytes < 1 || value.composeBytes > 512 * 1024
+    || !Number.isSafeInteger(value.secretCount) || value.secretCount < 0 || value.secretCount > 128
+    || !Number.isSafeInteger(value.configCount) || value.configCount < 0 || value.configCount > 128) {
+    throw new DockerComposeProjectRegistryError('docker_compose_project_state_invalid', 'Docker Compose project state is invalid', 409);
+  }
+  const services = normalizeNameArray(value.services?.map?.((service) => service?.name) ?? null, 'service', SERVICE_NAME_PATTERN, 64);
+  if (services.length < 1 || !Array.isArray(value.services) || value.services.length !== services.length) {
+    throw new DockerComposeProjectRegistryError('docker_compose_project_state_invalid', 'Docker Compose project service state is invalid', 409);
+  }
+  const normalizedServices = value.services
+    .map((service) => normalizeServiceSummary(service, 'docker_compose_project_state_invalid'))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  let networkDetails = null;
+  if (Array.isArray(value.networkDetails)) {
+    networkDetails = value.networkDetails.map((net) => {
+      if (!net || typeof net !== 'object' || typeof net.name !== 'string' || typeof net.scope !== 'string') {
+        throw new DockerComposeProjectRegistryError('docker_compose_project_state_invalid', 'Docker Compose project network state is invalid', 409);
+      }
+      if (net.scope !== 'project') {
+        throw new DockerComposeProjectRegistryError('docker_compose_project_state_invalid', 'Docker Compose networks must have project scope', 409);
+      }
+      return Object.freeze({ name: net.name, scope: net.scope });
+    });
+  } else if (value.networkDetails !== undefined) {
+    throw new DockerComposeProjectRegistryError('docker_compose_project_state_invalid', 'Docker Compose project network state is invalid', 409);
+  }
+  const volumeDetails = normalizeVolumeDetails(value.volumeDetails, 'docker_compose_project_state_invalid');
+  const ownedVolumes = value.ownedVolumes === undefined
+    ? null
+    : Object.freeze(normalizeNameArray(value.ownedVolumes, 'volume'));
+  return {
+    id: normalizeUuid(value.id, 'dockerProjectId'),
+    serverId: normalizeUuid(value.serverId, 'serverId'),
+    projectName: normalizeProjectName(value.projectName),
+    revision: value.revision,
+    composeSha256: value.composeSha256,
+    composeBytes: value.composeBytes,
+    services: normalizedServices,
+    networks: normalizeNameArray(value.networks, 'network'),
+    ...(networkDetails ? { networkDetails: Object.freeze(networkDetails) } : {}),
+    volumes: normalizeNameArray(value.volumes, 'volume'),
+    ...(volumeDetails ? { volumeDetails } : {}),
+    ...(ownedVolumes ? { ownedVolumes } : {}),
+    secretCount: value.secretCount,
+    configCount: value.configCount,
+    encryptedDocument: encryptedShape(value.encryptedDocument),
+    createdAt: validTimestamp(value.createdAt),
+    updatedAt: validTimestamp(value.updatedAt),
+  };
+}
+
+export function createDockerComposeProjectRegistry({
+  filePath = null,
+  masterKey = process.env.YUNPANEL_SECRET_MASTER_KEY,
+  now = () => Date.now(),
+  serverExists = async () => true,
+  beforeUpdateProject = null,
+} = {}) {
+  if (typeof now !== 'function' || typeof serverExists !== 'function'
+    || (beforeUpdateProject !== null && typeof beforeUpdateProject !== 'function')) {
+    throw new DockerComposeProjectRegistryError('docker_compose_project_dependencies_invalid', 'Docker Compose project registry dependencies are invalid', 503);
+  }
+  const encryptionKey = normalizeMasterKey(masterKey);
+  let state = { version: STORE_VERSION, projects: [] };
+  let initialized = false;
+  let writeChain = Promise.resolve();
+  let mutationChain = Promise.resolve();
+
+  function withMutation(action) {
+    const run = mutationChain.catch(() => {}).then(async () => {
+      await ensureInitialized();
+      return action();
+    });
+    mutationChain = run.then(() => {}, () => {});
+    return run;
+  }
+
+  async function persist() {
+    if (!filePath) return;
+    const snapshot = JSON.stringify(state, null, 2);
+    writeChain = writeChain.then(() => writeTextAtomic(filePath, snapshot));
+    return writeChain;
+  }
+
+  async function requireServer(serverId, persisted = false) {
+    const id = normalizeUuid(serverId, 'serverId');
+    let exists;
+    try { exists = await serverExists(id); }
+    catch { throw new DockerComposeProjectRegistryError('docker_server_reference_unavailable', 'Docker project server reference could not be verified', 503); }
+    if (!exists) throw new DockerComposeProjectRegistryError('docker_server_not_found', 'Docker project server does not exist', persisted ? 409 : 404);
+    return id;
+  }
+
+  async function init() {
+    if (initialized) return;
+    if (filePath) {
+      try {
+        const parsed = await readJsonWithFallback(filePath);
+        if (!parsed || parsed.version !== STORE_VERSION || !Array.isArray(parsed.projects)
+          || Object.keys(parsed).length !== 2 || Object.keys(parsed).some((key) => !['version', 'projects'].includes(key))) {
+          throw new DockerComposeProjectRegistryError('docker_compose_project_state_invalid', 'Docker Compose project store is invalid', 409);
+        }
+        const needsServiceSummaryMigration = parsed.projects.some((project) => Array.isArray(project?.services)
+          && project.services.some((service) => service && typeof service === 'object'
+            && (!Object.hasOwn(service, 'publishedPorts') || !Object.hasOwn(service, 'storageMounts'))));
+        const projects = parsed.projects.map(validatePersisted);
+        const ids = new Set();
+        const names = new Set();
+        for (const project of projects) {
+          const scopedName = `${project.serverId}:${project.projectName}`;
+          if (ids.has(project.id) || names.has(scopedName)) {
+            throw new DockerComposeProjectRegistryError('docker_compose_project_state_invalid', 'Docker Compose project identities must be unique', 409);
+          }
+          ids.add(project.id);
+          names.add(scopedName);
+          await requireServer(project.serverId, true);
+        }
+        state = { version: STORE_VERSION, projects };
+        if (needsServiceSummaryMigration) await persist();
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+        await persist();
+      }
+    }
+    initialized = true;
+  }
+
+  async function ensureInitialized() {
+    if (!initialized) await init();
+  }
+
+  async function createProject({ projectId = null, serverId, projectName, document, validation } = {}) {
+    await ensureInitialized();
+    const id = projectId === null ? randomUUID() : normalizeUuid(projectId, 'dockerProjectId');
+    const normalizedServerId = await requireServer(serverId);
+    const name = normalizeProjectName(projectName);
+    if (typeof document !== 'string' || document.length < 1) {
+      throw new DockerComposeProjectRegistryError('docker_compose_document_invalid', 'Docker Compose project document is required');
+    }
+    const summary = normalizeValidation(validation, name, document);
+    const existing = state.projects.find((project) => project.id === id) ?? null;
+    if (existing) {
+      if (projectId === null || existing.serverId !== normalizedServerId || existing.projectName !== name
+        || existing.revision !== 1 || existing.composeSha256 !== summary.composeSha256) {
+        throw new DockerComposeProjectRegistryError('docker_compose_project_identity_conflict', 'Docker Compose project identity conflicts with existing state', 409);
+      }
+      return publicProject(existing);
+    }
+    if (state.projects.some((project) => project.serverId === normalizedServerId && project.projectName === name)) {
+      throw new DockerComposeProjectRegistryError('docker_compose_project_name_conflict', 'Docker Compose project name is already used on this server', 409);
+    }
+    assertNoPublishedPortConflict(state.projects, { serverId: normalizedServerId, services: summary.services });
+    const timestamp = new Date(now()).toISOString();
+    const revision = 1;
+    const ownedVolumes = summary.volumeDetails
+      ? mergeOwnedVolumeKeys(name, [], null, summary.volumeDetails)
+      : null;
+    const record = {
+      id,
+      serverId: normalizedServerId,
+      projectName: name,
+      revision,
+      ...summary,
+      ...(ownedVolumes ? { ownedVolumes } : {}),
+      encryptedDocument: encryptDocument(encryptionKey, id, revision, document),
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    state.projects.push(record);
+    await persist();
+    return publicProject(record);
+  }
+
+  async function updateProject(projectId, { expectedRevision, document, validation } = {}) {
+    await ensureInitialized();
+    const id = normalizeUuid(projectId, 'dockerProjectId');
+    const project = state.projects.find((candidate) => candidate.id === id);
+    if (!project) throw new DockerComposeProjectRegistryError('docker_compose_project_not_found', 'Docker Compose project was not found', 404);
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+      throw new DockerComposeProjectRegistryError('invalid_docker_compose_project_revision', 'A positive expected project revision is required');
+    }
+    if (project.revision !== expectedRevision) {
+      throw new DockerComposeProjectRegistryError('docker_compose_project_revision_conflict', 'Docker Compose project changed before update', 409);
+    }
+    if (typeof document !== 'string' || document.length < 1) {
+      throw new DockerComposeProjectRegistryError('docker_compose_document_invalid', 'Docker Compose project document is required');
+    }
+    const summary = normalizeValidation(validation, project.projectName, document);
+    assertNoPublishedPortConflict(state.projects, {
+      serverId: project.serverId,
+      excludeProjectId: project.id,
+      services: summary.services,
+      previousServices: project.services,
+    });
+    if (typeof beforeUpdateProject === 'function') {
+      await beforeUpdateProject({ current: publicProject(project), next: summary });
+    }
+    const revision = project.revision + 1;
+    const ownedVolumes = (Array.isArray(project.ownedVolumes) || Array.isArray(project.volumeDetails) || Array.isArray(summary.volumeDetails))
+      ? mergeOwnedVolumeKeys(project.projectName, project.ownedVolumes ?? [], project.volumeDetails ?? null, summary.volumeDetails ?? null)
+      : null;
+    Object.assign(project, summary, {
+      ...(ownedVolumes ? { ownedVolumes } : {}),
+      revision,
+      encryptedDocument: encryptDocument(encryptionKey, id, revision, document),
+      updatedAt: new Date(now()).toISOString(),
+    });
+    if (!summary.volumeDetails) delete project.volumeDetails;
+    await persist();
+    return publicProject(project);
+  }
+
+  async function removeProject(projectId, { expectedRevision, expectedComposeSha256 } = {}) {
+    await ensureInitialized();
+    const id = normalizeUuid(projectId, 'dockerProjectId');
+    const current = state.projects.find(item => item.id === id);
+    if (!current) return { id, removed: true };
+    if (current.revision !== expectedRevision || current.composeSha256 !== expectedComposeSha256) throw new DockerComposeProjectRegistryError('docker_compose_project_revision_conflict', 'Project changed before retirement', 409);
+    const before = state.projects;
+    state.projects = state.projects.filter(item => item.id !== id);
+    try { await persist(); } catch (error) { state.projects = before; throw error; }
+    return { id, removed: true };
+  }
+
+  async function getProject(projectId) {
+    await ensureInitialized();
+    const id = normalizeUuid(projectId, 'dockerProjectId');
+    const project = state.projects.find((candidate) => candidate.id === id);
+    return project ? publicProject(project) : null;
+  }
+
+  async function getProjectDocument(projectId) {
+    await ensureInitialized();
+    const id = normalizeUuid(projectId, 'dockerProjectId');
+    const project = state.projects.find((candidate) => candidate.id === id);
+    if (!project) {
+      throw new DockerComposeProjectRegistryError('docker_compose_project_not_found', 'Docker Compose project was not found', 404);
+    }
+    return Object.freeze({
+      projectId: project.id,
+      projectName: project.projectName,
+      revision: project.revision,
+      composeSha256: project.composeSha256,
+      document: decryptDocument(encryptionKey, project),
+    });
+  }
+
+  async function listProjects({ serverId = null } = {}) {
+    await ensureInitialized();
+    const normalizedServerId = serverId === null ? null : normalizeUuid(serverId, 'serverId');
+    return state.projects
+      .filter((project) => normalizedServerId === null || project.serverId === normalizedServerId)
+      .map(publicProject);
+  }
+
+  async function materializeProject(projectId, { expectedRevision = null } = {}) {
+    await ensureInitialized();
+    const id = normalizeUuid(projectId, 'dockerProjectId');
+    const project = state.projects.find((candidate) => candidate.id === id);
+    if (!project) throw new DockerComposeProjectRegistryError('docker_compose_project_not_found', 'Docker Compose project was not found', 404);
+    if (expectedRevision !== null && project.revision !== expectedRevision) {
+      throw new DockerComposeProjectRegistryError('docker_compose_project_revision_conflict', 'Docker Compose project revision is stale', 409);
+    }
+    return Object.freeze({ ...publicProject(project), document: decryptDocument(encryptionKey, project) });
+  }
+
+  return Object.freeze({
+    init,
+    createProject: (input) => withMutation(() => createProject(input)),
+    updateProject: (projectId, input) => withMutation(() => updateProject(projectId, input)),
+    removeProject: (projectId, input) => withMutation(() => removeProject(projectId, input)),
+    getProject,
+    getProjectDocument,
+    listProjects,
+    materializeProject,
+  });
+}
+
+export const dockerComposeProjectRegistryInternals = Object.freeze({
+  storeVersion: STORE_VERSION,
+  normalizeProjectName,
+  normalizePublishedPorts,
+  normalizeStorageMounts,
+  normalizeValidation,
+  validatePersisted,
+  encryptDocument,
+  decryptDocument,
+});

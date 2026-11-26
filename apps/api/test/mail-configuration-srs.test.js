@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import test from 'node:test';
-import { createMailConfigurationService, MailConfigurationError } from '../src/mail-configuration.js';
+import { createMailConfigurationService, MailConfigurationError } from '../src/mail/mail-configuration.js';
 
 const SERVER_ID = randomUUID();
 const MAIL_DOMAIN_ID = randomUUID();

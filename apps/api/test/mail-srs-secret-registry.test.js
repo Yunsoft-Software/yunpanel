@@ -6,7 +6,7 @@ import test from 'node:test';
 import {
   createMailSrsSecretRegistry,
   MailSrsSecretRegistryError,
-} from '../src/mail-srs-secret-registry.js';
+} from '../src/mail/mail-srs-secret-registry.js';
 
 const SERVER_ID = '10714f5d-8646-4f9a-a8e9-b80439ff6305';
 const MASTER_KEY = '11'.repeat(32);

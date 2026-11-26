@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   createDockerComposeMaterializer,
   DockerComposeMaterializerError,
-} from '../src/docker-compose-materializer.js';
+} from '../src/docker/docker-compose-materializer.js';
 
 const projectId = '0bb78242-03a6-429f-9d17-7725c521437c';
 const sha = 'a'.repeat(64);

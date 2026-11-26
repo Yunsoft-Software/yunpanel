@@ -6,10 +6,10 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { createOperationEnvelope, isKnownOperation, OPERATIONS, validateOperationEnvelope } from '@yunpanel/protocol';
-import { createAuthStore } from '../src/auth-store.js';
-import { createDurableJobRegistry } from '../src/durable-job-registry.js';
-import { createJobRegistry, jobPublicView } from '../src/job-registry.js';
-import { createLocalHostOperations } from '../src/local-host-operations.js';
+import { createAuthStore } from '../src/auth/auth-store.js';
+import { createDurableJobRegistry } from '../src/jobs/durable-job-registry.js';
+import { createJobRegistry, jobPublicView } from '../src/jobs/job-registry.js';
+import { createLocalHostOperations } from '../src/runtime/local-host-operations.js';
 
 const operation = OPERATIONS.WEBSITE_PHP_COPY;
 const maxBytes = 16 * 1024 * 1024;

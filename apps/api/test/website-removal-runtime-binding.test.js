@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWebsiteRemovalRuntime } from '../src/website-removal-runtime.js';
+import { createWebsiteRemovalRuntime } from '../src/websites/website-removal-runtime.js';
 import { removalFixture, removalPreview } from '../test-support/website-removal-fixture.js';
 import { mkdtemp, mkdir, readFile, rename, rm, rmdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { createLiveSessionRegistry } from '../src/live-session-registry.js';
-import { createWebsiteRemovalOperationRegistry } from '../src/website-removal-operation-registry.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
+import { createLiveSessionRegistry } from '../src/auth/live-session-registry.js';
+import { createWebsiteRemovalOperationRegistry } from '../src/websites/website-removal-operation-registry.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
 
 test('removal preview blocks legacy direct-systemd binding without matching Application runtime authority', async()=>{
  const preview=removalPreview('site-a',{runtimeBindings:[{id:'binding-a'}]});

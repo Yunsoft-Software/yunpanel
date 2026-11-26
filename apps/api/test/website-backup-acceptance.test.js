@@ -3,29 +3,29 @@ import http from 'node:http';
 import { once } from 'node:events';
 import express from 'express';
 import test from 'node:test';
-import { createJobRegistry } from '../src/job-registry.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
 import {
   isWebsiteBackupHttpError,
   mountWebsiteBackupRoutes,
-} from '../src/website-backup-http.js';
-import { createWebsiteBackupBrowser } from '../src/website-backup-browser.js';
-import { createWebsiteBackupOperationService } from '../src/website-backup-operation-service.js';
-import { createWebsiteBackupOperationRegistry } from '../src/website-backup-operation-registry.js';
-import { createSiteResourceBoundary } from '../src/site-resource-boundary.js';
+} from '../src/backup/website-backup-http.js';
+import { createWebsiteBackupBrowser } from '../src/backup/website-backup-browser.js';
+import { createWebsiteBackupOperationService } from '../src/backup/website-backup-operation-service.js';
+import { createWebsiteBackupOperationRegistry } from '../src/backup/website-backup-operation-registry.js';
+import { createSiteResourceBoundary } from '../src/http/site-resource-boundary.js';
 import {
   createDisasterRecoveryScope,
   normalizeDisasterRecoveryScope,
   maskDisasterRecoverySecrets,
   DISASTER_RECOVERY_CATEGORIES,
-} from '../src/backup-manifest.js';
+} from '../src/backup/backup-manifest.js';
 import {
   verifyDisasterRecoveryRestore,
   BackupPlanError,
-} from '../src/backup-plan.js';
+} from '../src/backup/backup-plan.js';
 import {
   sanitizeDisasterRecoveryRestoreResult,
   DatabaseRestoreJobResultError,
-} from '../src/database-restore-job-result.js';
+} from '../src/databases/database-restore-job-result.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const siteAId = '11111111-1111-4111-8111-111111111111';

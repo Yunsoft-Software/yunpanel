@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import test from 'node:test';
-import { createSiteResourceBoundary } from '../src/site-resource-boundary.js';
-import { MailDiagnosticsHttpError, mountMailDiagnosticsRoutes } from '../src/mail-diagnostics-http.js';
-import { createMailDeliveryDiagnosticsService, MailDeliveryDiagnosticsError } from '../src/mail-delivery-diagnostics-service.js';
+import { createSiteResourceBoundary } from '../src/http/site-resource-boundary.js';
+import { MailDiagnosticsHttpError, mountMailDiagnosticsRoutes } from '../src/mail/mail-diagnostics-http.js';
+import { createMailDeliveryDiagnosticsService, MailDeliveryDiagnosticsError } from '../src/mail/mail-delivery-diagnostics-service.js';
 
 const localServerId = randomUUID();
 const remoteServerId = randomUUID();

@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { createConnection } from 'node:net';
 import express from 'express';
-import { createPleskImporter } from '../src/plesk-importer.js';
-import { mountPleskImporterRoutes, isPleskImporterHttpError } from '../src/plesk-importer-http.js';
-import { PleskImporterError } from '../src/plesk-importer.js';
+import { createPleskImporter } from '../src/migration/plesk-importer.js';
+import { mountPleskImporterRoutes, isPleskImporterHttpError } from '../src/migration/plesk-importer-http.js';
+import { PleskImporterError } from '../src/migration/plesk-importer.js';
 
 const localServerId = '99bc760a-d508-4ae6-92be-efdedee9658d';
 

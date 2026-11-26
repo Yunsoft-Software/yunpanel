@@ -5,10 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createDurableJobRegistry } from '../src/durable-job-registry.js';
-import { createJobRecoveryContextReader } from '../src/job-recovery-context.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { recoverRunningInspection } from '../src/job-running-recovery.js';
+import { createDurableJobRegistry } from '../src/jobs/durable-job-registry.js';
+import { createJobRecoveryContextReader } from '../src/jobs/job-recovery-context.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { recoverRunningInspection } from '../src/jobs/job-running-recovery.js';
 
 const serverId = 'server-1';
 const applicationId = '2f334b35-03ce-4aa0-a8e4-b2ad4f592541';

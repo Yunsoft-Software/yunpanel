@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWebsitePhpToolActionService } from '../src/website-php-tool-action-service.js';
-import { websitePhpToolActionPreview } from '../src/website-php-tool-action.js';
+import { createWebsitePhpToolActionService } from '../src/php/website-php-tool-action-service.js';
+import { websitePhpToolActionPreview } from '../src/php/website-php-tool-action.js';
 
 const binding = {
   websiteId: '11111111-1111-4111-8111-111111111111',

@@ -1,23 +1,23 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { AuthError } from '../src/auth-error.js';
+import { AuthError } from '../src/auth/auth-error.js';
 import {
   mountSiteCreateRoutes,
   siteCreateHttpInternals,
-} from '../src/site-create-http.js';
-import { SiteCreateError } from '../src/site-create.js';
+} from '../src/provisioning/site-create-http.js';
+import { SiteCreateError } from '../src/provisioning/site-create.js';
 import { siteFixture, website, allocation, uuid } from '../test-support/hosting-site-fixture.js';
 import {
   createHostingSiteAllocationStore,
   hostingWebsiteDigest,
-} from '../src/hosting-site-allocation-store.js';
-import { createHostingSiteCreateService } from '../src/hosting-site-create-service.js';
-import { createTenantBoundaryMiddleware } from '../src/tenant-boundary.js';
+} from '../src/hosting/hosting-site-allocation-store.js';
+import { createHostingSiteCreateService } from '../src/hosting/hosting-site-create-service.js';
+import { createTenantBoundaryMiddleware } from '../src/http/tenant-boundary.js';
 import {
   mountWebsiteRemovalRoutes,
   WebsiteRemovalHttpError,
   websiteRemovalHttpInternals,
-} from '../src/website-removal-http.js';
+} from '../src/websites/website-removal-http.js';
 
 function fakeApp() {
   const routes = { get: new Map(), post: new Map() };

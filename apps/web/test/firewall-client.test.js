@@ -9,10 +9,10 @@ import path from 'node:path';
 import test from 'node:test';
 import express from 'express';
 import { createCrowdsecManager } from '@yunpanel/host-runtime';
-import { createAuthenticatedApi } from '../../api/src/auth-http.js';
-import { createAuthStore } from '../../api/src/auth-store.js';
-import { mountFirewallRoutes } from '../../api/src/firewall-http.js';
-import { createFirewallService } from '../../api/src/firewall-service.js';
+import { createAuthenticatedApi } from '../../api/src/auth/auth-http.js';
+import { createAuthStore } from '../../api/src/auth/auth-store.js';
+import { mountFirewallRoutes } from '../../api/src/runtime/firewall-http.js';
+import { createFirewallService } from '../../api/src/runtime/firewall-service.js';
 import { createPanelServer } from '../server.js';
 import {
   fetchFirewallStatus,

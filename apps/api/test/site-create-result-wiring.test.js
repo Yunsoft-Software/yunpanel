@@ -8,7 +8,7 @@ import '../../web/test/site-create-result-wiring.test.js';
 const source = (file) => readFile(new URL(file, import.meta.url), 'utf8');
 
 test('API site-create HTTP routes enforce panel route access and strict body validation', async () => {
-  const code = await source('../src/site-create-http.js');
+  const code = await source('../src/provisioning/site-create-http.js');
 
   // Verify requirePanelRouteAccess guard on all create and recovery routes
   assert.match(code, /app\.post\('\/api\/sites\/create-preview',\s*requirePanelRouteAccess/);
@@ -26,7 +26,7 @@ test('API site-create HTTP routes enforce panel route access and strict body val
 });
 
 test('API site-create HTTP preserves 201/200 response with provisioningError when provisioning fails', async () => {
-  const code = await source('../src/site-create-http.js');
+  const code = await source('../src/provisioning/site-create-http.js');
 
   // Standard site creation handles provisioning errors without failing 201/200 create
   assert.match(code, /provisioningError = Object\.freeze\(\{/);
@@ -41,7 +41,7 @@ test('API site-create HTTP preserves 201/200 response with provisioningError whe
 });
 
 test('hosting site create service preserves verified website and allocation when provisioning registration fails', async () => {
-  const serviceCode = await source('../src/hosting-site-create-service.js');
+  const serviceCode = await source('../src/hosting/hosting-site-create-service.js');
 
   // Re-verifies website persistence before completing allocation
   assert.match(serviceCode, /const website = await websiteRegistry\.getWebsite\(reserved\.websiteId\)/);

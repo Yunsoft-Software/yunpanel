@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   BackupResourceProviderError,
   createBackupResourceProvider,
-} from '../src/backup-resource-provider.js';
+} from '../src/backup/backup-resource-provider.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const otherServerId = 'd0bc7f95-bdbd-4375-904f-50c532fc3faa';

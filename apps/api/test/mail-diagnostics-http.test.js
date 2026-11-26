@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import test from 'node:test';
-import { MailDiagnosticsHttpError, mountMailDiagnosticsRoutes } from '../src/mail-diagnostics-http.js';
+import { MailDiagnosticsHttpError, mountMailDiagnosticsRoutes } from '../src/mail/mail-diagnostics-http.js';
 
 const localServerId = randomUUID();
 const remoteServerId = randomUUID();

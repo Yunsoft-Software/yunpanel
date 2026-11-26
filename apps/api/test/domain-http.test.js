@@ -6,8 +6,8 @@ import {
   createDomainReparentPreviewHandler,
   createDomainUpdateHandler,
   createDomainUpdatePreviewHandler,
-} from '../src/domain-http.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
+} from '../src/domains/domain-http.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
 
 function responseRecorder() {
   return {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWebsitePhpToolsService } from '../src/website-php-tools-service.js';
+import { createWebsitePhpToolsService } from '../src/php/website-php-tools-service.js';
 import { phpToolsStatus } from '../../web/src/workspace/php-tools-model.js';
 const websiteId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', applicationId = '11111111-1111-4111-8111-111111111111';
 const scope = { websiteId, applicationId, serverId: '22222222-2222-4222-8222-222222222222', unixUser: 'yunapp-0123456789ab' };

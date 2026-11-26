@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import test from 'node:test';
-import { createApp } from '../src/app.js';
-import { createDnsHostingRegistry } from '../src/dns-hosting-registry.js';
-import { createDnsProviderCredentialRegistry } from '../src/dns-provider-credential-registry.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { createMailDomainRegistry } from '../src/mail-domain-registry.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
+import { createApp } from '../src/http/app.js';
+import { createDnsHostingRegistry } from '../src/dns/dns-hosting-registry.js';
+import { createDnsProviderCredentialRegistry } from '../src/dns/dns-provider-credential-registry.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { createMailDomainRegistry } from '../src/mail/mail-domain-registry.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
 import { ownerManagementContext, readOnlyManagementContext, withPanelContext } from './helpers/panel-auth-fixture.js';
 
 async function withServer(app, callback) {

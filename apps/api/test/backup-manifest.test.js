@@ -7,7 +7,7 @@ import {
   dockerStorageBackupPolicy,
   dockerStorageBackupResources,
   normalizeBackupManifest,
-} from '../src/backup-manifest.js';
+} from '../src/backup/backup-manifest.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const projectId = '0bb78242-03a6-429f-9d17-7725c521437c';

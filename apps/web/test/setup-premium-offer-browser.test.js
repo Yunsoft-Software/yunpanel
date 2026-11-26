@@ -8,17 +8,17 @@ import path from 'node:path';
 import test from 'node:test';
 import { chromium } from '@playwright/test';
 import { createPanelServer } from '../server.js';
-import { createApp } from '../../api/src/app.js';
-import { createAuthenticatedApi } from '../../api/src/auth-http.js';
-import { createAuthStore } from '../../api/src/auth-store.js';
+import { createApp } from '../../api/src/http/app.js';
+import { createAuthenticatedApi } from '../../api/src/auth/auth-http.js';
+import { createAuthStore } from '../../api/src/auth/auth-store.js';
 import {
   computePublicKeyId,
   ENTITLEMENT_ISSUER,
   ENTITLEMENT_TOKEN_TYPE,
   PREMIUM_CAPABILITIES,
-} from '../../api/src/license-entitlement-verifier.js';
-import { createLicenseEntitlementService } from '../../api/src/license-entitlement-service.js';
-import { createServerRegistry } from '../../api/src/server-registry.js';
+} from '../../api/src/panel/license-entitlement-verifier.js';
+import { createLicenseEntitlementService } from '../../api/src/panel/license-entitlement-service.js';
+import { createServerRegistry } from '../../api/src/runtime/server-registry.js';
 
 function generateEd25519KeyPair() {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');

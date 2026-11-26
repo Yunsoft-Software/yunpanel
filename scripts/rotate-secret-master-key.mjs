@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { lstat, open, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { rollbackSecretMasterKey, rotateSecretMasterKey } from '../apps/api/src/secret-master-key-rotation.js';
+import { rollbackSecretMasterKey, rotateSecretMasterKey } from '../apps/api/src/auth/secret-master-key-rotation.js';
 
 function usage() {
   return 'Usage: node scripts/rotate-secret-master-key.mjs rotate --confirm-offline --backup-dir <dir> --new-key-file <file> [--current-key-file <file> | --current-env-file <file>] | rollback --confirm-offline --backup-dir <dir>';

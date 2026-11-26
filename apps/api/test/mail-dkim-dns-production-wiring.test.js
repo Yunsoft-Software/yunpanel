@@ -7,9 +7,9 @@ const text = (name) => readFile(source(name), 'utf8');
 
 test('production app reuses one DKIM DNS service for provider routes and key lifecycle reconciliation', async () => {
   const [appSource, dnsSource, dkimHttpSource] = await Promise.all([
-    text('management-app.js'),
-    text('mail-dkim-dns.js'),
-    text('mail-dkim-http.js'),
+    text('http/management-app.js'),
+    text('mail/mail-dkim-dns.js'),
+    text('mail/mail-dkim-http.js'),
   ]);
 
   assert.match(appSource, /createMailDkimDnsService\(\{[\s\S]*?mailDomainRegistry,[\s\S]*?mailDkimRegistry,[\s\S]*?mailDkimRetirementRegistry,[\s\S]*?dnsHostingRegistry,[\s\S]*?dnsProviderCredentialRegistry,[\s\S]*?dnsRecordManager,[\s\S]*?jobRegistry,[\s\S]*?\}\)/);
@@ -31,7 +31,7 @@ test('DKIM DNS provider lifecycle is backed by generic bounded TXT protocol and 
   const [protocolSource, cloudflareSource, jobSource] = await Promise.all([
     readFile(new URL('../../../packages/protocol/src/index-extended.js', import.meta.url), 'utf8'),
     readFile(new URL('../../../packages/host-runtime/src/cloudflare-dns-manager.js', import.meta.url), 'utf8'),
-    text('job-registry.js'),
+    text('jobs/job-registry.js'),
   ]);
 
   assert.match(protocolSource, /record\.type !== 'TXT'/);

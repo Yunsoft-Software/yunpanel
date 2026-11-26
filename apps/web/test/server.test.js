@@ -178,8 +178,8 @@ test('browser proxy does not expose agent transport or raw API routes', async (t
 });
 
 test('IP-approved browser still needs login through the complete gateway/API chain', async (t) => {
-  const { createAuthStore } = await import('../../api/src/auth-store.js');
-  const { createAuthenticatedApi } = await import('../../api/src/auth-http.js');
+  const { createAuthStore } = await import('../../api/src/auth/auth-store.js');
+  const { createAuthenticatedApi } = await import('../../api/src/auth/auth-http.js');
   const { randomBytes } = await import('node:crypto');
   const { createRequire } = await import('node:module');
   const { TOTP } = createRequire(new URL('../../api/package.json', import.meta.url))('otpauth');

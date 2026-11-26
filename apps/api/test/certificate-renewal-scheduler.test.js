@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createCertificateRegistry } from '../src/certificate-registry.js';
-import { runCertificateRenewalSweep } from '../src/certificate-renewal-scheduler.js';
-import { createJobRegistry } from '../src/job-registry.js';
+import { createCertificateRegistry } from '../src/certificates/certificate-registry.js';
+import { runCertificateRenewalSweep } from '../src/certificates/certificate-renewal-scheduler.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
 
 function metadata(certName, validTo) {
   return {

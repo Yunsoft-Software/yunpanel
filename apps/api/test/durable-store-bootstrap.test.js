@@ -4,14 +4,14 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createDnsHostingRegistry } from '../src/dns-hosting-registry.js';
-import { createDnsProviderCredentialRegistry } from '../src/dns-provider-credential-registry.js';
-import { createDockerWorkloadRegistry } from '../src/docker-workload-registry.js';
-import { createMailDomainRegistry } from '../src/mail-domain-registry.js';
-import { createMailboxRegistry } from '../src/mailbox-registry.js';
-import { createWebsiteMigrationLedger } from '../src/website-migration-ledger.js';
-import { createWebsiteMigrationPolicyStore } from '../src/website-migration-policy.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
+import { createDnsHostingRegistry } from '../src/dns/dns-hosting-registry.js';
+import { createDnsProviderCredentialRegistry } from '../src/dns/dns-provider-credential-registry.js';
+import { createDockerWorkloadRegistry } from '../src/docker/docker-workload-registry.js';
+import { createMailDomainRegistry } from '../src/mail/mail-domain-registry.js';
+import { createMailboxRegistry } from '../src/mail/mailbox-registry.js';
+import { createWebsiteMigrationLedger } from '../src/migration/website-migration-ledger.js';
+import { createWebsiteMigrationPolicyStore } from '../src/migration/website-migration-policy.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
 
 test('empty file-backed control-plane stores materialize private versioned state', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-empty-stores-'));

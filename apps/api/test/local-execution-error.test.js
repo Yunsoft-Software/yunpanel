@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { safeLocalOperationError } from '../src/local-execution-error.js';
-import { createLocalJobExecutor, localExecutorInternals } from '../src/local-job-executor.js';
+import { safeLocalOperationError } from '../src/runtime/local-execution-error.js';
+import { createLocalJobExecutor, localExecutorInternals } from '../src/runtime/local-job-executor.js';
 
 test('known diagnostics preserve the code, never the original message or attached output', () => {
   const result = safeLocalOperationError({ code: 'certbot_failed', message: 'API_KEY=PRIVATE', stdout: 'PRIVATE', stderr: 'PRIVATE', command: 'PRIVATE' });

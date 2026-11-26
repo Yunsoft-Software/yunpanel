@@ -6,7 +6,7 @@ import path from 'node:path';
 import {
   createWebsiteSuspensionOperationRegistry,
   WebsiteSuspensionOperationRegistryError,
-} from '../src/website-suspension-operation-registry.js';
+} from '../src/websites/website-suspension-operation-registry.js';
 
 async function withTempDir(fn) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'website-susp-reg-test-'));

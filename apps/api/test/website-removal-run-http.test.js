@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
-import { mountWebsiteRemovalRoutes } from '../src/website-removal-http.js';
+import { mountWebsiteRemovalRoutes } from '../src/websites/website-removal-http.js';
 import { removalFixture, removalStart } from '../test-support/website-removal-fixture.js';
 
 // Real Express/HTTP parsing and route guards with controlled session authority.

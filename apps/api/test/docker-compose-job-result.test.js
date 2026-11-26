@@ -4,7 +4,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   DockerComposeJobResultError,
   sanitizeDockerComposeJobResult,
-} from '../src/docker-compose-job-result.js';
+} from '../src/docker/docker-compose-job-result.js';
 
 const projectId = '0bb78242-03a6-429f-9d17-7725c521437c';
 const payload = {

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
-import { mountPanelSettingsRoutes } from '../src/panel-settings-http.js';
+import { mountPanelSettingsRoutes } from '../src/panel/panel-settings-http.js';
 
 function createMockApp({ panelSettingsService, userRole = 'owner' }) {
   const app = express();

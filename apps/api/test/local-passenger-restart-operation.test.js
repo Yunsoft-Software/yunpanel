@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {normalizeNodeRuntimeConfig} from '@yunpanel/shared';
-import {createLocalPassengerRestartOperation} from '../src/local-passenger-restart-operation.js';
+import {createLocalPassengerRestartOperation} from '../src/applications/local-passenger-restart-operation.js';
 
 function fixture({parentDomainId=null}={}){
  const app={id:randomUUID(),serverId:randomUUID(),type:'node',runtimeAdapter:'passenger',currentReleaseId:randomUUID(),

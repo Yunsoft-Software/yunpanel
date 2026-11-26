@@ -3,7 +3,7 @@ import test from 'node:test';
 import { mkdtemp, readFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createApplicationRuntimeBindingRegistry } from '../src/application-runtime-binding-registry.js';
+import { createApplicationRuntimeBindingRegistry } from '../src/applications/application-runtime-binding-registry.js';
 
 const applicationId = '9d4a4727-1aba-4d35-95fe-21db67042ce9';
 const serverId = '57f8611c-0af7-4d2f-8291-2fe7dbab22fe';

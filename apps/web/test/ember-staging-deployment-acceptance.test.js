@@ -17,11 +17,11 @@ import {
   resolveDeploymentDiagnostics,
   compareDeploymentVersions,
   evaluateFreshnessState,
-} from '../../api/src/core-app.js';
+} from '../../api/src/http/core-app.js';
 import {
   assertNoDot44Host,
   ProductionExitGateError,
-} from '../../api/src/production-exit-gate.js';
+} from '../../api/src/panel/production-exit-gate.js';
 
 const proxyToken = 'p'.repeat(43);
 

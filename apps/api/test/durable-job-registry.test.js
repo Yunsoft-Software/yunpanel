@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createDurableJobRegistry, DurableJobRegistryError } from '../src/durable-job-registry.js';
+import { createDurableJobRegistry, DurableJobRegistryError } from '../src/jobs/durable-job-registry.js';
 
 function createFakeFactory({ initialJobs = [], failRecovery = false, failRecoveryRecord = false, blockMutation = null, blockInit = null } = {}) {
   let disk = structuredClone(initialJobs);

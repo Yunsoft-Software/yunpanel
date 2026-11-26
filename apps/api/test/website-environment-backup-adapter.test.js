@@ -4,9 +4,9 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { createWebsiteEnvironmentBackupAdapter } from '../src/website-environment-backup-adapter.js';
-import { createWebsiteResourceBackupCodec } from '../src/website-resource-backup-codec.js';
-import { createApplicationEnvironmentRegistry } from '../src/application-environment-registry.js';
+import { createWebsiteEnvironmentBackupAdapter } from '../src/backup/website-environment-backup-adapter.js';
+import { createWebsiteResourceBackupCodec } from '../src/backup/website-resource-backup-codec.js';
+import { createApplicationEnvironmentRegistry } from '../src/applications/application-environment-registry.js';
 
 async function fixture(t, type = 'node', configureRuntime = true) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'yp-site-env-'));

@@ -68,7 +68,7 @@ test.describe('EML-05 Mailing list ve üyelik yönetimi; OS/eklenti matrisi', ()
 
     // 4. Fiziksel kanıt 2: EML-05 capability kaydının deferred ve Mailman motoru olarak tanımlı olduğu doğrulanır
     const capOutput = runSsh(`node -e '
-      import("/usr/lib/yunpanel/apps/api/src/non-reseller-capabilities.js").then(m => {
+      import("/usr/lib/yunpanel/apps/api/src/hosting/non-reseller-capabilities.js").then(m => {
         const c = m.getCapabilityById("EML-05");
         console.log(JSON.stringify({ id: c.id, status: c.status, serviceAdapters: c.serviceAdapters }));
       });

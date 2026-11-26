@@ -15,11 +15,11 @@ import {
   mountWebsiteProvisioningRoutes,
   WebsiteProvisioningHttpError,
   websiteProvisioningHttpInternals,
-} from '../src/website-provisioning-http.js';
+} from '../src/provisioning/website-provisioning-http.js';
 import { advanceProvisioning } from '../../web/src/workspace/provisioning-advance.js';
-import { createAuthenticatedApi } from '../src/auth-http.js';
-import { createAuthStore } from '../src/auth-store.js';
-import { createSiteMutationLock } from '../src/site-mutation-lock.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
+import { createAuthStore } from '../src/auth/auth-store.js';
+import { createSiteMutationLock } from '../src/websites/site-mutation-lock.js';
 
 const { continueBody, retryBody, compensateBody, publicOperation, publicResult } = websiteProvisioningHttpInternals;
 

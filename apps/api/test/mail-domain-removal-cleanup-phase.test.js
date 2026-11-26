@@ -5,7 +5,7 @@ import test from 'node:test';
 import {
   createMailDomainRemovalCleanupPhase,
   MailDomainRemovalCleanupPhaseError,
-} from '../src/mail-domain-removal-cleanup-phase.js';
+} from '../src/mail/mail-domain-removal-cleanup-phase.js';
 
 const operationId = randomUUID();
 const mailDomainId = randomUUID();

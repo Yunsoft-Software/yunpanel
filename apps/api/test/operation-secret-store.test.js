@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile, lstat, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { createOperationSecretStore } from '../src/operation-secret-store.js';
+import { createOperationSecretStore } from '../src/auth/operation-secret-store.js';
 
 const id = '11111111-1111-4111-8111-111111111111';
 const websiteId = '22222222-2222-4222-8222-222222222222';

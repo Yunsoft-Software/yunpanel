@@ -11,19 +11,19 @@ import path from 'node:path';
 import test from 'node:test';
 import express from 'express';
 
-import { createAuthenticatedApi } from '../../api/src/auth-http.js';
-import { createAuthStore } from '../../api/src/auth-store.js';
-import { createSiteMutationLock, SiteMutationLockError } from '../../api/src/site-mutation-lock.js';
-import { mountWebsiteProvisioningRoutes, WebsiteProvisioningHttpError } from '../../api/src/website-provisioning-http.js';
+import { createAuthenticatedApi } from '../../api/src/auth/auth-http.js';
+import { createAuthStore } from '../../api/src/auth/auth-store.js';
+import { createSiteMutationLock, SiteMutationLockError } from '../../api/src/websites/site-mutation-lock.js';
+import { mountWebsiteProvisioningRoutes, WebsiteProvisioningHttpError } from '../../api/src/provisioning/website-provisioning-http.js';
 import {
   createWebsiteProvisioningOrchestrator,
   WebsiteProvisioningOrchestratorError,
-} from '../../api/src/website-provisioning-orchestrator.js';
+} from '../../api/src/provisioning/website-provisioning-orchestrator.js';
 import {
   createWebsiteProvisioningRegistry,
   WebsiteProvisioningRegistryError,
-} from '../../api/src/website-provisioning-registry.js';
-import { createWebsiteRegistry, WebsiteRegistryError } from '../../api/src/website-registry.js';
+} from '../../api/src/provisioning/website-provisioning-registry.js';
+import { createWebsiteRegistry, WebsiteRegistryError } from '../../api/src/websites/website-registry.js';
 
 import { setSession } from '../src/session-client.js';
 import { autoAdvanceWebsiteProvisioning } from '../src/workspace/provisioning-client.js';

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { createOperationalNotificationService } from '../../api/src/operational-notification-service.js';
+import { createOperationalNotificationService } from '../../api/src/panel/operational-notification-service.js';
 
 register('./jsx-loader.js', import.meta.url);
 const {

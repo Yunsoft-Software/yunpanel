@@ -7,7 +7,7 @@ import {
   createDnsZoneTemplateRegistry,
   dnsZoneTemplateInternals,
   DnsZoneTemplateRegistryError,
-} from '../src/dns-zone-template-registry.js';
+} from '../src/dns/dns-zone-template-registry.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 

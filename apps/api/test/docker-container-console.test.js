@@ -13,12 +13,12 @@ import {
   createDockerContainerConsoleInspector,
 } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createApp } from '../src/app.js';
-import { createAuthenticatedApi } from '../src/auth-http.js';
-import { createAuthStore } from '../src/auth-store.js';
-import { createDockerComposeApiHandler } from '../src/docker-compose-api-handler.js';
-import { createDockerComposeOperationReceiptStore } from '../src/docker-compose-operation-receipt.js';
-import { createDockerComposeRuntime } from '../src/docker-compose-runtime.js';
+import { createApp } from '../src/http/app.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
+import { createAuthStore } from '../src/auth/auth-store.js';
+import { createDockerComposeApiHandler } from '../src/docker/docker-compose-api-handler.js';
+import { createDockerComposeOperationReceiptStore } from '../src/docker/docker-compose-operation-receipt.js';
+import { createDockerComposeRuntime } from '../src/docker/docker-compose-runtime.js';
 import {
   buildContainerConsoleExecArgs,
   cleanupDockerContainerExec,
@@ -27,20 +27,20 @@ import {
   matchExecInspectForSession,
   parseProcStat,
   selectContainerSessionPids,
-} from '../src/docker-container-console-cleanup.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createDurableJobRegistry } from '../src/durable-job-registry.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { createLiveSessionRegistry } from '../src/live-session-registry.js';
-import { createLocalDockerComposeOperation } from '../src/local-docker-compose-operation.js';
-import { createOwnerMfaPolicy } from '../src/owner-mfa-policy.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createSiteMutationLock } from '../src/site-mutation-lock.js';
-import { createTerminalCapabilityRegistry, TerminalCapabilityError } from '../src/terminal-capability-registry.js';
-import { createTerminalProcessManager } from '../src/terminal-process-manager.js';
-import { resolveTerminalTarget } from '../src/terminal-target-resolver.js';
-import { terminalWebSocketInternals } from '../src/terminal-websocket.js';
-import { createWebsiteRegistry } from '../src/website-registry.js';
+} from '../src/docker/docker-container-console-cleanup.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createDurableJobRegistry } from '../src/jobs/durable-job-registry.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { createLiveSessionRegistry } from '../src/auth/live-session-registry.js';
+import { createLocalDockerComposeOperation } from '../src/docker/local-docker-compose-operation.js';
+import { createOwnerMfaPolicy } from '../src/auth/owner-mfa-policy.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createSiteMutationLock } from '../src/websites/site-mutation-lock.js';
+import { createTerminalCapabilityRegistry, TerminalCapabilityError } from '../src/terminal/terminal-capability-registry.js';
+import { createTerminalProcessManager } from '../src/terminal/terminal-process-manager.js';
+import { resolveTerminalTarget } from '../src/terminal/terminal-target-resolver.js';
+import { terminalWebSocketInternals } from '../src/terminal/terminal-websocket.js';
+import { createWebsiteRegistry } from '../src/websites/website-registry.js';
 
 async function resolveLocalDockerCommand() {
   for (const candidate of ['/usr/bin/docker', '/usr/local/bin/docker']) {

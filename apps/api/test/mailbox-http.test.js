@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import express from 'express';
 import test from 'node:test';
-import { mountMailboxRoutes } from '../src/mailbox-http.js';
-import { createMailboxRegistry, MailboxRegistryError } from '../src/mailbox-registry.js';
-import { MailboxPasswordError } from '../src/mailbox-password.js';
+import { mountMailboxRoutes } from '../src/mail/mailbox-http.js';
+import { createMailboxRegistry, MailboxRegistryError } from '../src/mail/mailbox-registry.js';
+import { MailboxPasswordError } from '../src/mail/mailbox-password.js';
 
 const localDomain = Object.freeze({ id: randomUUID(), domainName: 'example.com', managementMode: 'local' });
 const externalDomain = Object.freeze({ id: randomUUID(), domainName: 'external.example', managementMode: 'external' });

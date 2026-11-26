@@ -6,7 +6,7 @@ import test from 'node:test';
 import {
   createMailDkimOperationReceiptStore,
   MailDkimOperationReceiptError,
-} from '../src/mail-dkim-operation-receipt.js';
+} from '../src/mail/mail-dkim-operation-receipt.js';
 
 const serverId = 'local-server';
 const jobId = 'mail-dkim-job-001';

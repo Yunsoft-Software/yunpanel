@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';import test from 'node:test';import { randomUUID } from 'node:crypto';
-import { OPERATIONS } from '@yunpanel/protocol';import { createDomainRegistry } from '../src/domain-registry.js';
-import { createCertificateRegistry } from '../src/certificate-registry.js';import { reconcileCompletedJob } from '../src/job-reconciliation.js';
+import { OPERATIONS } from '@yunpanel/protocol';import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createCertificateRegistry } from '../src/certificates/certificate-registry.js';import { reconcileCompletedJob } from '../src/jobs/job-reconciliation.js';
 
 async function fixture() {
   const serverId = randomUUID(), domains = createDomainRegistry(), certificates = createCertificateRegistry();

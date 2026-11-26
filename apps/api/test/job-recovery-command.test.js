@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { JobRecoveryCommandError, reconcileTerminalRecovery } from '../src/job-recovery-command.js';
+import { JobRecoveryCommandError, reconcileTerminalRecovery } from '../src/jobs/job-recovery-command.js';
 
 const identity = Object.freeze({
   serverId: 'server-1',

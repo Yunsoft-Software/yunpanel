@@ -8,13 +8,13 @@ import {
   DnsZoneRetirementError,
   createDnsZoneRetirementService,
   dnsZoneRetirementInternals,
-} from '../src/dns-zone-retirement.js';
+} from '../src/dns/dns-zone-retirement.js';
 import { powerDnsZoneManagerInternals } from '@yunpanel/host-runtime/powerdns-zone-manager';
-import { websiteDnsZoneProvisioningInternals } from '../src/website-dns-zone-provisioning-handler.js';
-import { createDomainRegistry } from '../src/domain-registry.js';
-import { createDnsZoneOwnershipRegistry } from '../src/dns-zone-ownership-registry.js';
-import { createPowerDnsSecretRegistry } from '../src/powerdns-secret-registry.js';
-import { createWebsiteProvisioningRegistry } from '../src/website-provisioning-registry.js';
+import { websiteDnsZoneProvisioningInternals } from '../src/provisioning/website-dns-zone-provisioning-handler.js';
+import { createDomainRegistry } from '../src/domains/domain-registry.js';
+import { createDnsZoneOwnershipRegistry } from '../src/dns/dns-zone-ownership-registry.js';
+import { createPowerDnsSecretRegistry } from '../src/dns/powerdns-secret-registry.js';
+import { createWebsiteProvisioningRegistry } from '../src/provisioning/website-provisioning-registry.js';
 
 const rootId = '12345678-1234-4234-8234-123456789012';
 const childId = '22345678-1234-4234-8234-123456789012';

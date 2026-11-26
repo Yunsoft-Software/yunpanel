@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import test from 'node:test';
-import { mountMailDomainDeleteRoute } from '../src/mail-domain-delete-http.js';
-import { mountMailboxRoutes } from '../src/mailbox-http.js';
+import { mountMailDomainDeleteRoute } from '../src/mail/mail-domain-delete-http.js';
+import { mountMailboxRoutes } from '../src/mail/mailbox-http.js';
 
 const mailboxId = randomUUID();
 const mailDomainId = randomUUID();

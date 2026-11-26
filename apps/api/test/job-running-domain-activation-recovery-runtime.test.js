@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { runRunningDomainActivationRecoveryFromStores } from '../src/job-running-domain-activation-recovery-runtime.js';
+import { runRunningDomainActivationRecoveryFromStores } from '../src/jobs/job-running-domain-activation-recovery-runtime.js';
 
 const serverId = 'server-1';
 const jobId = '12345678-1234-4234-8234-123456789012';

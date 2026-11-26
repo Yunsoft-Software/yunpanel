@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWebsiteProvisioningHandlers } from '../src/website-provisioning-handlers.js';
+import { createWebsiteProvisioningHandlers } from '../src/provisioning/website-provisioning-handlers.js';
 
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 const intent = Object.freeze({

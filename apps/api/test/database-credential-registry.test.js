@@ -6,7 +6,7 @@ import test from 'node:test';
 import {
   createDatabaseCredentialRegistry,
   DatabaseCredentialRegistryError,
-} from '../src/database-credential-registry.js';
+} from '../src/databases/database-credential-registry.js';
 
 const bindingId = '12345678-1234-4234-8234-123456789012';
 const serverId = '22345678-1234-4234-8234-123456789012';

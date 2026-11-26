@@ -4,7 +4,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   JobRunningDatabaseRestoreRecoveryError,
   recoverRunningDatabaseRestore,
-} from '../src/job-running-database-restore-recovery.js';
+} from '../src/jobs/job-running-database-restore-recovery.js';
 
 const serverId = 'server-1';
 const jobId = '12345678-1234-4234-8234-123456789012';

@@ -8,7 +8,7 @@ import {
   createDnsZoneReapplyOperationRegistry,
   dnsZoneReapplyOperationPublicView,
   DnsZoneReapplyOperationRegistryError,
-} from '../src/dns-zone-reapply-operation-registry.js';
+} from '../src/dns/dns-zone-reapply-operation-registry.js';
 
 const operationId = 'f77d9d70-3f77-4be9-b257-0ade06401fb7';
 const domainId = '8bc307db-9e2d-4c3f-91ea-49e740d259a9';

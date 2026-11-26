@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createAiOrchestrator, AiOrchestratorError } from '../src/ai-orchestrator.js';
-import { createAiProviderAdapter } from '../src/ai-provider.js';
-import { createAiToolRegistry } from '../src/ai-tool-registry.js';
-import { DEFAULT_AI_TOOL_DEFINITIONS } from '../src/ai-tool-catalog.js';
+import { createAiOrchestrator, AiOrchestratorError } from '../src/ai/ai-orchestrator.js';
+import { createAiProviderAdapter } from '../src/ai/ai-provider.js';
+import { createAiToolRegistry } from '../src/ai/ai-tool-registry.js';
+import { DEFAULT_AI_TOOL_DEFINITIONS } from '../src/ai/ai-tool-catalog.js';
 
 const ownerAuth = Object.freeze({
   user: Object.freeze({ id: 'owner-user-1', role: 'owner' }),

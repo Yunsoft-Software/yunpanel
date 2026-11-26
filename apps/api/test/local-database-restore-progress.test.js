@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { createLocalHostOperations } from '../src/local-host-operations.js';
+import { createLocalHostOperations } from '../src/runtime/local-host-operations.js';
 
 const jobId = '12345678-1234-4234-8234-123456789012';
 const backupId = '22345678-1234-4234-8234-123456789012';

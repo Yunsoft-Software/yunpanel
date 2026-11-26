@@ -4,19 +4,19 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { createDnsHostingRegistry } from '../src/dns-hosting-registry.js';
-import { createDnsProviderCredentialRegistry } from '../src/dns-provider-credential-registry.js';
-import { createDnsRequirementsService } from '../src/dns-requirements-service.js';
-import { createDomainReparentHandler, createDomainUpdateHandler } from '../src/domain-http.js';
-import { createDomainRegistry, DomainRegistryError } from '../src/domain-registry.js';
-import { createJobRegistry } from '../src/job-registry.js';
-import { createMailAliasRegistry } from '../src/mail-alias-registry.js';
-import { mailboxAliasReferences } from '../src/mailbox-alias-references.js';
-import { createMailDiscoveryEndpointResolver } from '../src/mail-discovery-endpoint-resolver.js';
-import { createMailDiscoveryService } from '../src/mail-discovery-service.js';
-import { createServerRegistry } from '../src/server-registry.js';
-import { createSiteMutationLock } from '../src/site-mutation-lock.js';
-import { createSiteResourceBoundary } from '../src/site-resource-boundary.js';
+import { createDnsHostingRegistry } from '../src/dns/dns-hosting-registry.js';
+import { createDnsProviderCredentialRegistry } from '../src/dns/dns-provider-credential-registry.js';
+import { createDnsRequirementsService } from '../src/dns/dns-requirements-service.js';
+import { createDomainReparentHandler, createDomainUpdateHandler } from '../src/domains/domain-http.js';
+import { createDomainRegistry, DomainRegistryError } from '../src/domains/domain-registry.js';
+import { createJobRegistry } from '../src/jobs/job-registry.js';
+import { createMailAliasRegistry } from '../src/mail/mail-alias-registry.js';
+import { mailboxAliasReferences } from '../src/mail/mailbox-alias-references.js';
+import { createMailDiscoveryEndpointResolver } from '../src/mail/mail-discovery-endpoint-resolver.js';
+import { createMailDiscoveryService } from '../src/mail/mail-discovery-service.js';
+import { createServerRegistry } from '../src/runtime/server-registry.js';
+import { createSiteMutationLock } from '../src/websites/site-mutation-lock.js';
+import { createSiteResourceBoundary } from '../src/http/site-resource-boundary.js';
 
 function responseRecorder() {
   return {

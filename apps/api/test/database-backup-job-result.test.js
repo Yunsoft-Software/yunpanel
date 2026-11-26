@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   DatabaseBackupJobResultError,
   sanitizeDatabaseBackupResult,
-} from '../src/database-backup-job-result.js';
+} from '../src/databases/database-backup-job-result.js';
 
 const jobId = '12345678-1234-4234-8234-123456789012';
 const digest = 'a'.repeat(64);

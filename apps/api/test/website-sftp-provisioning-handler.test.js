@@ -4,7 +4,7 @@ import {
   createWebsiteSftpKeyAwareProvisioningHandler,
   createWebsiteSftpProvisioningHandler,
   WebsiteSftpProvisioningError,
-} from '../src/website-sftp-provisioning-handler.js';
+} from '../src/provisioning/website-sftp-provisioning-handler.js';
 
 test('the production key-aware SFTP handler preserves retirement and exact operation context',async()=>{
  const calls=[],result={satisfied:true};

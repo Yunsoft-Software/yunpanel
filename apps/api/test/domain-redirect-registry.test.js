@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createDomainRegistry, DomainRegistryError } from '../src/domain-registry.js';
+import { createDomainRegistry, DomainRegistryError } from '../src/domains/domain-registry.js';
 
 const input = (overrides = {}) => ({
   serverId: 'local', primaryDomain: 'eski.example.com', aliases: ['www.eski.example.com'], targetType: 'redirect',

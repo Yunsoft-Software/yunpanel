@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, lstat, readFile, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { createWebsiteBackupScheduleRegistry } from '../src/website-backup-schedule-registry.js';
-import { normalizeWebsiteBackupScheduleAuthorization } from '../src/website-backup-schedule-authorization.js';
+import { createWebsiteBackupScheduleRegistry } from '../src/backup/website-backup-schedule-registry.js';
+import { normalizeWebsiteBackupScheduleAuthorization } from '../src/backup/website-backup-schedule-authorization.js';
 
 const websiteId = '11111111-1111-4111-8111-111111111111', serverId = '22222222-2222-4222-8222-222222222222';
 const repositoryId = '33333333-3333-4333-8333-333333333333', creatorId = '44444444-4444-4444-8444-444444444444';

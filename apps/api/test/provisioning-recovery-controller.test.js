@@ -13,13 +13,13 @@ const fetch = nativeFetch;
 // Run web optional-step tests
 await import('../../web/test/provisioning-recovery-optional.test.js');
 
-import { createAuthenticatedApi } from '../src/auth-http.js';
-import { createAuthStore } from '../src/auth-store.js';
+import { createAuthenticatedApi } from '../src/auth/auth-http.js';
+import { createAuthStore } from '../src/auth/auth-store.js';
 import {
   mountWebsiteProvisioningRoutes,
   WebsiteProvisioningHttpError,
-} from '../src/website-provisioning-http.js';
-import { createSiteMutationLock, SiteMutationLockError } from '../src/site-mutation-lock.js';
+} from '../src/provisioning/website-provisioning-http.js';
+import { createSiteMutationLock, SiteMutationLockError } from '../src/websites/site-mutation-lock.js';
 import {
   createProvisioningRecovery,
   EMPTY_RECOVERY,
@@ -27,11 +27,11 @@ import {
   recoveryBusy,
   recoveryOperation,
 } from '../../web/src/workspace/provisioning-recovery.js';
-import { createWebsiteProvisioningRegistry } from '../src/website-provisioning-registry.js';
-import { createWebsiteProvisioningOrchestrator } from '../src/website-provisioning-orchestrator.js';
-import { createJobRecoveryStore } from '../src/job-recovery-store.js';
-import { createJobRecoveryContextReader } from '../src/job-recovery-context.js';
-import { createJobIdempotencyLookup } from '../src/job-idempotency-lookup.js';
+import { createWebsiteProvisioningRegistry } from '../src/provisioning/website-provisioning-registry.js';
+import { createWebsiteProvisioningOrchestrator } from '../src/provisioning/website-provisioning-orchestrator.js';
+import { createJobRecoveryStore } from '../src/jobs/job-recovery-store.js';
+import { createJobRecoveryContextReader } from '../src/jobs/job-recovery-context.js';
+import { createJobIdempotencyLookup } from '../src/jobs/job-idempotency-lookup.js';
 
 const siteAId = 'aaaaaaaa-1111-4111-8111-111111111111';
 const siteBId = 'bbbbbbbb-2222-4222-8222-222222222222';
@@ -435,7 +435,7 @@ test('Real Express API enforces fail-closed tenant boundary, session revocation,
   assert.equal(res.status, 401);
 
   // Test 2b: Inactive tenant actor directly evaluated fails closed with tenant_actor_inactive (403)
-  const { extractActorTenant } = await import('../src/tenant-boundary.js');
+  const { extractActorTenant } = await import('../src/http/tenant-boundary.js');
   const inactiveActorTenant = extractActorTenant({ user: { id: 'inact-user', role: 'site_manager', active: false } });
   assert.equal(inactiveActorTenant.active, false);
 

@@ -8,7 +8,7 @@ import {
   createDnsProviderCredentialRegistry,
   DnsProviderCredentialRegistryError,
   rewrapDnsProviderCredentialSnapshot,
-} from '../src/dns-provider-credential-registry.js';
+} from '../src/dns/dns-provider-credential-registry.js';
 
 const DNS_ZONE_ID = '12345678-1234-4234-8234-123456789012';
 

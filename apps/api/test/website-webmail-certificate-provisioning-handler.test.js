@@ -4,7 +4,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import {
   createWebsiteWebmailCertificateProvisioningHandler,
   WebsiteWebmailCertificateProvisioningError,
-} from '../src/website-webmail-certificate-provisioning-handler.js';
+} from '../src/provisioning/website-webmail-certificate-provisioning-handler.js';
 
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';

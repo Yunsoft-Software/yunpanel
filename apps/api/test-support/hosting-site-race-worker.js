@@ -1,6 +1,6 @@
 import { parentPort, workerData } from 'node:worker_threads';
 import { hostingAuthFixture } from './hosting-auth-fixture.js';
-import { createHostingAccountStore } from '../src/hosting-account-store.js';
+import { createHostingAccountStore } from '../src/hosting/hosting-account-store.js';
 
 const f = hostingAuthFixture(workerData.filePath);
 const store = createHostingAccountStore(f);

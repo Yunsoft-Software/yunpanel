@@ -4,7 +4,7 @@ import { DOCKER_COMPOSE_OPERATIONS, OPERATIONS } from '@yunpanel/protocol';
 import {
   createDockerComposeProjectRegistryBootstrap,
   dockerComposeRuntimeInternals,
-} from '../src/docker-compose-runtime.js';
+} from '../src/docker/docker-compose-runtime.js';
 
 const projectId = '0bb78242-03a6-429f-9d17-7725c521437c';
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';

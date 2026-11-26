@@ -8,7 +8,7 @@ import {
   createWebsiteIsolationMigrationRegistry,
   websiteIsolationMigrationPublicView,
   WebsiteIsolationMigrationRegistryError,
-} from '../src/website-isolation-migration-registry.js';
+} from '../src/websites/website-isolation-migration-registry.js';
 
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 const sourceOperationId = '4d7d1c87-c088-4c1d-bb44-7f370d315672';
