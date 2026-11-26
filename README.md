@@ -1,26 +1,34 @@
 # YunPanel
 
-Yunsoft'un Plesk Obsidian ekran düzenini, kullanım akışlarını ve özelliklerini mevcut Node/React altyapısıyla uyarlayan hosting paneli. Günlük merkez Web Siteleri ve Alan Adları; dosya, veritabanı, SSL, posta, DNS, runtime, yedek ve erişim aynı site bağlamında.
+Yunsoft'un hosting paneli. Plesk Obsidian'ın ekran düzenini, iş akışlarını ve özelliklerini Node/React ile karşılar. Günlük merkez Web Siteleri ekranıdır. Dosya, veritabanı, SSL, posta, DNS, çalışma ortamı, yedek ve erişim aynı site bağlamında yönetilir.
 
-**Projeyi devralan önce [docs/DEVIR.md](docs/DEVIR.md)'yi okusun:** güncel durum, çalışma düzeni, test sunucusu, kurulum, bilinen tuzaklar ve açık işler orada. Son değişiklikler: [docs/yapilanlar.md](docs/yapilanlar.md). Aşağıdaki plan/todo/audit belgeleri 9–12 Ekim'den kalma başvuru kaynaklarıdır.
+**İlk okunacak belge: [docs/DEVIR.md](docs/DEVIR.md).** Güncel durum, çalışma düzeni, test sunucusu, kurulum ve bilinen tuzaklar oradadır. Bağlayıcı kurallar [agents.md](agents.md) içindedir.
 
-| Belge | İçerik |
+## Belge haritası
+
+| Belge | Ne için |
 | --- | --- |
-| [docs/DEVIR.md](docs/DEVIR.md) | Devir notu: buradan başlayın |
-| [docs/yapilanlar.md](docs/yapilanlar.md) | Biten işler, en yeni üstte |
+| [docs/DEVIR.md](docs/DEVIR.md) | Şu anki durum. Buradan başlayın. |
 | [agents.md](agents.md) | Bağlayıcı çalışma ve güvenlik kuralları |
-| [plan.md](plan.md) | Öncelikli açık uygulama işleri |
-| [ui-plan.md](docs/ui-plan.md) | Plesk ekran/akış sözleşmesi |
-| [todo.md](todo.md) | Gerçek host ve tarayıcı kabulü |
-| [Audit](docs/history/audit-2026-10-09.md) | Kanıtlı kusurlar ve inceleme sınırı |
-| [162 özellik](docs/plesk-feature-parity.md) | Kaybolmayan tam hedef kapsam |
-| [Mimari](docs/architecture.md) | Kimlik, motor, işlem ve rol sınırı |
-| [Güvenlik](docs/security.md) | Auth, tenant, secret ve veri koruma |
-| [Operasyon](docs/operations.md) | Backup, migration, recovery ve dağıtım |
-| [Geliştirme](docs/development.md) | Çalıştırma ve doğrulama |
+| [docs/orkestra/PROJE.md](docs/orkestra/PROJE.md) | Senior/junior düzeni, kilitler, doğrulama |
+| [plan.md](plan.md) | Açık uygulama işleri |
+| [todo.md](todo.md) | Açık gerçek host ve tarayıcı kabulleri |
+| [docs/yapilanlar.md](docs/yapilanlar.md) | Biten işler, en yeni üstte |
+| [docs/plesk-feature-parity.md](docs/plesk-feature-parity.md) | Plesk karşılaştırması: 162 özellik ve eksikler |
+| [docs/ui-plan.md](docs/ui-plan.md) | Ekran ve akış sözleşmesi |
+| [docs/gorevler/](docs/gorevler/) | Görev sözleşmeleri ve kabul kayıtları |
+| [docs/architecture.md](docs/architecture.md) | Kimlik, motor, işlem ve rol sınırı |
+| [docs/security.md](docs/security.md) | Auth, tenant, secret ve veri koruma |
+| [docs/operations.md](docs/operations.md) | Yedek, taşıma, kurtarma ve dağıtım |
+| [docs/development.md](docs/development.md) | Çalıştırma ve doğrulama |
+| [docs/history/](docs/history/) | Tarihli eski planlar, raporlar ve denetimler |
 
-Node >=24.11.1, npm >=11; npm ci, npm run dev, npm run check. Ubuntu ilk hedef; Windows ve harici/premium entegrasyon kendi native kabul hattındadır. Sade reseller ilk sürümde kalır; paket/abonelik uzun vadeli envanterde korunur.
+Diğer başvuru belgeleri `docs/` altındadır: alan adı hiyerarşisi, site çalışma alanı, yerel yürütücü güvenliği, yerel taşıma ve yedek, paket izinleri, lisans yapılandırması, otomasyon API'si ve test senaryoları matrisi. Yayımlanan ürün dokümanı `docs/yunpanel-docs-0.3.0/` içindedir.
 
-Production tek yerel host; root backend, site workload dedicated Unix kullanıcı. .44 yasak; .28 hedefi private test-server.env'den doğrulanır. Local identity: local-runtime.mjs validate <server-uuid>; mutation öncesi doğrulanmış backup: create --backup-dir /var/backups/yunpanel/migration-<timestamp> --confirm. Ayrıntı operasyon belgesinde.
+## Çalıştırma
 
-Dokümanlar 9 Ekim'de birleştirildi. Eski rapor/sözleşmeler development@e997bdf9053cea895eba1e7ae947a3ec4fddf059 Git ağacında; Code Factory sonuçları görev/run/event kayıtlarında. done.md kısa geçmiş açıklamasıdır. Bu temizlik özellik/servis/API silme veya canlı dağıtım değildir.
+Node >=24.11.1 ve npm >=11. `npm ci`, `npm run dev`, `npm run check` (lint, test, derleme). Ubuntu 24.04 ilk hedeftir; Debian 12 Contabo sunucularında ayrıca doğrulandı. Diğer dağıtımlar, Windows ve harici/premium entegrasyonlar kendi kabul hattındadır.
+
+Production tek yerel hosttur. Root yetkisi yalnız backend'dedir; site işleri ayrı Unix kullanıcısında çalışır. `.44` ile biten Plesk sunucusuna dokunulmaz; `.28` test hedefi repo dışındaki `.local/test-server.env` ile doğrulanır.
+
+Yerel kimlik kontrolü: `local-runtime.mjs validate <server-uuid>`. Değişiklikten önce doğrulanmış yedek: `create --backup-dir /var/backups/yunpanel/migration-<timestamp> --confirm`. Ayrıntı [operasyon belgesinde](docs/operations.md).

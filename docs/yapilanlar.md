@@ -1,6 +1,51 @@
 # Yapılanlar
 
-> Her biten iş tek kısa satır. Yeni en üstte. Tür: **Özellik**, **Hata**, **Güvenlik**, **Altyapı**. Ayrıntı commit'te; görev raporları `tasks/done/`.
+> Her biten iş tek kısa satır. Yeni en üstte. Tür: **Özellik**, **Hata**, **Güvenlik**, **Altyapı**. Ayrıntı commit'te; görev raporları `tasks/done/`, kabul kayıtları `docs/gorevler/`.
+
+## 25-11-2026
+- **Özellik** — Üst bar, yan menü ve araç kartları ikon öncelikli tek düzene geçti; dar ekran yerleşimi düzeltildi.
+- **Hata** — Kampanya lisansı yenilemede imzalı sınıfını koruyor.
+
+## 24-11-2026
+- **Özellik** — 0.3.0 için sürümlü TR/EN ürün dokümanı paketi ve doğrulayıcısı (`docs/yunpanel-docs-0.3.0/`, [kayıt](gorevler/yunpanel-docs-premium-transfer-20261124.md)).
+- **Özellik** — İlk kurulumda isteğe bağlı 3 aylık Premium yönlendirmesi; ücretli ve kalıcı haklar korunuyor.
+- **Hata** — Kapatılan site dosya editörü kendiliğinden yeniden açılmıyor; ortak modal dış tıklama ve kaydedilmemiş değişiklik uyarısı tek yerde ([kayıt](gorevler/ui-ux-files-modal-20261124.md)).
+- **Altyapı** — `.28` `0.3.0-2026112301` üzerinde T883 normal koşuları 32/32 geçti; Debian 12 `.14` geçici çalışma alanında tam test geçti ([kayıt](gorevler/linux-hosting-pilot.md)).
+
+## 23-11-2026
+- **Hata** — Site barındırma yedeği canlı trafik Nginx ayarını ve site kimliğini kullanıyor; WordPress kurulumunu durduran ön yedek hatası giderildi.
+- **Altyapı** — `.28`'e `0.3.0-2026112301` kuruldu; Türkçe WordPress kurulum ve kaldırma Chrome'da geçti.
+- **Özellik** — WordPress staging'den seçili dosya aktarımı ve HTTP 503'te otomatik geri alma `.28`'de Chrome'da geçti.
+
+## 22-11-2026
+- **Altyapı** — Contabo Debian 12 ve Ubuntu 24.04: kaynak kapalıyken dış yedekten kurtarma, iki yönlü geri yükleme, posta ve PowerDNS ikincil sunucu kabulü ([kurtarma](gorevler/contabo-cold-recovery-20261122.md), [posta/DNS](gorevler/contabo-mail-dns-20261122.md)).
+- **Özellik** — Aylık HTTP trafik ölçümü, müşteri veritabanı sınırı, dosya yazma kotası ve isteğe bağlı trafik engeli; `.28`'de doğrulandı ([kayıt](gorevler/trafik-kota-20261122.md)).
+- **Hata** — Temiz hostta site silme ve dosya yöneticisi soketinin beklenmesi düzeltildi.
+
+## 21-11-2026
+- **Güvenlik** — CrowdSec AppSec gözlem trafiği ve izole kural engellemesi `.28`'de doğrulandı ([kayıt](gorevler/crowdsec-waf-20261121.md)).
+- **Özellik** — Site kaynakları: site başına disk ölçümü ve aktif veritabanı bağları.
+- **Hata** — Alıcı gözü incelemesi: güvenlik duvarı ekranı panel geçidinden çalışıyor, Premium hesap oluşturma lisans yüklenirken kapalı, rol etiketleri ve mobil menü sadeleşti ([kayıt](gorevler/buyer-review-20261121.md)).
+
+## 20-11-2026
+- **Özellik** — Docker alt yol proxy'si, tekil volume silme ve root olmayan container konsolu; `.28`'de Chromium ve Firefox 14/14.
+- **Hata** — Python sitesi deploy, restart ve rollback düzeltildi; `.28`'de doğrulandı.
+- **Özellik** — Posta kutusunda otomatik yanıt ve spam kuralları; kalıcı uygulama ve geri alma işine bağlı (T942–T945).
+- **Altyapı** — PowerDNS ikincil yerel kanıtı (T946), isimli rclone hedefi (T947), özel Restic önbelleği (T940), boş sunucu kurtarma ön kontrolü (T937), Plesk çevrimdışı önizleme ve staging (T936, T939, T941).
+- **Özellik** — PHP ve MariaDB site kopyası `.28`'de Chromium ve Firefox'ta geçti (T935).
+
+## 19-11-2026
+- **Özellik** — Statik site kopyası (T922–T926) ve PHP + MariaDB kopya motoru (T927–T934) ([görevler](gorevler/site-copy.md)).
+- **Hata** — WordPress klonu yeni PHP hedefinde varsayılan `index.php` yüzünden reddediliyordu; `.28`'de klon ve yönetici girişi doğrulandı (T921).
+- **Altyapı** — İş yürütücüsü durumu ve durma tanısı (T920); normal PHP kurulum hatasının güvenli yanıtı (T889).
+
+## 10–18-11-2026
+- **Hata** — WP-CLI çekirdek indirmesi resmî ZIP adresinde düşüyordu (T884).
+- **Hata** — Açık site terminali silmede kapanıyor ve Unix kullanıcı temizliği tamamlanıyor (T898); ttyd WebSocket sıkıştırma başlığı iletiliyor (T911).
+- **Hata** — PHP ayar hazırlama ve silme artığı (T891, T892), statik site silmesinden sonra kardeş WordPress 502'si (T897), paralel işlerde 503 (T899), depo ilk kurulum yanıtı (T893).
+- **Hata** — Node Passenger silmesinden sonra ortam dosyası kalıyordu (T913); yedek okumaları kalıcı kaydı gereksiz yeniden yazmıyor (T917).
+- **Güvenlik** — Ed25519 imzalı lisans hak doğrulaması ve yetenek kapıları (15 Kasım).
+- **Altyapı** — Paket hazırlığı temiz Git kimliği istiyor (T901).
 
 ## 09-11-2026
 - **Hata** — DNS ekranından bölge açılan siteler ve alan adları silinemiyordu; panel artık kendi oluşturduğu bölgenin sahiplik kaydını tutuyor, dışarıdan gelen bölgeler korunmaya devam ediyor (T881). `.28`'de uçtan uca doğrulandı.
