@@ -67,3 +67,8 @@
 - **Karar:** Yeni özellikten önce kod ve doküman karmaşası temizlenir. Hedef: clean code, frontend ve backend'de modüler, tekrar kullanılabilir fonksiyon ve bileşenler, aşırı mühendislik olmadan okunabilir ve kolay geliştirilebilir kod. Testler işle paralel yazılır. Görevler `docs/gorevler/temizlik-20261126.md` (T951–T959). İşi senior'ın başlattığı Claude alt ajanları ayrı worktree'lerde yapar; senior birleştirir ve doğrular. Canlı testler `.28`'de; Contabo VPS 10 (`.14`) ve VPS 20 (`.212`) çapraz işletim sistemi testleri için izinli; `.44` Plesk sunucusuna dokunulmaz. Ürün dokümanı yunsoft.com'da güncellenir.
 - **Gerekçe:** 26-11-2026 incelemesi: 544 düz API dosyası, ~8k satır ölü/sahte kod, 36 kopya atomik yazma fonksiyonu, 8 katmanlı CSS ve 1.938 `!important`, 630 belge/görev dosyası.
 - **Onaylayan:** İNSAN (26-11-2026 sohbet: "kod ve döküman karmaşasını temizleyecek bir plan yap subagentlara bu işleri dağıt")
+
+## 2026-11-26 · yunsoft.com doküman yayını için `.44` istisnası
+- **Karar:** yunsoft.com `.44` Plesk sunucusunda yayında. Yalnız senior Claude, yalnız T959 kapsamında, yunsoft.com sitesinin YunPanel ürün dokümanı dosyalarını yayımlamak için `.44`'e erişebilir. Plesk ayarı, başka site/domain, posta, DNS, servis veya paket değiştirilmez; müşteri verisi okunmaz. Yayından önce değişen dosyaların geri dönüş kopyası alınır, yayından sonra HTTP ve içerik doğrulanır. Junior ajanlar için `.44` yasağı istisnasız sürer.
+- **Gerekçe:** Ürün dokümanının yunsoft.com'da güncellenmesi isteniyor ve site bu sunucuda.
+- **Onaylayan:** İNSAN (26-11-2026 sohbet: ".44 için izin ver")
