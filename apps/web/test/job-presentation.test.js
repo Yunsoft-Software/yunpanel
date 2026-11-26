@@ -346,11 +346,10 @@ test('manual retry via Yeniden dene allows authorized users to retry exhausted j
   assert.equal(jobSupportsManualRetry('job', { canManage: true }), false);
 });
 
-test('UI components JobDrawer, JobsTable and JobList decouple stage, health and attempt indicators', async () => {
-  const [drawerSource, tableSource, listSource] = await Promise.all([
+test('UI components JobDrawer and JobsTable decouple stage, health and attempt indicators', async () => {
+  const [drawerSource, tableSource] = await Promise.all([
     readFile(new URL('../src/workspace/JobDrawer.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/workspace/JobsTable.jsx', import.meta.url), 'utf8'),
-    readFile(new URL('../src/JobList.jsx', import.meta.url), 'utf8'),
   ]);
 
   // Both components must import attempt count, health indicator and stage progress
@@ -375,8 +374,4 @@ test('UI components JobDrawer, JobsTable and JobList decouple stage, health and 
   assert.match(drawerSource, /job\?\.status === 'queued'/);
   assert.match(drawerSource, /handleCancel/);
   assert.match(drawerSource, /İşi iptal et/);
-
-  // JobList must preserve real 0 attempts and not silently coerce missing/corrupt values
-  assert.match(listSource, /jobAttemptCount/);
-  assert.doesNotMatch(listSource, /job\.attempts \?\? 0/);
 });

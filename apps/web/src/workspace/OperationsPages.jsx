@@ -78,13 +78,6 @@ export function SettingsPage() {
     {section === 'records' && <Section title="İşlemler ve kayıtlar" description="İşlemler, denetim kayıtları ve sistem tanılaması Araçlar ve Ayarlar altındaki Tanılama bölümündedir."><div className="ws-section-body ws-actions"><LinkButton to="/tools-settings" icon="settings">Araçlar ve Ayarlar</LinkButton><LinkButton to="/jobs" icon="jobs">İşlem geçmişi</LinkButton><LinkButton to="/audit" icon="shield">Denetim kayıtları</LinkButton><LinkButton to="/logs" icon="file">Günlükler</LinkButton><LinkButton to="/servers#server-diagnostics" icon="server">Sunucu tanılama</LinkButton><LinkButton to="/applications" icon="code">Uygulama envanteri</LinkButton><LinkButton to="/domains" icon="globe">Alan adları ve sertifikalar</LinkButton></div></Section>}
   </>;
 }
-const capabilities = {
-  backups: ['Yedekler', 'Yedek hedefleri, retention ve geri yükleme yönetimi henüz uygulanmadı.', 'archive'],
-};
-export function CapabilityPage({ name }) {
-  const [title, detail, icon] = capabilities[name] ?? ['Modül', 'Bu modül henüz uygulanmadı.', 'box'];
-  return <><PageHeading title={title} description="Modülün uygulama durumu." /><Section title={title}><EmptyState title="Bu modül henüz uygulanmadı" detail={detail} icon={icon} action={<LinkButton to="/websites">Web sitelerine dön</LinkButton>} /></Section></>;
-}
 export function NotFoundPage() {
   return <><PageHeading title="Sayfa bulunamadı" /><Section title="Geçersiz adres"><EmptyState title="Bu yönetim sayfası bulunmuyor" detail="Adres yanlış olabilir veya bu modül henüz mevcut olmayabilir." icon="search" action={<LinkButton to="/dashboard" variant="primary">Genel bakışa dön</LinkButton>} /></Section></>;
 }

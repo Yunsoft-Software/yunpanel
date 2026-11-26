@@ -18,7 +18,7 @@ import ReadOnlyDashboardPage from './ReadOnlyDashboardPage.jsx';
 import ReadOnlyWebsitesPage from './ReadOnlyWebsitesPage.jsx';
 import ReadOnlySitePage from './ReadOnlySitePage.jsx';
 import ReadOnlyServersPage from './ReadOnlyServersPage.jsx';
-import { AdvancedDomainsPage, CapabilityPage, JobsPage, NotFoundPage, ServersPage, SettingsPage } from './OperationsPages.jsx';
+import { AdvancedDomainsPage, JobsPage, NotFoundPage, ServersPage, SettingsPage } from './OperationsPages.jsx';
 import UsersPage from './UsersPage.jsx';
 import ResellerCustomersPage from './ResellerCustomersPage.jsx';
 import OwnerHostingAccountsPage from './OwnerHostingAccountsPage.jsx';
