@@ -1,9 +1,51 @@
+// PowerDNS authoritative manager: one factory that provisions the local PowerDNS host,
+// journals every apply/rollback, keeps an exact rollback snapshot and requires healthy
+// DNS sockets before a mutation is reported as done.
+//
+// Sections, bottom-up:
+//   1. files     – private reads and same-directory atomic replacement
+//   2. host      – packages, SQLite, managed drop-in, service, API, receipt
+//   3. rollback  – managed path guard, rollback snapshot, compensation, restore
+//   4. journal   – operation record, serialized mutations, explicit recovery
+//   5. readiness – UDP/TCP/recursion evidence on every public result
 import { execFile, spawn } from 'node:child_process';
-import { chmod, lstat, mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { chmod, chown, lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { gunzipSync } from 'node:zlib';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { powerDnsTemplatePolicy, renderManagedPowerDnsConfig } from '@yunpanel/config-templates/powerdns';
+import { createPowerDnsSocketHealthInspector } from './powerdns-socket-health-inspector.js';
+import {
+  apiKeyHashFromConfig,
+  assertRestoredState,
+  buildReceipt,
+  buildRollbackCompensation,
+  buildRollbackSnapshot,
+  configMatchesSpec,
+  decodeSnapshotFile,
+  evidenceFromInspection,
+  fileIdentity,
+  includeDirConfigured,
+  JOURNAL_VERSION,
+  normalizeIntent,
+  OPERATION_ID_PATTERN,
+  operationMatches,
+  packageStatus,
+  persistedOperation,
+  persistedRollbackCompensation,
+  persistedRollbackSnapshot,
+  PowerDnsAuthoritativeManagerError,
+  publicOperation,
+  publicRollbackSnapshot,
+  receiptValue,
+  ROLLBACK_CAPABLE_STATUSES,
+  safeFailure,
+  sameFileSnapshot,
+  SNAPSHOT_DIGEST_PATTERN,
+} from './powerdns-authoritative-records.js';
+
+export { PowerDnsAuthoritativeManagerError };
 
 const execFileAsync = promisify(execFile);
 const DPKG_QUERY = '/usr/bin/dpkg-query';
@@ -17,73 +59,53 @@ const INSTALL = '/usr/bin/install';
 const CHOWN = '/usr/bin/chown';
 const STAT = '/usr/bin/stat';
 const BASE_CONFIG = '/etc/powerdns/pdns.conf';
-const RECEIPT_PATH = '/var/lib/yunpanel/staging/powerdns/authoritative.json';
+const STATE_DIRECTORY = '/var/lib/yunpanel/staging/powerdns';
+const RECEIPT_PATH = `${STATE_DIRECTORY}/authoritative.json`;
+const OPERATION_PATH = `${STATE_DIRECTORY}/authoritative-operation.json`;
+const ROLLBACK_SNAPSHOT_PATH = `${STATE_DIRECTORY}/authoritative-rollback.json`;
+const ROLLBACK_COMPENSATION_PATH = `${STATE_DIRECTORY}/authoritative-rollback-compensation.json`;
 const SCHEMA_PATHS = Object.freeze([
   '/usr/share/pdns-backend-sqlite3/schema/schema.sqlite3.sql',
   '/usr/share/doc/pdns-backend-sqlite3/schema.sqlite3.sql',
   '/usr/share/doc/pdns-backend-sqlite3/schema.sqlite3.sql.gz',
 ]);
-const API_KEY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const ADAPTER = 'powerdns-authoritative-gsqlite3';
+// A failure with one of these codes happened before any host mutation or was rolled back,
+// so the journal closes as failed instead of blocking replay.
+const DETERMINISTIC_FAILURE_CODES = new Set([
+  'powerdns_recursor_conflict',
+  'powerdns_include_dir_required',
+  'powerdns_schema_missing',
+  'powerdns_hash_failed',
+  'powerdns_hash_invalid',
+  'powerdns_config_invalid',
+  'powerdns_rollback_snapshot_failed',
+  'powerdns_rollback_credential_mismatch',
+  'powerdns_rollback_snapshot_unsafe',
+  'powerdns_rollback_snapshot_invalid',
+  'powerdns_rollback_snapshot_unavailable',
+  'powerdns_rollback_snapshot_conflict',
+]);
+const CONFIG_SNAPSHOT_ERRORS = Object.freeze({
+  failed: ['powerdns_config_snapshot_failed', 'PowerDNS managed configuration could not be snapshotted before apply'],
+  drift: ['powerdns_config_path_drift', 'Managed PowerDNS configuration path must be a regular file when it already exists'],
+});
+const RECEIPT_SNAPSHOT_ERRORS = Object.freeze({
+  failed: ['powerdns_rollback_snapshot_failed', 'PowerDNS authoritative receipt could not be snapshotted before apply'],
+  drift: ['powerdns_rollback_snapshot_failed', 'PowerDNS authoritative receipt must be a regular file before apply'],
+});
 
-export class PowerDnsAuthoritativeManagerError extends Error {
-  constructor(code, message) {
-    super(message);
-    this.name = 'PowerDnsAuthoritativeManagerError';
-    this.code = code;
-  }
+function fail(code, message) {
+  throw new PowerDnsAuthoritativeManagerError(code, message);
 }
 
-function normalizeIntent(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)
-    || Object.keys(value).some((key) => !['serverId', 'apiKey', 'apiKeyRevision', 'secondaryDns'].includes(key))
-    || typeof value.serverId !== 'string' || !UUID_PATTERN.test(value.serverId)
-    || typeof value.apiKey !== 'string' || !API_KEY_PATTERN.test(value.apiKey)
-    || !Number.isSafeInteger(value.apiKeyRevision) || value.apiKeyRevision < 1
-    || !Array.isArray(value.secondaryDns)) {
-    throw new PowerDnsAuthoritativeManagerError('powerdns_intent_invalid', 'PowerDNS authoritative intent is invalid');
-  }
-  let content;
-  try { content = renderManagedPowerDnsConfig({ apiKeyHash: 'placeholder-hash-value-00000000000000000000', secondaryDns: value.secondaryDns }); }
-  catch { throw new PowerDnsAuthoritativeManagerError('powerdns_intent_invalid', 'PowerDNS authoritative secondary DNS settings are invalid'); }
-  void content;
-  return Object.freeze({
-    serverId: value.serverId.toLowerCase(),
-    apiKey: value.apiKey,
-    apiKeyRevision: value.apiKeyRevision,
-    secondaryDns: Object.freeze([...value.secondaryDns].sort()),
+function defaultRun(file, args, options = {}) {
+  return execFileAsync(file, args, {
+    encoding: 'utf8',
+    timeout: options.timeout ?? 10 * 60_000,
+    maxBuffer: options.maxBuffer ?? 2 * 1024 * 1024,
+    env: options.env,
   });
-}
-
-function packageStatus(output) {
-  const [status = '', version = ''] = String(output ?? '').trim().split('\t');
-  return Object.freeze({ installed: status === 'install ok installed', version: status === 'install ok installed' && version ? version : null });
-}
-
-function includeDirConfigured(content) {
-  return String(content ?? '').split(/\r?\n/).some((line) => /^\s*include-dir\s*=\s*\/etc\/powerdns\/pdns\.d\s*$/.test(line));
-}
-
-function apiKeyHashFromConfig(content) {
-  const match = String(content ?? '').match(/^api-key=([^\r\n]+)$/m);
-  if (!match || match[1].length < 20 || match[1].length > 512 || /[\u0000-\u001f\u007f]/.test(match[1])) return null;
-  return match[1];
-}
-
-function fileIdentity(output) {
-  const [owner, group, mode] = String(output ?? '').trim().split(':');
-  return Object.freeze({ owner, group, mode });
-}
-
-function receiptValue(value, spec, configContent) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)
-    || value.version !== 1 || value.serverId !== spec.serverId || value.apiKeyRevision !== spec.apiKeyRevision
-    || JSON.stringify(value.secondaryDns) !== JSON.stringify(spec.secondaryDns)
-    || value.configLength !== Buffer.byteLength(configContent, 'utf8')
-    || typeof value.appliedAt !== 'string' || !Number.isFinite(Date.parse(value.appliedAt))) {
-    throw new PowerDnsAuthoritativeManagerError('powerdns_receipt_invalid', 'PowerDNS authoritative receipt is invalid');
-  }
-  return Object.freeze({ ...value, secondaryDns: Object.freeze([...value.secondaryDns]) });
 }
 
 async function defaultHashPassword(value) {
@@ -97,7 +119,9 @@ async function defaultHashPassword(value) {
     child.stderr.on('data', (chunk) => { if (stderr.length < 4096) stderr += chunk; });
     child.on('error', () => reject(new PowerDnsAuthoritativeManagerError('powerdns_hash_failed', 'PowerDNS API key hash command failed')));
     child.on('close', (code) => {
-      if (code !== 0) return reject(new PowerDnsAuthoritativeManagerError('powerdns_hash_failed', `PowerDNS API key hash command failed${stderr ? ' with stderr output' : ''}`));
+      if (code !== 0) {
+        return reject(new PowerDnsAuthoritativeManagerError('powerdns_hash_failed', `PowerDNS API key hash command failed${stderr ? ' with stderr output' : ''}`));
+      }
       const result = stdout.trim();
       if (result.length < 20 || result.length > 512 || /[\r\n\u0000]/.test(result)) {
         return reject(new PowerDnsAuthoritativeManagerError('powerdns_hash_invalid', 'PowerDNS API key hash output is invalid'));
@@ -108,38 +132,137 @@ async function defaultHashPassword(value) {
   });
 }
 
+function isRegularFile(info) {
+  return Boolean(info?.isFile?.()) && !info?.isSymbolicLink?.();
+}
+
+function privateJson(value) {
+  return `${JSON.stringify(value, null, 2)}\n`;
+}
+
 export function createPowerDnsAuthoritativeManager({
-  run = (file, args, options = {}) => execFileAsync(file, args, {
-    encoding: 'utf8',
-    timeout: options.timeout ?? 10 * 60_000,
-    maxBuffer: options.maxBuffer ?? 2 * 1024 * 1024,
-    env: options.env,
-  }),
+  run = defaultRun,
   fetchFn = globalThis.fetch,
   hashPassword = defaultHashPassword,
+  socketInspector = createPowerDnsSocketHealthInspector(),
+  operationPath = OPERATION_PATH,
+  rollbackSnapshotPath = ROLLBACK_SNAPSHOT_PATH,
+  rollbackCompensationPath = ROLLBACK_COMPENSATION_PATH,
+  now = () => Date.now(),
+  idFactory = randomUUID,
   chmodFn = chmod,
+  chownFn = chown,
   lstatFn = lstat,
   mkdirFn = mkdir,
   readdirFn = readdir,
   readFileFn = readFile,
   renameFn = rename,
+  rmFn = rm,
   writeFileFn = writeFile,
-  now = () => Date.now(),
 } = {}) {
-  if (typeof run !== 'function' || typeof fetchFn !== 'function' || typeof hashPassword !== 'function'
-    || typeof chmodFn !== 'function' || typeof lstatFn !== 'function' || typeof mkdirFn !== 'function' || typeof readdirFn !== 'function'
-    || typeof readFileFn !== 'function' || typeof renameFn !== 'function' || typeof writeFileFn !== 'function'
-    || typeof now !== 'function') {
-    throw new PowerDnsAuthoritativeManagerError('powerdns_dependencies_invalid', 'PowerDNS authoritative dependencies are unavailable');
+  const functions = [run, fetchFn, hashPassword, now, idFactory, chmodFn, chownFn, lstatFn, mkdirFn, readdirFn,
+    readFileFn, renameFn, rmFn, writeFileFn];
+  if (functions.some((value) => typeof value !== 'function')
+    || typeof socketInspector?.inspect !== 'function'
+    || [operationPath, rollbackSnapshotPath, rollbackCompensationPath].some((value) => typeof value !== 'string' || !value)) {
+    fail('powerdns_dependencies_invalid', 'PowerDNS authoritative dependencies are unavailable');
   }
 
-  async function readOptional(target, encoding = 'utf8') {
-    try { return await readFileFn(target, encoding); }
+  // ---- 1. files ----
+
+  async function readOptional(target) {
+    try { return await readFileFn(target, 'utf8'); }
     catch (error) {
       if (error?.code === 'ENOENT') return null;
-      throw new PowerDnsAuthoritativeManagerError('powerdns_file_unavailable', 'PowerDNS managed file could not be read');
+      fail('powerdns_file_unavailable', 'PowerDNS managed file could not be read');
     }
   }
+
+  // Writes a same-directory temporary file with final owner and mode, then renames it into place.
+  async function replaceFile(target, content, { mode, directoryMode = null, enforceDirectoryMode = false, setOwner = null }) {
+    if (directoryMode !== null) {
+      const directory = path.dirname(target);
+      await mkdirFn(directory, { recursive: true, mode: directoryMode });
+      if (enforceDirectoryMode) await chmodFn(directory, directoryMode);
+    }
+    const temporary = `${target}.${process.pid}.tmp`;
+    try {
+      await writeFileFn(temporary, content, Buffer.isBuffer(content) ? { mode } : { encoding: 'utf8', mode });
+      if (setOwner) await setOwner(temporary);
+      await chmodFn(temporary, mode);
+      await renameFn(temporary, target);
+    } finally {
+      try { await rmFn(temporary, { force: true }); } catch { /* already renamed */ }
+    }
+  }
+
+  // Root-only JSON state (journal, rollback snapshot, compensation): 0600 file in a 0700 directory.
+  function writePrivateJson(target, value) {
+    return replaceFile(target, privateJson(value), { mode: 0o600, directoryMode: 0o700, enforceDirectoryMode: true });
+  }
+
+  async function readPrivateJson(target, parse, { unavailable, unsafe, invalid }) {
+    let info;
+    try { info = await lstatFn(target); }
+    catch (error) {
+      if (error?.code === 'ENOENT') return null;
+      fail(...unavailable);
+    }
+    if (!isRegularFile(info) || info.uid !== 0 || (info.mode & 0o777) !== 0o600) fail(...unsafe);
+    try { return parse(JSON.parse(await readFileFn(target, 'utf8'))); }
+    catch (error) {
+      if (error instanceof PowerDnsAuthoritativeManagerError) throw error;
+      fail(...invalid);
+    }
+  }
+
+  async function fileSnapshot(target, errors) {
+    let info;
+    try { info = await lstatFn(target); }
+    catch (error) {
+      if (error?.code === 'ENOENT') return Object.freeze({ exists: false });
+      fail(...errors.failed);
+    }
+    if (!isRegularFile(info)) fail(...errors.drift);
+    try {
+      const content = await readFileFn(target);
+      return Object.freeze({ exists: true, content, uid: info.uid, gid: info.gid, mode: info.mode & 0o777 });
+    } catch {
+      fail(...errors.failed);
+    }
+  }
+
+  async function managedFiles() {
+    return Object.freeze({
+      config: await fileSnapshot(powerDnsTemplatePolicy.configPath, CONFIG_SNAPSHOT_ERRORS),
+      receipt: await fileSnapshot(RECEIPT_PATH, RECEIPT_SNAPSHOT_ERRORS),
+    });
+  }
+
+  function sameManagedFiles(left, right) {
+    return sameFileSnapshot(left.config, right.config) && sameFileSnapshot(left.receipt, right.receipt);
+  }
+
+  async function restoreFile(target, snapshot) {
+    if (!snapshot.exists) {
+      await rmFn(target, { force: true });
+      return;
+    }
+    if (!Number.isInteger(snapshot.uid) || !Number.isInteger(snapshot.gid) || !Number.isInteger(snapshot.mode)) {
+      fail('powerdns_config_snapshot_invalid', 'PowerDNS managed configuration snapshot metadata is invalid');
+    }
+    await replaceFile(target, snapshot.content, {
+      mode: snapshot.mode,
+      setOwner: (temporary) => chownFn(temporary, snapshot.uid, snapshot.gid),
+    });
+  }
+
+  async function restoreManagedFiles(files) {
+    await restoreFile(powerDnsTemplatePolicy.configPath, files.config);
+    await restoreFile(RECEIPT_PATH, files.receipt);
+  }
+
+  // ---- 2. host ----
 
   async function inspectPackage(packageName) {
     try { return packageStatus((await run(DPKG_QUERY, ['-W', '-f=${Status}\t${Version}', packageName], { timeout: 10_000 })).stdout); }
@@ -147,86 +270,88 @@ export function createPowerDnsAuthoritativeManager({
   }
 
   async function ensurePackages() {
-    const recursor = await inspectPackage('pdns-recursor');
-    if (recursor.installed) {
-      throw new PowerDnsAuthoritativeManagerError('powerdns_recursor_conflict', 'pdns-recursor is installed; YunPanel authoritative DNS refuses to share ownership with a recursive resolver');
+    if ((await inspectPackage('pdns-recursor')).installed) {
+      fail('powerdns_recursor_conflict', 'pdns-recursor is installed; YunPanel authoritative DNS refuses to share ownership with a recursive resolver');
     }
     const before = await Promise.all(powerDnsTemplatePolicy.packages.map(inspectPackage));
-    if (before.every((entry) => entry.installed)) return before;
+    if (before.every((entry) => entry.installed)) return;
+    const env = { ...process.env, DEBIAN_FRONTEND: 'noninteractive', LC_ALL: 'C' };
     try {
-      await run(APT_GET, ['update'], { env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive', LC_ALL: 'C' } });
-      await run(APT_GET, ['install', '--yes', '--no-install-recommends', ...powerDnsTemplatePolicy.packages], {
-        env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive', LC_ALL: 'C' },
-      });
+      await run(APT_GET, ['update'], { env });
+      await run(APT_GET, ['install', '--yes', '--no-install-recommends', ...powerDnsTemplatePolicy.packages], { env });
     } catch {
-      throw new PowerDnsAuthoritativeManagerError('powerdns_package_install_failed', 'PowerDNS authoritative packages could not be installed');
+      fail('powerdns_package_install_failed', 'PowerDNS authoritative packages could not be installed');
     }
     const after = await Promise.all(powerDnsTemplatePolicy.packages.map(inspectPackage));
     if (!after.every((entry) => entry.installed)) {
-      throw new PowerDnsAuthoritativeManagerError('powerdns_package_install_unverified', 'PowerDNS authoritative package installation could not be verified');
+      fail('powerdns_package_install_unverified', 'PowerDNS authoritative package installation could not be verified');
     }
-    return after;
   }
 
   async function assertIncludeDirectory() {
     const base = await readOptional(BASE_CONFIG);
     if (base === null || !includeDirConfigured(base)) {
-      throw new PowerDnsAuthoritativeManagerError('powerdns_include_dir_required', 'Vendor pdns.conf must include /etc/powerdns/pdns.d before YunPanel can manage a safe drop-in');
+      fail('powerdns_include_dir_required', 'Vendor pdns.conf must include /etc/powerdns/pdns.d before YunPanel can manage a safe drop-in');
     }
   }
 
   async function findSchema() {
     for (const candidate of SCHEMA_PATHS) {
       try {
-        const info = await lstatFn(candidate);
-        if (info?.isFile?.() && !info.isSymbolicLink?.()) return candidate;
+        if (isRegularFile(await lstatFn(candidate))) return candidate;
       } catch (error) {
-        if (error?.code !== 'ENOENT') throw new PowerDnsAuthoritativeManagerError('powerdns_schema_inspection_failed', 'PowerDNS SQLite schema could not be inspected');
+        if (error?.code !== 'ENOENT') fail('powerdns_schema_inspection_failed', 'PowerDNS SQLite schema could not be inspected');
       }
     }
-    throw new PowerDnsAuthoritativeManagerError('powerdns_schema_missing', 'PowerDNS SQLite schema file is missing');
+    fail('powerdns_schema_missing', 'PowerDNS SQLite schema file is missing');
   }
 
   async function ensureDatabase() {
-    await run(INSTALL, ['-d', '-o', 'pdns', '-g', 'pdns', '-m', '0750', path.posix.dirname(powerDnsTemplatePolicy.databasePath)], { timeout: 10_000 });
+    const { databasePath } = powerDnsTemplatePolicy;
+    await run(INSTALL, ['-d', '-o', 'pdns', '-g', 'pdns', '-m', '0750', path.posix.dirname(databasePath)], { timeout: 10_000 });
     let exists = true;
-    try { await lstatFn(powerDnsTemplatePolicy.databasePath); }
+    try { await lstatFn(databasePath); }
     catch (error) {
-      if (error?.code === 'ENOENT') exists = false;
-      else throw new PowerDnsAuthoritativeManagerError('powerdns_database_inspection_failed', 'PowerDNS SQLite database could not be inspected');
+      if (error?.code !== 'ENOENT') fail('powerdns_database_inspection_failed', 'PowerDNS SQLite database could not be inspected');
+      exists = false;
     }
     if (!exists) {
       const schemaPath = await findSchema();
       let schema = await readFileFn(schemaPath);
       if (schemaPath.endsWith('.gz')) schema = gunzipSync(schema);
-      try { await run(SQLITE3, [powerDnsTemplatePolicy.databasePath, schema.toString('utf8')], { timeout: 60_000, maxBuffer: 512 * 1024 }); }
-      catch { throw new PowerDnsAuthoritativeManagerError('powerdns_database_init_failed', 'PowerDNS SQLite schema initialization failed'); }
+      try { await run(SQLITE3, [databasePath, schema.toString('utf8')], { timeout: 60_000, maxBuffer: 512 * 1024 }); }
+      catch { fail('powerdns_database_init_failed', 'PowerDNS SQLite schema initialization failed'); }
     }
     try {
-      await run(CHOWN, ['pdns:pdns', powerDnsTemplatePolicy.databasePath], { timeout: 10_000 });
-      await chmodFn(powerDnsTemplatePolicy.databasePath, 0o640);
+      await run(CHOWN, ['pdns:pdns', databasePath], { timeout: 10_000 });
+      await chmodFn(databasePath, 0o640);
     } catch {
-      throw new PowerDnsAuthoritativeManagerError('powerdns_database_permission_failed', 'PowerDNS SQLite database permissions could not be enforced');
+      fail('powerdns_database_permission_failed', 'PowerDNS SQLite database permissions could not be enforced');
     }
   }
 
-  async function atomicConfig(content) {
+  async function writeManagedConfig(content) {
     await mkdirFn(powerDnsTemplatePolicy.includeDirectory, { recursive: true, mode: 0o750 });
-    const temporary = `${powerDnsTemplatePolicy.configPath}.${process.pid}.tmp`;
-    try {
-      await writeFileFn(temporary, content, { encoding: 'utf8', mode: 0o640 });
-      await run(CHOWN, ['root:pdns', temporary], { timeout: 10_000 });
-      await renameFn(temporary, powerDnsTemplatePolicy.configPath);
-      await chmodFn(powerDnsTemplatePolicy.configPath, 0o640);
-    } finally {
-      try { await writeFileFn(temporary, '', { flag: 'a' }); } catch { /* ignored */ }
-      try { await run('/usr/bin/rm', ['-f', temporary], { timeout: 5_000 }); } catch { /* ignored */ }
-    }
+    await replaceFile(powerDnsTemplatePolicy.configPath, content, {
+      mode: 0o640,
+      setOwner: (temporary) => run(CHOWN, ['root:pdns', temporary], { timeout: 10_000 }),
+    });
   }
 
-  async function configCheck() {
+  async function writeReceipt(spec, config) {
+    const receipt = buildReceipt(spec, config, new Date(now()).toISOString());
+    await replaceFile(RECEIPT_PATH, `${JSON.stringify(receipt)}\n`, { mode: 0o600, directoryMode: 0o700 });
+  }
+
+  async function activate(configChanged) {
     try { await run(PDNS_SERVER, ['--config=check'], { timeout: 30_000, maxBuffer: 512 * 1024 }); }
-    catch { throw new PowerDnsAuthoritativeManagerError('powerdns_config_invalid', 'PowerDNS rejected the managed configuration'); }
+    catch { fail('powerdns_config_invalid', 'PowerDNS rejected the managed configuration'); }
+    try {
+      await run(SYSTEMCTL, ['enable', '--now', powerDnsTemplatePolicy.serviceUnit], { timeout: 60_000 });
+      if (configChanged) await run(SYSTEMCTL, ['restart', powerDnsTemplatePolicy.serviceUnit], { timeout: 60_000 });
+    } catch {
+      fail('powerdns_service_activation_failed', 'PowerDNS authoritative service could not be activated');
+    }
   }
 
   async function serviceActive() {
@@ -256,79 +381,46 @@ export function createPowerDnsAuthoritativeManager({
 
   async function inspectPath(target, expected) {
     try {
-      const output = (await run(STAT, ['-c', '%U:%G:%a', target], { timeout: 10_000 })).stdout;
-      const identity = fileIdentity(output);
-      return Object.freeze({ ...identity, satisfied: identity.owner === expected.owner && identity.group === expected.group && identity.mode === expected.mode });
+      const identity = fileIdentity((await run(STAT, ['-c', '%U:%G:%a', target], { timeout: 10_000 })).stdout);
+      return Object.freeze({
+        ...identity,
+        satisfied: identity.owner === expected.owner && identity.group === expected.group && identity.mode === expected.mode,
+      });
     } catch {
       return Object.freeze({ owner: null, group: null, mode: null, satisfied: false });
     }
   }
 
-  async function isUnconfigured() {
-    const { apiPort, databasePath, includeDirectory, serviceUnit } = powerDnsTemplatePolicy;
-    const directories = [includeDirectory, path.posix.dirname(databasePath), path.posix.dirname(RECEIPT_PATH)];
-    for (const directory of directories) {
-      try {
-        const info = await lstatFn(directory);
-        if (!info.isDirectory() || (await readdirFn(directory)).length !== 0) return false;
-      } catch (error) {
-        if (error?.code !== 'ENOENT') throw error;
-      }
-    }
-    const base = await readOptional(BASE_CONFIG);
-    const settings = (base ?? '').split(/\r?\n/).map((line) => line.trim());
-    if (settings.some((line) => (/^(?:launch|api|webserver)\s*\+?=/.test(line)
-      && !/^(?:launch\s*=\s*|(?:api|webserver)\s*=\s*no)$/.test(line))
-      || (/^include-dir\s*\+?=/.test(line) && !includeDirConfigured(line)))) return false;
-
-    const unit = await run(SYSTEMCTL, ['show', '--property=ActiveState,SubState,LoadState,MainPID', serviceUnit], { timeout: 5_000 });
-    const state = new Set(String(unit.stdout).trim().split('\n'));
-    if ((!state.has('LoadState=loaded') && !state.has('LoadState=not-found'))
-      || !state.has('ActiveState=inactive') || !state.has('SubState=dead') || !state.has('MainPID=0')) return false;
-    const listeners = await run(SS, ['-H', '-lntup', `sport = :53 or sport = :${apiPort}`], { timeout: 5_000 });
-    return String(listeners.stdout).trim().split('\n').every((line) => {
-      if (line === '') return true;
-      const [protocol, listenState, , , local, peer, process, ...rest] = line.trim().split(/\s+/);
-      return rest.length === 0 && ((protocol === 'tcp' && listenState === 'LISTEN')
-        || (protocol === 'udp' && listenState === 'UNCONN'))
-        && /^127\.0\.0\.(?:53|54)(?:%lo)?:53$/.test(local)
-        && /^(?:0\.0\.0\.0|\*):\*$/.test(peer)
-        && /^users:\(\("systemd-resolve",pid=[1-9]\d*,fd=\d+\)\)$/.test(process);
-    });
-  }
-
-  async function inspect(rawIntent) {
-    const spec = normalizeIntent(rawIntent);
+  async function inspectHost(spec) {
     const packages = await Promise.all(powerDnsTemplatePolicy.packages.map(inspectPackage));
-    const recursor = await inspectPackage('pdns-recursor');
-    if (recursor.installed) return Object.freeze({ satisfied: false, reason: 'powerdns_recursor_conflict', packages, recursorInstalled: true });
-    if (!packages.every((entry) => entry.installed)) return Object.freeze({ satisfied: false, reason: 'powerdns_packages_missing', packages, recursorInstalled: false });
+    const notReady = (reason, evidence = {}) => Object.freeze({ satisfied: false, reason, packages, ...evidence });
+    if ((await inspectPackage('pdns-recursor')).installed) return notReady('powerdns_recursor_conflict', { recursorInstalled: true });
+    if (!packages.every((entry) => entry.installed)) return notReady('powerdns_packages_missing', { recursorInstalled: false });
     const base = await readOptional(BASE_CONFIG);
-    if (base === null || !includeDirConfigured(base)) return Object.freeze({ satisfied: false, reason: 'powerdns_include_dir_missing', packages, recursorInstalled: false });
+    if (base === null || !includeDirConfigured(base)) return notReady('powerdns_include_dir_missing', { recursorInstalled: false });
     const config = await readOptional(powerDnsTemplatePolicy.configPath);
-    if (config === null) return Object.freeze({ satisfied: false, reason: 'powerdns_config_missing', packages, recursorInstalled: false });
-    const currentHash = apiKeyHashFromConfig(config);
-    if (!currentHash) return Object.freeze({ satisfied: false, reason: 'powerdns_config_invalid', packages, recursorInstalled: false });
-    const expectedConfig = renderManagedPowerDnsConfig({ apiKeyHash: currentHash, secondaryDns: spec.secondaryDns });
-    if (config !== expectedConfig) return Object.freeze({ satisfied: false, reason: 'powerdns_config_drift', packages, recursorInstalled: false });
-    const [configIdentity, databaseIdentity, active, health] = await Promise.all([
+    if (config === null) return notReady('powerdns_config_missing', { recursorInstalled: false });
+    if (!apiKeyHashFromConfig(config)) return notReady('powerdns_config_invalid', { recursorInstalled: false });
+    if (!configMatchesSpec(config, spec)) return notReady('powerdns_config_drift', { recursorInstalled: false });
+    const [configIdentity, databaseIdentity, active, api] = await Promise.all([
       inspectPath(powerDnsTemplatePolicy.configPath, { owner: 'root', group: 'pdns', mode: '640' }),
       inspectPath(powerDnsTemplatePolicy.databasePath, { owner: 'pdns', group: 'pdns', mode: '640' }),
       serviceActive(),
       apiHealth(spec.apiKey),
     ]);
-    if (!configIdentity.satisfied) return Object.freeze({ satisfied: false, reason: 'powerdns_config_permissions_invalid', packages, configIdentity, databaseIdentity, active, api: health });
-    if (!databaseIdentity.satisfied) return Object.freeze({ satisfied: false, reason: 'powerdns_database_permissions_invalid', packages, configIdentity, databaseIdentity, active, api: health });
-    if (!active) return Object.freeze({ satisfied: false, reason: 'powerdns_service_inactive', packages, configIdentity, databaseIdentity, active, api: health });
-    if (!health.healthy) return Object.freeze({ satisfied: false, reason: 'powerdns_api_unhealthy', packages, configIdentity, databaseIdentity, active, api: health });
+    const evidence = { configIdentity, databaseIdentity, active, api };
+    if (!configIdentity.satisfied) return notReady('powerdns_config_permissions_invalid', evidence);
+    if (!databaseIdentity.satisfied) return notReady('powerdns_database_permissions_invalid', evidence);
+    if (!active) return notReady('powerdns_service_inactive', evidence);
+    if (!api.healthy) return notReady('powerdns_api_unhealthy', evidence);
     const receiptRaw = await readOptional(RECEIPT_PATH);
-    if (receiptRaw === null) return Object.freeze({ satisfied: false, reason: 'powerdns_receipt_missing', packages, configIdentity, databaseIdentity, active, api: health });
+    if (receiptRaw === null) return notReady('powerdns_receipt_missing', evidence);
     let receipt;
     try { receipt = receiptValue(JSON.parse(receiptRaw), spec, config); }
-    catch { return Object.freeze({ satisfied: false, reason: 'powerdns_receipt_invalid', packages, configIdentity, databaseIdentity, active, api: health }); }
+    catch { return notReady('powerdns_receipt_invalid', evidence); }
     return Object.freeze({
       satisfied: true,
-      adapter: 'powerdns-authoritative-gsqlite3',
+      adapter: ADAPTER,
       serverId: spec.serverId,
       apiKeyRevision: spec.apiKeyRevision,
       secondaryDns: spec.secondaryDns,
@@ -342,123 +434,543 @@ export function createPowerDnsAuthoritativeManager({
     });
   }
 
-  async function persistReceipt(spec, config) {
-    const directory = path.posix.dirname(RECEIPT_PATH);
-    await mkdirFn(directory, { recursive: true, mode: 0o700 });
-    const receipt = {
-      version: 1,
-      serverId: spec.serverId,
-      apiKeyRevision: spec.apiKeyRevision,
-      secondaryDns: [...spec.secondaryDns],
-      configLength: Buffer.byteLength(config, 'utf8'),
-      appliedAt: new Date(now()).toISOString(),
-    };
-    const temporary = `${RECEIPT_PATH}.${process.pid}.tmp`;
-    await writeFileFn(temporary, `${JSON.stringify(receipt)}\n`, { encoding: 'utf8', mode: 0o600 });
-    await renameFn(temporary, RECEIPT_PATH);
-    await chmodFn(RECEIPT_PATH, 0o600);
-    return receiptValue(receipt, spec, config);
+  async function rotatedConfig(spec) {
+    return renderManagedPowerDnsConfig({ apiKeyHash: await hashPassword(spec.apiKey), secondaryDns: spec.secondaryDns });
   }
 
-  async function activate(configChanged) {
-    await configCheck();
-    try {
-      await run(SYSTEMCTL, ['enable', '--now', powerDnsTemplatePolicy.serviceUnit], { timeout: 60_000 });
-      if (configChanged) await run(SYSTEMCTL, ['restart', powerDnsTemplatePolicy.serviceUnit], { timeout: 60_000 });
-    } catch {
-      throw new PowerDnsAuthoritativeManagerError('powerdns_service_activation_failed', 'PowerDNS authoritative service could not be activated');
-    }
-  }
-
-  async function apply(rawIntent) {
-    const spec = normalizeIntent(rawIntent);
+  // Converges packages, database, drop-in, service and API key; idempotent when nothing drifted.
+  async function applyHost(spec) {
     await ensurePackages();
     await assertIncludeDirectory();
     await ensureDatabase();
 
-    let currentConfig = await readOptional(powerDnsTemplatePolicy.configPath);
-    let currentHash = currentConfig ? apiKeyHashFromConfig(currentConfig) : null;
-    let desiredConfig = currentHash ? renderManagedPowerDnsConfig({ apiKeyHash: currentHash, secondaryDns: spec.secondaryDns }) : null;
-    let configChanged = currentConfig === null || currentHash === null || currentConfig !== desiredConfig;
-
+    let config = await readOptional(powerDnsTemplatePolicy.configPath);
+    const configChanged = config === null || !configMatchesSpec(config, spec);
     if (configChanged) {
-      currentHash = await hashPassword(spec.apiKey);
-      desiredConfig = renderManagedPowerDnsConfig({ apiKeyHash: currentHash, secondaryDns: spec.secondaryDns });
-      await atomicConfig(desiredConfig);
-      currentConfig = desiredConfig;
+      config = await rotatedConfig(spec);
+      await writeManagedConfig(config);
     }
-
     await activate(configChanged);
     let health = await apiHealth(spec.apiKey);
     if (!health.healthy && !configChanged) {
-      const rotatedHash = await hashPassword(spec.apiKey);
-      desiredConfig = renderManagedPowerDnsConfig({ apiKeyHash: rotatedHash, secondaryDns: spec.secondaryDns });
-      await atomicConfig(desiredConfig);
+      // The drop-in matches but carries another key hash: rotate to the requested key once.
+      config = await rotatedConfig(spec);
+      await writeManagedConfig(config);
       await activate(true);
-      currentConfig = desiredConfig;
       health = await apiHealth(spec.apiKey);
     }
-    if (!health.healthy) throw new PowerDnsAuthoritativeManagerError('powerdns_api_unhealthy', 'PowerDNS API did not become healthy with the managed API key');
-    await persistReceipt(spec, currentConfig);
-    const verified = await inspect(spec);
-    if (!verified.satisfied) throw new PowerDnsAuthoritativeManagerError('powerdns_apply_unverified', `PowerDNS authoritative apply could not be verified (${verified.reason})`);
+    if (!health.healthy) fail('powerdns_api_unhealthy', 'PowerDNS API did not become healthy with the managed API key');
+    await writeReceipt(spec, config);
+    const verified = await inspectHost(spec);
+    if (!verified.satisfied) fail('powerdns_apply_unverified', `PowerDNS authoritative apply could not be verified (${verified.reason})`);
     return verified;
   }
 
-  async function activateRestored(rawIntent) {
-    const spec = normalizeIntent(rawIntent);
+  // Activates already-restored files without rewriting them.
+  async function activateRestored(spec) {
     await assertIncludeDirectory();
     const config = await readOptional(powerDnsTemplatePolicy.configPath);
-    if (config === null) {
-      throw new PowerDnsAuthoritativeManagerError(
-        'powerdns_rollback_config_missing',
-        'Restored PowerDNS managed configuration is missing',
-      );
-    }
-    const restoredHash = apiKeyHashFromConfig(config);
-    if (!restoredHash || renderManagedPowerDnsConfig({
-      apiKeyHash: restoredHash,
-      secondaryDns: spec.secondaryDns,
-    }) !== config) {
-      throw new PowerDnsAuthoritativeManagerError(
-        'powerdns_rollback_config_invalid',
-        'Restored PowerDNS managed configuration does not match rollback intent',
-      );
-    }
     const receiptRaw = await readOptional(RECEIPT_PATH);
-    if (receiptRaw === null) {
-      throw new PowerDnsAuthoritativeManagerError(
-        'powerdns_rollback_receipt_missing',
-        'Restored PowerDNS authoritative receipt is missing',
-      );
-    }
-    try { receiptValue(JSON.parse(receiptRaw), spec, config); }
-    catch {
-      throw new PowerDnsAuthoritativeManagerError(
-        'powerdns_rollback_receipt_invalid',
-        'Restored PowerDNS authoritative receipt does not match rollback intent',
-      );
-    }
-
+    assertRestoredState(spec, config, receiptRaw);
     await activate(true);
-    const health = await apiHealth(spec.apiKey);
-    if (!health.healthy) {
-      throw new PowerDnsAuthoritativeManagerError(
-        'powerdns_rollback_api_unhealthy',
-        'PowerDNS API did not become healthy after rollback activation',
-      );
+    if (!(await apiHealth(spec.apiKey)).healthy) {
+      fail('powerdns_rollback_api_unhealthy', 'PowerDNS API did not become healthy after rollback activation');
     }
-    const verified = await inspect(spec);
-    if (!verified.satisfied) {
-      throw new PowerDnsAuthoritativeManagerError(
-        'powerdns_rollback_unverified',
-        `PowerDNS rollback activation could not be verified (${verified.reason})`,
-      );
-    }
+    const verified = await inspectHost(spec);
+    if (!verified.satisfied) fail('powerdns_rollback_unverified', `PowerDNS rollback activation could not be verified (${verified.reason})`);
     return verified;
   }
 
-  return Object.freeze({ inspect, isUnconfigured, apply, activateRestored });
+  async function isUnconfigured() {
+    const { apiPort, databasePath, includeDirectory, serviceUnit } = powerDnsTemplatePolicy;
+    for (const directory of [includeDirectory, path.posix.dirname(databasePath), STATE_DIRECTORY]) {
+      try {
+        const info = await lstatFn(directory);
+        if (!info.isDirectory() || (await readdirFn(directory)).length !== 0) return false;
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+      }
+    }
+    const settings = ((await readOptional(BASE_CONFIG)) ?? '').split(/\r?\n/).map((line) => line.trim());
+    if (settings.some((line) => (/^(?:launch|api|webserver)\s*\+?=/.test(line)
+      && !/^(?:launch\s*=\s*|(?:api|webserver)\s*=\s*no)$/.test(line))
+      || (/^include-dir\s*\+?=/.test(line) && !includeDirConfigured(line)))) return false;
+
+    const unit = await run(SYSTEMCTL, ['show', '--property=ActiveState,SubState,LoadState,MainPID', serviceUnit], { timeout: 5_000 });
+    const state = new Set(String(unit.stdout).trim().split('\n'));
+    if ((!state.has('LoadState=loaded') && !state.has('LoadState=not-found'))
+      || !state.has('ActiveState=inactive') || !state.has('SubState=dead') || !state.has('MainPID=0')) return false;
+    const listeners = await run(SS, ['-H', '-lntup', `sport = :53 or sport = :${apiPort}`], { timeout: 5_000 });
+    return String(listeners.stdout).trim().split('\n').every((line) => {
+      if (line === '') return true;
+      const [protocol, listenState, , , local, peer, owner, ...rest] = line.trim().split(/\s+/);
+      return rest.length === 0 && ((protocol === 'tcp' && listenState === 'LISTEN')
+        || (protocol === 'udp' && listenState === 'UNCONN'))
+        && /^127\.0\.0\.(?:53|54)(?:%lo)?:53$/.test(local)
+        && /^(?:0\.0\.0\.0|\*):\*$/.test(peer)
+        && /^users:\(\("systemd-resolve",pid=[1-9]\d*,fd=\d+\)\)$/.test(owner);
+    });
+  }
+
+  // ---- 3. rollback ----
+
+  async function assertManagedPaths() {
+    for (const [target, code, message] of [
+      [powerDnsTemplatePolicy.configPath, ...CONFIG_SNAPSHOT_ERRORS.drift],
+      [powerDnsTemplatePolicy.databasePath, 'powerdns_database_path_drift',
+        'Managed PowerDNS SQLite database path must be a regular file when it already exists'],
+    ]) {
+      let info;
+      try { info = await lstatFn(target); }
+      catch (error) {
+        if (error?.code === 'ENOENT') continue;
+        fail('powerdns_managed_path_inspection_failed', 'PowerDNS managed filesystem state could not be inspected');
+      }
+      if (!isRegularFile(info)) fail(code, message);
+    }
+  }
+
+  async function inspectManaged(spec) {
+    await assertManagedPaths();
+    return inspectHost(spec);
+  }
+
+  function readRollbackSnapshot() {
+    return readPrivateJson(rollbackSnapshotPath, persistedRollbackSnapshot, {
+      unavailable: ['powerdns_rollback_snapshot_unavailable', 'PowerDNS rollback snapshot could not be inspected'],
+      unsafe: ['powerdns_rollback_snapshot_unsafe', 'PowerDNS rollback snapshot must be a root-owned private regular file'],
+      invalid: ['powerdns_rollback_snapshot_invalid', 'PowerDNS rollback snapshot content is invalid'],
+    });
+  }
+
+  function readRollbackCompensation() {
+    return readPrivateJson(rollbackCompensationPath, persistedRollbackCompensation, {
+      unavailable: ['powerdns_rollback_compensation_unavailable', 'PowerDNS rollback compensation snapshot could not be inspected'],
+      unsafe: ['powerdns_rollback_compensation_unsafe', 'PowerDNS rollback compensation snapshot must be a root-owned private regular file'],
+      invalid: ['powerdns_rollback_compensation_invalid', 'PowerDNS rollback compensation snapshot content is invalid'],
+    });
+  }
+
+  async function persistValidated(target, value, normalize, code, message) {
+    const normalized = normalize(value);
+    try { await writePrivateJson(target, normalized); }
+    catch { fail(code, message); }
+    return normalized;
+  }
+
+  // The first attempt of an operation captures the pre-apply state; retries keep that original capture.
+  async function prepareRollbackSnapshot(spec, operationId, configBefore) {
+    const existing = await readRollbackSnapshot();
+    if (existing?.operationId === operationId) {
+      if (existing.serverId !== spec.serverId || existing.credentialRevision !== spec.apiKeyRevision) {
+        fail('powerdns_rollback_snapshot_conflict', 'PowerDNS rollback snapshot belongs to a different operation intent');
+      }
+      return;
+    }
+    const snapshot = buildRollbackSnapshot({
+      operationId,
+      spec,
+      configSnapshot: configBefore,
+      receiptSnapshot: await fileSnapshot(RECEIPT_PATH, RECEIPT_SNAPSHOT_ERRORS),
+      createdAt: new Date(now()).toISOString(),
+    });
+    await persistValidated(rollbackSnapshotPath, snapshot, persistedRollbackSnapshot,
+      'powerdns_rollback_snapshot_failed', 'PowerDNS rollback snapshot could not be persisted before apply');
+  }
+
+  async function rollbackStatus(operation) {
+    const snapshot = await readRollbackSnapshot();
+    if (!snapshot || snapshot.operationId !== operation.id
+      || snapshot.serverId !== operation.serverId || snapshot.credentialRevision !== operation.apiKeyRevision) {
+      return Object.freeze({ available: false, reason: 'powerdns_rollback_snapshot_mismatch' });
+    }
+    return publicRollbackSnapshot(snapshot);
+  }
+
+  async function restoreRejectedConfig(configBefore) {
+    try { await restoreFile(powerDnsTemplatePolicy.configPath, configBefore); }
+    catch (error) {
+      if (error?.code === 'powerdns_config_snapshot_invalid') throw error;
+      fail('powerdns_config_rollback_failed',
+        'PowerDNS rejected the candidate configuration and the previous managed configuration could not be restored');
+    }
+  }
+
+  async function applyManaged(spec, operationId) {
+    await assertManagedPaths();
+    const configBefore = await fileSnapshot(powerDnsTemplatePolicy.configPath, CONFIG_SNAPSHOT_ERRORS);
+    await prepareRollbackSnapshot(spec, operationId, configBefore);
+    let result;
+    try { result = await applyHost(spec); }
+    catch (error) {
+      if (error?.code === 'powerdns_config_invalid') await restoreRejectedConfig(configBefore);
+      throw error;
+    }
+    await assertManagedPaths();
+    return result;
+  }
+
+  // Before overwriting current files, record them (once per rollback request) so a failed
+  // rollback can put them back. Only a verified current state may be captured.
+  async function prepareCompensation(spec, snapshot, previous, current) {
+    const existing = await readRollbackCompensation();
+    if (existing?.operationId === snapshot.operationId && existing.serverId === spec.serverId
+      && existing.credentialRevision === spec.apiKeyRevision && existing.rollbackSnapshotDigest === snapshot.snapshotDigest) {
+      return existing;
+    }
+    if (sameManagedFiles(current, previous)) return null;
+    let inspected;
+    try { inspected = await inspectHost(spec); }
+    catch { fail('powerdns_rollback_current_state_unverified', 'Current PowerDNS state could not be verified before rollback'); }
+    if (inspected?.satisfied !== true) {
+      fail('powerdns_rollback_current_state_unverified', 'Current PowerDNS state is not safe to replace with the rollback snapshot');
+    }
+    if (!sameManagedFiles(current, await managedFiles())) {
+      fail('powerdns_rollback_current_state_changed', 'Current PowerDNS files changed during rollback preflight');
+    }
+    const compensation = buildRollbackCompensation({
+      operationId: snapshot.operationId,
+      spec,
+      snapshotDigest: snapshot.snapshotDigest,
+      configSnapshot: current.config,
+      receiptSnapshot: current.receipt,
+      createdAt: new Date(now()).toISOString(),
+    });
+    return persistValidated(rollbackCompensationPath, compensation, persistedRollbackCompensation,
+      'powerdns_rollback_compensation_persist_failed', 'PowerDNS rollback compensation snapshot could not be persisted before mutation');
+  }
+
+  async function compensate(spec, compensating) {
+    try {
+      await restoreManagedFiles(compensating);
+      const compensated = await activateRestored(spec);
+      if (compensated?.satisfied !== true) throw new Error('compensation unverified');
+      await verifiedSockets('PowerDNS rollback compensation restored unhealthy DNS socket or recursion policy evidence');
+    } catch {
+      fail('powerdns_rollback_compensation_failed', 'PowerDNS rollback failed and the current authoritative state could not be recovered');
+    }
+  }
+
+  // Restores the exact pre-apply config and receipt; resumable after a crash at any step.
+  async function restoreSnapshot(spec, snapshot) {
+    await assertManagedPaths();
+    const previousSpec = normalizeIntent({ ...spec, secondaryDns: snapshot.previousSecondaryDns });
+    const previous = Object.freeze({ config: decodeSnapshotFile(snapshot.config), receipt: decodeSnapshotFile(snapshot.receipt) });
+    const compensation = await prepareCompensation(spec, snapshot, previous, await managedFiles());
+    const compensating = compensation
+      ? Object.freeze({ config: decodeSnapshotFile(compensation.config), receipt: decodeSnapshotFile(compensation.receipt) })
+      : null;
+    const live = await managedFiles();
+    const configIsPrevious = sameFileSnapshot(live.config, previous.config);
+    const receiptIsPrevious = sameFileSnapshot(live.receipt, previous.receipt);
+    const configIsCurrent = compensating ? sameFileSnapshot(live.config, compensating.config) : false;
+    const receiptIsCurrent = compensating ? sameFileSnapshot(live.receipt, compensating.receipt) : false;
+    if ((!configIsPrevious && !configIsCurrent) || (!receiptIsPrevious && !receiptIsCurrent)) {
+      fail('powerdns_rollback_current_state_changed', 'PowerDNS files no longer match the exact rollback or compensation snapshots');
+    }
+
+    const alreadyRestored = configIsPrevious && receiptIsPrevious;
+    try {
+      if (!configIsPrevious) await restoreFile(powerDnsTemplatePolicy.configPath, previous.config);
+      if (!receiptIsPrevious) await restoreFile(RECEIPT_PATH, previous.receipt);
+      let verified = null;
+      if (alreadyRestored) {
+        try { verified = await inspectHost(previousSpec); } catch { /* activation performs the authoritative check */ }
+      }
+      if (verified?.satisfied !== true) verified = await activateRestored(previousSpec);
+      const sockets = await verifiedSockets('PowerDNS rollback completed with unhealthy DNS socket or recursion policy evidence');
+      return Object.freeze({
+        ...verified,
+        sockets,
+        rollback: Object.freeze({ operationId: snapshot.operationId, snapshotDigest: snapshot.snapshotDigest, alreadyRestored }),
+      });
+    } catch (error) {
+      if (compensating) await compensate(spec, compensating);
+      throw error;
+    }
+  }
+
+  // ---- 4. journal ----
+
+  let mutationChain = Promise.resolve();
+
+  function serializeMutation(task) {
+    const execution = mutationChain.then(task, task);
+    mutationChain = execution.catch(() => {});
+    return execution;
+  }
+
+  async function readOperation() {
+    try { return persistedOperation(JSON.parse(await readFileFn(operationPath, 'utf8'))); }
+    catch (error) {
+      if (error?.code === 'ENOENT') return null;
+      if (error instanceof PowerDnsAuthoritativeManagerError) throw error;
+      fail('powerdns_operation_state_invalid', 'PowerDNS authoritative operation journal is invalid');
+    }
+  }
+
+  async function persistOperation(operation) {
+    const normalized = persistedOperation(operation);
+    await writePrivateJson(operationPath, normalized);
+    return normalized;
+  }
+
+  function updateOperation(operation, update) {
+    const updatedAt = new Date(Math.max(now(), Date.parse(operation.updatedAt) + 1)).toISOString();
+    return persistOperation({ ...operation, ...update, version: JOURNAL_VERSION, updatedAt });
+  }
+
+  function succeed(operation, spec, inspected) {
+    return updateOperation(operation, { status: 'succeeded', result: evidenceFromInspection(spec, inspected), lastError: null });
+  }
+
+  function createOperation(spec) {
+    const createdAt = new Date(now()).toISOString();
+    return persistOperation({
+      version: JOURNAL_VERSION,
+      id: idFactory(),
+      serverId: spec.serverId,
+      apiKeyRevision: spec.apiKeyRevision,
+      secondaryDns: spec.secondaryDns,
+      status: 'applying',
+      result: null,
+      lastError: null,
+      createdAt,
+      updatedAt: createdAt,
+    });
+  }
+
+  async function inspectForRecovery(spec, message) {
+    try { return await inspectManaged(spec); }
+    catch { fail('powerdns_recovery_inspection_unavailable', message); }
+  }
+
+  async function recoveryTarget(rawIntent, { operationId, expectedUpdatedAt } = {}) {
+    const spec = normalizeIntent(rawIntent);
+    if (typeof operationId !== 'string' || !operationId || typeof expectedUpdatedAt !== 'string' || !expectedUpdatedAt) {
+      fail('powerdns_recovery_request_invalid', 'PowerDNS recovery requires an exact operation identity and journal revision');
+    }
+    const existing = await readOperation();
+    if (!existing || existing.status !== 'applying') {
+      fail('powerdns_recovery_not_required', 'PowerDNS authoritative operation does not require recovery');
+    }
+    if (existing.id !== operationId || existing.updatedAt !== expectedUpdatedAt) {
+      fail('powerdns_recovery_stale', 'PowerDNS recovery request does not match the current operation journal');
+    }
+    if (!operationMatches(existing, spec)) {
+      fail('powerdns_operation_conflict', 'Interrupted PowerDNS apply intent changed and cannot be recovered with current credentials or settings');
+    }
+    return Object.freeze({ operation: existing, spec });
+  }
+
+  // An interrupted apply closes only from inspected evidence; the mutation is never replayed automatically.
+  async function recoverInterrupted(operation, spec) {
+    const inspected = await inspectForRecovery(spec,
+      'Interrupted PowerDNS apply cannot be replayed because current host state could not be inspected');
+    if (inspected?.satisfied !== true) {
+      fail('powerdns_recovery_pending',
+        'Interrupted PowerDNS apply was inspected but is not proven complete; automatic mutation replay is blocked');
+    }
+    await succeed(operation, spec, inspected);
+    return inspected;
+  }
+
+  async function executeApply(operation, spec) {
+    let applied;
+    try { applied = await applyManaged(spec, operation.id); }
+    catch (error) {
+      let after = null;
+      let inspectionAvailable = true;
+      try { after = await inspectManaged(spec); }
+      catch { inspectionAvailable = false; }
+      if (after?.satisfied === true) {
+        await succeed(operation, spec, after);
+        return after;
+      }
+      const failure = safeFailure(error);
+      if (DETERMINISTIC_FAILURE_CODES.has(failure.code)) {
+        await updateOperation(operation, { status: 'failed', result: null, lastError: failure });
+        throw error;
+      }
+      await updateOperation(operation, { status: 'applying', result: null, lastError: failure });
+      if (!inspectionAvailable) {
+        fail('powerdns_recovery_inspection_unavailable',
+          'PowerDNS apply failed and current host state cannot be inspected; operation remains applying and automatic replay is blocked');
+      }
+      fail('powerdns_apply_outcome_uncertain',
+        'PowerDNS apply failed without a proven post-condition; operation remains applying and automatic replay is blocked');
+    }
+    await succeed(operation, spec, applied);
+    return applied;
+  }
+
+  async function applyOnce(rawIntent) {
+    const spec = normalizeIntent(rawIntent);
+    const existing = await readOperation();
+    if (existing?.status === 'rolling_back') {
+      fail('powerdns_rollback_recovery_pending',
+        'Interrupted PowerDNS rollback must be explicitly resolved before applying authoritative intent');
+    }
+    if (existing?.status === 'rollback_failed' && existing.lastError?.code === 'powerdns_rollback_compensation_failed') {
+      fail('powerdns_rollback_recovery_pending',
+        'PowerDNS rollback compensation failed; explicit recovery is required before another apply');
+    }
+    if (existing?.status === 'applying') {
+      if (!operationMatches(existing, spec)) {
+        fail('powerdns_operation_conflict',
+          'A different interrupted PowerDNS apply must be resolved before changing authoritative DNS intent');
+      }
+      return recoverInterrupted(existing, spec);
+    }
+    const before = await inspectManaged(spec);
+    if (before?.satisfied === true) return before;
+    return executeApply(await createOperation(spec), spec);
+  }
+
+  async function resolveOnce(rawIntent, recovery) {
+    const { operation, spec } = await recoveryTarget(rawIntent, recovery);
+    return recoverInterrupted(operation, spec);
+  }
+
+  async function retryOnce(rawIntent, recovery) {
+    const { operation: existing, spec } = await recoveryTarget(rawIntent, recovery);
+    const before = await inspectForRecovery(spec,
+      'Interrupted PowerDNS apply cannot be retried because current host state could not be inspected');
+    if (before?.satisfied === true) {
+      await succeed(existing, spec, before);
+      return before;
+    }
+    const operation = await updateOperation(existing, {
+      status: 'applying',
+      result: null,
+      lastError: Object.freeze({
+        code: 'powerdns_explicit_retry_started',
+        message: 'Operator-authorized PowerDNS retry started after current-state inspection',
+      }),
+    });
+    return executeApply(operation, spec);
+  }
+
+  function rollbackRequest(recovery) {
+    const fields = ['operationId', 'expectedUpdatedAt', 'snapshotDigest'];
+    if (!recovery || typeof recovery !== 'object' || Array.isArray(recovery)
+      || Object.keys(recovery).length !== fields.length || Object.keys(recovery).some((field) => !fields.includes(field))
+      || typeof recovery.operationId !== 'string' || !OPERATION_ID_PATTERN.test(recovery.operationId)
+      || typeof recovery.expectedUpdatedAt !== 'string' || !recovery.expectedUpdatedAt
+      || typeof recovery.snapshotDigest !== 'string' || !SNAPSHOT_DIGEST_PATTERN.test(recovery.snapshotDigest)) {
+      fail('powerdns_rollback_request_invalid', 'PowerDNS rollback requires exact operation, journal revision and snapshot digest');
+    }
+    return recovery;
+  }
+
+  async function rollbackOnce(rawIntent, rawRecovery = {}) {
+    const recovery = rollbackRequest(rawRecovery);
+    const spec = normalizeIntent(rawIntent);
+    const existing = await readOperation();
+    if (!existing || !ROLLBACK_CAPABLE_STATUSES.includes(existing.status)) {
+      fail('powerdns_rollback_not_available', 'PowerDNS operation is not in a rollback-capable state');
+    }
+    if (existing.id !== recovery.operationId || existing.updatedAt !== recovery.expectedUpdatedAt) {
+      fail('powerdns_rollback_stale', 'PowerDNS rollback request does not match the current operation journal');
+    }
+    if (!operationMatches(existing, spec)) {
+      fail('powerdns_operation_conflict', 'PowerDNS rollback intent changed after the selected apply operation');
+    }
+    const snapshot = await readRollbackSnapshot();
+    if (!snapshot?.available || snapshot.operationId !== existing.id || snapshot.serverId !== existing.serverId
+      || snapshot.credentialRevision !== existing.apiKeyRevision || snapshot.snapshotDigest !== recovery.snapshotDigest) {
+      fail('powerdns_rollback_snapshot_stale', 'PowerDNS rollback snapshot is unavailable or no longer matches the request');
+    }
+    const previousSpec = normalizeIntent({ ...spec, secondaryDns: snapshot.previousSecondaryDns });
+    if (existing.status === 'rolled_back') {
+      const inspected = await inspectManaged(previousSpec);
+      if (inspected?.satisfied !== true) {
+        fail('powerdns_rollback_recovery_unverified', 'Completed PowerDNS rollback no longer matches current host state');
+      }
+      return inspected;
+    }
+
+    const rollingBack = existing.status === 'rolling_back'
+      ? existing
+      : await updateOperation(existing, {
+        status: 'rolling_back',
+        result: existing.result,
+        lastError: Object.freeze({
+          code: 'powerdns_explicit_rollback_started',
+          message: 'Operator-authorized PowerDNS rollback started from an exact snapshot',
+        }),
+      });
+    try {
+      const restored = await restoreSnapshot(spec, snapshot);
+      await updateOperation(rollingBack, {
+        status: 'rolled_back',
+        result: evidenceFromInspection(previousSpec, restored),
+        lastError: null,
+      });
+      return restored;
+    } catch (error) {
+      await updateOperation(rollingBack, { status: 'rollback_failed', result: rollingBack.result, lastError: safeFailure(error) });
+      throw error;
+    }
+  }
+
+  // ---- 5. readiness ----
+
+  async function socketEvidence() {
+    const sockets = await socketInspector.inspect();
+    if (!sockets || typeof sockets !== 'object') {
+      fail('powerdns_socket_health_invalid', 'PowerDNS socket health inspector returned invalid evidence');
+    }
+    return sockets;
+  }
+
+  async function verifiedSockets(message) {
+    const sockets = await socketEvidence();
+    if (sockets.satisfied !== true) fail(sockets.reason ?? 'powerdns_socket_unhealthy', message);
+    return sockets;
+  }
+
+  async function withVerifiedSockets(result, message) {
+    if (result.sockets?.satisfied === true) return result;
+    return Object.freeze({ ...result, sockets: await verifiedSockets(message) });
+  }
+
+  async function inspect(rawIntent) {
+    const base = await inspectManaged(normalizeIntent(rawIntent));
+    if (!base?.satisfied) return base;
+    const sockets = await socketEvidence();
+    if (!sockets.satisfied) {
+      return Object.freeze({ ...base, satisfied: false, reason: sockets.reason ?? 'powerdns_socket_unhealthy', sockets });
+    }
+    return Object.freeze({ ...base, sockets });
+  }
+
+  async function apply(rawIntent) {
+    const result = await serializeMutation(() => applyOnce(rawIntent));
+    return withVerifiedSockets(result, 'PowerDNS service started but DNS socket or recursion policy verification failed');
+  }
+
+  async function resolve(rawIntent, recovery) {
+    const result = await serializeMutation(() => resolveOnce(rawIntent, recovery));
+    return withVerifiedSockets(result, 'PowerDNS recovery found unhealthy DNS socket or recursion policy evidence');
+  }
+
+  async function retry(rawIntent, recovery) {
+    const result = await serializeMutation(() => retryOnce(rawIntent, recovery));
+    return withVerifiedSockets(result, 'PowerDNS retry completed with unhealthy DNS socket or recursion policy evidence');
+  }
+
+  async function rollback(rawIntent, recovery) {
+    const result = await serializeMutation(() => rollbackOnce(rawIntent, recovery));
+    return withVerifiedSockets(result, 'PowerDNS rollback completed with unhealthy DNS socket or recursion policy evidence');
+  }
+
+  async function operation() {
+    const current = await readOperation();
+    return current ? publicOperation(current, await rollbackStatus(current)) : null;
+  }
+
+  return Object.freeze({ inspect, apply, operation, resolve, retry, rollback, isUnconfigured });
 }
 
 export const powerDnsAuthoritativeManagerInternals = Object.freeze({
@@ -466,9 +978,15 @@ export const powerDnsAuthoritativeManagerInternals = Object.freeze({
   packageStatus,
   includeDirConfigured,
   apiKeyHashFromConfig,
-  fileIdentity,
-  receiptValue,
+  assertRestoredState,
   defaultHashPassword,
-  paths: Object.freeze({ BASE_CONFIG, RECEIPT_PATH, ...powerDnsTemplatePolicy }),
+  paths: Object.freeze({
+    BASE_CONFIG,
+    RECEIPT_PATH,
+    OPERATION_PATH,
+    ROLLBACK_SNAPSHOT_PATH,
+    ROLLBACK_COMPENSATION_PATH,
+    ...powerDnsTemplatePolicy,
+  }),
   schemaPaths: SCHEMA_PATHS,
 });

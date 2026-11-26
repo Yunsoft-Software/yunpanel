@@ -1,177 +1,199 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { powerDnsTemplatePolicy, renderManagedPowerDnsConfig } from '@yunpanel/config-templates/powerdns';
+import { renderManagedPowerDnsConfig } from '@yunpanel/config-templates/powerdns';
 import {
-  createPowerDnsAuthoritativeManager,
   PowerDnsAuthoritativeManagerError,
   powerDnsAuthoritativeManagerInternals,
 } from '../src/powerdns-authoritative-manager.js';
+import { configFor, createFakeHost, intent, paths, previousSecondaryDns, serverId } from './powerdns-fake-host.js';
 
-const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
-const apiKey = 'A'.repeat(43);
+const internals = powerDnsAuthoritativeManagerInternals;
 
-function intent(overrides = {}) {
-  return {
-    serverId,
-    apiKey,
-    apiKeyRevision: 2,
-    secondaryDns: ['203.0.113.20', '2001:db8::20'],
-    ...overrides,
-  };
+function managerError(code) {
+  return (error) => error instanceof PowerDnsAuthoritativeManagerError && error.code === code;
 }
 
 test('PowerDNS manager intent canonicalizes secondary targets and keeps secret private to host intent', () => {
-  const normalized = powerDnsAuthoritativeManagerInternals.normalizeIntent(intent({
-    secondaryDns: ['203.0.113.20', '2001:db8::20'],
-  }));
+  const normalized = internals.normalizeIntent(intent({ secondaryDns: ['203.0.113.20', '2001:db8::20'] }));
   assert.equal(normalized.serverId, serverId);
-  assert.equal(normalized.apiKey, apiKey);
+  assert.equal(normalized.apiKey, intent().apiKey);
   assert.equal(normalized.apiKeyRevision, 2);
   assert.deepEqual(normalized.secondaryDns, ['2001:db8::20', '203.0.113.20']);
 });
 
 test('PowerDNS manager rejects malformed API keys and secondary DNS addresses', () => {
-  assert.throws(
-    () => powerDnsAuthoritativeManagerInternals.normalizeIntent(intent({ apiKey: 'short' })),
-    (error) => error instanceof PowerDnsAuthoritativeManagerError && error.code === 'powerdns_intent_invalid',
-  );
-  assert.throws(
-    () => powerDnsAuthoritativeManagerInternals.normalizeIntent(intent({ secondaryDns: ['not-an-ip'] })),
-    (error) => error instanceof PowerDnsAuthoritativeManagerError && error.code === 'powerdns_intent_invalid',
-  );
+  assert.throws(() => internals.normalizeIntent(intent({ apiKey: 'short' })), managerError('powerdns_intent_invalid'));
+  assert.throws(() => internals.normalizeIntent(intent({ secondaryDns: ['not-an-ip'] })), managerError('powerdns_intent_invalid'));
 });
 
 test('PowerDNS manager requires vendor include-dir and parses package state deterministically', () => {
-  assert.equal(
-    powerDnsAuthoritativeManagerInternals.schemaPaths[0],
-    '/usr/share/pdns-backend-sqlite3/schema/schema.sqlite3.sql',
-  );
-  assert.equal(
-    powerDnsAuthoritativeManagerInternals.includeDirConfigured('include-dir=/etc/powerdns/pdns.d\n'),
-    true,
-  );
-  assert.equal(
-    powerDnsAuthoritativeManagerInternals.includeDirConfigured('include-dir=/tmp/not-managed\n'),
-    false,
-  );
-  assert.deepEqual(
-    powerDnsAuthoritativeManagerInternals.packageStatus('install ok installed\t4.8.3-1build2'),
-    { installed: true, version: '4.8.3-1build2' },
-  );
-  assert.deepEqual(
-    powerDnsAuthoritativeManagerInternals.packageStatus('deinstall ok config-files\t4.8.3'),
-    { installed: false, version: null },
-  );
+  assert.equal(internals.schemaPaths[0], '/usr/share/pdns-backend-sqlite3/schema/schema.sqlite3.sql');
+  assert.equal(internals.includeDirConfigured('include-dir=/etc/powerdns/pdns.d\n'), true);
+  assert.equal(internals.includeDirConfigured('include-dir=/tmp/not-managed\n'), false);
+  assert.deepEqual(internals.packageStatus('install ok installed\t4.8.3-1build2'), { installed: true, version: '4.8.3-1build2' });
+  assert.deepEqual(internals.packageStatus('deinstall ok config-files\t4.8.3'), { installed: false, version: null });
 });
 
 test('PowerDNS managed config requires a non-trivial API key hash', () => {
-  assert.equal(powerDnsAuthoritativeManagerInternals.apiKeyHashFromConfig('api-key=$scrypt$example-hash-value\n'), '$scrypt$example-hash-value');
-  assert.equal(powerDnsAuthoritativeManagerInternals.apiKeyHashFromConfig('api-key=short\n'), null);
-  assert.equal(powerDnsAuthoritativeManagerInternals.apiKeyHashFromConfig('webserver=yes\n'), null);
+  assert.equal(internals.apiKeyHashFromConfig('api-key=$scrypt$example-hash-value\n'), '$scrypt$example-hash-value');
+  assert.equal(internals.apiKeyHashFromConfig('api-key=short\n'), null);
+  assert.equal(internals.apiKeyHashFromConfig('webserver=yes\n'), null);
 });
 
-function restoredState(overrides = {}) {
+function restoredState() {
+  const spec = internals.normalizeIntent(intent());
   const config = renderManagedPowerDnsConfig({
     apiKeyHash: 'restored-managed-api-key-hash-value-0000000000',
-    secondaryDns: intent().secondaryDns,
+    secondaryDns: spec.secondaryDns,
   });
-  const receipt = `${JSON.stringify({
+  const receipt = {
     version: 1,
     serverId,
     apiKeyRevision: 2,
-    secondaryDns: [...intent().secondaryDns].sort(),
+    secondaryDns: [...spec.secondaryDns],
     configLength: Buffer.byteLength(config),
     appliedAt: '2026-09-17T11:00:00.000Z',
-  })}\n`;
-  return {
-    config,
-    receipt,
-    base: 'include-dir=/etc/powerdns/pdns.d\n',
-    ...overrides,
   };
+  return { spec, config, receipt };
 }
 
-function restoredManager(state, calls = []) {
-  return createPowerDnsAuthoritativeManager({
-    async run(file, args) {
-      calls.push([file, args]);
-      if (file === '/usr/bin/dpkg-query') {
-        return {
-          stdout: args.at(-1) === 'pdns-recursor'
-            ? 'deinstall ok config-files\t'
-            : 'install ok installed\t4.8.3-1ubuntu1',
-        };
-      }
-      if (file === '/usr/bin/stat') {
-        return {
-          stdout: args.at(-1) === powerDnsTemplatePolicy.configPath
-            ? 'root:pdns:640\n'
-            : 'pdns:pdns:640\n',
-        };
-      }
-      return { stdout: '' };
-    },
-    async fetchFn() {
-      return { ok: true, status: 200, async json() { return { id: 'localhost' }; } };
-    },
-    async readFileFn(target) {
-      if (target === powerDnsAuthoritativeManagerInternals.paths.BASE_CONFIG) return state.base;
-      if (target === powerDnsTemplatePolicy.configPath) return state.config;
-      if (target === powerDnsAuthoritativeManagerInternals.paths.RECEIPT_PATH) return state.receipt;
-      const error = new Error('missing');
-      error.code = 'ENOENT';
-      throw error;
-    },
-    async writeFileFn() { throw new Error('rollback activation must not rewrite restored state'); },
-  });
-}
+test('PowerDNS restored state accepts an exact config and receipt pair', () => {
+  const { spec, config, receipt } = restoredState();
+  assert.doesNotThrow(() => internals.assertRestoredState(spec, config, `${JSON.stringify(receipt)}\n`));
+});
 
-test('PowerDNS manager validates and activates an exact restored config and receipt without rewriting them', async () => {
-  const calls = [];
-  const manager = restoredManager(restoredState(), calls);
+test('PowerDNS restored state rejects config drift and a receipt mismatch', () => {
+  const { spec, config, receipt } = restoredState();
+  const drifted = renderManagedPowerDnsConfig({ apiKeyHash: 'restored-managed-api-key-hash-value-0000000000', secondaryDns: [] });
+  assert.throws(() => internals.assertRestoredState(spec, drifted, JSON.stringify(receipt)), managerError('powerdns_rollback_config_invalid'));
+  assert.throws(
+    () => internals.assertRestoredState(spec, config, JSON.stringify({ ...receipt, apiKeyRevision: 1 })),
+    managerError('powerdns_rollback_receipt_invalid'),
+  );
+  assert.throws(() => internals.assertRestoredState(spec, null, JSON.stringify(receipt)), managerError('powerdns_rollback_config_missing'));
+  assert.throws(() => internals.assertRestoredState(spec, config, null), managerError('powerdns_rollback_receipt_missing'));
+});
 
-  const result = await manager.activateRestored(intent());
+test('PowerDNS first apply installs packages and leaves every managed file with its owner and mode', async () => {
+  const host = createFakeHost();
+  host.packagesInstalled = false;
+
+  const result = await host.manager().apply(intent());
 
   assert.equal(result.satisfied, true);
-  assert.equal(result.receipt.appliedAt, '2026-09-17T11:00:00.000Z');
-  assert.ok(calls.some(([file, args]) => file === '/usr/sbin/pdns_server' && args[0] === '--config=check'));
-  assert.ok(calls.some(([file, args]) => file === '/usr/bin/systemctl'
-    && args[0] === 'enable' && args[1] === '--now'));
-  assert.ok(calls.some(([file, args]) => file === '/usr/bin/systemctl'
-    && args[0] === 'restart' && args[1] === powerDnsTemplatePolicy.serviceUnit));
-  assert.equal(calls.some(([file]) => file === '/usr/bin/apt-get'), false);
+  assert.equal(result.adapter, 'powerdns-authoritative-gsqlite3');
+  assert.equal(host.commands('/usr/bin/apt-get', 'install').length, 1);
+  assert.equal(host.text(paths.config), configFor(intent().secondaryDns));
+  assert.deepEqual(host.meta(paths.config), { uid: 0, gid: 113, mode: 0o640 });
+  assert.deepEqual(host.meta(paths.database), { uid: 113, gid: 113, mode: 0o640 });
+  assert.deepEqual(host.meta(paths.receipt), { uid: 0, gid: 0, mode: 0o600 });
+  assert.deepEqual(host.meta(paths.journal), { uid: 0, gid: 0, mode: 0o600 });
+  assert.deepEqual(host.meta(paths.snapshot), { uid: 0, gid: 0, mode: 0o600 });
+  assert.equal([...host.files.keys()].some((target) => target.endsWith('.tmp')), false);
+  assert.doesNotMatch(host.text(paths.receipt) + host.text(paths.journal) + host.text(paths.snapshot), new RegExp(intent().apiKey));
 });
 
-test('PowerDNS manager rejects restored config drift before configtest or service activation', async () => {
-  const calls = [];
-  const state = restoredState({
-    config: renderManagedPowerDnsConfig({
-      apiKeyHash: 'restored-managed-api-key-hash-value-0000000000',
-      secondaryDns: [],
-    }),
-  });
-  const manager = restoredManager(state, calls);
+test('PowerDNS apply is idempotent once the host matches the intent', async () => {
+  const host = createFakeHost();
+  const manager = host.manager();
+  await manager.apply(intent());
+  const journal = host.text(paths.journal);
 
-  await assert.rejects(
-    manager.activateRestored(intent()),
-    (error) => error instanceof PowerDnsAuthoritativeManagerError
-      && error.code === 'powerdns_rollback_config_invalid',
-  );
-  assert.equal(calls.length, 0);
+  const repeated = await manager.apply(intent());
+
+  assert.equal(repeated.satisfied, true);
+  assert.equal(host.text(paths.journal), journal);
+  assert.equal(host.commands('/usr/bin/systemctl', 'enable').length, 1);
+  assert.equal(host.configWrites(), 1);
+  assert.equal(host.hashes, 1);
 });
 
-test('PowerDNS manager rejects a restored receipt mismatch before service activation', async () => {
-  const calls = [];
-  const state = restoredState();
-  const manager = restoredManager({
-    ...state,
-    receipt: `${JSON.stringify({ ...JSON.parse(state.receipt), apiKeyRevision: 1 })}\n`,
-  }, calls);
+test('PowerDNS apply refuses a host with pdns-recursor or without the vendor include-dir', async () => {
+  const recursor = createFakeHost();
+  recursor.recursorInstalled = true;
+  await assert.rejects(recursor.manager().apply(intent()), managerError('powerdns_recursor_conflict'));
+  assert.equal(recursor.journal().status, 'failed');
+  assert.equal(recursor.files.has(paths.config), false);
 
-  await assert.rejects(
-    manager.activateRestored(intent()),
-    (error) => error instanceof PowerDnsAuthoritativeManagerError
-      && error.code === 'powerdns_rollback_receipt_invalid',
-  );
-  assert.equal(calls.length, 0);
+  const vendor = createFakeHost();
+  vendor.put(paths.baseConfig, 'launch=bind\n');
+  await assert.rejects(vendor.manager().apply(intent()), managerError('powerdns_include_dir_required'));
+  assert.equal(vendor.journal().status, 'failed');
+  assert.equal(vendor.files.has(paths.config), false);
+});
+
+test('PowerDNS manager blocks a symlinked SQLite database before host mutation', async () => {
+  const host = createFakeHost();
+  host.put(paths.database, 'sqlite', { uid: 113, gid: 113, mode: 0o640, type: 'symlink' });
+
+  await assert.rejects(host.manager().apply(intent()), managerError('powerdns_database_path_drift'));
+  assert.deepEqual(host.calls, []);
+  assert.equal(host.files.has(paths.journal), false);
+  assert.equal(host.files.has(paths.config), false);
+});
+
+test('PowerDNS manager blocks a non-regular managed config before inspection', async () => {
+  const host = createFakeHost();
+  host.put(paths.config, '', { type: 'directory' });
+
+  await assert.rejects(host.manager().inspect(intent()), managerError('powerdns_config_path_drift'));
+  assert.deepEqual(host.calls, []);
+});
+
+test('PowerDNS manager rechecks managed paths after apply and keeps the operation blocked', async () => {
+  const host = createFakeHost();
+  host.databaseAsSymlink = true;
+
+  await assert.rejects(host.manager().apply(intent()), managerError('powerdns_recovery_inspection_unavailable'));
+  const journal = host.journal();
+  assert.equal(journal.status, 'applying');
+  assert.equal(journal.lastError.code, 'powerdns_database_path_drift');
+});
+
+test('PowerDNS manager restores the previous managed config after config validation failure', async () => {
+  const host = createFakeHost();
+  const manager = host.manager();
+  await manager.apply(intent({ secondaryDns: [...previousSecondaryDns] }));
+  const previous = host.bytes(paths.config);
+  host.rejectConfig = true;
+
+  await assert.rejects(manager.apply(intent()), managerError('powerdns_config_invalid'));
+
+  assert.equal(host.bytes(paths.config).equals(previous), true);
+  assert.deepEqual(host.meta(paths.config), { uid: 0, gid: 113, mode: 0o640 });
+  const journal = host.journal();
+  assert.equal(journal.status, 'failed');
+  assert.equal(journal.lastError.code, 'powerdns_config_invalid');
+});
+
+test('PowerDNS manager removes a rejected first-install config when no previous config existed', async () => {
+  const host = createFakeHost();
+  host.rejectConfig = true;
+
+  await assert.rejects(host.manager().apply(intent()), managerError('powerdns_config_invalid'));
+
+  assert.equal(host.configWrites(), 1);
+  assert.equal(host.files.has(paths.config), false);
+  assert.equal(host.journal().status, 'failed');
+});
+
+test('PowerDNS manager rotates a stale API key hash once when the drop-in otherwise matches', async () => {
+  const host = createFakeHost();
+  const manager = host.manager();
+  await manager.apply(intent());
+  host.put(paths.config, configFor(intent().secondaryDns, 'C'.repeat(43)), { gid: 113, mode: 0o640 });
+
+  const result = await manager.apply(intent());
+
+  assert.equal(result.satisfied, true);
+  assert.equal(host.text(paths.config), configFor(intent().secondaryDns));
+  assert.equal(host.hashes, 2);
+});
+
+test('PowerDNS host stays unconfigured until YunPanel writes state', async () => {
+  const host = createFakeHost();
+  const manager = host.manager();
+  assert.equal(await manager.isUnconfigured(), true);
+  await manager.apply(intent());
+  assert.equal(await manager.isUnconfigured(), false);
 });

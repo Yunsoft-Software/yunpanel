@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { powerDnsTemplatePolicy } from '@yunpanel/config-templates/powerdns';
-import { createPowerDnsAuthoritativeReadyManager } from '@yunpanel/host-runtime/powerdns-authoritative-ready-manager';
+import { createPowerDnsAuthoritativeManager } from '@yunpanel/host-runtime/powerdns-authoritative-manager';
 import { createPublicDnsReachabilityInspector } from './public-dns-reachability-inspector.js';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -89,7 +89,7 @@ export function createPowerDnsAuthoritativeService({
   serverRegistry,
   dnsIdentityRegistry,
   secretRegistry,
-  manager = createPowerDnsAuthoritativeReadyManager(),
+  manager = createPowerDnsAuthoritativeManager(),
   publicReachabilityInspector = createPublicDnsReachabilityInspector(),
 } = {}) {
   if (typeof localServerId !== 'string' || !localServerId
