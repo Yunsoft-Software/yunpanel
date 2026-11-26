@@ -1,6 +1,6 @@
 # Alan Adı, DNS ve SSL
 
-> **Sürüm:** YunPanel `0.3.0` · **Doğrulanmış kaynak revizyonu:** `f30fd779` (`f30fd779293ad96f83e7a76846fa70e71562730b`) · **Doğrulanmış Linux `.deb` paket tabanı:** `0.3.0-2026112301` (`f13b2b78`) · **Arayüz dili:** Türkçe (`tr`)
+> **Sürüm:** YunPanel `0.3.0` · **Doğrulanmış kaynak revizyonu:** `c1a84a51` (`c1a84a5159add2f2f87fd6e21725f7c657cf98ec`) · **Doğrulanmış Linux `.deb` paket tabanı:** `0.3.0-2026112301` (`f13b2b78`) · **Arayüz dili:** Türkçe (`tr`)
 
 YunPanel alan adı yaşam döngüsünü, yetkili veya harici DNS kayıtlarını, Let's Encrypt SSL/TLS sertifikalarını ve Nginx barındırma kurallarını site bağlamında yönetir.
 
@@ -27,7 +27,7 @@ Site detayındaki **SSL/TLS Sertifikaları** (`/websites/<id>/ssl`) ekranından 
 - **Korunacak alan adları:** Ana alan adı, `www`, `webmail`, `mail` alt alan adları, posta sunucusu (Postfix/Dovecot TLS SNI) ataması ve Cloudflare DNS-01 ile Joker (Wildcard `*.alanadi`) sertifika desteği.
 - **ACME doğrulama testi:** Gerçek sertifika isteğinden önce DNS ve ACME erişilebilirliğini test edebilirsiniz.
 - **Otomatik yenileme:** Arka plan zamanlayıcısı varsayılan olarak 6 saatte bir (`YUNPANEL_CERTIFICATE_RENEWAL_INTERVAL_MS`) kontrol yapar ve bitişine 30 gün kalan (`YUNPANEL_CERTIFICATE_RENEW_BEFORE_MS`) sertifikaları otomatik yeniler.
-- **Sertifika bildirimleri:** Üst bardaki **Bildirimler** çekmecesi süresi yaklaşan veya eksik SSL sertifikalarını listeler.
+- **Sertifika bildirimleri:** Üst bardaki zil simgesi **Bildirim ve Görev Merkezi** panelini açar. Bu paneldeki **Bildirimler** sekmesi süresi yaklaşan veya eksik SSL sertifikalarını listeler.
 
 ![Site SSL/TLS sertifika yönetimi](assets/tr/08-site-ssl.png)
 

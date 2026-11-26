@@ -1,6 +1,6 @@
 # Lisanslama ve Üç Aylık Premium
 
-> **Sürüm:** YunPanel `0.3.0` · **Doğrulanmış kaynak revizyonu:** `f30fd779` (`f30fd779293ad96f83e7a76846fa70e71562730b`) · **Doğrulanmış Linux `.deb` paket tabanı:** `0.3.0-2026112301` (`f13b2b78`) · **Arayüz dili:** Türkçe (`tr`)
+> **Sürüm:** YunPanel `0.3.0` · **Doğrulanmış kaynak revizyonu:** `c1a84a51` (`c1a84a5159add2f2f87fd6e21725f7c657cf98ec`) · **Doğrulanmış Linux `.deb` paket tabanı:** `0.3.0-2026112301` (`f13b2b78`) · **Arayüz dili:** Türkçe (`tr`)
 
 YunPanel, temel sunucu ve sınırsız site yönetimini **Ücretsiz** sürümde kalıcı olarak sunar; çok kullanıcılı yönetim, bayi/müşteri hesapları ve AI yönetim araçları için çevrimdışı kriptografik doğrulamalı **YunPanel Premium** lisansını kullanır.
 
@@ -17,7 +17,7 @@ YunPanel, temel sunucu ve sınırsız site yönetimini **Ücretsiz** sürümde k
 
 ## Üç aylık ücretsiz Premium kampanyası (Yunsoft Website)
 
-> Başvuru ve güncel koşullar için [Yunsoft'un üç aylık Premium kampanya sayfasına](https://yunsoft.com/kampanya/premium-3-ay) bakın. Kampanya görselleri yerel `0.3.0` (`f30fd779`) aday derlemesinde alınmıştır.
+> Başvuru ve güncel koşullar için [Yunsoft'un üç aylık Premium kampanya sayfasına](https://yunsoft.com/kampanya/premium-3-ay) bakın. Kampanya görselleri yerel `0.3.0` (`c1a84a51`) aday derlemesinde alınmıştır.
 
 Yeni kurulumlarda ve ücretsiz sürümü kullanırken Yunsoft üzerinden isteğe bağlı olarak **kredi kartsız üç aylık YunPanel Premium** teklifine başvurabilirsiniz.
 

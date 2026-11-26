@@ -1,6 +1,6 @@
 # Posta Yönetimi
 
-> **Sürüm:** YunPanel `0.3.0` · **Doğrulanmış kaynak revizyonu:** `f30fd779` (`f30fd779293ad96f83e7a76846fa70e71562730b`) · **Doğrulanmış Linux `.deb` paket tabanı:** `0.3.0-2026112301` (`f13b2b78`) · **Arayüz dili:** Türkçe (`tr`)
+> **Sürüm:** YunPanel `0.3.0` · **Doğrulanmış kaynak revizyonu:** `c1a84a51` (`c1a84a5159add2f2f87fd6e21725f7c657cf98ec`) · **Doğrulanmış Linux `.deb` paket tabanı:** `0.3.0-2026112301` (`f13b2b78`) · **Arayüz dili:** Türkçe (`tr`)
 
 YunPanel, Postfix, Dovecot (Pigeonhole Sieve), Rspamd ve Roundcube bileşenlerini yerel Linux sunucusu üzerinde tek yönetim akışında birleştirir. Sol menüdeki **Posta** (`/mail`) sayfasından tüm posta alan adlarını, site içindeki **E-posta** (`/websites/<id>/mail`) sekmesinden ise ilgili sitenin posta servislerini yönetebilirsiniz.
 

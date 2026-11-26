@@ -28,13 +28,14 @@ test('YunPanel 0.3.0 bilingual docs bundle satisfies Yunsoft Website importer co
   const enLicense = readFileSync(path.join(BUNDLE_DIR, 'locales/en/licensing-and-premium.md'), 'utf8');
   const trSetup = readFileSync(path.join(BUNDLE_DIR, 'locales/tr/first-time-setup.md'), 'utf8');
   const enSetup = readFileSync(path.join(BUNDLE_DIR, 'locales/en/first-time-setup.md'), 'utf8');
+  const shortCommit = result.sourceCommit.slice(0, 8);
   for (const guide of [trLicense, trSetup]) {
     assert.match(guide, /https:\/\/yunsoft\.com\/kampanya\/premium-3-ay\)/);
-    assert.match(guide, /yerel `0\.3\.0` \(`f30fd779`\) aday derlemesi/);
+    assert.ok(guide.includes(`yerel \`0.3.0\` (\`${shortCommit}\`) aday derlemesi`), 'TR guide must cite the manifest source commit');
   }
   for (const guide of [enLicense, enSetup]) {
     assert.match(guide, /https:\/\/yunsoft\.com\/campaign\/premium-3-months\)/);
-    assert.match(guide, /local `0\.3\.0` \(`f30fd779`\) candidate build/);
+    assert.ok(guide.includes(`local \`0.3.0\` (\`${shortCommit}\`) candidate build`), 'EN guide must cite the manifest source commit');
   }
 });
 

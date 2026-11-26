@@ -1,6 +1,6 @@
 # Dosya Yönetimi
 
-> **Sürüm:** YunPanel `0.3.0` · **Doğrulanmış kaynak revizyonu:** `f30fd779` (`f30fd779293ad96f83e7a76846fa70e71562730b`) · **Doğrulanmış Linux `.deb` paket tabanı:** `0.3.0-2026112301` (`f13b2b78`) · **Arayüz dili:** Türkçe (`tr`)
+> **Sürüm:** YunPanel `0.3.0` · **Doğrulanmış kaynak revizyonu:** `c1a84a51` (`c1a84a5159add2f2f87fd6e21725f7c657cf98ec`) · **Doğrulanmış Linux `.deb` paket tabanı:** `0.3.0-2026112301` (`f13b2b78`) · **Arayüz dili:** Türkçe (`tr`)
 
 YunPanel tüm dosya işlemlerini sitenin kendi yalıtılmış Linux kullanıcısı (`yunapp-<ozet>`) ve kendi kök dizini içinde yürütür. Sol menüdeki **Dosyalar** (`/files`) girişi ve site detayındaki **Dosya Yöneticisi** (`/websites/<id>/files`) sekmesi aynı güvenli dosya altyapısını kullanır.
 
@@ -23,7 +23,7 @@ Dosya yöneticisi ekranında:
 
 - **elFinder ile Aç:** Oturuma bağlı tek kullanımlık devir (handoff) mekanizmasıyla elFinder arayüzü sitenin kendi sistem kullanıcısı bağlamında açılır.
 - **Erişim Hesapları (SFTP / SSH anahtarları):** Site detayındaki **Erişim Hesapları** (`/websites/<id>/access`) sekmesinden site kullanıcısına SSH/SFTP açık anahtarı ekleyebilir, döndürebilir veya iptal edebilirsiniz. Tek Owner bu yeteneği ücretsiz sürümde de kullanabilir.
-- **Site Terminali (`ttyd`):** Site detayındaki **Terminal** sekmesi, sitenin kendi yalıtılmış kullanıcısı altında tarayıcı terminali açar (Owner root sunucu terminali ayrı olarak **Sunucu** sayfasındadır).
+- **Site Terminali (`ttyd`):** Site detayındaki **Terminal** sekmesi, sitenin kendi yalıtılmış kullanıcısı altında tarayıcı terminali açar (Owner için sunucu kök terminali ayrıdır: **Araçlar ve Ayarlar → Sunucu ve servis yönetimi**, `/servers`).
 
 ## İlgili kılavuzlar
 

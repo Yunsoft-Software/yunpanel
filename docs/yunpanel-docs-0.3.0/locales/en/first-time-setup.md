@@ -1,6 +1,6 @@
 # First-Time Setup
 
-> **Version:** YunPanel `0.3.0` · **Verified source revision:** `f30fd779` (`f30fd779293ad96f83e7a76846fa70e71562730b`) · **Verified Linux `.deb` package baseline:** `0.3.0-2026112301` (`f13b2b78`) · **Web UI language:** Turkish (`tr`; verified in Chromium with both `tr-TR` and `en-US` browser locales)
+> **Version:** YunPanel `0.3.0` · **Verified source revision:** `c1a84a51` (`c1a84a5159add2f2f87fd6e21725f7c657cf98ec`) · **Verified Linux `.deb` package baseline:** `0.3.0-2026112301` (`f13b2b78`) · **Web UI language:** Turkish (`tr`; verified in Chromium with both `tr-TR` and `en-US` browser locales)
 
 YunPanel ships with no default password and no public signup endpoint. Creating the initial **Owner (Sunucu Yöneticisi)** account requires a single-use, 10-minute setup token generated directly on the host.
 
@@ -37,7 +37,7 @@ You can switch between dark and light themes at any time using the top-right the
 
 ## 3. Optional 3-month free Premium offer
 
-> Visit [Yunsoft's three-month Premium campaign page](https://yunsoft.com/campaign/premium-3-months) for the application and current terms. Campaign screenshots were captured in the local `0.3.0` (`f30fd779`) candidate build.
+> Visit [Yunsoft's three-month Premium campaign page](https://yunsoft.com/campaign/premium-3-months) for the application and current terms. Campaign screenshots were captured in the local `0.3.0` (`c1a84a51`) candidate build.
 
 Below the setup form, YunPanel displays an optional **3 aylık ücretsiz Premium teklifi** (3-Month Free Premium Offer) card:
 

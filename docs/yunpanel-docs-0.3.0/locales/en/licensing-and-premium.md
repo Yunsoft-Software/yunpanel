@@ -1,6 +1,6 @@
 # Licensing and Three-Month Premium
 
-> **Version:** YunPanel `0.3.0` · **Verified source revision:** `f30fd779` (`f30fd779293ad96f83e7a76846fa70e71562730b`) · **Verified Linux `.deb` package baseline:** `0.3.0-2026112301` (`f13b2b78`) · **Web UI language:** Turkish (`tr`; verified in Chromium with both `tr-TR` and `en-US` browser locales)
+> **Version:** YunPanel `0.3.0` · **Verified source revision:** `c1a84a51` (`c1a84a5159add2f2f87fd6e21725f7c657cf98ec`) · **Verified Linux `.deb` package baseline:** `0.3.0-2026112301` (`f13b2b78`) · **Web UI language:** Turkish (`tr`; verified in Chromium with both `tr-TR` and `en-US` browser locales)
 
 YunPanel includes unlimited website management for a single Owner permanently in the **Free** edition, and unlocks multi-tenant roles (Resellers, Customers, Site Managers) and AI operations via offline cryptographically verified **YunPanel Premium** licensing.
 
@@ -17,7 +17,7 @@ YunPanel includes unlimited website management for a single Owner permanently in
 
 ## Credit-card-free 3-month Premium campaign (Yunsoft Website)
 
-> Visit [Yunsoft's three-month Premium campaign page](https://yunsoft.com/campaign/premium-3-months) for the application and current terms. Campaign screenshots were captured in the local `0.3.0` (`f30fd779`) candidate build.
+> Visit [Yunsoft's three-month Premium campaign page](https://yunsoft.com/campaign/premium-3-months) for the application and current terms. Campaign screenshots were captured in the local `0.3.0` (`c1a84a51`) candidate build.
 
 New installations and Free-tier panels can apply for the optional **three-month YunPanel Premium** offer through Yunsoft without a credit card.
 

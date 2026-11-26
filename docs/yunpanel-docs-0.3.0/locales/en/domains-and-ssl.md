@@ -1,6 +1,6 @@
 # Domains, DNS, and SSL
 
-> **Version:** YunPanel `0.3.0` · **Verified source revision:** `f30fd779` (`f30fd779293ad96f83e7a76846fa70e71562730b`) · **Verified Linux `.deb` package baseline:** `0.3.0-2026112301` (`f13b2b78`) · **Web UI language:** Turkish (`tr`; verified in Chromium with both `tr-TR` and `en-US` browser locales)
+> **Version:** YunPanel `0.3.0` · **Verified source revision:** `c1a84a51` (`c1a84a5159add2f2f87fd6e21725f7c657cf98ec`) · **Verified Linux `.deb` package baseline:** `0.3.0-2026112301` (`f13b2b78`) · **Web UI language:** Turkish (`tr`; verified in Chromium with both `tr-TR` and `en-US` browser locales)
 
 YunPanel manages domain lifecycle, authoritative and external DNS zones, Let's Encrypt SSL/TLS certificates, and Nginx web server settings directly in site context.
 
@@ -27,7 +27,7 @@ Open **SSL/TLS Sertifikaları** (`/websites/<id>/ssl`) on any site to issue and 
 - **Coverage options:** Protect the root domain, `www`, `webmail`, and `mail` subdomains, assign the certificate to Postfix/Dovecot TLS SNI, or issue wildcard (`*.domain`) certificates via Cloudflare DNS-01.
 - **ACME validation pre-check:** Use **ACME doğrulamasını test et** (Test ACME verification) before issuing a live certificate.
 - **Automatic renewal scheduler:** Checks certificates every 6 hours by default (`YUNPANEL_CERTIFICATE_RENEWAL_INTERVAL_MS`) and renews certificates within 30 days of expiration (`YUNPANEL_CERTIFICATE_RENEW_BEFORE_MS`).
-- **Central alerts:** The top-bar **Bildirimler** (Notifications) drawer highlights missing or expiring SSL certificates.
+- **Central alerts:** The bell icon in the top bar opens **Bildirim ve Görev Merkezi** (Notification and Task Center). Its **Bildirimler** (Notifications) tab lists missing or expiring SSL certificates.
 
 ![YunPanel site SSL/TLS certificate management screen (Turkish UI)](assets/en/08-site-ssl.png)
 

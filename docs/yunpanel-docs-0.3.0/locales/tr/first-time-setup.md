@@ -1,6 +1,6 @@
 # İlk Kurulum
 
-> **Sürüm:** YunPanel `0.3.0` · **Doğrulanmış kaynak revizyonu:** `f30fd779` (`f30fd779293ad96f83e7a76846fa70e71562730b`) · **Doğrulanmış Linux `.deb` paket tabanı:** `0.3.0-2026112301` (`f13b2b78`) · **Arayüz dili:** Türkçe (`tr`)
+> **Sürüm:** YunPanel `0.3.0` · **Doğrulanmış kaynak revizyonu:** `c1a84a51` (`c1a84a5159add2f2f87fd6e21725f7c657cf98ec`) · **Doğrulanmış Linux `.deb` paket tabanı:** `0.3.0-2026112301` (`f13b2b78`) · **Arayüz dili:** Türkçe (`tr`)
 
 YunPanel varsayılan parola veya herkese açık kayıt ekranı içermez. İlk **Owner (Sunucu Yöneticisi)** hesabı yalnızca sunucu üzerinde üretilen, tek kullanımlık ve 10 dakika geçerli bir kurulum anahtarı ile oluşturulur.
 
@@ -37,7 +37,7 @@ Açık ve koyu tema arasında sağ üstteki tema düğmesiyle geçiş yapabilirs
 
 ## 3. İsteğe bağlı 3 aylık ücretsiz Premium teklifi
 
-> Başvuru ve güncel koşullar için [Yunsoft'un üç aylık Premium kampanya sayfasına](https://yunsoft.com/kampanya/premium-3-ay) bakın. Kampanya görselleri yerel `0.3.0` (`f30fd779`) aday derlemesinde alınmıştır.
+> Başvuru ve güncel koşullar için [Yunsoft'un üç aylık Premium kampanya sayfasına](https://yunsoft.com/kampanya/premium-3-ay) bakın. Kampanya görselleri yerel `0.3.0` (`c1a84a51`) aday derlemesinde alınmıştır.
 
 İlk kurulum formunun altında isteğe bağlı **3 aylık ücretsiz Premium teklifi** kartı yer alır:
 

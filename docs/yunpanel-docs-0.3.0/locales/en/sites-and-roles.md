@@ -1,6 +1,6 @@
 # Basic Site and Role Operations
 
-> **Version:** YunPanel `0.3.0` · **Verified source revision:** `f30fd779` (`f30fd779293ad96f83e7a76846fa70e71562730b`) · **Verified Linux `.deb` package baseline:** `0.3.0-2026112301` (`f13b2b78`) · **Web UI language:** Turkish (`tr`; verified in Chromium with both `tr-TR` and `en-US` browser locales)
+> **Version:** YunPanel `0.3.0` · **Verified source revision:** `c1a84a51` (`c1a84a5159add2f2f87fd6e21725f7c657cf98ec`) · **Verified Linux `.deb` package baseline:** `0.3.0-2026112301` (`f13b2b78`) · **Web UI language:** Turkish (`tr`; verified in Chromium with both `tr-TR` and `en-US` browser locales)
 
 Daily hosting management centers on the **Web Siteleri** (Websites, `/websites`) workspace. Root domains and their subdomains are organized hierarchically, and each website runs under its own isolated Linux user (`yunapp-<hash>`), document root, database bindings, and site tools.
 
@@ -12,7 +12,7 @@ The **Web Siteleri** page clearly displays root domain and subdomain counts (`X 
 
 ## Creating a website or subdomain
 
-Click **Web sitesi ekle** (Add website) in the header or **Alt alan adı ekle** (Add subdomain) on any domain card to open `/websites/new`:
+Click **Web sitesi ekle** (Add website) or **Alt alan adı ekle** (Add subdomain) in the page header, or **Alt alan adı** (Subdomain) on a root domain card, to open `/websites/new`:
 
 1. **Alan adı ve sahip** (Domain & owner): Choose a standalone root domain or a subdomain under an existing parent, configure `www` handling, and choose the site owner.
 2. **Barındırma** (Hosting): Select PHP-FPM, Node.js, Python, Static site, Redirect, or Docker proxy.

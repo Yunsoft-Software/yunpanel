@@ -1,6 +1,6 @@
 # Temel Site ve Rol İşlemleri
 
-> **Sürüm:** YunPanel `0.3.0` · **Doğrulanmış kaynak revizyonu:** `f30fd779` (`f30fd779293ad96f83e7a76846fa70e71562730b`) · **Doğrulanmış Linux `.deb` paket tabanı:** `0.3.0-2026112301` (`f13b2b78`) · **Arayüz dili:** Türkçe (`tr`)
+> **Sürüm:** YunPanel `0.3.0` · **Doğrulanmış kaynak revizyonu:** `c1a84a51` (`c1a84a5159add2f2f87fd6e21725f7c657cf98ec`) · **Doğrulanmış Linux `.deb` paket tabanı:** `0.3.0-2026112301` (`f13b2b78`) · **Arayüz dili:** Türkçe (`tr`)
 
 YunPanel günlük iş akışının merkezi **Web Siteleri** (`/websites`) ekranıdır. Ana alan adları ve bunlara bağlı alt alan adları tek bir ağaç yapısında listelenir; her site kendi yalıtılmış Linux kullanıcısı (`yunapp-<ozet>`), dosya kökü, veritabanı ve servis araçlarıyla yönetilir.
 
@@ -12,7 +12,7 @@ YunPanel günlük iş akışının merkezi **Web Siteleri** (`/websites`) ekran�
 
 ## Yeni web sitesi veya alt alan adı ekleme
 
-Üst bardaki **Web sitesi ekle** veya site kartındaki **Alt alan adı ekle** düğmesiyle `/websites/new` sihirbazı açılır:
+Sayfa başlığındaki **Web sitesi ekle** veya **Alt alan adı ekle** düğmesi ya da ana alan adı kartındaki **Alt alan adı** düğmesi `/websites/new` sihirbazını açar:
 
 1. **Alan adı ve sahip:** Bağımsız ana alan adı veya mevcut bir alan adına bağlı alt alan adı seçin, `www` davranışını ve site sahibini belirleyin.
 2. **Barındırma türü:** PHP-FPM, Node.js, Python, Statik site, Yönlendirme veya Docker proxy seçeneklerinden birini seçin.

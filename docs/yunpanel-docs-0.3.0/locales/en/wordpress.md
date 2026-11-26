@@ -1,6 +1,6 @@
 # WordPress Management
 
-> **Version:** YunPanel `0.3.0` · **Verified source revision:** `f30fd779` (`f30fd779293ad96f83e7a76846fa70e71562730b`) · **Verified Linux `.deb` package baseline:** `0.3.0-2026112301` (`f13b2b78`) · **Web UI language:** Turkish (`tr`; verified in Chromium with both `tr-TR` and `en-US` browser locales)
+> **Version:** YunPanel `0.3.0` · **Verified source revision:** `c1a84a51` (`c1a84a5159add2f2f87fd6e21725f7c657cf98ec`) · **Verified Linux `.deb` package baseline:** `0.3.0-2026112301` (`f13b2b78`) · **Web UI language:** Turkish (`tr`; verified in Chromium with both `tr-TR` and `en-US` browser locales)
 
 Every PHP-FPM website and subdomain exposes the **WordPress** tab (`/websites/<id>/wordpress`). All WordPress operations run through the bundled, pinned **WP-CLI** binary (`/usr/lib/yunpanel/vendor/wp-cli/wp`) under the website's dedicated Linux user.
 

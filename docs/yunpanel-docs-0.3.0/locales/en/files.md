@@ -1,6 +1,6 @@
 # File Management
 
-> **Version:** YunPanel `0.3.0` · **Verified source revision:** `f30fd779` (`f30fd779293ad96f83e7a76846fa70e71562730b`) · **Verified Linux `.deb` package baseline:** `0.3.0-2026112301` (`f13b2b78`) · **Web UI language:** Turkish (`tr`; verified in Chromium with both `tr-TR` and `en-US` browser locales)
+> **Version:** YunPanel `0.3.0` · **Verified source revision:** `c1a84a51` (`c1a84a5159add2f2f87fd6e21725f7c657cf98ec`) · **Verified Linux `.deb` package baseline:** `0.3.0-2026112301` (`f13b2b78`) · **Web UI language:** Turkish (`tr`; verified in Chromium with both `tr-TR` and `en-US` browser locales)
 
 All YunPanel file operations run strictly inside the website's own document root under its dedicated Linux user (`yunapp-<hash>`). Both the global **Dosyalar** (`/files`) menu entry and each site's **Dosya Yöneticisi** (`/websites/<id>/files`) tab share this isolated file engine.
 
@@ -23,7 +23,7 @@ From **Dosya Yöneticisi**, you can:
 
 - **elFinder ile Aç** (Open in elFinder): Launches the bundled elFinder file manager via a short-lived, session-bound handoff under the dedicated site Unix user.
 - **Erişim Hesapları (`/websites/<id>/access`):** Add, rotate, or revoke SSH/SFTP public keys for the website user. A single Owner has full SFTP key management on the Free tier as well.
-- **Site Terminal (`ttyd`):** The **Terminal** tab launches a browser terminal scoped strictly to the site's dedicated Unix user (the Owner root server terminal is separate on the **Sunucu** page).
+- **Site Terminal (`ttyd`):** The **Terminal** tab launches a browser terminal scoped strictly to the site's dedicated Unix user (the Owner root server terminal is separate, under **Araçlar ve Ayarlar → Sunucu ve servis yönetimi** (Server and service management), `/servers`).
 
 ## Related guides
 

@@ -1,6 +1,6 @@
 # Veritabanı Yönetimi
 
-> **Sürüm:** YunPanel `0.3.0` · **Doğrulanmış kaynak revizyonu:** `f30fd779` (`f30fd779293ad96f83e7a76846fa70e71562730b`) · **Doğrulanmış Linux `.deb` paket tabanı:** `0.3.0-2026112301` (`f13b2b78`) · **Arayüz dili:** Türkçe (`tr`)
+> **Sürüm:** YunPanel `0.3.0` · **Doğrulanmış kaynak revizyonu:** `c1a84a51` (`c1a84a5159add2f2f87fd6e21725f7c657cf98ec`) · **Doğrulanmış Linux `.deb` paket tabanı:** `0.3.0-2026112301` (`f13b2b78`) · **Arayüz dili:** Türkçe (`tr`)
 
 YunPanel, yerel MariaDB sunucusu üzerinde her web sitesi ve alt alan adı için yalıtılmış veritabanı ve özel veritabanı kullanıcıları yönetir. Sol menüdeki **Veritabanları** (`/databases`) ekranı tüm envanteri, site içindeki **Veritabanları** (`/websites/<id>/databases`) sekmesi ise yalnız ilgili siteye bağlı veritabanlarını gösterir.
 

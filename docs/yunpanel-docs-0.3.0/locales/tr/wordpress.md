@@ -1,6 +1,6 @@
 # WordPress Yönetimi
 
-> **Sürüm:** YunPanel `0.3.0` · **Doğrulanmış kaynak revizyonu:** `f30fd779` (`f30fd779293ad96f83e7a76846fa70e71562730b`) · **Doğrulanmış Linux `.deb` paket tabanı:** `0.3.0-2026112301` (`f13b2b78`) · **Arayüz dili:** Türkçe (`tr`)
+> **Sürüm:** YunPanel `0.3.0` · **Doğrulanmış kaynak revizyonu:** `c1a84a51` (`c1a84a5159add2f2f87fd6e21725f7c657cf98ec`) · **Doğrulanmış Linux `.deb` paket tabanı:** `0.3.0-2026112301` (`f13b2b78`) · **Arayüz dili:** Türkçe (`tr`)
 
 PHP-FPM çalışma zamanına sahip tüm web siteleri ve alt alan adları için site detayında **WordPress** (`/websites/<id>/wordpress`) yönetim sekmesi açılır. Tüm WordPress komutları paketle birlikte gelen sabitlenmiş **WP-CLI** (`/usr/lib/yunpanel/vendor/wp-cli/wp`) üzerinden ve sitenin kendi yalıtılmış Linux kullanıcısıyla yürütülür.
 

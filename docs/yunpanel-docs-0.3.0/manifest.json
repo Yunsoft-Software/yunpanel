@@ -3,8 +3,8 @@
   "product": "yunpanel",
   "version": "0.3.0",
   "sourceRepo": "Yunsoft-Software/yunpanel",
-  "sourceCommit": "f30fd779293ad96f83e7a76846fa70e71562730b",
-  "verifiedAt": "2026-11-24T19:44:58.502Z",
+  "sourceCommit": "c1a84a5159add2f2f87fd6e21725f7c657cf98ec",
+  "verifiedAt": "2026-11-26T05:57:22.971Z",
   "defaultPage": "installation-and-upgrade",
   "locales": {
     "tr": {
@@ -286,10 +286,10 @@
       "version": "0.3.0",
       "locale": "tr",
       "file": "assets/tr/01-first-time-setup-dark.png",
-      "sha256": "e21a70c62de58dbb4270254b6a729dc5112db70bf5d50bd97cb60e98253aa786",
+      "sha256": "4b1e04253bf8427205f6a7c99272a4986b1ea42822fe473cd4253505fe09601d",
       "alt": "YunPanel ilk kurulum ekrani ve yerel aday 3 aylik ucretsiz Premium teklifi (koyu tema)",
       "caption": "YunPanel 0.3.0 yerel aday derlemesinde Owner hesabı oluşturma formu ve isteğe bağlı üç aylık Premium bağlantısı.",
-      "capturedFrom": "local-candidate route=/ (setupRequired=true) role=anonymous theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b liveCampaignActive=false",
+      "capturedFrom": "local-candidate route=/ (setupRequired=true) role=anonymous theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec liveCampaignActive=false",
       "sanitized": true
     },
     {
@@ -298,10 +298,10 @@
       "version": "0.3.0",
       "locale": "tr",
       "file": "assets/tr/02-first-time-setup-light.png",
-      "sha256": "0936ea5388d40be4b4bf229551bbb695155a0437d76ac2cf7e1d3ec78b586ce4",
+      "sha256": "e793213753005cafb7cd4636936e9d64f26314ffa67365771cb98cce4a13cb16",
       "alt": "YunPanel ilk kurulum ekrani ve yerel aday 3 aylik ucretsiz Premium teklifi (acik tema)",
       "caption": "YunPanel 0.3.0 yerel aday derlemesi ilk kurulum ekraninin acik tema gorunumu (canli kampanya kaniti degildir).",
-      "capturedFrom": "local-candidate route=/ (setupRequired=true) role=anonymous theme=light viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b liveCampaignActive=false",
+      "capturedFrom": "local-candidate route=/ (setupRequired=true) role=anonymous theme=light viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec liveCampaignActive=false",
       "sanitized": true
     },
     {
@@ -310,10 +310,10 @@
       "version": "0.3.0",
       "locale": "tr",
       "file": "assets/tr/03-login.png",
-      "sha256": "138cd4e9b588261a53d14f09be80d8f44362f783313cff4f0e7a3f4f8f17a04b",
+      "sha256": "88e6fd75e6308c53ceab2af9998727a96313f9952840c72e61a591f2bebd0a4e",
       "alt": "YunPanel giris ekrani",
       "caption": "YunPanel 0.3.0 guvenli yonetici giris ekrani.",
-      "capturedFrom": "route=/login role=anonymous theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b",
+      "capturedFrom": "route=/login role=anonymous theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec",
       "sanitized": true
     },
     {
@@ -322,10 +322,10 @@
       "version": "0.3.0",
       "locale": "tr",
       "file": "assets/tr/04-websites-hierarchy.png",
-      "sha256": "e33af2e825e43811066ad6542dd30130f2cccf5d471d388ad564cfc61c94e469",
+      "sha256": "8df6248763b18cf4defdaf1b2db92829d5656ecb66c19e6b85b3196b8e03fafc",
       "alt": "YunPanel Web Siteleri ana ekrani ve alan adi hiyerarsisi",
       "caption": "Web Siteleri listesinde ana alan adi, alt alan adlari ve hizli arac erisimi.",
-      "capturedFrom": "route=/websites role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b",
+      "capturedFrom": "route=/websites role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec",
       "sanitized": true
     },
     {
@@ -334,10 +334,10 @@
       "version": "0.3.0",
       "locale": "tr",
       "file": "assets/tr/05-new-website.png",
-      "sha256": "e6239e042525abd267b6bd140243dab2b2ef72c958b15225564d9788c906bd49",
+      "sha256": "e5d0c7b900f7b20d4605e71773ac8e27fa057f881327ab00a567e352fd8fa31d",
       "alt": "YunPanel yeni web sitesi olusturma ekrani",
       "caption": "Yeni site ve alt alan adi olusturma sihirbazi.",
-      "capturedFrom": "route=/websites/new role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b",
+      "capturedFrom": "route=/websites/new role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec",
       "sanitized": true
     },
     {
@@ -346,10 +346,10 @@
       "version": "0.3.0",
       "locale": "tr",
       "file": "assets/tr/06-site-overview.png",
-      "sha256": "29240aa5bd33f3e9e16edaab786da188b3b3b6d1879ffbaedbb9df47fd0756e2",
+      "sha256": "ea6d4d2af8d44f00bd59befc2baeb478a8a3ddfa17c4d2958b814e4759cfe6d2",
       "alt": "YunPanel site genel bakis ve arac kartlari",
       "caption": "Site detay ekraninda sik kullanilan araclar ve gelistirici araclari.",
-      "capturedFrom": "route=/websites/:domainId role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b",
+      "capturedFrom": "route=/websites/:domainId role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec",
       "sanitized": true
     },
     {
@@ -358,10 +358,10 @@
       "version": "0.3.0",
       "locale": "tr",
       "file": "assets/tr/07-users-and-roles.png",
-      "sha256": "3f6a79275f3df6d28a992c18cc44702993782ac51142931bcb35b57690e297c8",
+      "sha256": "815dd7f021ee1ae58ed53c68f424d1655c5fe521a8e8051047969b1ce7bcfeb6",
       "alt": "YunPanel kullanicilar ve roller yonetim ekrani",
       "caption": "Owner, Bayi, Musteri, Site Yoneticisi ve Salt Okunur panel hesap listesi.",
-      "capturedFrom": "route=/users role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b",
+      "capturedFrom": "route=/users role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec",
       "sanitized": true
     },
     {
@@ -370,10 +370,10 @@
       "version": "0.3.0",
       "locale": "tr",
       "file": "assets/tr/08-site-ssl.png",
-      "sha256": "a9c76d9b8386c66d14f74af42e30cb8631a00431daa2b211ac32072135be73c5",
+      "sha256": "b677d5c8582e892f6adfc2ea41436efef7fee520777f9d67f4cd6c27038c2019",
       "alt": "YunPanel SSL/TLS sertifika yonetim ekrani",
       "caption": "Site bazli SSL/TLS sertifika durumu ve yenileme ekrani.",
-      "capturedFrom": "route=/websites/:domainId/ssl role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b",
+      "capturedFrom": "route=/websites/:domainId/ssl role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec",
       "sanitized": true
     },
     {
@@ -382,10 +382,10 @@
       "version": "0.3.0",
       "locale": "tr",
       "file": "assets/tr/09-site-dns.png",
-      "sha256": "a0e41dc0262dda87e84323706436e8f1e5fbc16a4e6b3d2aa34b1098611fcc0c",
+      "sha256": "f2825e18f625980b60f219f45e78557db0d5c0b93d99034c8e15cc281216c760",
       "alt": "YunPanel DNS kayitlari ekrani",
       "caption": "Site DNS bolge yonetimi ve kayit ekrani.",
-      "capturedFrom": "route=/websites/:domainId/dns role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b",
+      "capturedFrom": "route=/websites/:domainId/dns role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec",
       "sanitized": true
     },
     {
@@ -394,10 +394,10 @@
       "version": "0.3.0",
       "locale": "tr",
       "file": "assets/tr/11-files-editor.png",
-      "sha256": "e81c2860e28f123552f437b6b4550bdbe79339aa3888a658d912342eb92ba7aa",
+      "sha256": "a7ccb231911c076388aaf238ed6a18ff46b06fd36c0242e3c84ab1a3aa6f9cf9",
       "alt": "YunPanel site dosya yoneticisi ve kod editoru",
       "caption": "Site Dosya Yoneticisi icinde subdomains klasoru ve dahili kod editoru.",
-      "capturedFrom": "route=/websites/:domainId/files?file=index.html role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b",
+      "capturedFrom": "route=/websites/:domainId/files?file=index.html role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec",
       "sanitized": true
     },
     {
@@ -406,10 +406,10 @@
       "version": "0.3.0",
       "locale": "tr",
       "file": "assets/tr/12-docker-compose.png",
-      "sha256": "2c015eac779fe2a1094d83b450f596912e99e26ea25c118a1eec357e276ef42e",
-      "alt": "YunPanel Docker, Compose Stack ve Uygulama Marketi ekrani",
-      "caption": "Docker Compose projeleri, port proxy ve tek tikla uygulama katalogu.",
-      "capturedFrom": "route=/docker role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b",
+      "sha256": "dd7a5261151584ae07d4a1803bfdc300a28d493ae28247015a5b03cae44b9432",
+      "alt": "YunPanel Docker ve Compose Yonetimi ile Uygulama Marketi ekrani",
+      "caption": "Compose projeleri, konteyner ve sunucu port eslemeleri ve tek tikla kurulan hazir uygulamalar.",
+      "capturedFrom": "route=/docker role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec",
       "sanitized": true
     },
     {
@@ -418,10 +418,10 @@
       "version": "0.3.0",
       "locale": "tr",
       "file": "assets/tr/13-databases.png",
-      "sha256": "f65cd1fcf263cb1fb0c122eff36dff6682d02e4c35badff3f723adceb69b298b",
+      "sha256": "89568e8ce5a7939b93e651dcb7c4e1fd0f9c0118346245569e77f24a05add72b",
       "alt": "YunPanel Veritabanlari yonetim ekrani",
       "caption": "MariaDB veritabani envanteri ve phpMyAdmin erisim arayuzu.",
-      "capturedFrom": "route=/databases role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b",
+      "capturedFrom": "route=/databases role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec",
       "sanitized": true
     },
     {
@@ -430,10 +430,10 @@
       "version": "0.3.0",
       "locale": "tr",
       "file": "assets/tr/14-mail-domains.png",
-      "sha256": "a051bbf476ccd684d10b8e540a10055d55c8f3fe93fefaa0fde6651f350049bc",
+      "sha256": "1d7dc5c3112b548b8e9c79d187108192d39e7d35041588520337ee9b2dbac03d",
       "alt": "YunPanel Posta yonetim ekrani",
       "caption": "Posta alan adlari, posta kutulari ve DKIM/teslimat yonetimi.",
-      "capturedFrom": "route=/mail role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b",
+      "capturedFrom": "route=/mail role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec",
       "sanitized": true
     },
     {
@@ -442,10 +442,10 @@
       "version": "0.3.0",
       "locale": "tr",
       "file": "assets/tr/15-site-backup.png",
-      "sha256": "f39ac63393ea9fe1fcd286f94204fadbe89b407772f691dabd9f50741a56393e",
+      "sha256": "9fee6475754bb8da2862f0426c5b6c7c1282c7e001c49adde4610bfe4930f041",
       "alt": "YunPanel Yedekleme ve Geri Yukleme ekrani",
       "caption": "Site bazli Restic yedekleme, zamanlama ve geri yukleme arayuzu.",
-      "capturedFrom": "route=/websites/:domainId/backup role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b",
+      "capturedFrom": "route=/websites/:domainId/backup role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec",
       "sanitized": true
     },
     {
@@ -454,10 +454,10 @@
       "version": "0.3.0",
       "locale": "tr",
       "file": "assets/tr/16-license-free-offer.png",
-      "sha256": "4c46530516325648c09f37424cf1aed3aa3c662bdc3e1b84b6ff3626699b67a1",
+      "sha256": "5897b88173ad3ccd5a39f4cfdb941fb57df50dc7f1a18b638165d97fe62da348",
       "alt": "YunPanel Lisans ekrani ucretsiz surum ve yerel aday 3 aylik Premium teklifi",
       "caption": "Yerel 0.3.0 aday derlemesinde ücretsiz sürümün lisans durumu ve kampanya teklifi.",
-      "capturedFrom": "local-candidate route=/settings?section=license (free tier) role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b liveCampaignActive=false",
+      "capturedFrom": "local-candidate route=/settings?section=license (free tier) role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec liveCampaignActive=false",
       "sanitized": true
     },
     {
@@ -466,10 +466,10 @@
       "version": "0.3.0",
       "locale": "tr",
       "file": "assets/tr/17-license-campaign-active.png",
-      "sha256": "03080649298db8f9b9617e30952f3e990d84af7d18ffae26df92a0171a776174",
+      "sha256": "296898340d699380814fc93df4aabb754ed4173e74b734aac538e35724bc384d",
       "alt": "YunPanel Lisans ekrani yerel aday 3 aylik kampanya Premium durumu",
       "caption": "Yerel 0.3.0 aday derlemesinde doğrulanan üç aylık kampanya hakkının Lisans ekranındaki görünümü.",
-      "capturedFrom": "local-candidate route=/settings?section=license (campaign active) role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b liveCampaignActive=false",
+      "capturedFrom": "local-candidate route=/settings?section=license (campaign active) role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec liveCampaignActive=false",
       "sanitized": true
     },
     {
@@ -478,10 +478,10 @@
       "version": "0.3.0",
       "locale": "tr",
       "file": "assets/tr/18-tools-settings.png",
-      "sha256": "64f6e865de69e3ba9cb63e44df288083f8779dd81f246c2e8b65d489402118c5",
+      "sha256": "0b43ce08b49fad1715078da99020765633f0595fe0d155c859c935cea1a29784",
       "alt": "YunPanel Araclar ve Ayarlar dizini",
       "caption": "Sunucu, guvenlik, guncellemeler, lisans ve tanilama araclarinin merkezi dizini.",
-      "capturedFrom": "route=/tools-settings role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b",
+      "capturedFrom": "route=/tools-settings role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec",
       "sanitized": true
     },
     {
@@ -490,10 +490,10 @@
       "version": "0.3.0",
       "locale": "en",
       "file": "assets/en/15-site-backup.png",
-      "sha256": "f39ac63393ea9fe1fcd286f94204fadbe89b407772f691dabd9f50741a56393e",
+      "sha256": "9fee6475754bb8da2862f0426c5b6c7c1282c7e001c49adde4610bfe4930f041",
       "alt": "YunPanel Site Backup and Restore screen (Turkish UI)",
       "caption": "YunPanel Site Backup and Restore screen (Turkish UI). This is the original YunPanel 0.3.0 interface shown with English guide text.",
-      "capturedFrom": "route=/websites/:domainId/backup role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b docLocale=en actualUiLocale=tr",
+      "capturedFrom": "route=/websites/:domainId/backup role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec docLocale=en actualUiLocale=tr",
       "sanitized": true
     },
     {
@@ -502,10 +502,10 @@
       "version": "0.3.0",
       "locale": "en",
       "file": "assets/en/13-databases.png",
-      "sha256": "f65cd1fcf263cb1fb0c122eff36dff6682d02e4c35badff3f723adceb69b298b",
+      "sha256": "89568e8ce5a7939b93e651dcb7c4e1fd0f9c0118346245569e77f24a05add72b",
       "alt": "YunPanel Databases workspace screen (Turkish UI)",
       "caption": "YunPanel Databases workspace screen (Turkish UI). This is the original YunPanel 0.3.0 interface shown with English guide text.",
-      "capturedFrom": "route=/databases role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b docLocale=en actualUiLocale=tr",
+      "capturedFrom": "route=/databases role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec docLocale=en actualUiLocale=tr",
       "sanitized": true
     },
     {
@@ -514,10 +514,10 @@
       "version": "0.3.0",
       "locale": "en",
       "file": "assets/en/12-docker-compose.png",
-      "sha256": "2c015eac779fe2a1094d83b450f596912e99e26ea25c118a1eec357e276ef42e",
-      "alt": "YunPanel Docker, Compose Stack, and Application Catalog screen (Turkish UI)",
-      "caption": "YunPanel Docker, Compose Stack, and Application Catalog screen (Turkish UI). This is the original YunPanel 0.3.0 interface shown with English guide text.",
-      "capturedFrom": "route=/docker role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b docLocale=en actualUiLocale=tr",
+      "sha256": "dd7a5261151584ae07d4a1803bfdc300a28d493ae28247015a5b03cae44b9432",
+      "alt": "YunPanel Docker and Compose Management screen with the Application Catalog (Turkish UI)",
+      "caption": "YunPanel Docker and Compose Management screen with the Application Catalog (Turkish UI). This is the original YunPanel 0.3.0 interface shown with English guide text.",
+      "capturedFrom": "route=/docker role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec docLocale=en actualUiLocale=tr",
       "sanitized": true
     },
     {
@@ -526,10 +526,10 @@
       "version": "0.3.0",
       "locale": "en",
       "file": "assets/en/09-site-dns.png",
-      "sha256": "a0e41dc0262dda87e84323706436e8f1e5fbc16a4e6b3d2aa34b1098611fcc0c",
+      "sha256": "f2825e18f625980b60f219f45e78557db0d5c0b93d99034c8e15cc281216c760",
       "alt": "YunPanel site DNS management screen (Turkish UI)",
       "caption": "YunPanel site DNS management screen (Turkish UI). This is the original YunPanel 0.3.0 interface shown with English guide text.",
-      "capturedFrom": "route=/websites/:domainId/dns role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b docLocale=en actualUiLocale=tr",
+      "capturedFrom": "route=/websites/:domainId/dns role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec docLocale=en actualUiLocale=tr",
       "sanitized": true
     },
     {
@@ -538,10 +538,10 @@
       "version": "0.3.0",
       "locale": "en",
       "file": "assets/en/08-site-ssl.png",
-      "sha256": "a9c76d9b8386c66d14f74af42e30cb8631a00431daa2b211ac32072135be73c5",
+      "sha256": "b677d5c8582e892f6adfc2ea41436efef7fee520777f9d67f4cd6c27038c2019",
       "alt": "YunPanel site SSL/TLS certificate management screen (Turkish UI)",
       "caption": "YunPanel site SSL/TLS certificate management screen (Turkish UI). This is the original YunPanel 0.3.0 interface shown with English guide text.",
-      "capturedFrom": "route=/websites/:domainId/ssl role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b docLocale=en actualUiLocale=tr",
+      "capturedFrom": "route=/websites/:domainId/ssl role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec docLocale=en actualUiLocale=tr",
       "sanitized": true
     },
     {
@@ -550,10 +550,10 @@
       "version": "0.3.0",
       "locale": "en",
       "file": "assets/en/11-files-editor.png",
-      "sha256": "e81c2860e28f123552f437b6b4550bdbe79339aa3888a658d912342eb92ba7aa",
+      "sha256": "a7ccb231911c076388aaf238ed6a18ff46b06fd36c0242e3c84ab1a3aa6f9cf9",
       "alt": "YunPanel Site File Manager with built-in code editor open (Turkish UI)",
       "caption": "YunPanel Site File Manager with built-in code editor open (Turkish UI). This is the original YunPanel 0.3.0 interface shown with English guide text.",
-      "capturedFrom": "route=/websites/:domainId/files?file=index.html role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b docLocale=en actualUiLocale=tr",
+      "capturedFrom": "route=/websites/:domainId/files?file=index.html role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec docLocale=en actualUiLocale=tr",
       "sanitized": true
     },
     {
@@ -562,10 +562,10 @@
       "version": "0.3.0",
       "locale": "en",
       "file": "assets/en/01-first-time-setup-dark.png",
-      "sha256": "e21a70c62de58dbb4270254b6a729dc5112db70bf5d50bd97cb60e98253aa786",
+      "sha256": "4b1e04253bf8427205f6a7c99272a4986b1ea42822fe473cd4253505fe09601d",
       "alt": "YunPanel first-time setup screen in dark theme (Turkish UI)",
       "caption": "YunPanel first-time setup screen in dark theme (Turkish UI). This is the original YunPanel 0.3.0 interface shown with English guide text.",
-      "capturedFrom": "local-candidate route=/ (setupRequired=true) role=anonymous theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b liveCampaignActive=false docLocale=en actualUiLocale=tr",
+      "capturedFrom": "local-candidate route=/ (setupRequired=true) role=anonymous theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec liveCampaignActive=false docLocale=en actualUiLocale=tr",
       "sanitized": true
     },
     {
@@ -574,10 +574,10 @@
       "version": "0.3.0",
       "locale": "en",
       "file": "assets/en/02-first-time-setup-light.png",
-      "sha256": "0936ea5388d40be4b4bf229551bbb695155a0437d76ac2cf7e1d3ec78b586ce4",
+      "sha256": "e793213753005cafb7cd4636936e9d64f26314ffa67365771cb98cce4a13cb16",
       "alt": "YunPanel first-time setup screen in light theme (Turkish UI)",
       "caption": "YunPanel first-time setup screen in light theme (Turkish UI). This is the original YunPanel 0.3.0 interface shown with English guide text.",
-      "capturedFrom": "local-candidate route=/ (setupRequired=true) role=anonymous theme=light viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b liveCampaignActive=false docLocale=en actualUiLocale=tr",
+      "capturedFrom": "local-candidate route=/ (setupRequired=true) role=anonymous theme=light viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec liveCampaignActive=false docLocale=en actualUiLocale=tr",
       "sanitized": true
     },
     {
@@ -586,10 +586,10 @@
       "version": "0.3.0",
       "locale": "en",
       "file": "assets/en/03-login.png",
-      "sha256": "138cd4e9b588261a53d14f09be80d8f44362f783313cff4f0e7a3f4f8f17a04b",
+      "sha256": "88e6fd75e6308c53ceab2af9998727a96313f9952840c72e61a591f2bebd0a4e",
       "alt": "YunPanel sign-in screen (Turkish UI)",
       "caption": "YunPanel sign-in screen (Turkish UI). This is the original YunPanel 0.3.0 interface shown with English guide text.",
-      "capturedFrom": "route=/login role=anonymous theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b docLocale=en actualUiLocale=tr",
+      "capturedFrom": "route=/login role=anonymous theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec docLocale=en actualUiLocale=tr",
       "sanitized": true
     },
     {
@@ -598,10 +598,10 @@
       "version": "0.3.0",
       "locale": "en",
       "file": "assets/en/18-tools-settings.png",
-      "sha256": "64f6e865de69e3ba9cb63e44df288083f8779dd81f246c2e8b65d489402118c5",
+      "sha256": "0b43ce08b49fad1715078da99020765633f0595fe0d155c859c935cea1a29784",
       "alt": "YunPanel Tools and Settings directory (Turkish UI)",
       "caption": "YunPanel Tools and Settings directory (Turkish UI). This is the original YunPanel 0.3.0 interface shown with English guide text.",
-      "capturedFrom": "route=/tools-settings role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b docLocale=en actualUiLocale=tr",
+      "capturedFrom": "route=/tools-settings role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec docLocale=en actualUiLocale=tr",
       "sanitized": true
     },
     {
@@ -610,10 +610,10 @@
       "version": "0.3.0",
       "locale": "en",
       "file": "assets/en/16-license-free-offer.png",
-      "sha256": "4c46530516325648c09f37424cf1aed3aa3c662bdc3e1b84b6ff3626699b67a1",
+      "sha256": "5897b88173ad3ccd5a39f4cfdb941fb57df50dc7f1a18b638165d97fe62da348",
       "alt": "YunPanel License settings screen showing Free tier and local candidate 3-month Premium offer view (Turkish UI)",
       "caption": "YunPanel License settings screen showing Free tier and local candidate 3-month Premium offer view (Turkish UI). This is the original YunPanel 0.3.0 interface shown with English guide text.",
-      "capturedFrom": "local-candidate route=/settings?section=license (free tier) role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b liveCampaignActive=false docLocale=en actualUiLocale=tr",
+      "capturedFrom": "local-candidate route=/settings?section=license (free tier) role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec liveCampaignActive=false docLocale=en actualUiLocale=tr",
       "sanitized": true
     },
     {
@@ -622,10 +622,10 @@
       "version": "0.3.0",
       "locale": "en",
       "file": "assets/en/17-license-campaign-active.png",
-      "sha256": "03080649298db8f9b9617e30952f3e990d84af7d18ffae26df92a0171a776174",
+      "sha256": "296898340d699380814fc93df4aabb754ed4173e74b734aac538e35724bc384d",
       "alt": "License settings showing the three-month campaign entitlement in the local candidate build (Turkish UI)",
       "caption": "License settings showing the three-month campaign entitlement in the local YunPanel 0.3.0 candidate build. The interface is in Turkish.",
-      "capturedFrom": "local-candidate route=/settings?section=license (campaign active) role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b liveCampaignActive=false docLocale=en actualUiLocale=tr",
+      "capturedFrom": "local-candidate route=/settings?section=license (campaign active) role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec liveCampaignActive=false docLocale=en actualUiLocale=tr",
       "sanitized": true
     },
     {
@@ -634,10 +634,10 @@
       "version": "0.3.0",
       "locale": "en",
       "file": "assets/en/14-mail-domains.png",
-      "sha256": "a051bbf476ccd684d10b8e540a10055d55c8f3fe93fefaa0fde6651f350049bc",
+      "sha256": "1d7dc5c3112b548b8e9c79d187108192d39e7d35041588520337ee9b2dbac03d",
       "alt": "YunPanel Mail domains management screen (Turkish UI)",
       "caption": "YunPanel Mail domains management screen (Turkish UI). This is the original YunPanel 0.3.0 interface shown with English guide text.",
-      "capturedFrom": "route=/mail role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b docLocale=en actualUiLocale=tr",
+      "capturedFrom": "route=/mail role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec docLocale=en actualUiLocale=tr",
       "sanitized": true
     },
     {
@@ -646,10 +646,10 @@
       "version": "0.3.0",
       "locale": "en",
       "file": "assets/en/04-websites-hierarchy.png",
-      "sha256": "e33af2e825e43811066ad6542dd30130f2cccf5d471d388ad564cfc61c94e469",
+      "sha256": "8df6248763b18cf4defdaf1b2db92829d5656ecb66c19e6b85b3196b8e03fafc",
       "alt": "YunPanel Websites hierarchy screen (Turkish UI)",
       "caption": "YunPanel Websites hierarchy screen (Turkish UI). This is the original YunPanel 0.3.0 interface shown with English guide text.",
-      "capturedFrom": "route=/websites role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b docLocale=en actualUiLocale=tr",
+      "capturedFrom": "route=/websites role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec docLocale=en actualUiLocale=tr",
       "sanitized": true
     },
     {
@@ -658,10 +658,10 @@
       "version": "0.3.0",
       "locale": "en",
       "file": "assets/en/05-new-website.png",
-      "sha256": "e6239e042525abd267b6bd140243dab2b2ef72c958b15225564d9788c906bd49",
+      "sha256": "e5d0c7b900f7b20d4605e71773ac8e27fa057f881327ab00a567e352fd8fa31d",
       "alt": "YunPanel new website wizard (Turkish UI)",
       "caption": "YunPanel new website wizard (Turkish UI). This is the original YunPanel 0.3.0 interface shown with English guide text.",
-      "capturedFrom": "route=/websites/new role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b docLocale=en actualUiLocale=tr",
+      "capturedFrom": "route=/websites/new role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec docLocale=en actualUiLocale=tr",
       "sanitized": true
     },
     {
@@ -670,10 +670,10 @@
       "version": "0.3.0",
       "locale": "en",
       "file": "assets/en/06-site-overview.png",
-      "sha256": "29240aa5bd33f3e9e16edaab786da188b3b3b6d1879ffbaedbb9df47fd0756e2",
+      "sha256": "ea6d4d2af8d44f00bd59befc2baeb478a8a3ddfa17c4d2958b814e4759cfe6d2",
       "alt": "YunPanel site detail overview and tool cards (Turkish UI)",
       "caption": "YunPanel site detail overview and tool cards (Turkish UI). This is the original YunPanel 0.3.0 interface shown with English guide text.",
-      "capturedFrom": "route=/websites/:domainId role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b docLocale=en actualUiLocale=tr",
+      "capturedFrom": "route=/websites/:domainId role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec docLocale=en actualUiLocale=tr",
       "sanitized": true
     },
     {
@@ -682,10 +682,10 @@
       "version": "0.3.0",
       "locale": "en",
       "file": "assets/en/07-users-and-roles.png",
-      "sha256": "3f6a79275f3df6d28a992c18cc44702993782ac51142931bcb35b57690e297c8",
+      "sha256": "815dd7f021ee1ae58ed53c68f424d1655c5fe521a8e8051047969b1ce7bcfeb6",
       "alt": "YunPanel Users and Roles screen (Turkish UI)",
       "caption": "YunPanel Users and Roles screen (Turkish UI). This is the original YunPanel 0.3.0 interface shown with English guide text.",
-      "capturedFrom": "route=/users role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=f30fd779293ad96f83e7a76846fa70e71562730b docLocale=en actualUiLocale=tr",
+      "capturedFrom": "route=/users role=owner theme=dark viewport=1366x840 browserLocale=tr-TR uiLanguage=tr commit=c1a84a5159add2f2f87fd6e21725f7c657cf98ec docLocale=en actualUiLocale=tr",
       "sanitized": true
     }
   ]
