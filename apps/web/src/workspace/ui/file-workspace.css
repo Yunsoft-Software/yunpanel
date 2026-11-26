@@ -31,10 +31,10 @@
 .yf-tree-note { display: flex; align-items: center; gap: 7px; margin: 28px 8px 0; color: var(--ws-muted); font-size: 11px; }
 .yf-content { min-width: 0; display: flex; flex-direction: column; }
 .yf-tools { display: flex; align-items: center; gap: 10px; padding: 16px 18px; }
-.workspace-shell .yf-search { flex: 1; display: flex; align-items: center; min-width: 90px; gap: 8px; padding: 0 11px; border: 1px solid var(--ws-border); border-radius: 7px; background: var(--ws-surface-subtle); color: var(--ws-muted); }
-.workspace-shell .yf-search input { border: none; background: transparent; min-height: 36px; padding: 8px 0; font-size: 12px; }
+.workspace-shell .yf-search { flex: 1; display: flex; align-items: center; min-width: 90px; gap: 8px; color: var(--ws-muted); }
+.workspace-shell .yf-search input { background: transparent; min-height: 36px; padding: 8px 0; font-size: 12px; }
 .yf-sort { width: 138px; flex: none; }
-.workspace-shell .yf-sort select { font-size: 12px; min-height: 38px; padding: 7px 9px; border-color: var(--ws-border); }
+.workspace-shell .yf-sort select { font-size: 12px; min-height: 38px; padding: 7px 9px; }
 .yf-view { display: flex; gap: 2px; flex: none; }
 .yf-view .ws-button { border-color: transparent; background: transparent; padding: 9px; }
 .yf-view .ws-button[aria-pressed=true] { background: var(--ws-accent-soft); color: var(--ws-accent) !important; }
@@ -63,7 +63,7 @@
 .yf-entry.is-folder .yf-file-icon, .yf-tile.is-folder > svg { color: var(--ws-folder, var(--ws-warning)); }
 .yf-size, .yf-date { color: var(--ws-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .yf-row-actions { display: flex; gap: 5px; justify-content: flex-end; }
-.workspace-shell .yf-row-actions .ws-button { min-width: 30px; min-height: 30px; padding: 6px; background: var(--ws-surface-subtle); border-color: var(--ws-border); border-radius: 6px; }
+.workspace-shell .yf-row-actions .ws-button { min-width: 30px; min-height: 30px; padding: 6px; border-color: var(--ws-border); }
 .yf-row-actions .ws-button svg { width: 14px; height: 14px; }
 .yf-status { display: flex; justify-content: space-between; gap: 12px; padding: 13px 18px; border-top: 1px solid var(--ws-border); color: var(--ws-muted); font-size: 11px; }
 .yf-status > span { display: flex; align-items: center; gap: 5px; }
