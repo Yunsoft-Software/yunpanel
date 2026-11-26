@@ -1,7 +1,9 @@
 import { test, expect, request as apiRequest } from '@playwright/test';
 import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { OWNER_USERNAME, OWNER_PASSWORD } from '../helpers.js';
+import {
+  OWNER_USERNAME, OWNER_PASSWORD, missingPremiumCapabilities, premiumSkipReason, expectPanelUserCreateGated,
+} from '../helpers.js';
 import { createTestHostProbe } from './test-host-probe.js';
 
 // Real panel scenarios: one-time key display and persistence, validation/CSRF,
@@ -296,6 +298,16 @@ print(json.dumps({'exists':r is not None,'hash':r.get('hash') if r else None,'re
   test('real Customer and Reseller sessions cannot list, create or revoke Owner API keys', async ({ page, browser }) => {
     await login(page);
     const key = await createKey(page, `${prefix}-rbac`);
+    // Customer ve Reseller hesapları YunPanel Premium ister; yoksa kullanıcı oluşturma kapıda durmalı.
+    const missing = await missingPremiumCapabilities(page.request, ['perSiteIsolatedUsers', 'resellerAccounts']);
+    if (missing.length) {
+      if (missing.includes('perSiteIsolatedUsers')) {
+        await expectPanelUserCreateGated(page, { username: `${prefix}-customer`, password: randomBytes(24).toString('base64url') });
+      }
+      await revokeKey(page, key.name);
+      expect((await call(machine, 'get', '/api/automation/whoami', { headers: { authorization: `Bearer ${key.token}` } })).status()).toBe(401);
+      test.skip(true, premiumSkipReason(missing));
+    }
     for (const kind of ['customer', 'reseller']) {
       const account = await createAccount(page, kind);
       const restrictedContext = await browser.newContext({ baseURL, ignoreHTTPSErrors: false });

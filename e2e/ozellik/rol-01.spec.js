@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
-import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
+import {
+  OWNER_USERNAME, OWNER_PASSWORD, loginAs, missingPremiumCapabilities, premiumSkipReason, expectHostingAccountCreateGated,
+} from '../helpers.js';
 
 test.use({ trace: 'off' });
 
@@ -13,6 +15,8 @@ test.describe('ROL-01 Yönetici Service Provider görünümü', () => {
   const CUST1_USER = `${prefix}-cust1`;
   const DIRECT_USER = `${prefix}-direct`;
   const TEST_PASS = 'Tr0l01_A3_TestPass!2026';
+  // Bayi ve müşteri hesapları YunPanel Premium ister.
+  const PREMIUM_CAPABILITIES = ['resellerAccounts', 'perSiteIsolatedUsers'];
 
   async function ensureOwnerLoggedIn(page) {
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -120,10 +124,12 @@ test.describe('ROL-01 Yönetici Service Provider görünümü', () => {
 
   test('mutlu yol: Owner Service Provider görünümü, bayi ve müşteri oluşturma, limit güncelleme ve fiziksel doğrulamalar', async ({ page }) => {
     // 1. Sol menü & Service Provider düzeni
-    const sidebar = page.locator('aside.ws-sidebar');
-    await expect(sidebar).toBeVisible();
+    const aside = page.locator('aside.ws-sidebar');
+    await expect(aside).toBeVisible();
 
-    await expect(sidebar.locator('.ws-brand small')).toContainText(/sunucu/i);
+    await expect(aside.locator('.ws-brand small')).toContainText(/sunucu/i);
+    // 25 Kasım: marka bağlantısı da /websites'e gider; menü bağlantıları bölüm menüsünde aranır.
+    const sidebar = aside.locator('nav.ws-sidebar-nav');
     await expect(sidebar.locator('a[href="/websites"]')).toBeVisible();
     await expect(sidebar.locator('a[href="/databases"]')).toBeVisible();
     await expect(sidebar.locator('a[href="/customers"]')).toBeVisible();
@@ -131,7 +137,7 @@ test.describe('ROL-01 Yönetici Service Provider görünümü', () => {
     await expect(sidebar.locator('a[href="/tools-settings"]')).toBeVisible();
 
     const sessionBar = page.locator('.auth-sessionbar');
-    await expect(sessionBar.locator('.auth-role')).toContainText(/owner/i);
+    await expect(sessionBar.locator('.auth-role')).toHaveText('Sunucu Yöneticisi');
 
     // 2. Global /tools-settings ve /databases sayfalarını kontrol et
     await sidebar.locator('a[href="/tools-settings"]').click();
@@ -140,6 +146,14 @@ test.describe('ROL-01 Yönetici Service Provider görünümü', () => {
 
     await sidebar.locator('a[href="/databases"]').click();
     await expect(page.locator('h1')).toContainText('Veritabanları');
+
+    const missing = await missingPremiumCapabilities(page.request, PREMIUM_CAPABILITIES);
+    if (missing.length) {
+      // Premium yoksa bayi ve müşteri oluşturma kapıda durmalı ve hesap açılmamalı.
+      if (missing.includes('resellerAccounts')) await expectHostingAccountCreateGated(page, { kind: 'reseller', username: RES1_USER, password: TEST_PASS });
+      if (missing.includes('perSiteIsolatedUsers')) await expectHostingAccountCreateGated(page, { kind: 'customer', username: CUST1_USER, password: TEST_PASS });
+      test.skip(true, premiumSkipReason(missing));
+    }
 
     // 3. Bayiler (/resellers) sayfasına git ve Bayi ekle
     await sidebar.locator('a[href="/resellers"]').click();
@@ -243,7 +257,21 @@ test.describe('ROL-01 Yönetici Service Provider görünümü', () => {
   });
 
   test('hatalı girdi: bayi kotası aşımı (409), mükerrer kullanıcı (409), bağlı müşterisi olan bayiyi silme engeli (409) ve geçersiz müşteri filtresi (404)', async ({ page }) => {
-    const sidebar = page.locator('aside.ws-sidebar');
+    const sidebar = page.locator('aside.ws-sidebar nav.ws-sidebar-nav');
+
+    // Geçersiz müşteri ID'si ile filtreleme (404)
+    async function expectInvalidCustomerFilterRejected() {
+      await page.goto('/websites?customer=olmayan-musteri-999');
+      await expect(page.locator('[role="alert"]')).toBeVisible({ timeout: 10000 });
+      await expect(page.locator('[role="alert"]')).toContainText(/bulunmuyor|bulunamadı|geçersiz/i);
+    }
+
+    const missing = await missingPremiumCapabilities(page.request, PREMIUM_CAPABILITIES);
+    if (missing.length) {
+      // Kota ve silme engeli Premium hesap ister; geçersiz filtre kontrolü Premium gerektirmez.
+      await expectInvalidCustomerFilterRejected();
+      test.skip(true, `${premiumSkipReason(missing)}: kota ve silme engeli Premium hesap ister`);
+    }
 
     // 1. Bayi müşteri kotası aşımı (1/1 dolu olan bayiye ikinci müşteri ekleme denemesi)
     await sidebar.locator('a[href="/customers"]').click();
@@ -305,12 +333,13 @@ test.describe('ROL-01 Yönetici Service Provider görünümü', () => {
     await expect(manageDialog).toBeHidden({ timeout: 10000 });
 
     // 4. Geçersiz müşteri ID'si ile filtreleme (404)
-    await page.goto('/websites?customer=olmayan-musteri-999');
-    await expect(page.locator('[role="alert"]')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('[role="alert"]')).toContainText(/bulunmuyor|bulunamadı|geçersiz/i);
+    await expectInvalidCustomerFilterRejected();
   });
 
   test('yetki ve rol izolasyonu: Reseller ve Customer yetki sınırları ve bayiyi askıya alma/etkinleştirme zinciri', async ({ browser, page }) => {
+    const missing = await missingPremiumCapabilities(page.request, PREMIUM_CAPABILITIES);
+    test.skip(missing.length > 0, `${premiumSkipReason(missing)}: bayi ve müşteri oturumları Premium hesap ister`);
+
     // 1. Bayi (RES1_USER) oturumu aç
     const resContext = await browser.newContext({ ignoreHTTPSErrors: true });
     const resPage = await resContext.newPage();
@@ -321,7 +350,7 @@ test.describe('ROL-01 Yönetici Service Provider görünümü', () => {
     await expect(resPage.locator('.auth-sessionbar')).toBeVisible({ timeout: 15000 });
 
     // Bayi /customers sayfasına gittiğinde yalnız kendi müşterisini görmeli (DIRECT_USER görünmemeli)
-    await resPage.locator('aside.ws-sidebar a[href="/customers"]').click();
+    await resPage.locator('aside.ws-sidebar nav.ws-sidebar-nav a[href="/customers"]').click();
     await expect(resPage.locator('h1')).toContainText('Müşterilerim');
     const resCustomerRow = await findAccountRow(resPage, CUST1_USER);
     await expect(resCustomerRow).toBeVisible({ timeout: 15000 });
@@ -397,6 +426,8 @@ test.describe('ROL-01 Yönetici Service Provider görünümü', () => {
   });
 
   test('bilinen hata: /customers tablosunda ve profil modalında bağlı bayi kullanıcı adı görünmelidir', async ({ page }) => {
+    const missing = await missingPremiumCapabilities(page.request, PREMIUM_CAPABILITIES);
+    test.skip(missing.length > 0, `${premiumSkipReason(missing)}: bayiye bağlı müşteri Premium hesap ister`);
     test.fail(true, 'BULGU ROL-01: /customers tablosunda bağlı bayi sütunu yok ve profil modalında bayi adı yerine ham UUID gösteriliyor');
 
     await page.goto('/customers');

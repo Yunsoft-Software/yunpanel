@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { execSync } from 'node:child_process';
-import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
+import {
+  OWNER_USERNAME, OWNER_PASSWORD, loginAs, missingPremiumCapabilities, premiumSkipReason, expectPremiumLicenseRequired, panelUserExists,
+} from '../helpers.js';
 
 test.use({ trace: 'off' });
 
@@ -99,17 +101,22 @@ test.describe('TLS-01 Ücretsiz ACME issue, renew ve otomatik yenileme', () => {
       console.warn('Website removal API notice:', err.message);
     }
 
-    // 2. UI Fallback: /websites/${websiteId}/settings rotası üzerinden silme
+    // 2. UI Fallback: site ayarları rotası üzerinden silme (rota alan adı kimliğiyle açılır)
     try {
-      await page.goto(`/websites/${encodeURIComponent(websiteId)}/settings`);
+      const domainsJson = await (await page.request.get('/api/panel/domains')).json().catch(() => ({}));
+      const domainList = Array.isArray(domainsJson.data) ? domainsJson.data : (domainsJson.data?.domains || []);
+      const siteDomainId = domainList.find((d) => d.websiteId === websiteId && !d.parentDomainId)?.id ?? websiteId;
+      await page.goto(`/websites/${encodeURIComponent(siteDomainId)}/settings`);
       const removalSection = page.locator('section').filter({ has: page.locator('h2, h3', { hasText: 'Siteyi sil' }) });
-      if (await removalSection.isVisible({ timeout: 10000 }).catch(() => false)) {
+      // isVisible() beklemez; silme önizlemesi yüklenene kadar bekle, yoksa temizlik hiç başlamaz.
+      const visible = (locator, timeout) => locator.waitFor({ state: 'visible', timeout }).then(() => true).catch(() => false);
+      if (await visible(removalSection, 30000)) {
         const deleteBtn = removalSection.locator('button', { hasText: 'Siteyi sil…' });
-        if (await deleteBtn.isVisible({ timeout: 10000 }).catch(() => false)) {
+        if (await visible(deleteBtn, 30000)) {
           await deleteBtn.click();
 
-          const dialog = page.locator('dialog.ws-modal, [role="dialog"], .ws-modal, dialog[open]').filter({ hasText: 'Siteyi kalıcı olarak sil' });
-          if (await dialog.isVisible({ timeout: 5000 }).catch(() => false)) {
+          const dialog = page.locator('dialog.ws-modal, [role="dialog"], .ws-modal, dialog[open]').filter({ hasText: 'Siteyi kalıcı olarak sil' }).first();
+          if (await visible(dialog, 10000)) {
             const input = dialog.locator('input');
             if (domainName) await input.fill(domainName);
             const submitBtn = dialog.locator('button', { hasText: 'Silme işlemini başlat' });
@@ -117,7 +124,7 @@ test.describe('TLS-01 Ücretsiz ACME issue, renew ve otomatik yenileme', () => {
               await submitBtn.click();
 
               const doneBtn = page.locator('button:has-text("Web sitelerine dön")');
-              if (await doneBtn.isVisible({ timeout: 45000 }).catch(() => false)) {
+              if (await visible(doneBtn, 150000)) {
                 await doneBtn.click();
                 await page.waitForURL(/\/websites/, { timeout: 10000 }).catch(() => {});
               }
@@ -153,6 +160,7 @@ test.describe('TLS-01 Ücretsiz ACME issue, renew ve otomatik yenileme', () => {
   });
 
   test.afterAll(async ({ browser }) => {
+    test.setTimeout(300000);
     // 0 artık ilkesi: Test sırasında açılan geçici web sitesi ve müşteri hesabını temizle
     try {
       const page = await browser.newPage({ ignoreHTTPSErrors: true });
@@ -499,6 +507,8 @@ test.describe('TLS-01 Ücretsiz ACME issue, renew ve otomatik yenileme', () => {
     }
 
     // 4. Rol Senaryosu (Kiracı İzolasyonu): Geçici bir Customer kullanıcısı oluştur
+    // Müşteri hesabı YunPanel Premium ister; yoksa istek kapıda reddedilmeli ve hesap açılmamalı.
+    const missing = await missingPremiumCapabilities(page.request, ['perSiteIsolatedUsers']);
     const createUserRes = await page.request.post('/api/panel/users/hosting/accounts/create-login', {
       headers: apiHeaders(),
       data: {
@@ -508,6 +518,11 @@ test.describe('TLS-01 Ücretsiz ACME issue, renew ve otomatik yenileme', () => {
         resellerId: null,
       },
     });
+    if (missing.length) {
+      await expectPremiumLicenseRequired(createUserRes, 'perSiteIsolatedUsers');
+      expect(await panelUserExists(page.request, testCustomerUsername)).toBe(false);
+      test.skip(true, premiumSkipReason(missing));
+    }
     expect([200, 201]).toContain(createUserRes.status());
     const userJson = await createUserRes.json();
     createdCustomerUserId = userJson.data?.account?.id || userJson.account?.id;

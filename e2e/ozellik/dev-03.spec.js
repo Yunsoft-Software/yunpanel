@@ -1,7 +1,8 @@
 import http from 'node:http';
+import https from 'node:https';
 import { execSync } from 'node:child_process';
 import { test, expect } from '@playwright/test';
-import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
+import { OWNER_USERNAME, OWNER_PASSWORD, loginAs, waitForWebsiteSetup } from '../helpers.js';
 
 test.use({ trace: 'off' });
 
@@ -46,24 +47,61 @@ test.describe.serial('DEV-03 Deploy anahtarı/webhook/ek komut ve işlem sonucu'
     });
   }
 
+  // Kurulum tamamlanınca site sertifikası etkinleşir ve HTTP isteği HTTPS'e yönlenir; uygulama yanıtı
+  // aynı sunucudan SNI ile HTTPS üzerinden okunur. Sertifika zinciri TLS-01'de ayrıca doğrulanır.
+  async function checkDirectHttps(host, path = '/') {
+    return new Promise((resolve, reject) => {
+      const req = https.request({
+        hostname: '157.180.11.28',
+        port: 443,
+        path,
+        method: 'GET',
+        servername: host,
+        rejectUnauthorized: false,
+        headers: { Host: host },
+      }, (res) => {
+        let body = '';
+        res.on('data', (chunk) => { body += chunk; });
+        res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body }));
+      });
+      req.on('error', reject);
+      req.end();
+    });
+  }
+
   async function removeWebsiteById(page, domainId, domainName) {
     if (!domainId) return;
     try {
       await page.goto(`/websites/${encodeURIComponent(domainId)}/settings`);
       const removalSection = page.locator('section').filter({ has: page.locator('h2, h3', { hasText: 'Siteyi sil' }) });
-      if (await removalSection.isVisible({ timeout: 5000 }).catch(() => false)) {
+      // isVisible() beklemez; silme önizlemesi yüklenene kadar bekle, yoksa temizlik hiç başlamaz.
+      const visible = (locator, timeout) => locator.waitFor({ state: 'visible', timeout }).then(() => true).catch(() => false);
+      if (await visible(removalSection, 30000)) {
         const deleteBtn = removalSection.locator('button', { hasText: 'Siteyi sil…' });
-        if (await deleteBtn.isVisible().catch(() => false)) {
+        if (await visible(deleteBtn, 30000)) {
           await deleteBtn.click();
           const dialog = page.locator('dialog.ws-modal, [role="dialog"], .ws-modal').filter({ hasText: 'Siteyi kalıcı olarak sil' });
-          if (await dialog.isVisible({ timeout: 5000 }).catch(() => false)) {
+          if (await visible(dialog, 10000)) {
             const input = dialog.locator('input');
             await input.fill(domainName);
             const submitBtn = dialog.locator('button', { hasText: 'Silme işlemini başlat' });
             if (await submitBtn.isEnabled({ timeout: 3000 }).catch(() => false)) {
               await submitBtn.click();
               const doneBtn = page.locator('button', { hasText: 'Web sitelerine dön' });
-              await expect(doneBtn.or(page.locator('text=Site silindi'))).toBeVisible({ timeout: 40000 }).catch(() => {});
+              const resumeBtn = page.getByRole('button', { name: 'Silme işlemine devam et…', exact: true });
+              // Posta alan adı adımı açık devam onayı ister (domain_removal_mail_retry_required); silme durursa
+              // aynı işleme devam et.
+              for (let round = 0; round < 15; round += 1) {
+                await expect(doneBtn.or(resumeBtn).first()).toBeVisible({ timeout: 90000 }).catch(() => {});
+                if (!await resumeBtn.isVisible().catch(() => false)) break;
+                console.log(`DEV-03 cleanup: silme durdu, devam ediliyor (${round + 1})`);
+                await page.waitForTimeout(2000);
+                await resumeBtn.click();
+                const resumeDialog = page.locator('dialog[open]').filter({ hasText: 'Silme işlemine devam et' });
+                if (!await visible(resumeDialog, 10000)) break;
+                await resumeDialog.locator('input').fill(domainName);
+                await resumeDialog.getByRole('button', { name: 'Silme işlemine devam et', exact: true }).click();
+              }
               if (await doneBtn.isVisible().catch(() => false)) {
                 await doneBtn.click();
               }
@@ -93,6 +131,7 @@ test.describe.serial('DEV-03 Deploy anahtarı/webhook/ek komut ve işlem sonucu'
   });
 
   test.afterAll(async ({ browser }) => {
+    test.setTimeout(420000);
     if (!createdDomainId) return;
     const page = await browser.newPage({ ignoreHTTPSErrors: true });
     try {
@@ -125,6 +164,11 @@ test.describe.serial('DEV-03 Deploy anahtarı/webhook/ek komut ve işlem sonucu'
     await expect(entryFileInput).toBeVisible();
     await entryFileInput.fill('index.js');
 
+    // Örnek depoda /health yok, kök yol 200 döner; sağlık yolu kullanıcı seçimidir.
+    const healthPathInput = page.locator('label', { hasText: 'Sağlık kontrolü yolu' }).locator('input');
+    await expect(healthPathInput).toBeVisible();
+    await healthPathInput.fill('/');
+
     const repoInput = page.locator('label', { hasText: 'GitHub repository' }).locator('input');
     await repoInput.fill('https://github.com/heroku/node-js-getting-started.git');
 
@@ -146,8 +190,8 @@ test.describe.serial('DEV-03 Deploy anahtarı/webhook/ek komut ve işlem sonucu'
     const domainIdMatch = href?.match(/\/websites\/([^/?#]+)/);
     createdDomainId = domainIdMatch ? decodeURIComponent(domainIdMatch[1]) : primaryDomain;
 
-    // Arka plan servislerinin yapılandırılması için bekleme
-    await page.waitForTimeout(15000);
+    // Site kurulumu sonuç ekranından sonra sunucuda biter; sabit süre yerine bitmesini bekle.
+    await waitForWebsiteSetup(page, createdDomainId, { timeout: 240000 });
 
     // 2. Git / Yayın sekmesine geç
     await page.goto(`/websites/${encodeURIComponent(createdDomainId)}/deploy`);
@@ -178,7 +222,11 @@ test.describe.serial('DEV-03 Deploy anahtarı/webhook/ek komut ve işlem sonucu'
 
     // 3. Fiziksel Sonuç Kontrolü
     // a) Direct HTTP isteği ile Nginx cevabı kontrolü
-    const httpRes = await checkDirectHttp(primaryDomain);
+    let httpRes = await checkDirectHttp(primaryDomain);
+    if (httpRes.status === 301) {
+      expect(httpRes.headers.location).toBe(`https://${primaryDomain}/`);
+      httpRes = await checkDirectHttps(primaryDomain);
+    }
     expect([200, 404, 502, 503]).toContain(httpRes.status);
 
     // b) SSH üzerinden Nginx config kontrolü

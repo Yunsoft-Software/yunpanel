@@ -1,6 +1,8 @@
 import http from 'node:http';
 import { test, expect } from '@playwright/test';
-import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
+import {
+  OWNER_USERNAME, OWNER_PASSWORD, loginAs, missingPremiumCapabilities, premiumSkipReason, expectHostingAccountCreateGated,
+} from '../helpers.js';
 
 test.use({ trace: 'off' });
 
@@ -307,6 +309,13 @@ test.describe.serial('WEB-01 Domain ekleme ve amaca göre site oluşturma sihirb
   });
 
   test('rol senaryosu: müşteri rolü doğrudan site oluşturamaz ve izole edilir', async ({ page, browser }) => {
+    // Müşteri hesabı YunPanel Premium ister; yoksa oluşturma kapıda durmalı.
+    const missing = await missingPremiumCapabilities(page.request, ['perSiteIsolatedUsers']);
+    if (missing.length) {
+      await expectHostingAccountCreateGated(page, { kind: 'customer', username: custUser, password: custPass });
+      test.skip(true, premiumSkipReason(missing));
+    }
+
     // 1. Owner olarak müşteri oluştur
     await page.goto('/customers');
     await expect(page.locator('h1', { hasText: 'Müşteriler' })).toBeVisible({ timeout: 15000 });

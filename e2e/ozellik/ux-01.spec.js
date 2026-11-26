@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
-import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
+import {
+  OWNER_USERNAME, OWNER_PASSWORD, loginAs, missingPremiumCapabilities, premiumSkipReason, expectHostingAccountCreateGated,
+} from '../helpers.js';
 
 test.use({ trace: 'off' });
 
@@ -102,24 +104,26 @@ test.describe('UX-01 Plesk görev yerleşimi ve tüm rollerin doğru menüsü', 
     const sidebar = page.locator('aside.ws-sidebar');
     await expect(sidebar).toBeVisible({ timeout: 15000 });
     await expect(sidebar.locator('.ws-brand small')).toContainText('SUNUCU YÖNETİMİ');
+    // 25 Kasım: marka bağlantısı da /websites'e gider; menü bağlantıları bölüm menüsünde aranır.
+    const sidebarNav = sidebar.locator('nav.ws-sidebar-nav');
 
-    await expect(sidebar.locator('a[href="/websites"]')).toBeVisible();
-    await expect(sidebar.locator('a[href="/docker"]')).toBeVisible();
-    await expect(sidebar.locator('a[href="/mail"]')).toBeVisible();
-    await expect(sidebar.locator('a[href="/files"]')).toBeVisible();
-    await expect(sidebar.locator('a[href="/databases"]')).toBeVisible();
-    await expect(sidebar.locator('a[href="/statistics"]')).toBeVisible();
-    await expect(sidebar.locator('a[href="/customers"]')).toBeVisible();
-    await expect(sidebar.locator('a[href="/resellers"]')).toBeVisible();
-    await expect(sidebar.locator('a[href="/tools-settings"]')).toBeVisible();
+    await expect(sidebarNav.locator('a[href="/websites"]')).toBeVisible();
+    await expect(sidebarNav.locator('a[href="/docker"]')).toBeVisible();
+    await expect(sidebarNav.locator('a[href="/mail"]')).toBeVisible();
+    await expect(sidebarNav.locator('a[href="/files"]')).toBeVisible();
+    await expect(sidebarNav.locator('a[href="/databases"]')).toBeVisible();
+    await expect(sidebarNav.locator('a[href="/statistics"]')).toBeVisible();
+    await expect(sidebarNav.locator('a[href="/customers"]')).toBeVisible();
+    await expect(sidebarNav.locator('a[href="/resellers"]')).toBeVisible();
+    await expect(sidebarNav.locator('a[href="/tools-settings"]')).toBeVisible();
 
     // Sunucu iç rotaları sol menüyü şişirmemeli
-    await expect(sidebar.locator('a[href="/servers"]')).toHaveCount(0);
-    await expect(sidebar.locator('a[href="/firewall"]')).toHaveCount(0);
-    await expect(sidebar.locator('a[href="/logs"]')).toHaveCount(0);
+    await expect(sidebarNav.locator('a[href="/servers"]')).toHaveCount(0);
+    await expect(sidebarNav.locator('a[href="/firewall"]')).toHaveCount(0);
+    await expect(sidebarNav.locator('a[href="/logs"]')).toHaveCount(0);
 
     // 2. /tools-settings (Araçlar ve Ayarlar) 3 Plesk görev grubu
-    await sidebar.locator('a[href="/tools-settings"]').click();
+    await sidebarNav.locator('a[href="/tools-settings"]').click();
     await page.waitForURL(/\/tools-settings/, { timeout: 15000 });
     await expect(page.locator('h1')).toContainText('Araçlar ve Ayarlar');
 
@@ -137,7 +141,7 @@ test.describe('UX-01 Plesk görev yerleşimi ve tüm rollerin doğru menüsü', 
     await expect(page.locator('a[href="/logs"]').first()).toBeVisible();
 
     // 3. /websites site görev kartları ve Plesk görev grubu sekmeleri
-    await sidebar.locator('a[href="/websites"]').click();
+    await sidebarNav.locator('a[href="/websites"]').click();
     await page.waitForURL(/\/websites/, { timeout: 15000 });
 
     const taskCards = page.locator('.ws-website-task-card');
@@ -160,9 +164,11 @@ test.describe('UX-01 Plesk görev yerleşimi ve tüm rollerin doğru menüsü', 
     const siteNav = page.locator('.ws-plesk-site-navigation');
     await expect(siteNav).toBeVisible({ timeout: 15000 });
     await expect(siteNav.locator('.ws-site-tool-group')).toHaveCount(3);
-    await expect(siteNav.locator('a[href$="/overview"]')).toBeVisible();
-    await expect(siteNav.locator('a[href$="/hosting"]')).toBeVisible();
-    await expect(siteNav.locator('a[href$="/mail"]')).toBeVisible();
+    // Mobil ve masaüstü bağlantıları ayrı; masaüstü görev grupları görünür.
+    const desktopSiteNav = siteNav.locator('.ws-site-tool-desktop');
+    await expect(desktopSiteNav.locator('a[href$="/overview"]')).toBeVisible();
+    await expect(desktopSiteNav.locator('a[href$="/hosting"]')).toBeVisible();
+    await expect(desktopSiteNav.locator('a[href$="/mail"]')).toBeVisible();
 
     // Genel bakış bölümleri: Site araçları ve Yayın bilgileri
     await expect(page.locator('section.ws-section h2', { hasText: 'Site araçları' })).toBeVisible();
@@ -231,6 +237,14 @@ test.describe('UX-01 Plesk görev yerleşimi ve tüm rollerin doğru menüsü', 
     try {
       await ensureOwnerLoggedIn(ownerPage);
 
+      const missing = await missingPremiumCapabilities(ownerPage.request, ['resellerAccounts', 'perSiteIsolatedUsers']);
+      if (missing.length) {
+        // Premium yoksa bayi ve müşteri oluşturma kapıda durmalı; rol menüsü adımları Premium hesap ister.
+        if (missing.includes('resellerAccounts')) await expectHostingAccountCreateGated(ownerPage, { kind: 'reseller', username: RES_USER, password: TEST_PASS });
+        if (missing.includes('perSiteIsolatedUsers')) await expectHostingAccountCreateGated(ownerPage, { kind: 'customer', username: CUST_USER, password: TEST_PASS });
+        test.skip(true, premiumSkipReason(missing));
+      }
+
       // Bayi oluştur
       await ownerPage.goto('/resellers');
       await ownerPage.locator('button:has-text("Bayi ekle")').click();
@@ -268,9 +282,10 @@ test.describe('UX-01 Plesk görev yerleşimi ve tüm rollerin doğru menüsü', 
       await resPage.goto('/websites');
       await expect(resPage.locator('.workspace-shell')).toBeVisible({ timeout: 15000 });
 
-      const resSidebar = resPage.locator('aside.ws-sidebar');
-      await expect(resSidebar).toBeVisible({ timeout: 15000 });
-      await expect(resSidebar.locator('.ws-brand small')).toContainText('BAYİ PANELİ');
+      const resAside = resPage.locator('aside.ws-sidebar');
+      await expect(resAside).toBeVisible({ timeout: 15000 });
+      await expect(resAside.locator('.ws-brand small')).toContainText('BAYİ PANELİ');
+      const resSidebar = resAside.locator('nav.ws-sidebar-nav');
 
       // Bayi 6 izinli öğe
       await expect(resSidebar.locator('a[href="/customers"]')).toBeVisible();
@@ -303,9 +318,10 @@ test.describe('UX-01 Plesk görev yerleşimi ve tüm rollerin doğru menüsü', 
       await custPage.goto('/websites');
       await expect(custPage.locator('.workspace-shell')).toBeVisible({ timeout: 15000 });
 
-      const custSidebar = custPage.locator('aside.ws-sidebar');
-      await expect(custSidebar).toBeVisible({ timeout: 15000 });
-      await expect(custSidebar.locator('.ws-brand small')).toContainText('MÜŞTERİ PANELİ');
+      const custAside = custPage.locator('aside.ws-sidebar');
+      await expect(custAside).toBeVisible({ timeout: 15000 });
+      await expect(custAside.locator('.ws-brand small')).toContainText('MÜŞTERİ PANELİ');
+      const custSidebar = custAside.locator('nav.ws-sidebar-nav');
 
       // Müşteri 5 izinli öğe
       await expect(custSidebar.locator('a[href="/websites"]')).toBeVisible();
@@ -338,6 +354,8 @@ test.describe('UX-01 Plesk görev yerleşimi ve tüm rollerin doğru menüsü', 
     test.fail(true, 'BULGU UX-01: /settings/users modalında Site Yöneticisi seçildiğinde siteler yüklenmiyor');
 
     await ensureOwnerLoggedIn(page);
+    const missing = await missingPremiumCapabilities(page.request, ['perSiteIsolatedUsers']);
+    test.skip(missing.length > 0, `${premiumSkipReason(missing)}: kullanıcı ekleme formu Premium ister`);
     await page.goto('/settings/users');
     await expect(page.locator('h1')).toContainText('Kullanıcılar', { timeout: 15000 });
 
@@ -357,6 +375,15 @@ test.describe('UX-01 Plesk görev yerleşimi ve tüm rollerin doğru menüsü', 
   test('bilinen hata: Reseller ve Customer rolünde /jobs ve /audit rotalarının açık olması ve üst barda İşlemler butonu', async ({ browser }) => {
     test.fail(true, 'BULGU UX-01: Reseller ve Customer rolünde /jobs ve /audit rotaları erişilebilir ve üst barda İşlemler butonu görünüyor');
 
+    const ownerContext = await browser.newContext({ ignoreHTTPSErrors: true });
+    try {
+      const ownerPage = await ownerContext.newPage();
+      await ensureOwnerLoggedIn(ownerPage);
+      const missing = await missingPremiumCapabilities(ownerPage.request, ['resellerAccounts', 'perSiteIsolatedUsers']);
+      test.skip(missing.length > 0, `${premiumSkipReason(missing)}: müşteri hesabı Premium ister`);
+    } finally {
+      await ownerContext.close().catch(() => {});
+    }
     const custContext = await browser.newContext({ ignoreHTTPSErrors: true });
     const custPage = await custContext.newPage();
     try {
@@ -377,8 +404,8 @@ test.describe('UX-01 Plesk görev yerleşimi ve tüm rollerin doğru menüsü', 
     }
   });
 
-  test('bilinen hata: Mobil görünümde (<=768px) Site aracı select seçicisinin CSS ile gizlenmiş olması', async ({ page }) => {
-    test.fail(true, 'BULGU UX-01: Mobil görünümde (<=768px) Site aracı select seçicisi CSS ile gizli');
+  // 25 Kasım site araçları menüsü yenilemesiyle bulgu giderildi; artık gerilemeyi yakalar.
+  test('mobil görünümde (<=768px) Site aracı select seçicisi görünür', async ({ page }) => {
 
     await page.setViewportSize({ width: 390, height: 844 });
     await ensureOwnerLoggedIn(page);
@@ -393,8 +420,7 @@ test.describe('UX-01 Plesk görev yerleşimi ve tüm rollerin doğru menüsü', 
     await page.goto(`/websites/${resolvedDomainId}/overview`);
     await expect(page.locator('.ws-plesk-site-navigation')).toBeVisible({ timeout: 15000 });
 
-    // Beklenen: docs/ui-plan.md §1 gereği mobilde .ws-site-tool-select seçicisi görünür olmalıdır
-    // Gerçek: theme.css içindeki @media (max-width: 768px) kuralı display: none !important uyguladığı için gizlidir.
+    // docs/ui-plan.md §1 gereği mobilde .ws-site-tool-select seçicisi görünür olmalıdır.
     await expect(page.locator('.ws-site-tool-select')).toBeVisible({ timeout: 4000 });
   });
 });

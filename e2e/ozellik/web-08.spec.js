@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { test, expect } from '@playwright/test';
-import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
+import { OWNER_USERNAME, OWNER_PASSWORD, loginAs, waitForWebsiteSetup } from '../helpers.js';
 import { externalSiteUrl } from '../../apps/web/src/workspace/site-model.js';
 
 // fetch() cannot set Host, so it would hit the server's default vhost; ask the site's own vhost directly.
@@ -60,21 +60,23 @@ test.describe.serial('WEB-08 Önizleme, geçici domain ve site açma bağlantıl
     try {
       await gotoAuthenticated(page, `/websites/${encodeURIComponent(domainId)}/settings`);
       const removalSection = page.locator('section').filter({ has: page.locator('h2, h3', { hasText: 'Siteyi sil' }) });
-      if (!await removalSection.isVisible({ timeout: 8000 }).catch(() => false)) return;
+      // isVisible() beklemez; silme önizlemesi yüklenene kadar bekle, yoksa temizlik hiç başlamaz.
+      const visible = (locator, timeout) => locator.waitFor({ state: 'visible', timeout }).then(() => true).catch(() => false);
+      if (!await visible(removalSection, 30000)) return;
 
       const deleteBtn = removalSection.locator('button', { hasText: 'Siteyi sil…' });
-      if (await deleteBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+      if (await visible(deleteBtn, 30000)) {
         await deleteBtn.click();
 
         const dialog = page.locator('dialog.ws-modal, [role="dialog"]').filter({ hasText: 'Siteyi kalıcı olarak sil' });
-        if (await dialog.isVisible({ timeout: 5000 }).catch(() => false)) {
+        if (await visible(dialog, 10000)) {
           const input = dialog.locator('input');
           await input.fill(domainName);
           const submitBtn = dialog.locator('button[type="submit"]', { hasText: 'Silme işlemini başlat' });
           if (await submitBtn.isEnabled()) {
             await submitBtn.click();
             const doneIndicator = page.locator('button', { hasText: 'Web sitelerine dön' }).or(page.locator('text=Site silindi'));
-            await doneIndicator.waitFor({ timeout: 15000 }).catch(() => {});
+            await doneIndicator.first().waitFor({ timeout: 150000 }).catch(() => {});
           }
         }
       }
@@ -88,6 +90,7 @@ test.describe.serial('WEB-08 Önizleme, geçici domain ve site açma bağlantıl
   });
 
   test.afterAll(async ({ browser }) => {
+    test.setTimeout(240000);
     if (!createdDomainId) return;
     const context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
@@ -145,13 +148,16 @@ test.describe.serial('WEB-08 Önizleme, geçici domain ve site açma bağlantıl
     const match = href ? href.match(/\/websites\/([^/?#]+)/) : null;
     expect(match).toBeTruthy();
     createdDomainId = match[1];
+    // Kurulum sonuç ekranından sonra sunucuda biter; alan adı etkinleşmeden kartta site bağlantısı çıkmaz.
+    await waitForWebsiteSetup(page, createdDomainId);
 
     // 2. Web Siteleri listesine git ve kart üzerindeki 'Siteyi aç' dış bağlantısını doğrula
     await gotoAuthenticated(page, `/websites?q=${encodeURIComponent(primaryDomain)}`);
     const siteCard = page.locator('.ws-website-task-card').filter({ hasText: primaryDomain });
     await expect(siteCard).toBeVisible({ timeout: 30000 });
 
-    const openSiteBtnOnCard = siteCard.locator('a:has-text("Siteyi aç")');
+    // 25 Kasım üst bar/kart yenilemesi: bağlantı yalnız ikon; erişilebilir adı alan adını taşır.
+    const openSiteBtnOnCard = siteCard.getByRole('link', { name: `${primaryDomain} sitesini yeni sekmede aç`, exact: true });
     await expect(openSiteBtnOnCard).toBeVisible({ timeout: 15000 });
     await expect(openSiteBtnOnCard).toHaveAttribute('target', '_blank');
     await expect(openSiteBtnOnCard).toHaveAttribute('rel', 'noopener noreferrer');
@@ -164,7 +170,7 @@ test.describe.serial('WEB-08 Önizleme, geçici domain ve site açma bağlantıl
     await expect(page.locator('h1', { hasText: primaryDomain })).toBeVisible({ timeout: 30000 });
 
     // Site Detay Genel Bakış sayfasında da 'Siteyi aç' dış bağlantısını doğrula
-    const openSiteBtnOnDetail = page.locator('header a:has-text("Siteyi aç"), .ws-heading-actions a:has-text("Siteyi aç")').first();
+    const openSiteBtnOnDetail = page.locator('header.ws-page-heading').getByRole('link', { name: 'Siteyi aç', exact: true });
     await expect(openSiteBtnOnDetail).toBeVisible({ timeout: 15000 });
     await expect(openSiteBtnOnDetail).toHaveAttribute('target', '_blank');
     await expect(openSiteBtnOnDetail).toHaveAttribute('rel', 'noopener noreferrer');

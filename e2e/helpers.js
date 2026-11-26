@@ -228,3 +228,117 @@ export async function waitForWebsiteSetup(page, domainId, { timeout = 120000 } =
   }, { timeout, intervals: [2000], message: 'Website setup did not finish' }).toBe(true);
   return websiteId;
 }
+
+// --- YunPanel Premium license gate (T965) ---
+// Premium-only flows (customer/reseller accounts, extra panel users, per-site users) run in full
+// only when the panel's own license says the capability is active. Without it the tests assert the
+// gate and skip only the Premium continuation. These helpers only read the license; they never
+// activate, refresh or change it.
+
+// GET /api/panel/license as the signed-in Owner (page.request or a browser context request).
+export async function readLicenseStatus(request) {
+  const response = await request.get('/api/panel/license');
+  expect(response.status(), 'GET /api/panel/license').toBe(200);
+  const status = (await response.json())?.data;
+  expect(typeof status?.capabilities, 'license status lists capabilities').toBe('object');
+  return status;
+}
+
+// Returns the subset of `capabilities` that this panel's license does not grant.
+export async function missingPremiumCapabilities(request, capabilities) {
+  const status = await readLicenseStatus(request);
+  return capabilities.filter((capability) => {
+    expect(Object.hasOwn(status.capabilities, capability), `known license capability ${capability}`).toBe(true);
+    return !(status.valid === true && status.capabilities[capability] === true);
+  });
+}
+
+export function premiumSkipReason(missing) {
+  return `YunPanel Premium etkin değil (${missing.join(', ')}): kapı doğrulandı, Premium gerektiren devam adımı atlandı`;
+}
+
+// The panel refused the request with the Premium gate for exactly this capability.
+export async function expectPremiumLicenseRequired(response, capability) {
+  expect(response.status(), 'Premium gate status').toBe(403);
+  const error = (await response.json())?.error;
+  expect(error?.code).toBe('premium_license_required');
+  expect(error?.capability).toBe(capability);
+}
+
+// Session CSRF token and Origin for Owner mutations through page.request.
+export async function ownerMutationHeaders(request) {
+  const response = await request.get('/api/auth/session');
+  expect(response.status(), 'GET /api/auth/session').toBe(200);
+  const csrf = (await response.json())?.data?.csrfToken;
+  expect(typeof csrf === 'string' && csrf.length > 0, 'session CSRF token').toBe(true);
+  return { origin: new URL(response.url()).origin, 'x-csrf-token': csrf };
+}
+
+// True when a panel user with this username exists (walks every /api/panel/users page).
+export async function panelUserExists(request, username) {
+  let total = 1;
+  for (let offset = 0; offset < total; offset += 100) {
+    const response = await request.get(`/api/panel/users?limit=100&offset=${offset}`);
+    expect(response.status(), 'GET /api/panel/users').toBe(200);
+    const page = (await response.json())?.data;
+    total = page?.total ?? 0;
+    if ((page?.users ?? []).some((user) => user.username === username)) return true;
+  }
+  return false;
+}
+
+// Without the capability, Owner's "Bayi ekle" / "Müşteri ekle" opens the Premium dialog instead of the
+// form, the create-login API answers premium_license_required, and no login or profile is created.
+export async function expectHostingAccountCreateGated(page, { kind, username, password }) {
+  const reseller = kind === 'reseller';
+  const capability = reseller ? 'resellerAccounts' : 'perSiteIsolatedUsers';
+  const label = reseller ? 'Bayi' : 'Müşteri';
+  await page.goto(reseller ? '/resellers' : '/customers');
+  await expect(page.locator('h1')).toContainText(reseller ? 'Bayiler' : 'Müşteriler', { timeout: 15000 });
+  const open = page.locator('header.ws-page-heading').getByRole('button', { name: new RegExp(`^${label} ekle`) });
+  await expect(open).toBeEnabled({ timeout: 15000 });
+  await expect(open).toContainText('Premium');
+  await open.click();
+  const dialog = page.locator('dialog[open]');
+  await expect(dialog.locator(`[data-premium-gate-dialog="${kind}"]`)).toBeVisible({ timeout: 10000 });
+  await expect(dialog.locator('h2')).toContainText(`${label} eklemek için YunPanel Premium gerekiyor`);
+  await expect(dialog.locator('input')).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Vazgeç', exact: true }).click();
+  await expect(page.locator('dialog[open]')).toHaveCount(0);
+
+  const response = await page.request.post('/api/panel/users/hosting/accounts/create-login', {
+    headers: await ownerMutationHeaders(page.request),
+    data: reseller
+      ? { kind, username, password, limits: { maxCustomers: 1, maxWebsites: 1 } }
+      : { kind, username, password, resellerId: null },
+  });
+  await expectPremiumLicenseRequired(response, capability);
+  const accounts = await page.request.get(`/api/panel/users/hosting/accounts?kind=${kind}&limit=100`);
+  expect(accounts.status()).toBe(200);
+  expect(((await accounts.json())?.data?.accounts ?? []).some((account) => account.username === username)).toBe(false);
+  expect(await panelUserExists(page.request, username)).toBe(false);
+}
+
+// Without perSiteIsolatedUsers, /settings/users "Kullanıcı ekle" opens the Premium dialog instead of the
+// form, POST /api/panel/users answers premium_license_required, and no user is created.
+export async function expectPanelUserCreateGated(page, { username, password }) {
+  await page.goto('/settings/users');
+  await expect(page.locator('h1')).toContainText('Kullanıcılar', { timeout: 15000 });
+  const open = page.locator('header.ws-page-heading').getByRole('button', { name: /^Kullanıcı ekle/ });
+  await expect(open).toBeEnabled({ timeout: 15000 });
+  await expect(open).toContainText('Premium');
+  await open.click();
+  const dialog = page.locator('dialog[open]');
+  await expect(dialog.locator('[data-premium-gate-dialog="users"]')).toBeVisible({ timeout: 10000 });
+  await expect(dialog.locator('h2')).toContainText('Kullanıcı eklemek için YunPanel Premium gerekiyor');
+  await expect(dialog.locator('input')).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Vazgeç', exact: true }).click();
+  await expect(page.locator('dialog[open]')).toHaveCount(0);
+
+  const response = await page.request.post('/api/panel/users', {
+    headers: await ownerMutationHeaders(page.request),
+    data: { username, password, role: 'site_manager', websiteIds: [] },
+  });
+  await expectPremiumLicenseRequired(response, 'perSiteIsolatedUsers');
+  expect(await panelUserExists(page.request, username)).toBe(false);
+}

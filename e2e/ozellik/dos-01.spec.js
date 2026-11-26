@@ -106,7 +106,8 @@ test.describe('DOS-01 Global Files ve domain File Manager girişleri', () => {
     await expect(page.locator('h1')).toBeVisible({ timeout: 15000 });
 
     // Sekmelerde "Dosyalar" bağlantısının var olduğunu ve tıklandığında File Manager'ı açtığını doğrula
-    const siteFilesTab = page.locator('.ws-plesk-site-navigation a[href$="/files"], nav[aria-label="Site araçları"] a:has-text("Dosyalar"), a:has-text("Dosya yöneticisi")').first();
+    // 25 Kasım yenilemesi: site araçları menüsünde mobil ve masaüstü bağlantıları ayrı; masaüstü grubu görünür.
+    const siteFilesTab = page.locator('nav.ws-plesk-site-navigation[aria-label="Site araçları"] .ws-site-tool-desktop a[href$="/files"]');
     await expect(siteFilesTab).toBeVisible({ timeout: 10000 });
     await siteFilesTab.click();
     await page.waitForURL(new RegExp(`/websites/${encodeURIComponent(resolvedDomainId)}/files`), { timeout: 15000 });
