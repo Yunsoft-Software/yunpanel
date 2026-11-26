@@ -1,8 +1,11 @@
-# YunPanel — Plesk özellik eşdeğerliği
+# YunPanel — Plesk karşılaştırması
 
-9 Ekim 2026. 21 grup / 162 özellik ID'si eksiksiz korunur. Hedef Plesk Obsidian görev ve işlev eşdeğerliği; katalog/adapter varlığı veya önceki Tamamlandı etiketi kabul değildir. 10 Ekim kullanıcı [plan.md](../plan.md) uygulamasını onayladı; geliştirme sürüyor.
+Güncelleme: 26 Kasım 2026. Bu belge Plesk ile karşılaştırmanın tek kaynağıdır. İki bölümü var:
 
-20 Kasım 2026. [Linux hosting pilotu](../plan.md#20-kasım-2026--onaylanan-linux-hosting-pilotu-ve-plesk-geçişi) için kurtarma, taşıma ve posta hazırlığının yerel kanıtı [görev kaydında](gorevler/linux-hosting-pilot.md#20-kasım-yerel-ubuntu-kanıtı). Bağımsız ortam ve canlı geçiş sonuçları [kabul listesinde](../todo.md#linux-hosting-pilotu-ve-plesk-geçişi).
+1. **162 özellik envanteri** (21 grup). 9 Ekim 2026'da kuruldu. Hiçbir ID silinmez.
+2. **[Plesk'te olup YunPanel'de eksik olanlar](#pleskte-olup-yunpanelde-eksik-olanlar).** 26–27 Ekim kod incelemesi ve gerçek Plesk envanteri, 26 Kasım durumuyla. Eski ayrı not [arşivde](history/plesk-eksikler-2026-11-07.md).
+
+Hedef Plesk Obsidian görev ve işlev eşdeğerliğidir. Katalog veya adapter varlığı ya da eski "Tamamlandı" etiketi kabul sayılmaz. Açık işler [plan.md](../plan.md), canlı kabul [todo.md](../todo.md). Linux hosting pilotunun kanıtı [görev kaydında](gorevler/linux-hosting-pilot.md#20-kasım-yerel-ubuntu-kanıtı).
 
 Durum: **Kritik açık** = bu tur doğrulanan hata; **Kısmi / kabul açık** = bazı kaynak yolları incelendi, tüm görev doğrulanmadı; **İnceleme/kabul açık** = bu tur eksiksiz kontrol edilmedi; **Sonraki faz** = sade reseller ilk sürümünde ertelenmiş; **Ayrı hat** = OS/vendor/koşullu bağımlılık. Hiçbiri otomatik tamamlandı değildir.
 
@@ -278,6 +281,82 @@ Her ID için uygulamada gerçek kaynak+mount edilmiş endpoint, kullanıcı akı
 | WIN-05 | Windows kullanıcı/NTFS izinleri ve erişim. | Ayrı hat |
 | WIN-06 | Microsoft DNS ve Windows mail bileşeni eşdeğerleri. | Ayrı hat |
 
+## Plesk'te olup YunPanel'de eksik olanlar
+
+Kaynak: 26 Ekim 2026 senior kod incelemesi ve 27 Ekim'de İNSAN'ın açtığı oturumda gerçek Plesk Obsidian 18.0.81 sunucusuna salt okunur bakış (DECISIONS 2026-10-27 istisnası). O sunucuda 177 domain, 29 eklenti ve 66 sunucu aracı vardı. Aynı üst domain altında onlarca tek tek açılmış subdomain bulunuyordu; wildcard ihtiyacı gerçek.
+
+"26 Kasım durumu" sütunu [yapılanlar](yapilanlar.md), [görev kayıtları](gorevler/) ve commit geçmişinden alındı. Kaynak bağlantısı olmayan satırda 26 Ekim tespiti değişmedi. Bu liste onaylı görev değildir; sıra İNSAN kararıyla belirlenir.
+
+### Plesk sunucusunda günlük kullanılanlar (öncelik sırası)
+
+| # | Plesk'te | 26 Ekim'de YunPanel | 26 Kasım durumu |
+| --- | --- | --- | --- |
+| 1 | Hosting'siz yönlendirme domaini ve wildcard subdomain | Yok; wildcard kodda reddediliyor | Yönlendirme domaini yapıldı (27 Ekim, `.28` nginx). Wildcard hâlâ reddediliyor (`packages/shared/src/domain.js` `wildcard_not_supported`). |
+| 2 | WP Toolkit | Yarım (WP-03, WP-04, WP-07) | Kısmi. `.28`'de WordPress klonu (T921, 19 Kasım), staging'den seçici dosya aktarımı ve 503 geri alma (23 Kasım), Türkçe kurulum ve kaldırma (23 Kasım) geçti. Akıllı güncelleme ve toplu yönetim ertelendi. |
+| 3 | Website Copying | Yok | Aynı sunucuda boş hedef siteye statik kopya (T922–T926) ve PHP + MariaDB kopyası (T927–T935) yapıldı; `.28` Chromium ve Firefox kabulü 20 Kasım. [Görevler](gorevler/site-copy.md). |
+| 4 | Şifre korumalı dizinler | Yok | Yapıldı (27 Ekim, `.28` nginx). |
+| 5 | Site Import, Mail Importing, Plesk Migrator | Yok / yarım (MIG-*) | Kısmi. Çevrimdışı Plesk dışa aktarımı için önizleme ve yerel staging hazır (T936, T939, T941). Gerçek Plesk dışa aktarımı ve son IMAP eşitlemesi açık ([todo](../todo.md#linux-hosting-pilotu-ve-plesk-geçişi)). |
+| 6 | Bildirimler ve Watchdog | E-posta bildirimi yok | Yapıldı: e-posta ve panel içi uyarı, bağımsız nöbetçi (T860, 3 Kasım). |
+| 7 | Performance Booster | Yok | Gzip ve tarayıcı önbelleği yapıldı (27 Ekim). Nginx proxy/fastcgi önbelleği yok. |
+| 8 | Smarthost | Yok | Yapıldı (27 Ekim, gerçek Postfix). |
+| 9 | Log Browser (canlı log) | Canlı akış yok | Yapıldı (27 Ekim). |
+| 10 | Google Drive Backup | Yok | Restic için isimli rclone hedefi var (T947, 20 Kasım). Google Drive hedefi ayrıca doğrulanmadı. |
+| 11 | Imunify (zararlı yazılım tarama) | Yok / yarım (EKL-04) | Değişmedi. |
+| 12 | Advisor | Yalnız firewall önerisi | Değişmedi. |
+| 13 | Track Email Delivery | Kısmi | Yapıldı: ileti başına teslimat durumu (27 Ekim). |
+| 14 | Softaculous, Sitejet Builder | Docker uygulama marketi var; PHP uygulama kurucu ve site builder yok | Değişmedi. |
+| 15 | Event Manager, Mass Email, Custom Buttons, Prohibited Domains, SOGo, Mobile Center | Yok | Değişmedi; düşük öncelik. |
+
+26 Ekim bakışında karşılığı olanlar: Git, Composer, Laravel, Node.js, Docker ve proxy kuralları, Let's Encrypt, firewall, CrowdSec, ModSecurity (yarım), MFA, SSH terminal, tanı ve onarım, Netdata, zamanlanmış görevler, yedek, DNS, Roundcube.
+
+### Nginx, domain ve yönlendirme
+
+| Plesk özelliği | 26 Ekim'de YunPanel | 26 Kasım durumu |
+| --- | --- | --- |
+| Wildcard domain / subdomain | Yok, kodda reddediliyor | Değişmedi. |
+| Hosting'siz domain yönlendirmesi (301/302) | Yok | Yapıldı (27 Ekim). |
+| Yol bazlı yönlendirme kuralları | Yok | Yapıldı: tam yol ve klasör, 301/302 (27 Ekim). |
+| Docker alt yol proxy'si (`/api`) | — | Yapıldı; `.28` Chromium ve Firefox kabulü 20 Kasım. |
+| Site başına serbest nginx yönergesi | Bulunamadı; yalnız ön ayarlar (CORS, güvenlik başlıkları, cache) | Değişmedi. |
+| Nginx önbellekleme (proxy/fastcgi cache) | Yok | Yok. |
+| Hotlink koruması | Yok | Yok. |
+| Site bakım modu (503) | — | Yapıldı (27 Ekim). |
+
+### 26 Ekim'de kodda izi olmayanlar
+
+| Plesk özelliği | 26 Kasım durumu |
+| --- | --- |
+| Ek FTP/SFTP kullanıcıları (klasöre özel) | Değişmedi; site başına tek SFTP. |
+| Şifre korumalı dizinler | Yapıldı (27 Ekim). |
+| Site kopyalama | Statik ve PHP + MariaDB kopyası yapıldı (19–20 Kasım). |
+| Yöneticiye e-posta bildirimi | Yapıldı (3 Kasım). |
+| Canlı log izleme | Yapıldı (27 Ekim). |
+| PHP eklenti (uzantı) yönetimi | Değişmedi. |
+| Başka sunucudan posta taşıma (IMAP eşitleme) | Açık; Plesk pilotunun son eşitleme adımı. |
+| IP adresi yönetimi (havuz, dedicated/shared) | Değişmedi. Katalog SYS-01'i kısmi gösteriyor. |
+
+### Katalogda yarım işaretli olanlar
+
+Kaynak: `apps/api/src/non-reseller-capabilities.js` (26 Ekim'de 95 özellik: 70 completed, 13 partial, 9 deferred). Katalogdaki "completed" işareti çalıştığı anlamına gelmez.
+
+| Özellik | 26 Kasım durumu |
+| --- | --- |
+| EML-03 otomatik yanıt | Sieve Vacation panelde. Debian 12 ve Ubuntu 24.04'te gerçek servislerle doğrulandı (22 Kasım, [kayıt](gorevler/contabo-mail-dns-20261122.md#posta-ve-spam-politikası)). |
+| EML-04 spam filtresi, izin/engel listesi | Rspamd Multimap panelde. Aynı kayıtla doğrulandı. |
+| DNS-04 DNSSEC anahtar, DS ve rollover | DNSSEC testi (dns-04) `.28`'de geçti (30 Ekim). Rollover kabulü `todo.md` T-HOSTING içinde açık. |
+| DB-09 uzak veritabanı sunucusu | Değişmedi. |
+| WP-04 WordPress klon ve staging | Klon ve staging'den seçici dosya aktarımı `.28`'de geçti (19 ve 23 Kasım). İlgili `todo.md` maddesi açık. |
+| BAK-07 çoklu yedek takvimi ve hedef | İsimli rclone hedefi eklendi (T947). Çoklu takvim değişmedi. |
+| SEC-03 WAF politikaları | CrowdSec AppSec gözlem ve izole engelleme `.28`'de doğrulandı (21 Kasım, [kayıt](gorevler/crowdsec-waf-20261121.md)). |
+| SYS-01 IP havuzu, IPv4/IPv6 | Değişmedi. |
+| MIG-02 cPanel / DirectAdmin'den taşıma | Değişmedi. |
+| EKL-04 antivirüs ve güvenlik entegrasyonları | Değişmedi. |
+| EKL-02, EKL-06 eklenti yönetimi, lisans ve sağlık envanteri | Değişmedi. |
+| DEV-04 Laravel oluşturma ve tarama | Değişmedi. |
+
+### Bilerek ertelenenler
+
+Mailing list (EML-05), WordPress akıllı güncelleme (WP-07) ve toplu yönetim (WP-03), WHMCS/faturalama (API-05), paket/abonelik senkronizasyonu (API-06), registrar bayiliği (API-07), abonelikler arası DB taşıma (DB-07), harici uptime izleme (MON-06), site builder (EKL-03). Bunlar `agents.md` madde 3 kapsamında sonraki fazdır; İNSAN açıkça isterse alınır.
 
 ## Doğrulanan açıkların eşlemesi
 

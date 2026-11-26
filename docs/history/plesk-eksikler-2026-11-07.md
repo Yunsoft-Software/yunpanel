@@ -1,5 +1,7 @@
 # Plesk'te olup YunPanel'de olmayan özellikler (3. dalga adayları)
 
+> **Arşiv · 26 Kasım 2026.** Bu belge `docs/plesk-eksikler.md` yolundan taşındı. Yazıldığı günün durumunu anlatır; güncel durum için [devir notu](../DEVIR.md). Güncel hali [Plesk karşılaştırması](../plesk-feature-parity.md#pleskte-olup-yunpanelde-eksik-olanlar).
+
 > 2026-10-26 · senior (Claude) kod incelemesi. **Not, onaylı görev değil.** 3. dalgada İNSAN'ın vereceği "Plesk'te sık kullandıklarımız" listesiyle birleştirilip göreve çevrilir (`docs/orkestra/DECISIONS.md` 2026-10-26 iş sırası).
 >
 > Yöntem: Plesk'in sık kullanılan özellikleri YunPanel'in `apps/api/src`, `apps/web/src`, `packages/*/src` kodunda anahtar kelimeyle arandı. Ayrıca kendi yetenek kataloğu `apps/api/src/non-reseller-capabilities.js` (95 özellik: 70 completed, 13 partial, 9 deferred) okundu. Sınırlar: Plesk tarafı resmî belgeyle tek tek doğrulanmadı; farklı isimle yazılmış bir özellik kaçmış olabilir. Katalogdaki "completed" işareti çalıştığı anlamına gelmez; gerçek durum 1. dalga manuel test raporlarında (`docs/manuel-test/`).

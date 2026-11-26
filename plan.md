@@ -105,7 +105,7 @@ Website silme sırası: receipt sahibi SFTP mount/OpenSSH/chroot → PHP pool/so
 
 ## 26 Ekim 2026 — 3. dalga adayları (not, henüz onaylı görev değil)
 
-- [ ] **Plesk'te olup YunPanel'de olmayan özellikler:** [docs/plesk-eksikler.md](docs/plesk-eksikler.md). Öne çıkanlar: wildcard domain (`*.alan.com`, şu an kodda reddediliyor), hosting'siz domain yönlendirme (forwarding), yol bazlı yönlendirme kuralları, nginx önbellekleme, ek FTP kullanıcıları, şifre korumalı dizinler, site kopyalama, yöneticiye e-posta bildirimi, canlı log, PHP eklenti yönetimi, mail içe aktarma. İş sırası: 1. dalga manuel test → 2. dalga gerçek senaryo testleri → 3. dalga bu liste + İNSAN'ın vereceği sık kullanılanlar listesi (`docs/orkestra/DECISIONS.md`).
+- [ ] **Plesk'te olup YunPanel'de olmayan özellikler:** [Plesk karşılaştırması](docs/plesk-feature-parity.md#pleskte-olup-yunpanelde-eksik-olanlar). Öne çıkanlar: wildcard domain (`*.alan.com`, şu an kodda reddediliyor), hosting'siz domain yönlendirme (forwarding), yol bazlı yönlendirme kuralları, nginx önbellekleme, ek FTP kullanıcıları, şifre korumalı dizinler, site kopyalama, yöneticiye e-posta bildirimi, canlı log, PHP eklenti yönetimi, mail içe aktarma. İş sırası: 1. dalga manuel test → 2. dalga gerçek senaryo testleri → 3. dalga bu liste + İNSAN'ın vereceği sık kullanılanlar listesi (`docs/orkestra/DECISIONS.md`).
 
 
 ## 13 Kasım 2026 — P0 devam dilimi

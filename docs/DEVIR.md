@@ -72,7 +72,7 @@ Yunsoft'un kendi hosting paneli: Plesk Obsidian'ın ekran düzeni, iş akışlar
 - **Silinen `live-audit` testleri (T883):** Eski kabul ortamına bağlı 59 test silindi. Raporundaki "karşılığı var" matrisi doğrulanamadı (51 referansın 33'ünde test adı, 2'sinde dosya yok); bu davranışların başka testlerce sınandığını varsayma. Dosyalar `ba33f4a8^` commit'inde.
 - **Website Copying:** sıradaki özellik. Tasarım görüşmesi başladı, karar yok. Plesk'teki gibi bir siteyi aynı sunucudaki başka bir siteye kopyalama; dosyalar ve isteğe bağlı veritabanları.
 - **Uyarı e-postaları spama düşüyor:** gönderen alan adında DKIM yok, sunucunun ters DNS'i uyuşmuyor. İNSAN "şimdilik kalsın" dedi.
-- **Plesk eksikleri:** `docs/plesk-eksikler.md` (başındaki 07-11 notu neyin yapıldığını söyler) ve `docs/plesk-feature-parity.md`.
+- **Plesk eksikleri:** `docs/plesk-feature-parity.md` (162 ID ve eksikler listesi tek belgede).
 - **Eski notlar:** `plan.md`, `todo.md`, `docs/ui-plan.md` ve `docs/history/checkpoint-2026-10-12.md` 9–12 Ekim durumunu anlatır. İçerikleri (özellik ve kabul listeleri) hâlâ başvuru, ama "güncel durum" satırları eskidir.
 
 ## 9. Kişiler ve iletişim
