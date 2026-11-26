@@ -1,6 +1,6 @@
 # YunPanel — Plesk UI/UX planı
 
-24 Ekim 2026 Güncellemesi: Kullanıcı kararıyla eski Ember (bej/turuncu, 22px yuvarlak, 4 katmanlı CSS) görünümü terk edilmiştir. Yeni arayüz **Shadcn UI** tabanlı (`zinc/slate` net kontrast, `1px` keskin kenarlıklar, tek birleşik üst bar), **ufak mikro-animasyonlar ve zarif ışık/spotlight efektleriyle** modernleştirilmiş, sade ve kullanımı kolay bir tasarıma geçecektir. Ana domain ve alt alan adları (subdomain) hem arayüzde hem dosya köklerinde (`<domain-root>/subdomains/<sub-label>`) hiyerarşik ağaç yapısında sunulur. Görsel tasarım kullanıcı tarafından onaylandıktan sonra birebir kodlanır. İlgili açık işler [plan.md](plan.md), fiziksel kabul [todo.md](todo.md).
+24 Ekim 2026 Güncellemesi: Kullanıcı kararıyla eski Ember (bej/turuncu, 22px yuvarlak, 4 katmanlı CSS) görünümü terk edilmiştir. Yeni arayüz **Shadcn UI** tabanlı (`zinc/slate` net kontrast, `1px` keskin kenarlıklar, tek birleşik üst bar), **ufak mikro-animasyonlar ve zarif ışık/spotlight efektleriyle** modernleştirilmiş, sade ve kullanımı kolay bir tasarıma geçecektir. Ana domain ve alt alan adları (subdomain) hem arayüzde hem dosya köklerinde (`<domain-root>/subdomains/<sub-label>`) hiyerarşik ağaç yapısında sunulur. Görsel tasarım kullanıcı tarafından onaylandıktan sonra birebir kodlanır. İlgili açık işler [plan.md](../plan.md), fiziksel kabul [todo.md](../todo.md).
 
 ## 1. Kabuk ve gezinme
 

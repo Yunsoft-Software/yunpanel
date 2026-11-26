@@ -10,9 +10,9 @@ Yunsoft'un Plesk Obsidian ekran düzenini, kullanım akışlarını ve özellikl
 | [docs/yapilanlar.md](docs/yapilanlar.md) | Biten işler, en yeni üstte |
 | [agents.md](agents.md) | Bağlayıcı çalışma ve güvenlik kuralları |
 | [plan.md](plan.md) | Öncelikli açık uygulama işleri |
-| [ui-plan.md](ui-plan.md) | Plesk ekran/akış sözleşmesi |
+| [ui-plan.md](docs/ui-plan.md) | Plesk ekran/akış sözleşmesi |
 | [todo.md](todo.md) | Gerçek host ve tarayıcı kabulü |
-| [Audit](docs/audit-2026-10-09.md) | Kanıtlı kusurlar ve inceleme sınırı |
+| [Audit](docs/history/audit-2026-10-09.md) | Kanıtlı kusurlar ve inceleme sınırı |
 | [162 özellik](docs/plesk-feature-parity.md) | Kaybolmayan tam hedef kapsam |
 | [Mimari](docs/architecture.md) | Kimlik, motor, işlem ve rol sınırı |
 | [Güvenlik](docs/security.md) | Auth, tenant, secret ve veri koruma |

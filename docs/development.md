@@ -1,6 +1,6 @@
 # YunPanel — Geliştirme özeti
 
-Node >=24.11.1 ve npm >=11. React/JavaScript/JSX; TypeScript/GitHub Actions yok. Önce agents.md, plan.md, ui-plan.md, gerçek audit ve ilgili kod. Aktif dal development; main'e yazma/deploy yok; her yazımdan önce HEAD/status kontrol edilir ve eşzamanlı değişiklik korunur. Commit mesajı [skip ci].
+Node >=24.11.1 ve npm >=11. React/JavaScript/JSX; TypeScript/GitHub Actions yok. Önce agents.md, plan.md, docs/ui-plan.md, docs/history/audit-2026-10-09.md ve ilgili kod. Aktif dal development; main'e yazma/deploy yok; her yazımdan önce HEAD/status kontrol edilir ve eşzamanlı değişiklik korunur. Commit mesajı [skip ci].
 
 - Kurulum: npm ci. Normal yerel çalışma: npm run dev veya ilgili dev:web/dev:api workspace komutu.
 - Local auth: npm run auth -- setup-token; API ile aynı env/state kullanılır. .env.example private production env değildir, otomatik yüklendiği varsayılmaz.

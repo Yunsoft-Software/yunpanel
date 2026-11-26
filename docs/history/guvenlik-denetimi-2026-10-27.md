@@ -1,5 +1,7 @@
 # Yetki denetimi — site rolleri (27-10-2026)
 
+> **Arşiv · 26 Kasım 2026.** Bu belge `docs/guvenlik-denetimi-2026-10-27.md` yolundan taşındı. Yazıldığı günün durumunu anlatır; güncel durum için [devir notu](../DEVIR.md).
+
 > Senior (Claude). Soru: müşteri, bayi ve site yöneticisi rolleri hangi sunucu geneli uçlara ulaşabiliyor?
 
 ## Neden gerekti

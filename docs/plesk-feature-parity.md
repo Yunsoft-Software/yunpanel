@@ -283,11 +283,11 @@ Her ID için uygulamada gerçek kaynak+mount edilmiş endpoint, kullanıcı akı
 
 TLS-01/06 → YP2-02; DB-01/02/03/04 → YP2-03/04; RUN-02 → YP2-05; WEB-07/UX-01 → YP2-06/08; BAK-08 → YP2-07; WEB/RUN/DOS/EML → YP2-09/10/11; UX-06/MON → YP2-12; ROL/HSP/PLN-08 → YP2-13. DB-05/06 için eski export/access/repair endpoint iddiaları kabul edilmedi; gerçek HTTP mount ve UI görevleri yeniden eşlenecek.
 
-[Kanıt ve sınırlamalar](audit-2026-10-09.md). Endpoint olmayan yol envanterde tamamlandı yazılmaz; katalogdaki source path tek başına yeterli değil.
+[Kanıt ve sınırlamalar](history/audit-2026-10-09.md). Endpoint olmayan yol envanterde tamamlandı yazılmaz; katalogdaki source path tek başına yeterli değil.
 
 ## Resmî kaynak kaydı
 
-Aşağıdaki S01–S27 önceki kapsam araştırmasının korunmuş referanslarıdır; hepsi bu tur yeniden açılmış gibi sunulmaz. Bu tur ziyaret edilen Plesk/Certbot/Let’s Encrypt sayfaları [araştırmada](audit-2026-10-09.md) ayrıca kayıtlıdır.
+Aşağıdaki S01–S27 önceki kapsam araştırmasının korunmuş referanslarıdır; hepsi bu tur yeniden açılmış gibi sunulmaz. Bu tur ziyaret edilen Plesk/Certbot/Let’s Encrypt sayfaları [araştırmada](history/audit-2026-10-09.md) ayrıca kayıtlıdır.
 
 - S01: [Kaynak](https://docs.plesk.com/en-US/obsidian/administrator-guide/70562/)
 - S02: [Kaynak](https://docs.plesk.com/en-US/obsidian/administrator-guide/customers-and-resellers.70622/)

@@ -15,9 +15,9 @@
 
 ## Önceki kabul matrisi
 
-Güncel devam noktası: [12 Ekim güvenli durma ve devam kaydı](docs/checkpoint-2026-10-12.md). Kullanıcı isteğiyle çalışma durdu; `.28` paket `0.3.0-2026101141`, 8143/8143 kaynak testi, native queue/recovery temiz. Kalan test kaynakları, commitlenmemiş dilimler ve kabul sınırları bu kayıtta; aşağıdaki eski ara sonuçlar güncel kabul diye kullanılmaz.
+Güncel devam noktası: [12 Ekim güvenli durma ve devam kaydı](docs/history/checkpoint-2026-10-12.md). Kullanıcı isteğiyle çalışma durdu; `.28` paket `0.3.0-2026101141`, 8143/8143 kaynak testi, native queue/recovery temiz. Kalan test kaynakları, commitlenmemiş dilimler ve kabul sınırları bu kayıtta; aşağıdaki eski ara sonuçlar güncel kabul diye kullanılmaz.
 
-9–10 Ekim 2026. Aşağıdaki tam kabul kapıları açık; önceki checkbox veya Code Factory DONE kanıt değildir. Kullanıcı bu tur `.28` üzerinde izole gerçek kur/deneyip/kaldır testlerini açıkça onayladı. 10 Ekim ürün geliştirmesi onaylandı ve başladı; 11 Ekim yalnız `.28` temiz OS/YunPanel kurulumu ayrıca onaylandı ve tamamlandı. Başka hedef veya yeni deployment kapsamı ayrı onaya tabidir. `.44` kesinlikle kullanılmaz. Gerçek test sonuçları ve kapı sınırları [audit](docs/audit-2026-10-09.md) içindedir; geçen alt test bütün kapıyı kapatmaz.
+9–10 Ekim 2026. Aşağıdaki tam kabul kapıları açık; önceki checkbox veya Code Factory DONE kanıt değildir. Kullanıcı bu tur `.28` üzerinde izole gerçek kur/deneyip/kaldır testlerini açıkça onayladı. 10 Ekim ürün geliştirmesi onaylandı ve başladı; 11 Ekim yalnız `.28` temiz OS/YunPanel kurulumu ayrıca onaylandı ve tamamlandı. Başka hedef veya yeni deployment kapsamı ayrı onaya tabidir. `.44` kesinlikle kullanılmaz. Gerçek test sonuçları ve kapı sınırları [audit](docs/history/audit-2026-10-09.md) içindedir; geçen alt test bütün kapıyı kapatmaz.
 
 Her senaryo: kaynak commit, çalışan API release, web asset/hash, tarih, rol, site/runtime, viewport, adımlar, beklenen/gerçek sonuç, okunabilir artifact ve fiziksel çıktı. Test parolası/cookie/token/private key raporda bulunmaz. Negatif, hata, restart ve rollback ayrı kaydedilir. Bu tur mutation izni var; yeni ortam veya mevcut kullanıcı verisini değiştiren kapsam için hedef/scope yeniden doğrulanır.
 

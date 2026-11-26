@@ -1,6 +1,6 @@
 # YunPanel — Mimari özeti
 
-9 Ekim 2026. Plesk Obsidian ekran/iş akışı/özellik eşdeğerliği; mevcut altyapı üzerinde. Açık uygulama [plan](../plan.md), gerçek durum [audit](audit-2026-10-09.md), kabul [todo](../todo.md).
+9 Ekim 2026. Plesk Obsidian ekran/iş akışı/özellik eşdeğerliği; mevcut altyapı üzerinde. Açık uygulama [plan](../plan.md), gerçek durum [audit](history/audit-2026-10-09.md), kabul [todo](../todo.md).
 
 - React + JavaScript/JSX, React Router, ortak PanelKit/tasarım tokenları. TypeScript, paralel UI veya browser prompt/alert yok.
 - Node >=24.11.1, npm >=11; mevcut native Node backend ve adapterlar. Repodaki Directus/YunCMS seçimi talimat olmadan değiştirilmez; bu incelemede YunPanel'in kendi backend'i esas alındı.

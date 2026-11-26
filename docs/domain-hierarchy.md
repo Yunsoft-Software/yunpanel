@@ -6,4 +6,4 @@ Website identity is independent from hostname/domain IDs. Website kalıcı UUID 
 - Bir Application sessizce birden çok Website'ye bağlanmaz; dedicated user/root drift startup'ta engeldir. Proxy için var olmayan Unix kullanıcı uydurulmaz.
 - Legacy unbound Domain yalnız exact Website ve preview/migration kurallarıyla bağlanır. General rebind/move açık impact, backup ve rollback ister; hostname/certificate/user/desired-applied revisions korunur.
 - Site create preview/apply aynı input ve digest'i kullanır. Metadata hazır site kanıtı değildir. Customer/reseller kapsamı tüm kaynaklarda backend'de uygulanır.
-- Domain gibi davranan websiteId route parametresi yeni resolver görevinde düzeltilecek; veri kimlikleri yeniden atanmayacak. [Analiz](audit-2026-10-09.md), [UI](../ui-plan.md), [mimari](architecture.md).
+- Domain gibi davranan websiteId route parametresi yeni resolver görevinde düzeltilecek; veri kimlikleri yeniden atanmayacak. [Analiz](history/audit-2026-10-09.md), [UI](ui-plan.md), [mimari](architecture.md).

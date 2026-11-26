@@ -16715,7 +16715,7 @@ test('Source contract RS-02e/RS-05 gerçek kabul: Node24/npm11, Owner + iki rese
   }
 
   // 8. Documentary Integrity Preserved Pending Independent Integration
-  const uiPlanContent = await readFile(path.resolve(import.meta.dirname, '../../../ui-plan.md'), 'utf8');
+  const uiPlanContent = await readFile(path.resolve(import.meta.dirname, '../../../docs/ui-plan.md'), 'utf8');
   await assertAcceptanceGateDocumented('T-ROLES');
 
 });
@@ -17436,7 +17436,7 @@ test('Source contract AN-03 kabul: Node24/npm11 tam check ve güncel head ile ge
   }
 
   // 12. Documentary Integrity Preserved Pending Independent Integration
-  const uiPlanDoc = await readFile(path.resolve(import.meta.dirname, '../../../ui-plan.md'), 'utf8');
+  const uiPlanDoc = await readFile(path.resolve(import.meta.dirname, '../../../docs/ui-plan.md'), 'utf8');
   await assertAcceptanceGateDocumented('T-JOBS');
 
 });
@@ -18367,7 +18367,7 @@ test('Source contract BACKUP-UI-03/04: mevcut senkron backup/restore motorunu du
   }
 
   // 13. Documentary Integrity Preserved Pending Independent Integration
-  const uiPlanDoc = await readFile(path.resolve(import.meta.dirname, '../../../ui-plan.md'), 'utf8');
+  const uiPlanDoc = await readFile(path.resolve(import.meta.dirname, '../../../docs/ui-plan.md'), 'utf8');
   await assertAcceptanceGateDocumented('T-BACKUP');
 
 });
@@ -18908,7 +18908,7 @@ test('Source contract CRON-UI: Node24/npm11 tam lint/test/build, gerçek Owner/S
   assert.equal(cronErrorMessage({ code: 'cron_forbidden' }), 'Bu siteye erişim izni veya oturum geçerliliği kayboldu.');
 
   // 8. Documentary Integrity Preserved Pending Independent Integration
-  const uiPlanDoc = await readFile(path.resolve(import.meta.dirname, '../../../ui-plan.md'), 'utf8');
+  const uiPlanDoc = await readFile(path.resolve(import.meta.dirname, '../../../docs/ui-plan.md'), 'utf8');
   await assertAcceptanceGateDocumented('T-VISUAL');
 
 });
@@ -19606,7 +19606,7 @@ test('Source contract Files: Hedef Node24/npm11 tam React/Vite build; gerçek ta
   assert.equal(sslContactEmail(noAddressSess), '');
 
   // 8. Documentary Integrity Preserved Pending Independent Integration
-  const uiPlanDoc = await readFile(path.resolve(import.meta.dirname, '../../../ui-plan.md'), 'utf8');
+  const uiPlanDoc = await readFile(path.resolve(import.meta.dirname, '../../../docs/ui-plan.md'), 'utf8');
   await assertAcceptanceGateDocumented('T-VISUAL');
   await assertAcceptanceGateDocumented('T-VISUAL');
 
@@ -20116,7 +20116,7 @@ test('Source contract UX-PL-03/04/06: Domain/subdomain/alias görevlerinin kalan
   const rootPlanDoc = await readFile(path.resolve(import.meta.dirname, '../../../plan.md'), 'utf8');
   assert.match(rootPlanDoc, /YP2-02/);
 
-  const uiPlanDoc = await readFile(path.resolve(import.meta.dirname, '../../../ui-plan.md'), 'utf8');
+  const uiPlanDoc = await readFile(path.resolve(import.meta.dirname, '../../../docs/ui-plan.md'), 'utf8');
   await assertAcceptanceGateDocumented('T-VISUAL');
 
 });
@@ -21094,7 +21094,7 @@ test('Source contract RS-02–05 kalan: phpMyAdmin panel-bound site session, lon
   }
 
   // 9. Documentary Integrity Preserved Pending Independent Integration
-  const uiPlanContent = await readFile(path.resolve(import.meta.dirname, '../../../ui-plan.md'), 'utf8');
+  const uiPlanContent = await readFile(path.resolve(import.meta.dirname, '../../../docs/ui-plan.md'), 'utf8');
   await assertAcceptanceGateDocumented('T-ROLES');
 
 });

@@ -73,7 +73,7 @@ Yunsoft'un kendi hosting paneli: Plesk Obsidian'ın ekran düzeni, iş akışlar
 - **Website Copying:** sıradaki özellik. Tasarım görüşmesi başladı, karar yok. Plesk'teki gibi bir siteyi aynı sunucudaki başka bir siteye kopyalama; dosyalar ve isteğe bağlı veritabanları.
 - **Uyarı e-postaları spama düşüyor:** gönderen alan adında DKIM yok, sunucunun ters DNS'i uyuşmuyor. İNSAN "şimdilik kalsın" dedi.
 - **Plesk eksikleri:** `docs/plesk-eksikler.md` (başındaki 07-11 notu neyin yapıldığını söyler) ve `docs/plesk-feature-parity.md`.
-- **Eski notlar:** `plan.md`, `todo.md`, `ui-plan.md` ve `docs/checkpoint-2026-10-12.md` 9–12 Ekim durumunu anlatır. İçerikleri (özellik ve kabul listeleri) hâlâ başvuru, ama "güncel durum" satırları eskidir.
+- **Eski notlar:** `plan.md`, `todo.md`, `docs/ui-plan.md` ve `docs/history/checkpoint-2026-10-12.md` 9–12 Ekim durumunu anlatır. İçerikleri (özellik ve kabul listeleri) hâlâ başvuru, ama "güncel durum" satırları eskidir.
 
 ## 9. Kişiler ve iletişim
 - İNSAN (proje sahibi) kullanıcıyla Türkçe konuşulur. Kod, tanımlayıcılar ve kod yorumları İngilizcedir.

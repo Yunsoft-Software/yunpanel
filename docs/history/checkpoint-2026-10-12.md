@@ -1,5 +1,7 @@
 # YunPanel — 12 Ekim 2026 güvenli durma ve devam kaydı
 
+> **Arşiv · 26 Kasım 2026.** Bu belge `docs/checkpoint-2026-10-12.md` yolundan taşındı. Yazıldığı günün durumunu anlatır; güncel durum için [devir notu](../DEVIR.md).
+
 Kullanıcı çalışmanın uygun noktada sonlandırılmasını istedi. Geliştirme ve yeni native mutation burada durduruldu. Bu kayıt, plan/todo içindeki daha eski ara sonuçların güncel devam noktasıdır; bütün kabul kapılarının kapandığı anlamına gelmez.
 
 ## Durulan durum
