@@ -59,27 +59,9 @@ import {
   assertNoResellerBillingPollution,
   assertResellerBillingDeferred,
   assertPreserveLinuxTenantIsolation,
-  OsEquivalenceError,
-  ExternalIntegrationError,
   ResellerBillingDeferredError,
   LinuxIsolationViolationError,
-  WindowsPlatformAdapter,
-  IisWebAdapter,
-  DotNetRuntimeAdapter,
-  MssqlDatabaseAdapter,
-  NtfsPermissionAdapter,
-  WindowsMailDnsAdapter,
-  CommercialCertificateAdapter,
-  SitejetBuilderAdapter,
-  PremiumSecurityAdapter,
-  PremiumBackupAdapter,
-  PremiumToolkitAdapter,
-  DomainRegistrarAdapter,
-  createDefaultOsAdapters,
-  createDefaultExternalAdapters,
-  getOsEquivalenceAdapter,
   listOsEquivalenceAdapters,
-  getExternalParityAdapter,
   listExternalParityAdapters,
   listDeferredBillingItems,
   mountOsExternalParityRoutes,
@@ -7787,33 +7769,6 @@ test('Source contract PAR-05: Windows OS equivalence boundaries (WIN-01..06) fai
     assert.equal(line.linuxIsolationPreserved, true, 'Linux tenant isolation must be preserved');
   }
 
-  // Verify adapter contract methods throw OsEquivalenceError (fail-closed) on Linux host
-  const osAdapters = createDefaultOsAdapters();
-  await assert.rejects(
-    () => osAdapters['WIN-01'].getServiceStatus('W3SVC'),
-    (err) => err instanceof OsEquivalenceError && err.code === 'windows_platform_unsupported' && err.status === 501,
-  );
-  await assert.rejects(
-    () => osAdapters['WIN-02'].createSite({ siteName: 'win.local' }),
-    (err) => err instanceof OsEquivalenceError && err.code === 'windows_platform_unsupported',
-  );
-  await assert.rejects(
-    () => osAdapters['WIN-03'].configureRuntime('site-1', 'net8.0'),
-    (err) => err instanceof OsEquivalenceError,
-  );
-  await assert.rejects(
-    () => osAdapters['WIN-04'].createDatabase('win_db'),
-    (err) => err instanceof OsEquivalenceError,
-  );
-  await assert.rejects(
-    () => osAdapters['WIN-05'].setAcl('C:\\inetpub', 'IUSR', 'FullControl'),
-    (err) => err instanceof OsEquivalenceError,
-  );
-  await assert.rejects(
-    () => osAdapters['WIN-06'].createMailbox('win.local', 'admin', 500),
-    (err) => err instanceof OsEquivalenceError,
-  );
-
   // 2. Linux Tenant Isolation Preservation
   const ownerActor = { user: { id: 'owner-e2e', role: 'owner', active: true } };
   const customerActor = {
@@ -7841,44 +7796,6 @@ test('Source contract PAR-05: Windows OS equivalence boundaries (WIN-01..06) fai
     assert.equal(line.status, 'external_unconfigured_fail_closed');
     assert.equal(line.requiresConfig, true);
   }
-
-  const unconfiguredAdapters = createDefaultExternalAdapters();
-  await assert.rejects(
-    () => unconfiguredAdapters['EXT-CERT-01'].requestOrder({ domain: 'shop.net' }),
-    (err) => err instanceof ExternalIntegrationError && err.code === 'commercial_certificate_unconfigured' && err.status === 501,
-  );
-  await assert.rejects(
-    () => unconfiguredAdapters['EXT-BUILD-01'].createBuilderSession({ siteId: 's1', domain: 's1.com' }),
-    (err) => err instanceof ExternalIntegrationError && err.code === 'sitebuilder_unconfigured' && err.status === 501,
-  );
-  await assert.rejects(
-    () => unconfiguredAdapters['EXT-SEC-01'].scheduleMalwareScan({ siteId: 's1' }),
-    (err) => err instanceof ExternalIntegrationError && err.code === 'premium_security_unconfigured' && err.status === 501,
-  );
-  await assert.rejects(
-    () => unconfiguredAdapters['EXT-BAK-01'].registerRemoteVault({ provider: 'acronis', vaultName: 'V1' }),
-    (err) => err instanceof ExternalIntegrationError && err.code === 'premium_backup_unconfigured' && err.status === 501,
-  );
-  await assert.rejects(
-    () => unconfiguredAdapters['EXT-TOOL-01'].prepareSmartUpdate({ siteId: 's1' }),
-    (err) => err instanceof ExternalIntegrationError && err.code === 'premium_toolkit_unconfigured' && err.status === 501,
-  );
-  await assert.rejects(
-    () => unconfiguredAdapters['EXT-REG-01'].checkDomainAvailability('shop.net'),
-    (err) => err instanceof ExternalIntegrationError && err.code === 'registrar_unconfigured' && err.status === 501,
-  );
-
-  // Configured external adapter deterministic lifecycle execution
-  const configuredAdapters = createDefaultExternalAdapters({
-    'EXT-CERT-01': { apiKey: 'live-key-1' },
-    'EXT-BUILD-01': { webhookSecret: 'secret-sig-1' },
-    'EXT-REG-01': { apiKey: 'reg-key-1' },
-  });
-  const certOrder = await configuredAdapters['EXT-CERT-01'].requestOrder({ domain: 'test.com' });
-  assert.ok(certOrder.orderId);
-  assert.equal(certOrder.status, 'pending_validation');
-  const regAvail = await configuredAdapters['EXT-REG-01'].checkDomainAvailability('test.com');
-  assert.equal(regAvail.available, true);
 
   // 4. Reseller Billing and Subscription Automation Deferral
   const deferredList = listDeferredBillingItems();
@@ -8009,7 +7926,6 @@ test('Source contract PAR-05: Windows OS equivalence boundaries (WIN-01..06) fai
   });
   assert.equal(cleanBillRes.status, 200);
   assert.equal(cleanBillRes.body.data.valid, true);
-
 });
 
 // ============================================================================

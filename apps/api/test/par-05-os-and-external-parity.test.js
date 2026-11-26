@@ -5,32 +5,13 @@ import express from 'express';
 import {
   OS_EQUIVALENCE_INVENTORY,
   EXTERNAL_PARITY_INVENTORY,
-  DEFERRED_BILLING_INVENTORY,
   FORBIDDEN_BILLING_KEYS,
   assertNoResellerBillingPollution,
   assertResellerBillingDeferred,
   assertPreserveLinuxTenantIsolation,
-  OsEquivalenceError,
-  ExternalIntegrationError,
   ResellerBillingDeferredError,
   LinuxIsolationViolationError,
-  WindowsPlatformAdapter,
-  IisWebAdapter,
-  DotNetRuntimeAdapter,
-  MssqlDatabaseAdapter,
-  NtfsPermissionAdapter,
-  WindowsMailDnsAdapter,
-  CommercialCertificateAdapter,
-  SitejetBuilderAdapter,
-  PremiumSecurityAdapter,
-  PremiumBackupAdapter,
-  PremiumToolkitAdapter,
-  DomainRegistrarAdapter,
-  createDefaultOsAdapters,
-  createDefaultExternalAdapters,
-  getOsEquivalenceAdapter,
   listOsEquivalenceAdapters,
-  getExternalParityAdapter,
   listExternalParityAdapters,
   listDeferredBillingItems,
   mountOsExternalParityRoutes,
@@ -55,117 +36,6 @@ test('PAR-05 Acceptance 1 & 2: Windows OS equivalence lines fail-closed and enfo
     assert.equal(line.linuxIsolationPreserved, true);
     assert.ok(line.methods.length > 0);
   }
-
-  // Verify adapter classes instantiate and fail-closed when called on Linux/Ubuntu
-  const adapters = createDefaultOsAdapters();
-
-  // WIN-01: WindowsPlatformAdapter
-  const win01 = adapters['WIN-01'];
-  assert.ok(win01 instanceof WindowsPlatformAdapter);
-  await assert.rejects(
-    () => win01.getServiceStatus('W3SVC'),
-    (err) => err instanceof OsEquivalenceError && err.code === 'windows_platform_unsupported' && err.status === 501,
-  );
-  await assert.rejects(
-    () => win01.startService('MSSQLSERVER'),
-    (err) => err instanceof OsEquivalenceError && err.code === 'windows_platform_unsupported',
-  );
-  await assert.rejects(
-    () => win01.stopService('W3SVC'),
-    (err) => err instanceof OsEquivalenceError && err.code === 'windows_platform_unsupported',
-  );
-  await assert.rejects(
-    () => win01.getSystemMetrics(),
-    (err) => err instanceof OsEquivalenceError && err.code === 'windows_platform_unsupported',
-  );
-
-  // WIN-02: IisWebAdapter
-  const win02 = adapters['WIN-02'];
-  assert.ok(win02 instanceof IisWebAdapter);
-  await assert.rejects(
-    () => win02.createSite({ siteName: 'win-site.com', docroot: 'C:\\inetpub\\wwwroot' }),
-    (err) => err instanceof OsEquivalenceError && err.code === 'windows_platform_unsupported' && err.message.includes('IIS'),
-  );
-  await assert.rejects(
-    () => win02.createAppPool('DefaultAppPool', { managedRuntimeVersion: 'v4.0' }),
-    (err) => err instanceof OsEquivalenceError,
-  );
-  await assert.rejects(
-    () => win02.createVirtualDirectory('win-site.com', { path: '/api', physicalPath: 'C:\\inetpub\\api' }),
-    (err) => err instanceof OsEquivalenceError,
-  );
-  await assert.rejects(
-    () => win02.bindCertificate('win-site.com', 'AB:CD:EF'),
-    (err) => err instanceof OsEquivalenceError,
-  );
-
-  // WIN-03: DotNetRuntimeAdapter
-  const win03 = adapters['WIN-03'];
-  assert.ok(win03 instanceof DotNetRuntimeAdapter);
-  await assert.rejects(
-    () => win03.configureRuntime('site-win', 'net8.0', { enableKestrel: true }),
-    (err) => err instanceof OsEquivalenceError && err.code === 'windows_platform_unsupported',
-  );
-  await assert.rejects(
-    () => win03.recycleAppPool('site-win-pool'),
-    (err) => err instanceof OsEquivalenceError,
-  );
-  await assert.rejects(
-    () => win03.listClrVersions(),
-    (err) => err instanceof OsEquivalenceError,
-  );
-
-  // WIN-04: MssqlDatabaseAdapter
-  const win04 = adapters['WIN-04'];
-  assert.ok(win04 instanceof MssqlDatabaseAdapter);
-  await assert.rejects(
-    () => win04.createDatabase('production_db', 'SQL_Latin1_General_CP1_CI_AS'),
-    (err) => err instanceof OsEquivalenceError && err.code === 'windows_platform_unsupported',
-  );
-  await assert.rejects(
-    () => win04.createUser('db_user', 'SecurePass123!', 'production_db'),
-    (err) => err instanceof OsEquivalenceError,
-  );
-  await assert.rejects(
-    () => win04.grantPermissions('production_db', 'db_user', ['db_owner']),
-    (err) => err instanceof OsEquivalenceError,
-  );
-  await assert.rejects(
-    () => win04.createBackup('production_db', 'C:\\backups\\db.bak'),
-    (err) => err instanceof OsEquivalenceError,
-  );
-
-  // WIN-05: NtfsPermissionAdapter
-  const win05 = adapters['WIN-05'];
-  assert.ok(win05 instanceof NtfsPermissionAdapter);
-  await assert.rejects(
-    () => win05.setAcl('C:\\vhosts\\site1', 'IIS_IUSRS', 'ReadAndExecute', 'ContainerInherit'),
-    (err) => err instanceof OsEquivalenceError && err.code === 'windows_platform_unsupported',
-  );
-  await assert.rejects(
-    () => win05.getAcl('C:\\vhosts\\site1'),
-    (err) => err instanceof OsEquivalenceError,
-  );
-  await assert.rejects(
-    () => win05.isolateTenantFolder('C:\\vhosts\\site1', 'S-1-5-21-tenant-sid'),
-    (err) => err instanceof OsEquivalenceError,
-  );
-
-  // WIN-06: WindowsMailDnsAdapter
-  const win06 = adapters['WIN-06'];
-  assert.ok(win06 instanceof WindowsMailDnsAdapter);
-  await assert.rejects(
-    () => win06.createMailbox('domain.com', 'info', 1024),
-    (err) => err instanceof OsEquivalenceError && err.code === 'windows_platform_unsupported',
-  );
-  await assert.rejects(
-    () => win06.createDnsZone('domain.com'),
-    (err) => err instanceof OsEquivalenceError,
-  );
-  await assert.rejects(
-    () => win06.getServiceHealth(),
-    (err) => err instanceof OsEquivalenceError,
-  );
 });
 
 // ============================================================================
@@ -229,207 +99,17 @@ test('PAR-05 Acceptance 2: Linux tenant isolation is preserved without weakening
 // 3. EXTERNAL LIFECYCLE CONTRACTS (CERT, BUILDER, SEC, BAK, TOOLKIT, REG)
 // ============================================================================
 
-test('PAR-05 Acceptance 3: External lifecycle contracts fail-closed when unconfigured', async () => {
-  const unconfiguredAdapters = createDefaultExternalAdapters();
-
-  // Commercial certificates
-  const certAdapter = unconfiguredAdapters['EXT-CERT-01'];
-  assert.equal(certAdapter.isConfigured(), false);
-  await assert.rejects(
-    () => certAdapter.requestOrder({ domain: 'example.com' }),
-    (err) => err instanceof ExternalIntegrationError && err.code === 'commercial_certificate_unconfigured' && err.status === 501,
+test('PAR-05 Acceptance 3: External lifecycle lines are listed as unconfigured and fail closed', () => {
+  const externalLines = listExternalParityAdapters();
+  assert.deepEqual(
+    externalLines.map((line) => line.id),
+    ['EXT-CERT-01', 'EXT-BUILD-01', 'EXT-SEC-01', 'EXT-BAK-01', 'EXT-TOOL-01', 'EXT-REG-01'],
   );
-  await assert.rejects(
-    () => certAdapter.checkOrderStatus('order-1'),
-    (err) => err instanceof ExternalIntegrationError && err.code === 'commercial_certificate_unconfigured',
-  );
-
-  // Sitejet / Site-builder
-  const builderAdapter = unconfiguredAdapters['EXT-BUILD-01'];
-  assert.equal(builderAdapter.isConfigured(), false);
-  await assert.rejects(
-    () => builderAdapter.createBuilderSession({ siteId: 'site-1', domain: 'site1.com' }),
-    (err) => err instanceof ExternalIntegrationError && err.code === 'sitebuilder_unconfigured' && err.status === 501,
-  );
-  await assert.rejects(
-    () => builderAdapter.handlePublishWebhook({}, 'sig'),
-    (err) => err instanceof ExternalIntegrationError && err.code === 'sitebuilder_unconfigured',
-  );
-
-  // Premium security
-  const secAdapter = unconfiguredAdapters['EXT-SEC-01'];
-  assert.equal(secAdapter.isConfigured(), false);
-  await assert.rejects(
-    () => secAdapter.scheduleMalwareScan({ siteId: 'site-1' }),
-    (err) => err instanceof ExternalIntegrationError && err.code === 'premium_security_unconfigured' && err.status === 501,
-  );
-  await assert.rejects(
-    () => secAdapter.quarantineFile({ filePath: '/tmp/bad.php' }),
-    (err) => err instanceof ExternalIntegrationError && err.code === 'premium_security_unconfigured',
-  );
-
-  // Premium backup
-  const bakAdapter = unconfiguredAdapters['EXT-BAK-01'];
-  assert.equal(bakAdapter.isConfigured(), false);
-  await assert.rejects(
-    () => bakAdapter.registerRemoteVault({ provider: 'acronis', vaultName: 'Vault1' }),
-    (err) => err instanceof ExternalIntegrationError && err.code === 'premium_backup_unconfigured' && err.status === 501,
-  );
-  await assert.rejects(
-    () => bakAdapter.scheduleVaultReplication({ snapshotId: 'snap-1', vaultId: 'v1' }),
-    (err) => err instanceof ExternalIntegrationError && err.code === 'premium_backup_unconfigured',
-  );
-
-  // Premium toolkit
-  const toolAdapter = unconfiguredAdapters['EXT-TOOL-01'];
-  assert.equal(toolAdapter.isConfigured(), false);
-  await assert.rejects(
-    () => toolAdapter.prepareSmartUpdate({ siteId: 'site-1' }),
-    (err) => err instanceof ExternalIntegrationError && err.code === 'premium_toolkit_unconfigured' && err.status === 501,
-  );
-
-  // Domain registrar
-  const regAdapter = unconfiguredAdapters['EXT-REG-01'];
-  assert.equal(regAdapter.isConfigured(), false);
-  await assert.rejects(
-    () => regAdapter.checkDomainAvailability('example.com'),
-    (err) => err instanceof ExternalIntegrationError && err.code === 'registrar_unconfigured' && err.status === 501,
-  );
-  await assert.rejects(
-    () => regAdapter.registerDomain({ domain: 'example.com', contactInfo: {} }),
-    (err) => err instanceof ExternalIntegrationError && err.code === 'registrar_unconfigured',
-  );
-});
-
-test('PAR-05 Acceptance 3: Configured external lifecycle adapters execute complete deterministic lifecycle contracts', async () => {
-  const configuredAdapters = createDefaultExternalAdapters({
-    'EXT-CERT-01': { apiKey: 'test-digicert-key', partnerId: 'partner-99' },
-    'EXT-BUILD-01': { webhookSecret: 'secret-hmac-123', vendorApi: 'https://builder.example.com' },
-    'EXT-SEC-01': { licenseKey: 'imunify-lic-key-abc' },
-    'EXT-BAK-01': { vaultToken: 'acronis-vault-token-xyz' },
-    'EXT-TOOL-01': { aiApiKey: 'smart-updates-token-555' },
-    'EXT-REG-01': { registrarUser: 'opensrs-user', registrarKey: 'opensrs-key' },
-  });
-
-  // 1. Commercial Certificate Lifecycle
-  const certAdapter = configuredAdapters['EXT-CERT-01'];
-  assert.equal(certAdapter.isConfigured(), true);
-  const order = await certAdapter.requestOrder({
-    domain: 'shop.example.com',
-    sans: ['www.shop.example.com'],
-    validationMethod: 'dns-01',
-    certType: 'ov_commercial',
-  });
-  assert.ok(order.orderId);
-  assert.equal(order.status, 'pending_validation');
-  assert.equal(order.dcvRequirements.method, 'dns-01');
-
-  const check = await certAdapter.checkOrderStatus(order.orderId);
-  assert.equal(check.orderId, order.orderId);
-
-  const cancelResult = await certAdapter.cancelOrder(order.orderId);
-  assert.equal(cancelResult.status, 'cancelled');
-
-  const revokeResult = await certAdapter.revokeCertificate({ serialNumber: '11:22:33:44:55', reason: 'key_compromise' });
-  assert.equal(revokeResult.status, 'revoked');
-  assert.equal(revokeResult.reason, 'key_compromise');
-
-  // 2. Sitejet / Site-Builder Lifecycle
-  const builderAdapter = configuredAdapters['EXT-BUILD-01'];
-  assert.equal(builderAdapter.isConfigured(), true);
-  const session = await builderAdapter.createBuilderSession({
-    siteId: 'site-100',
-    domain: 'site100.com',
-    userEmail: 'client@site100.com',
-  });
-  assert.ok(session.sessionId);
-  assert.ok(session.editorUrl.includes(session.sessionId));
-
-  // Valid webhook publication with matching signature
-  const publish = await builderAdapter.handlePublishWebhook(
-    { siteId: 'site-100', files: ['index.html', 'style.css'] },
-    'secret-hmac-123',
-  );
-  assert.equal(publish.succeeded, true);
-  assert.equal(publish.siteId, 'site-100');
-  assert.equal(publish.publishedArtifactsCount, 2);
-
-  // Invalid webhook signature fails closed (403)
-  await assert.rejects(
-    () => builderAdapter.handlePublishWebhook({ siteId: 'site-100' }, 'bad-signature'),
-    (err) => err instanceof ExternalIntegrationError && err.code === 'invalid_signature' && err.status === 403,
-  );
-
-  // 3. Premium Security Lifecycle
-  const secAdapter = configuredAdapters['EXT-SEC-01'];
-  const scan = await secAdapter.scheduleMalwareScan({ siteId: 'site-100', deepScan: true });
-  assert.ok(scan.scanId);
-  assert.equal(scan.deepScan, true);
-
-  const scanCheck = await secAdapter.getScanResults(scan.scanId);
-  assert.equal(scanCheck.scanId, scan.scanId);
-
-  const quarantine = await secAdapter.quarantineFile({ filePath: '/var/www/vhosts/site-100/bad.php' });
-  assert.equal(quarantine.quarantined, true);
-  assert.equal(quarantine.quarantineVault, '/var/lib/yunpanel/security-quarantine');
-
-  const defs = await secAdapter.updateDefinitions();
-  assert.equal(defs.definitionsUpdated, true);
-
-  // 4. Premium Backup Vaults Lifecycle
-  const bakAdapter = configuredAdapters['EXT-BAK-01'];
-  const vault = await bakAdapter.registerRemoteVault({ provider: 'acronis', vaultName: 'EU-Vault-1' });
-  assert.ok(vault.vaultId);
-  assert.equal(vault.status, 'active');
-
-  const repl = await bakAdapter.scheduleVaultReplication({ snapshotId: 'snap-100', vaultId: vault.vaultId, retentionDays: 60 });
-  assert.ok(repl.replicationJobId);
-  assert.equal(repl.retentionDays, 60);
-
-  const integrity = await bakAdapter.verifyVaultIntegrity({ vaultId: vault.vaultId, snapshotId: 'snap-100' });
-  assert.equal(integrity.checksumMatches, true);
-
-  const restore = await bakAdapter.restoreFromVault({ snapshotId: 'snap-100', vaultId: vault.vaultId, targetSiteId: 'site-100' });
-  assert.ok(restore.restoreJobId);
-
-  // 5. Premium Toolkit & Smart Updates Lifecycle
-  const toolAdapter = configuredAdapters['EXT-TOOL-01'];
-  const smartPrep = await toolAdapter.prepareSmartUpdate({ siteId: 'site-100', plugins: ['woocommerce'], dryRun: false });
-  assert.ok(smartPrep.updateReceiptId);
-  assert.equal(smartPrep.readyForPromotion, true);
-
-  const regression = await toolAdapter.analyzeVisualRegression({ siteId: 'site-100', baselineSnapshotId: 'base-1', updatedSnapshotId: 'up-1' });
-  assert.equal(regression.regressionDetected, false);
-
-  const promo = await toolAdapter.promoteStagingToProduction({ siteId: 'site-100', updateReceiptId: smartPrep.updateReceiptId });
-  assert.equal(promo.promoted, true);
-  assert.equal(promo.rollbackCheckpointCreated, true);
-
-  // 6. Domain Registrar Lifecycle
-  const regAdapter = configuredAdapters['EXT-REG-01'];
-  const avail = await regAdapter.checkDomainAvailability('mynewbrand.net');
-  assert.equal(avail.available, true);
-
-  const reg = await regAdapter.registerDomain({
-    domain: 'mynewbrand.net',
-    years: 2,
-    contactInfo: { registrant: 'Alice' },
-    nameservers: ['ns1.yunpanel.internal', 'ns2.yunpanel.internal'],
-  });
-  assert.equal(reg.domain, 'mynewbrand.net');
-  assert.equal(reg.locked, true);
-
-  const renew = await regAdapter.renewDomain({ domain: 'mynewbrand.net', years: 1 });
-  assert.ok(renew.expiresAt);
-
-  const nsUpdate = await regAdapter.updateNameservers({ domain: 'mynewbrand.net', nameservers: ['ns3.yunpanel.internal'] });
-  assert.equal(nsUpdate.updated, true);
-
-  const dsSync = await regAdapter.setDnssecDsData('mynewbrand.net', [{ keyTag: 12345, algorithm: 13, digestType: 2, digest: 'ABCDEF' }]);
-  assert.equal(dsSync.synced, true);
-
-  const authCode = await regAdapter.getAuthCode('mynewbrand.net');
-  assert.ok(authCode.authCode.startsWith('EPP-'));
+  for (const line of externalLines) {
+    assert.equal(line.status, 'external_unconfigured_fail_closed');
+    assert.equal(typeof line.category, 'string');
+    assert.ok(line.methods.length > 0);
+  }
 });
 
 // ============================================================================
@@ -589,6 +269,31 @@ test('PAR-05 Acceptance 5: Express routes enforce authentication, tenant role fi
   });
   assert.equal(execExtRes.status, 501);
   assert.equal(execExtRes.body.error.code, 'commercial_certificate_unconfigured');
+
+  // Every listed OS method and external method answers with the fixed fail-closed response
+  for (const line of Object.values(OS_EQUIVALENCE_INVENTORY)) {
+    for (const method of line.methods) {
+      const res = await request('POST', `/api/system/parity/os/${line.id}/execute`, { method, args: [] });
+      assert.equal(res.status, 501, `${line.id}.${method}`);
+      assert.equal(res.body.error.code, 'windows_platform_unsupported');
+    }
+  }
+  for (const line of Object.values(EXTERNAL_PARITY_INVENTORY)) {
+    for (const method of line.methods) {
+      const res = await request('POST', `/api/system/parity/external/${line.id}/execute`, { method, params: {} });
+      assert.equal(res.status, 501, `${line.id}.${method}`);
+      assert.equal(res.body.error.code, `${line.category}_unconfigured`);
+    }
+  }
+  const unknownMethodRes = await request('POST', '/api/system/parity/os/WIN-02/execute', { method: 'constructor' });
+  assert.equal(unknownMethodRes.status, 400);
+  assert.equal(unknownMethodRes.body.error.code, 'invalid_method');
+  const unknownExternalMethodRes = await request('POST', '/api/system/parity/external/EXT-REG-01/execute', { method: 'isConfigured' });
+  assert.equal(unknownExternalMethodRes.status, 400);
+  assert.equal(unknownExternalMethodRes.body.error.code, 'invalid_method');
+  const unknownLineRes = await request('POST', '/api/system/parity/external/EXT-NOPE-01/execute', { method: 'requestOrder' });
+  assert.equal(unknownLineRes.status, 404);
+  assert.equal(unknownLineRes.body.error.code, 'external_adapter_not_found');
 
   // 6. Validate billing endpoint rejects forbidden billing keys with 403
   const badBillingRes = await request('POST', '/api/system/parity/validate-billing', {
