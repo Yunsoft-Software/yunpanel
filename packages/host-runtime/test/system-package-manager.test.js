@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createSystemPackageManager } from '../src/index.js';
 import {
-  createSystemPackageManager,
   SystemPackageManagerError,
   systemPackageManagerInternals,
-} from '../src/index.js';
+} from '../src/system-package-manager.js';
 
 test('APT policy parsing reports installed and candidate YunPanel versions', () => {
   const state = systemPackageManagerInternals.packageState(systemPackageManagerInternals.parsePolicy(`

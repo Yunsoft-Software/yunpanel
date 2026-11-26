@@ -19,11 +19,11 @@ import {
   mailDkimTemplatePolicy,
   previewRspamdDkimSigningConfig,
 } from '@yunpanel/config-templates';
+import { createMailDkimActivator } from '../src/index.js';
 import {
-  createMailDkimActivator,
   MailDkimActivationError,
   mailDkimActivatorInternals,
-} from '../src/index.js';
+} from '../src/mail-dkim-activator.js';
 
 const PAIR = generateKeyPairSync('rsa', {
   modulusLength: 2048,

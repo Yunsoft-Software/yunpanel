@@ -13,11 +13,13 @@ import {
   sanitizeManagedRuleset,
   verifyDockerCoexistence,
   verifyCrowdsecCoexistence,
+  nftablesManagerInternals,
+} from '../src/index.js';
+import {
   inspectDockerFirewall,
   inspectCrowdsecFirewall,
   migrateRulesetToManagedScope,
-  nftablesManagerInternals,
-} from '../src/index.js';
+} from '../src/nftables-manager.js';
 
 const MOCK_LIVE_DOCKER_RULESET = `
 table ip filter {

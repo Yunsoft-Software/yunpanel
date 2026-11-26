@@ -10,11 +10,11 @@ import {
   mailTemplatePolicy,
   previewManagedMailSubmissionConfiguration,
 } from '@yunpanel/config-templates';
+import { createMailConfigBackupManager } from '../src/index.js';
 import {
-  createMailConfigBackupManager,
   MailConfigBackupError,
   mailConfigBackupInternals,
-} from '../src/index.js';
+} from '../src/mail-config-backup.js';
 
 const ARGON2ID_HASH = `$argon2id$v=19$m=65536,t=3,p=1$${Buffer.alloc(16, 3).toString('base64').replace(/=+$/, '')}$${Buffer.alloc(32, 4).toString('base64').replace(/=+$/, '')}`;
 

@@ -8,12 +8,12 @@ import test from 'node:test';
 import express from 'express';
 import {
   DockerComposeValidationError,
-  OsPlatformError,
   createDatabaseManager,
   createDockerComposeObserver,
-  databaseManagerInternals,
+} from '@yunpanel/host-runtime';
+import {
+  OsPlatformError,
   detectLinuxPlatform,
-  dockerComposeValidatorInternals,
   isSupportedPassengerPlatform,
   isSupportedPhpRepositoryLine,
   normalizeLinuxPlatform,
@@ -26,8 +26,12 @@ import {
   resolvePhpFpmPoolDirectory,
   resolvePhpFpmServiceUnit,
   resolvePhpFpmSocketDirectory,
+} from '../../../packages/host-runtime/src/os-platform.js';
+import { databaseManagerInternals } from '../../../packages/host-runtime/src/database-manager.js';
+import {
+  dockerComposeValidatorInternals,
   summarizeDockerComposeConfig,
-} from '@yunpanel/host-runtime';
+} from '../../../packages/host-runtime/src/docker-compose-validator.js';
 import { DatabaseHttpError, mountDatabaseRoutes } from '../src/database-http.js';
 import { createDockerComposeProjectRegistry } from '../src/docker-compose-project-registry.js';
 import { createDockerComposeEnvironmentRegistry } from '../src/docker-compose-environment-registry.js';

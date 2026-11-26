@@ -9,17 +9,19 @@ import {
   previewPhpMyAdminFpmPool,
   previewRoundcubeFpmPool,
 } from '@yunpanel/config-templates';
+import { createManagedServiceManager } from '../src/index.js';
 import {
-  createManagedServiceManager,
   createPassengerManager,
+  PassengerManagerError,
+  passengerManagerInternals,
+} from '../src/passenger-manager.js';
+import {
   detectLinuxPlatform,
   isSupportedPassengerPlatform,
   isSupportedPhpRepositoryLine,
   normalizeLinuxPlatform,
   OsPlatformError,
   parseOsReleaseText,
-  PassengerManagerError,
-  passengerManagerInternals,
   resolveDistroPackageName,
   resolveDistroUnitName,
   resolvePackageManagerCommands,
@@ -28,7 +30,7 @@ import {
   resolvePhpFpmPoolDirectory,
   resolvePhpFpmServiceUnit,
   resolvePhpFpmSocketDirectory,
-} from '../src/index.js';
+} from '../src/os-platform.js';
 import { createServiceUmaskManager } from '../src/service-umask-manager.js';
 
 async function withTempOsRelease(content, callback) {

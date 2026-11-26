@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createJournalLogReader, JournalLogReaderError } from '../src/index.js';
+import { createJournalLogReader } from '../src/index.js';
+import { JournalLogReaderError } from '../src/journal-log-reader.js';
 
 function entry({ cursor, message, priority = '6', timestamp = 1_788_739_200_000_000 }) {
   return JSON.stringify({ __CURSOR: cursor, __REALTIME_TIMESTAMP: String(timestamp), PRIORITY: priority, MESSAGE: message, _PID: '123' });

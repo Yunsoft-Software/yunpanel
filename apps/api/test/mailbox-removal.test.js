@@ -52,10 +52,8 @@ import {
 import {
   mountMailboxRoutes,
 } from '../src/mailbox-http.js';
-import {
-  createMailDataDeleteManager,
-  MailDataDeleteError,
-} from '@yunpanel/host-runtime';
+import { createMailDataDeleteManager } from '@yunpanel/host-runtime';
+import { MailDataDeleteError } from '../../../packages/host-runtime/src/mail-data-delete-manager.js';
 import {
   createSingleMailboxLifecycleCoordinator,
   assertNoDomainOrSiblingDisruption,

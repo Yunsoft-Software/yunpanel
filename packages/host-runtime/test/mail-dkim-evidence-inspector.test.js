@@ -6,10 +6,8 @@ import {
   mailDkimTemplatePolicy,
   previewRspamdDkimSigningConfig,
 } from '@yunpanel/config-templates';
-import {
-  createMailDkimEvidenceInspector,
-  mailDkimActivatorInternals,
-} from '../src/index.js';
+import { createMailDkimEvidenceInspector } from '../src/index.js';
+import { mailDkimActivatorInternals } from '../src/mail-dkim-activator.js';
 
 const pair = generateKeyPairSync('rsa', {
   modulusLength: 2048,

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { managedServicePolicy } from '../src/index.js';
+import { managedServicePolicy } from '../src/managed-service-manager.js';
 
 test('managed Dovecot service includes IMAP, LMTP, Sieve and SQLite packages', () => {
   const dovecot = managedServicePolicy.services.find((entry) => entry.id === 'dovecot');

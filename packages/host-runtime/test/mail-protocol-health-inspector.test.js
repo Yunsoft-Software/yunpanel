@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  createMailProtocolHealthInspector,
-  mailProtocolHealthInternals,
-} from '../src/index.js';
+import { createMailProtocolHealthInspector } from '../src/index.js';
+import { mailProtocolHealthInternals } from '../src/mail-protocol-health-inspector.js';
 
 function key(file, args) {
   return `${file} ${args.join(' ')}`;

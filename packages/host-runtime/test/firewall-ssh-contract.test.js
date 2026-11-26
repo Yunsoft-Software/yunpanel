@@ -4,10 +4,12 @@ import { nftablesTemplatePolicy } from '@yunpanel/config-templates';
 import {
   createNftablesManager,
   NftablesManagerError,
-  inspectSshListeners,
-  verifySshListenerContract,
   nftablesManagerInternals,
 } from '../src/index.js';
+import {
+  inspectSshListeners,
+  verifySshListenerContract,
+} from '../src/nftables-manager.js';
 
 test('PROD-01 (AC-1): resolves default SSH port from standardPorts.ssh when nftablesTemplatePolicy.defaultSshPort is undefined', () => {
   assert.equal(nftablesTemplatePolicy.defaultSshPort, undefined);

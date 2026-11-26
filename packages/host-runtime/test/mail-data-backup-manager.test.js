@@ -18,8 +18,8 @@ import test from 'node:test';
 import {
   createMailDataBackupManager,
   MailDataBackupError,
-  mailDataBackupInternals,
 } from '../src/index.js';
+import { mailDataBackupInternals } from '../src/mail-data-backup-manager.js';
 
 const CANONICAL_SOURCE = '/var/lib/yunpanel/mail/example.com/owner';
 const SNAPSHOT = 'a'.repeat(64);

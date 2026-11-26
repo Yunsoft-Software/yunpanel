@@ -11,10 +11,8 @@ import {
   previewManagedMailSubmissionConfiguration,
   renderDovecotQuotaPasswdFile,
 } from '@yunpanel/config-templates';
-import {
-  createMailConfigEvidenceInspector,
-  mailConfigBackupInternals,
-} from '../src/index.js';
+import { createMailConfigEvidenceInspector } from '../src/index.js';
+import { mailConfigBackupInternals } from '../src/mail-config-backup.js';
 
 const ARGON2ID_HASH = `$argon2id$v=19$m=65536,t=3,p=1$${Buffer.alloc(16, 31).toString('base64').replace(/=+$/, '')}$${Buffer.alloc(32, 32).toString('base64').replace(/=+$/, '')}`;
 const VMAIL_GID = 5000;

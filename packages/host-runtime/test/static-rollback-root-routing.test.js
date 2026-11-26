@@ -1,10 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  createStaticRollbackManager,
-  StaticRollbackError,
-  StaticRollbackRouterError,
-} from '../src/index.js';
+import { createStaticRollbackManager } from '../src/index.js';
+import { StaticRollbackError } from '../src/static-rollback-manager.js';
+import { StaticRollbackRouterError } from '../src/static-rollback-router.js';
 
 const APPLICATION_ID = '2f334b35-03ce-4aa0-a8e4-b2ad4f592541';
 const spec = Object.freeze({

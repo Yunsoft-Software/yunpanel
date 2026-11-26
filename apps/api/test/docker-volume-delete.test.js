@@ -11,8 +11,8 @@ import {
   createDockerComposeObserver,
   createDockerComposeValidator,
   createDockerVolumeManager,
-  dockerComposeManagerInternals,
 } from '@yunpanel/host-runtime';
+import { dockerComposeManagerInternals } from '../../../packages/host-runtime/src/docker-compose-manager.js';
 import { DOCKER_COMPOSE_OPERATIONS, OPERATIONS } from '@yunpanel/protocol';
 import { apiKeyActor, createApiKeyActorAuthorizer } from '../src/api-key-actor.js';
 import { createApiKeyStore } from '../src/api-key-store.js';

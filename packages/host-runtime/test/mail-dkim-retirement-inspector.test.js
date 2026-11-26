@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  createMailDkimRetirementInspector,
-  mailDkimRetirementInternals,
-} from '../src/index.js';
+import { createMailDkimRetirementInspector } from '../src/index.js';
+import { mailDkimRetirementInternals } from '../src/mail-dkim-retirement-inspector.js';
 import { mailDkimTemplatePolicy } from '@yunpanel/config-templates';
 
 const domain = 'example.com';

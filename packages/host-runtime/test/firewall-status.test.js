@@ -3,12 +3,14 @@ import test from 'node:test';
 import {
   createNftablesManager,
   NftablesManagerError,
+  nftablesManagerInternals,
+} from '../src/index.js';
+import {
   createFirewallStatusInspector,
   inspectFirewallStatus,
   FirewallStatusInspectorError,
   firewallStatusInspectorInternals,
-  nftablesManagerInternals,
-} from '../src/index.js';
+} from '../src/firewall-status-inspector.js';
 
 const MOCK_LIVE_RULESET = `table inet yunpanel {
   set crowdsec-blacklists {

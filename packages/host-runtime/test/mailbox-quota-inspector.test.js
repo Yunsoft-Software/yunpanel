@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createMailboxQuotaInspector } from '../src/index.js';
 import {
-  createMailboxQuotaInspector,
   MailboxQuotaInspectorError,
   parseDoveadmQuotaTab,
-} from '../src/index.js';
+} from '../src/mailbox-quota-inspector.js';
 
 const output = [
   'Quota name\tType\tValue\tLimit\t%',

@@ -3,8 +3,8 @@ import test from 'node:test';
 import {
   createMailQueueInspector,
   MailQueueInspectorError,
-  mailQueueInspectorInternals,
 } from '../src/index.js';
+import { mailQueueInspectorInternals } from '../src/mail-queue-inspector.js';
 
 function row(overrides = {}) {
   return JSON.stringify({

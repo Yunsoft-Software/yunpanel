@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createWebsiteCronManager } from '../src/index.js';
 import {
-  createWebsiteCronManager,
   WebsiteCronManagerError,
   websiteCronManagerInternals,
-} from '../src/index.js';
+} from '../src/website-cron-manager.js';
 
 const task = Object.freeze({
   taskId: '07b0be89-f855-4c61-8132-3a73eb39888b',

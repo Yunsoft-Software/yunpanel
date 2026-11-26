@@ -15,8 +15,8 @@ import test from 'node:test';
 import {
   createMailDataBackupManager,
   createMailDataDeleteManager,
-  MailDataDeleteError,
 } from '../src/index.js';
+import { MailDataDeleteError } from '../src/mail-data-delete-manager.js';
 import { mailboxAccessInternals } from '../src/mailbox-access-guard.js';
 
 const CANONICAL_SOURCE = '/var/lib/yunpanel/mail/example.com/owner';

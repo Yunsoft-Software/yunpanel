@@ -3,13 +3,15 @@ import assert from 'node:assert/strict';
 import { lstat, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { createPassengerSiteManager } from '@yunpanel/host-runtime';
 import {
-  createPassengerSiteManager,
   createWebsitePassengerEnvironmentManager,
+  WebsitePassengerEnvironmentError,
+} from '../../../packages/host-runtime/src/website-passenger-environment-manager.js';
+import {
   PassengerSiteManagerError,
   validatePassengerSetup,
-  WebsitePassengerEnvironmentError,
-} from '@yunpanel/host-runtime';
+} from '../../../packages/host-runtime/src/passenger-site-manager.js';
 import { renderPassengerSiteConfig } from '@yunpanel/config-templates';
 
 test('Passenger Runtime Validation Slice - Env, Log, Startup, Config Validation & Rollback', async (t) => {

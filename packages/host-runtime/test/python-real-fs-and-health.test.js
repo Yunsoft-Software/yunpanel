@@ -8,9 +8,9 @@ import { pythonApplicationUser, pythonServiceName } from '@yunpanel/config-templ
 import {
   createPythonRollbackManager,
   createPythonSiteManager,
-  PythonRollbackError,
-  PythonSiteManagerError,
 } from '../src/index.js';
+import { PythonRollbackError } from '../src/python-rollback-manager.js';
+import { PythonSiteManagerError } from '../src/python-site-manager.js';
 import { defaultWaitForPythonHealth, requestPythonHealth } from '../src/python-site-manager.js';
 
 const APP_ID = '340344cf-4e57-4f70-946a-3c6e919e951d';

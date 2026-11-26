@@ -14,10 +14,8 @@ import {
   renderDovecotQuotaPasswdFile,
   renderManagedMailSqlSeed,
 } from '@yunpanel/config-templates';
-import {
-  createMailConfigManager,
-  MailConfigManagerError,
-} from '../src/index.js';
+import { createMailConfigManager } from '../src/index.js';
+import { MailConfigManagerError } from '../src/mail-config-manager.js';
 
 const ARGON2ID_HASH = `$argon2id$v=19$m=65536,t=3,p=1$${Buffer.alloc(16, 7).toString('base64').replace(/=+$/, '')}$${Buffer.alloc(32, 9).toString('base64').replace(/=+$/, '')}`;
 

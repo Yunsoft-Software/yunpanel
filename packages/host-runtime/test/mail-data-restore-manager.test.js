@@ -16,10 +16,8 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import {
-  createMailDataRestoreManager,
-  MailDataRestoreError,
-} from '../src/index.js';
+import { createMailDataRestoreManager } from '../src/index.js';
+import { MailDataRestoreError } from '../src/mail-data-restore-manager.js';
 
 const CANONICAL_ROOT = '/var/lib/yunpanel';
 const CANONICAL_TARGET = '/var/lib/yunpanel/mail/example.com/owner';

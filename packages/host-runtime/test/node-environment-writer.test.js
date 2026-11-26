@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createNodeEnvironmentWriter, NodeEnvironmentWriteError } from '../src/index.js';
+import { createNodeEnvironmentWriter, NodeEnvironmentWriteError } from '../src/node-environment-writer.js';
 
 const APPLICATION_ID = '9d4a4727-1aba-4d35-95fe-21db67042ce9';
 

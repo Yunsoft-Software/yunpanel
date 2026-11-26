@@ -18,10 +18,8 @@ import {
   mailDkimTemplatePolicy,
   previewRspamdDkimSigningConfig,
 } from '@yunpanel/config-templates';
-import {
-  createMailDkimActivator,
-  mailDkimActivatorInternals,
-} from '../src/index.js';
+import { createMailDkimActivator } from '../src/index.js';
+import { mailDkimActivatorInternals } from '../src/mail-dkim-activator.js';
 
 async function withTempDirectory(run) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-dkim-empty-'));

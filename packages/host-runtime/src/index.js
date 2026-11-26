@@ -1,50 +1,15 @@
-export { inspectHostInventory, inventoryInternals } from './inventory.js';
-export {
-  OsPlatformError,
-  detectLinuxPlatform,
-  isSupportedPassengerPlatform,
-  isSupportedPhpRepositoryLine,
-  normalizeLinuxPlatform,
-  osPlatformInternals,
-  parseOsReleaseText,
-  resolveDistroPackageName,
-  resolveDistroUnitName,
-  resolvePackageManagerCommands,
-  resolvePhpFpmBinaryPath,
-  resolvePhpFpmPackageName,
-  resolvePhpFpmPoolDirectory,
-  resolvePhpFpmServiceUnit,
-  resolvePhpFpmSocketDirectory,
-} from './os-platform.js';
-export { gitDeploymentInternals } from './git-deployment.js';
-export {
-  createJournalLogReader,
-  JournalLogReaderError,
-  journalLogInternals,
-  journalLogPolicy,
-} from './journal-log-reader.js';
-export {
-  createNginxLogReader,
-  NginxLogReaderError,
-  nginxLogInternals,
-  nginxLogPolicy,
-} from './nginx-log-reader.js';
-export { createDockerInspector, inspectDocker, parseDockerPsOutput } from './docker-inspector.js';
+export { inspectHostInventory } from './inventory.js';
+export { createJournalLogReader } from './journal-log-reader.js';
+export { createNginxLogReader } from './nginx-log-reader.js';
+export { inspectDocker } from './docker-inspector.js';
 export {
   createDockerComposeValidator,
   DockerComposeValidationError,
-  dockerComposeValidatorInternals,
-  summarizeDockerComposeConfig,
 } from './docker-compose-validator.js';
-export {
-  createDockerComposeManager,
-  DockerComposeManagerError,
-  dockerComposeManagerInternals,
-} from './docker-compose-manager.js';
+export { createDockerComposeManager } from './docker-compose-manager.js';
 export {
   createDockerComposeObserver,
   DockerComposeObserverError,
-  dockerComposeObserverInternals,
 } from './docker-compose-observer.js';
 export {
   createDockerVolumeManager,
@@ -52,386 +17,106 @@ export {
   dockerVolumeManagerInternals,
 } from './docker-volume-manager.js';
 export {
-  assertContainerVolumeInspectSafe,
   createDockerContainerConsoleInspector,
   DockerContainerConsoleInspectorError,
-  dockerContainerConsoleInspectorInternals,
-  evaluateContainerConsoleInspect,
-  parseContainerShellProbe,
 } from './docker-container-console-inspector.js';
-export { createNginxInspector, inspectNginx, parseNginxConfigMetadata } from './nginx-inspector.js';
-export { createNginxManager, nginxManager, NginxManagerError } from './nginx-manager.js';
-export {
-  createMailConfigManager,
-  MailConfigManagerError,
-  mailConfigManagerInternals,
-} from './mail-config-manager.js';
-export {
-  createMailConfigBackupManager,
-  MailConfigBackupError,
-  mailConfigBackupInternals,
-} from './mail-config-backup.js';
-export {
-  createMailReadinessInspector,
-  MailReadinessError,
-  mailReadinessInternals,
-} from './mail-readiness-inspector.js';
-export {
-  createMailProtocolHealthInspector,
-  MailProtocolHealthInspectorError,
-  mailProtocolHealthInternals,
-} from './mail-protocol-health-inspector.js';
-export {
-  createMailAntivirusHealthInspector,
-  MailAntivirusHealthError,
-} from './mail-antivirus-health-inspector.js';
-export {
-  createMailConfigActivator,
-  MailConfigActivationError,
-  mailConfigActivatorInternals,
-} from './mail-config-activator.js';
-export {
-  createMailConfigEvidenceInspector,
-  MailConfigEvidenceError,
-  mailConfigEvidenceInternals,
-} from './mail-config-evidence-inspector.js';
+export { inspectNginx } from './nginx-inspector.js';
+export { createNginxManager } from './nginx-manager.js';
+export { createMailConfigManager } from './mail-config-manager.js';
+export { createMailConfigBackupManager } from './mail-config-backup.js';
+export { createMailReadinessInspector } from './mail-readiness-inspector.js';
+export { createMailProtocolHealthInspector } from './mail-protocol-health-inspector.js';
+export { createMailAntivirusHealthInspector } from './mail-antivirus-health-inspector.js';
+export { createMailConfigActivator } from './mail-config-activator.js';
+export { createMailConfigEvidenceInspector } from './mail-config-evidence-inspector.js';
 export {
   createMailDataInspector,
   MailDataInspectorError,
-  mailDataInspectorInternals,
 } from './mail-data-inspector.js';
 export {
   createMailDataBackupManager,
   MailDataBackupError,
-  mailDataBackupInternals,
 } from './mail-data-backup-manager.js';
-export {
-  createMailDataRestoreManager,
-  MailDataRestoreError,
-  mailDataRestoreInternals,
-} from './mail-data-restore-manager.js';
-export {
-  createMailDataDeleteManager,
-  MailDataDeleteError,
-  mailDataDeleteInternals,
-} from './mail-data-delete-manager.js';
+export { createMailDataRestoreManager } from './mail-data-restore-manager.js';
+export { createMailDataDeleteManager } from './mail-data-delete-manager.js';
 export {
   createMailDiagnosticsInspector,
   MailDiagnosticsInspectorError,
-  mailDiagnosticsInspectorInternals,
 } from './mail-diagnostics-inspector.js';
 export {
   createMailQueueInspector,
   MailQueueInspectorError,
-  mailQueueInspectorInternals,
 } from './mail-queue-inspector.js';
-export {
-  createMailDkimActivator,
-  MailDkimActivationError,
-  mailDkimActivatorInternals,
-} from './mail-dkim-activator.js';
-export {
-  createMailDkimEvidenceInspector,
-  MailDkimEvidenceError,
-  mailDkimEvidenceInternals,
-} from './mail-dkim-evidence-inspector.js';
-export {
-  createMailDkimRetirementInspector,
-  MailDkimRetirementError,
-  mailDkimRetirementInternals,
-} from './mail-dkim-retirement-inspector.js';
-export {
-  createMailboxQuotaInspector,
-  MailboxQuotaInspectorError,
-  mailboxQuotaInspectorInternals,
-  parseDoveadmQuotaTab,
-} from './mailbox-quota-inspector.js';
-export {
-  createRoundcubeConfigManager,
-  RoundcubeConfigManagerError,
-  roundcubeConfigManagerInternals,
-} from './roundcube-config-manager.js';
-export {
-  createRoundcubeConfigBackupManager,
-  RoundcubeConfigBackupError,
-  roundcubeConfigBackupInternals,
-} from './roundcube-config-backup.js';
-export {
-  createRoundcubeConfigActivator,
-  RoundcubeConfigActivationError,
-  roundcubeConfigActivatorInternals,
-} from './roundcube-config-activator.js';
-export {
-  createRoundcubeConfigEvidenceInspector,
-  RoundcubeConfigEvidenceError,
-  roundcubeConfigEvidenceInternals,
-} from './roundcube-config-evidence-inspector.js';
-export {
-  createPhpMyAdminConfigManager,
-  PhpMyAdminConfigManagerError,
-  phpMyAdminConfigManagerInternals,
-} from './phpmyadmin-config-manager.js';
-export {
-  createPhpMyAdminConfigBackupManager,
-  PhpMyAdminConfigBackupError,
-  phpMyAdminConfigBackupInternals,
-} from './phpmyadmin-config-backup.js';
-export {
-  createPhpMyAdminConfigActivator,
-  PhpMyAdminConfigActivationError,
-  phpMyAdminConfigActivatorInternals,
-} from './phpmyadmin-config-activator.js';
+export { createMailDkimActivator } from './mail-dkim-activator.js';
+export { createMailDkimEvidenceInspector } from './mail-dkim-evidence-inspector.js';
+export { createMailDkimRetirementInspector } from './mail-dkim-retirement-inspector.js';
+export { createMailboxQuotaInspector } from './mailbox-quota-inspector.js';
+export { createRoundcubeConfigManager } from './roundcube-config-manager.js';
+export { createRoundcubeConfigBackupManager } from './roundcube-config-backup.js';
+export { createRoundcubeConfigActivator } from './roundcube-config-activator.js';
+export { createRoundcubeConfigEvidenceInspector } from './roundcube-config-evidence-inspector.js';
 export {
   createAcmeManager,
   acmeManager,
-  AcmeManagerError,
-  acmeManagerInternals,
 } from './acme-manager.js';
 export {
   createCloudflareDnsManager,
-  cloudflareDnsManager,
   CloudflareDnsManagerError,
-  cloudflareDnsManagerInternals,
 } from './cloudflare-dns-manager.js';
-export { inspectAllowlistedServices, parseSystemdProperties, systemdInspectionPolicy } from './systemd-inspector.js';
-export {
-  createSystemPackageManager,
-  systemPackageManager,
-  SystemPackageManagerError,
-  systemPackageManagerInternals,
-} from './system-package-manager.js';
-export {
-  createWebsitePathContract,
-  WebsitePathContractError,
-  websitePathContractInternals,
-} from './website-path-contract.js';
-export {
-  createWebsiteIdentityManager,
-  WebsiteIdentityManagerError,
-  websiteIdentityManagerInternals,
-} from './website-identity-manager.js';
-export {
-  createWebsiteIdentityPathManager,
-  WebsiteIdentityPathManagerError,
-  websiteIdentityPathManagerInternals,
-} from './website-identity-path-manager.js';
-export {
-  createWebsiteCronManager,
-  WebsiteCronManagerError,
-  websiteCronManagerInternals,
-} from './website-cron-manager.js';
-export {
-  createTtydRuntimeManager,
-  TtydRuntimeError,
-  ttydRuntimeInternals,
-} from './ttyd-runtime-manager.js';
-export {
-  createElFinderNginxGatewayManager,
-  ElFinderNginxGatewayError,
-  elFinderNginxGatewayInternals,
-} from './elfinder-nginx-gateway-manager.js';
-export {
-  createElFinderFpmSiteManager,
-  ElFinderFpmSiteManagerError,
-  elFinderFpmSiteManagerInternals,
-} from './elfinder-fpm-site-manager.js';
-export {
-  createPhpFpmSiteManager,
-  PhpFpmSiteManagerError,
-  phpFpmSiteManagerInternals,
-} from './php-fpm-site-manager.js';
-export {
-  createPassengerInspector,
-  PassengerInspectorError,
-  passengerInspectorInternals,
-} from './passenger-inspector.js';
-export {
-  createPassengerManager,
-  PassengerManagerError,
-  passengerManagerInternals,
-} from './passenger-manager.js';
-export {
-  createPassengerSiteManager,
-  PassengerSiteManagerError,
-  passengerSiteManagerInternals,
-  validatePassengerSetup,
-} from './passenger-site-manager.js';
-export {
-  createPythonSiteManager,
-  PythonSiteManagerError,
-  pythonSiteManagerInternals,
-} from './python-site-manager.js';
-export {
-  createPythonDeploymentManager,
-  PythonDeploymentError,
-  pythonDeploymentManagerInternals,
-} from './python-deployment-manager.js';
-export {
-  createPythonRollbackManager,
-  PythonRollbackError,
-} from './python-rollback-manager.js';
-export {
-  createWebsitePythonReleaseManager,
-  WebsitePythonReleaseError,
-} from './website-python-release-manager.js';
-export {
-  createWebsitePassengerEnvironmentManager,
-  WebsitePassengerEnvironmentError,
-  websitePassengerEnvironmentInternals,
-} from './website-passenger-environment-manager.js';
-export { createNodeStatusInspector, NodeStatusError, nodeStatusInspector, parseNodeServiceProperties } from './node-status-inspector.js';
-export {
-  createNodeEnvironmentWriter,
-  NodeEnvironmentWriteError,
-  nodeEnvironmentWriter,
-} from './node-environment-writer.js';
-export {
-  createNodeDeploymentManager,
-  NodeDeploymentError,
-  nodeDeploymentInternals,
-  nodeDeploymentManager,
-} from './node-deployment-manager.js';
-export {
-  createNodeRestartManager,
-  NodeRestartError,
-  nodeRestartManager,
-} from './node-restart-manager.js';
-export {
-  createNodeProcessManager,
-  NodeProcessError,
-  nodeProcessInternals,
-  nodeProcessManager,
-} from './node-process-manager.js';
-export {
-  createNodeServiceRemovalManager,
-  NodeServiceRemovalError,
-  nodeServiceRemovalInternals,
-} from './node-service-removal-manager.js';
-export {
-  createNodeRuntimeManager,
-  NodeRuntimeManagerError,
-  nodeRuntimeInternals,
-  nodeRuntimeManager,
-  nodeRuntimePolicy,
-} from './node-runtime-manager.js';
-export {
-  createNodeRollbackManager,
-  NodeRollbackError,
-  nodeRollbackManager,
-} from './node-rollback-manager.js';
-export { copyStaticArtifact } from './static-artifact-worker.js';
-export { StaticDeploymentError } from './static-deployment-manager.js';
-export {
-  createStaticDeploymentRouter as createStaticDeploymentManager,
-  StaticDeploymentRouterError,
-  staticDeploymentRouter as staticDeploymentManager,
-  staticDeploymentRouterInternals,
-} from './static-deployment-router.js';
-export {
-  createWebsiteStaticDeploymentManager,
-  WebsiteStaticDeploymentError,
-  websiteStaticDeploymentInternals,
-} from './website-static-deployment-manager.js';
-export {
-  createStaticDeploymentReceiptStore,
-  StaticDeploymentReceiptError,
-  staticDeploymentReceiptInternals,
-} from './static-deployment-receipt.js';
-export {
-  createStaticDeploymentEvidenceInspector,
-  StaticDeploymentEvidenceError,
-  staticDeploymentEvidenceInternals,
-} from './static-deployment-evidence.js';
-export { StaticRollbackError } from './static-rollback-manager.js';
-export {
-  createStaticRollbackRouter as createStaticRollbackManager,
-  StaticRollbackRouterError,
-  staticRollbackRouter as staticRollbackManager,
-  staticRollbackRouterInternals,
-} from './static-rollback-router.js';
-export {
-  createStaticRollbackEvidenceInspector,
-  StaticRollbackEvidenceError,
-  staticRollbackEvidenceInternals,
-} from './static-rollback-evidence.js';
+export { inspectAllowlistedServices } from './systemd-inspector.js';
+export { createSystemPackageManager } from './system-package-manager.js';
+export { createWebsitePathContract } from './website-path-contract.js';
+export { createWebsiteIdentityPathManager } from './website-identity-path-manager.js';
+export { createWebsiteCronManager } from './website-cron-manager.js';
+export { createTtydRuntimeManager } from './ttyd-runtime-manager.js';
+export { createElFinderNginxGatewayManager } from './elfinder-nginx-gateway-manager.js';
+export { createElFinderFpmSiteManager } from './elfinder-fpm-site-manager.js';
+export { createPhpFpmSiteManager } from './php-fpm-site-manager.js';
+export { createPassengerSiteManager } from './passenger-site-manager.js';
+export { createPythonSiteManager } from './python-site-manager.js';
+export { createPythonDeploymentManager } from './python-deployment-manager.js';
+export { createPythonRollbackManager } from './python-rollback-manager.js';
+export { createNodeStatusInspector } from './node-status-inspector.js';
+export { createNodeDeploymentManager } from './node-deployment-manager.js';
+export { createNodeRestartManager } from './node-restart-manager.js';
+export { createNodeProcessManager } from './node-process-manager.js';
+export { createNodeServiceRemovalManager } from './node-service-removal-manager.js';
+export { createNodeRuntimeManager } from './node-runtime-manager.js';
+export { createNodeRollbackManager } from './node-rollback-manager.js';
+export { createStaticDeploymentRouter as createStaticDeploymentManager } from './static-deployment-router.js';
+export { createStaticDeploymentReceiptStore } from './static-deployment-receipt.js';
+export { createStaticDeploymentEvidenceInspector } from './static-deployment-evidence.js';
+export { createStaticRollbackRouter as createStaticRollbackManager } from './static-rollback-router.js';
+export { createStaticRollbackEvidenceInspector } from './static-rollback-evidence.js';
 export {
   createManagedServiceManager,
   managedServiceManager,
-  ManagedServiceError,
-  managedServicePolicy,
-  managedServiceInternals,
 } from './managed-service-manager.js';
-export {
-  createDatabaseManager,
-  databaseManager,
-  DatabaseManagerError,
-  databaseManagerPolicy,
-  databaseManagerInternals,
-} from './database-manager.js';
-export {
-  createDatabaseDumpManager,
-  DatabaseDumpError,
-  databaseDumpManagerInternals,
-} from './database-dump-manager.js';
-export {
-  createDatabaseRestoreManager,
-  DatabaseRestoreError,
-  databaseRestoreManagerInternals,
-} from './database-restore-manager.js';
-export {
-  createDatabaseRestoreReceiptStore,
-  DatabaseRestoreReceiptError,
-  databaseRestoreReceiptInternals,
-} from './database-restore-receipt.js';
-export {
-  createDatabaseRestoreEvidenceInspector,
-  DatabaseRestoreEvidenceError,
-  databaseRestoreEvidenceInternals,
-} from './database-restore-evidence-inspector.js';
-export {
-  createDatabaseCredentialHostStateStore,
-  DatabaseCredentialHostStateError,
-  databaseCredentialHostStateInternals,
-} from './database-credential-host-state.js';
-export {
-  createDatabaseCredentialManager,
-  DatabaseCredentialManagerError,
-  databaseCredentialManagerInternals,
-} from './database-credential-manager.js';
-export {
-  createDatabaseCredentialEvidenceInspector,
-  DatabaseCredentialEvidenceError,
-  databaseCredentialEvidenceInternals,
-} from './database-credential-evidence-inspector.js';
+export { createDatabaseManager } from './database-manager.js';
+export { createDatabaseDumpManager } from './database-dump-manager.js';
+export { createDatabaseRestoreManager } from './database-restore-manager.js';
+export { createDatabaseRestoreReceiptStore } from './database-restore-receipt.js';
+export { createDatabaseRestoreEvidenceInspector } from './database-restore-evidence-inspector.js';
+export { createDatabaseCredentialManager } from './database-credential-manager.js';
+export { createDatabaseCredentialEvidenceInspector } from './database-credential-evidence-inspector.js';
 export {
   createPhpCliToolManager,
   PhpCliToolError,
-  phpCliToolInternals,
 } from './php-cli-tool-manager.js';
 export {
   createCacheIsolationManager,
   CacheIsolationError,
-  cacheIsolationInternals,
 } from './cache-isolation-manager.js';
 export {
   assertResticRcloneTarget,
   createResticManager,
-  cleanOrphanedPasswordFiles,
-  MINIMUM_RESTIC_VERSION,
   ResticError,
-  resticManagerInternals,
 } from './restic-manager.js';
 export {
   createRcloneManager,
-  MINIMUM_RCLONE_VERSION,
   RcloneError,
-  rcloneManagerInternals,
 } from './rclone-manager.js';
-export {
-  createWebsiteRestoreReceiptStore,
-  WebsiteRestoreReceiptError,
-  websiteRestoreReceiptInternals,
-} from './website-restore-receipt.js';
+export { createWebsiteRestoreReceiptStore } from './website-restore-receipt.js';
 export {
   createGoAccessManager,
   GoAccessManagerError,
@@ -439,8 +124,6 @@ export {
 export {
   createNftablesManager,
   NftablesManagerError,
-  inspectSshListeners,
-  verifySshListenerContract,
   nftablesManagerInternals,
   MANAGED_FIREWALL_TABLE,
   MANAGED_FIREWALL_FAMILY,
@@ -452,43 +135,19 @@ export {
   sanitizeManagedRuleset,
   verifyDockerCoexistence,
   verifyCrowdsecCoexistence,
-  inspectDockerFirewall,
-  inspectCrowdsecFirewall,
-  migrateRulesetToManagedScope,
-  checkSystemdService,
-  inspectConflictingFirewalls,
-  getLiveRuleset,
-  parseRulesetMetadata,
 } from './nftables-manager.js';
 export {
   createCrowdsecManager,
   CrowdsecManagerError,
 } from './crowdsec-manager.js';
-export {
-  createFirewallStatusInspector,
-  inspectFirewallStatus,
-  FirewallStatusInspectorError,
-  firewallStatusInspectorInternals,
-} from './firewall-status-inspector.js';
 export { createApplicationEnvironmentBackupManager } from './application-environment-backup-manager.js';
 export { createPhpMyAdminConfigurationService } from './phpmyadmin-configuration-service.js';
-export { createMailSmarthostManager, MailSmarthostError, mailSmarthostManagerInternals } from './mail-smarthost-manager.js';
-export { createProtectedPathAuthManager, ProtectedPathAuthError } from './protected-path-auth-manager.js';
-export {
-  createLinuxSiteConsumptionAdapter,
-  siteConsumptionInspectorInternals,
-} from './site-consumption-inspector.js';
-export {
-  createWebsiteTrafficLedger,
-  WebsiteTrafficLedgerError,
-  websiteTrafficLedgerInternals,
-} from './website-traffic-ledger.js';
+export { createMailSmarthostManager } from './mail-smarthost-manager.js';
+export { createProtectedPathAuthManager } from './protected-path-auth-manager.js';
+export { createLinuxSiteConsumptionAdapter } from './site-consumption-inspector.js';
+export { createWebsiteTrafficLedger } from './website-traffic-ledger.js';
 export {
   createWebsiteTrafficEnforcer,
   discoverAppliedTrafficVhosts,
-  WebsiteTrafficEnforcerError,
 } from './website-traffic-enforcer.js';
-export {
-  inspectNativeDiskQuotaSupport,
-  diskQuotaCapabilityInternals,
-} from './disk-quota-capability.js';
+export { inspectNativeDiskQuotaSupport } from './disk-quota-capability.js';

@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  createPythonSiteManager,
-  PythonSiteManagerError,
-} from '../src/index.js';
+import { createPythonSiteManager } from '../src/index.js';
+import { PythonSiteManagerError } from '../src/python-site-manager.js';
 import {
   pythonApplicationUser,
   pythonServiceName,

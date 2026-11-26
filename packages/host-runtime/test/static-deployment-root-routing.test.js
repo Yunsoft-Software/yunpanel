@@ -1,10 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  createStaticDeploymentManager,
-  StaticDeploymentError,
-  StaticDeploymentRouterError,
-} from '../src/index.js';
+import { createStaticDeploymentManager } from '../src/index.js';
+import { StaticDeploymentError } from '../src/static-deployment-manager.js';
+import { StaticDeploymentRouterError } from '../src/static-deployment-router.js';
 
 const spec = Object.freeze({ applicationId: '2f334b35-03ce-4aa0-a8e4-b2ad4f592541' });
 

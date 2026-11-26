@@ -12,10 +12,8 @@ import {
   previewWebsitePhpFpmPool,
   renderWebsitePhpFpmPool,
 } from '@yunpanel/config-templates';
-import {
-  createPhpFpmSiteManager,
-  PhpFpmSiteManagerError,
-} from '@yunpanel/host-runtime';
+import { createPhpFpmSiteManager } from '@yunpanel/host-runtime';
+import { PhpFpmSiteManagerError } from '../../../packages/host-runtime/src/php-fpm-site-manager.js';
 
 test('PHP-FPM Runtime Golden Path - Distro Baseline, Multi-Version & Verified Repo Validation', async (t) => {
   const websiteId = 'a1000000-0000-4000-8000-000000000001';

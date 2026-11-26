@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import express from 'express';
-import { MailSmarthostError } from '@yunpanel/host-runtime';
+import { MailSmarthostError } from '../../../packages/host-runtime/src/mail-smarthost-manager.js';
 import { mountMailSmarthostRoutes } from '../src/mail-smarthost-http.js';
 import { createMailSmarthostRegistry } from '../src/mail-smarthost-registry.js';
 import { ownerManagementContext, withPanelContext } from './helpers/panel-auth-fixture.js';

@@ -7,10 +7,8 @@ import {
   previewManagedMailSecurityConfiguration,
   previewManagedMailSubmissionConfiguration,
 } from '@yunpanel/config-templates';
-import {
-  createMailReadinessInspector,
-  MailReadinessError,
-} from '../src/index.js';
+import { createMailReadinessInspector } from '../src/index.js';
+import { MailReadinessError } from '../src/mail-readiness-inspector.js';
 
 const ARGON2ID_HASH = `$argon2id$v=19$m=65536,t=3,p=1$${Buffer.alloc(16, 5).toString('base64').replace(/=+$/, '')}$${Buffer.alloc(32, 6).toString('base64').replace(/=+$/, '')}`;
 

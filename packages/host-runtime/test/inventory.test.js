@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { inspectHostInventory, inventoryInternals } from '../src/index.js';
+import { inspectHostInventory } from '../src/index.js';
+import { inventoryInternals } from '../src/inventory.js';
 
 test('parses Ubuntu os-release metadata', () => {
   const parsed = inventoryInternals.parseOsRelease(`

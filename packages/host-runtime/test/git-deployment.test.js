@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { gitDeploymentInternals } from '../src/index.js';
+import { gitDeploymentInternals } from '../src/git-deployment.js';
 
 test('Git fetch arguments use exact branch, tag or commit without shell input', () => {
   assert.deepEqual(

@@ -1,14 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  assertContainerVolumeInspectSafe,
   createDockerContainerConsoleInspector,
   DockerContainerConsoleInspectorError,
-  dockerComposeManagerInternals,
+} from '../src/index.js';
+import {
+  assertContainerVolumeInspectSafe,
   dockerContainerConsoleInspectorInternals,
   evaluateContainerConsoleInspect,
   parseContainerShellProbe,
-} from '../src/index.js';
+} from '../src/docker-container-console-inspector.js';
+import { dockerComposeManagerInternals } from '../src/docker-compose-manager.js';
 
 const PROJECT_ID = '22222222-2222-4222-8222-222222222222';
 const PROJECT_NAME = 'demo_app';

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { managedServicePolicy } from '@yunpanel/host-runtime';
+import { managedServicePolicy } from '../../../packages/host-runtime/src/managed-service-manager.js';
 import { MANAGED_SERVICE_IDS } from '@yunpanel/protocol';
 import { managedServiceStatePolicy } from '../src/managed-service-state-policy.js';
 

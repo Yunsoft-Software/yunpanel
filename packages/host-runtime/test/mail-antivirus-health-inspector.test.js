@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  createMailAntivirusHealthInspector,
-  MailAntivirusHealthError,
-} from '../src/index.js';
+import { createMailAntivirusHealthInspector } from '../src/index.js';
+import { MailAntivirusHealthError } from '../src/mail-antivirus-health-inspector.js';
 
 function createMockInspector({
   dpkgStatus = 'install ok installed',

@@ -8,8 +8,8 @@ import {
   DockerVolumeManagerError,
   createDockerVolumeManager,
   dockerVolumeManagerInternals,
-  summarizeDockerComposeConfig,
 } from '../src/index.js';
+import { summarizeDockerComposeConfig } from '../src/docker-compose-validator.js';
 
 function execFilePromise(file, args, stdinText) {
   return new Promise((resolve, reject) => {

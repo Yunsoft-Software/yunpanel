@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createNginxLogReader, NginxLogReaderError, nginxLogInternals } from '../src/index.js';
+import { createNginxLogReader } from '../src/index.js';
+import { NginxLogReaderError, nginxLogInternals } from '../src/nginx-log-reader.js';
 
 function fixture(content) {
   const data = Buffer.from(content);

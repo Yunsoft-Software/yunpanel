@@ -32,9 +32,9 @@ import {
   createMailConfigActivator,
   createMailConfigBackupManager,
   createMailConfigManager,
-  MailConfigActivationError,
-  mailConfigBackupInternals,
 } from '../src/index.js';
+import { MailConfigActivationError } from '../src/mail-config-activator.js';
+import { mailConfigBackupInternals } from '../src/mail-config-backup.js';
 
 const ARGON2ID_HASH = `$argon2id$v=19$m=65536,t=3,p=1$${Buffer.alloc(16, 11).toString('base64').replace(/=+$/, '')}$${Buffer.alloc(32, 12).toString('base64').replace(/=+$/, '')}`;
 const TRANSACTION_ID = 'mail-job-activate-001';
