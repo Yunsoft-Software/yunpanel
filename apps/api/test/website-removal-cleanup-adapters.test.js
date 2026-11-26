@@ -317,7 +317,7 @@ test('a provisioning step in an unknown state stays blocked',async()=>{
  assert.equal(f.compensated.length,0);
 });
 
-async function realPassengerControlPlane(t) {
+async function realPassengerControlPlane(t,{released=true}={}) {
  const root=await realpath(await mkdtemp(path.join(os.tmpdir(),'yp-retirement-control-plane-')));t.after(()=>rm(root,{recursive:true,force:true}));
  const servers=createServerRegistry({filePath:path.join(root,'servers.json')});await servers.init();const server=await servers.createLocalServer({hostname:'retirement-control.example.test'});
  const applications=createApplicationRegistry({filePath:path.join(root,'applications.json'),serverExists:async id=>Boolean(await servers.getServer(id))});await applications.init();
@@ -337,12 +337,13 @@ async function realPassengerControlPlane(t) {
  await provisioning.registry.beginStep({operationId:sourceOperationId,stepId:'passenger_environment'});await provisioning.registry.completeStep({operationId:sourceOperationId,stepId:'passenger_environment',evidence});
  await provisioning.registry.beginStep({operationId:sourceOperationId,stepId:'node_release'});await provisioning.registry.completeStep({operationId:sourceOperationId,stepId:'node_release',evidence:{adapter:'passenger-release',applicationId:application.id,releaseId:sourceOperationId,deploymentId:sourceOperationId,previousReleaseId:null,commitSha}});
  const sourceOperation=await provisioning.registry.get(sourceOperationId),releaseStep=sourceOperation.steps.find(row=>row.kind==='passenger_application_release');
- const releaseEvidence=await createWebsitePassengerApplicationReleaseProvisioningHandler({applicationRegistry:applications}).apply({operation:sourceOperation,operationId:sourceOperationId,intent:releaseStep.intent});
- await provisioning.registry.beginStep({operationId:sourceOperationId,stepId:'passenger_application_release'});await provisioning.registry.completeStep({operationId:sourceOperationId,stepId:'passenger_application_release',evidence:releaseEvidence});
+ // released=false: provisioning stopped before its first release (failed health check), leaving a draft Application.
+ if(released){const releaseEvidence=await createWebsitePassengerApplicationReleaseProvisioningHandler({applicationRegistry:applications}).apply({operation:sourceOperation,operationId:sourceOperationId,intent:releaseStep.intent});
+ await provisioning.registry.beginStep({operationId:sourceOperationId,stepId:'passenger_application_release'});await provisioning.registry.completeStep({operationId:sourceOperationId,stepId:'passenger_application_release',evidence:releaseEvidence});}
  application=await applications.getApplication(application.id);
  const journal=createWebsiteRemovalOperationRegistry({filePath:path.join(root,'removals.json')});await journal.init();
  // Pure removal policy input from these actual new registry records; no HTTP or host outcome is substituted.
- const operation=await journal.create({operation:'website_remove',readyToStart:true,previewDigest:'a'.repeat(64),confirmation:'own-retirement-policy',website:{...website,desiredRevision:website.revision},plan:{applicationId:application.id,applicationRevision:application.desiredRevision,applicationRuntime:{type:'node',adapter:'passenger',releaseId:sourceOperationId},domainIds:[],domains:[],systemUser:website.unixUser,additional:{}}});
+ const operation=await journal.create({operation:'website_remove',readyToStart:true,previewDigest:'a'.repeat(64),confirmation:'own-retirement-policy',website:{...website,desiredRevision:website.revision},plan:{applicationId:application.id,applicationRevision:application.desiredRevision,applicationRuntime:{type:'node',adapter:'passenger',releaseId:released?sourceOperationId:null},domainIds:[],domains:[],systemUser:website.unixUser,additional:{}}});
  const adapters=createWebsiteRemovalCleanupAdapters({websiteRegistry:websites,applicationRegistry:applications,applicationEnvironmentRegistry:environments,websiteProvisioningRuntime:provisioning,passengerEnvironmentManager:manager});
  return{root,server,servers,application,website,applications,websites,environments,manager,journal,operation,adapters,target:path.join(includeRoot,application.id+'.conf')};
 }
@@ -360,6 +361,19 @@ test('actual registries retire an initial Passenger include before deletion and 
  await f.environments.purgeApplication(f.application.id);await f.applications.deleteApplication({applicationId:f.application.id,expectedServerId:f.server.id,expectedDesiredRevision:f.application.desiredRevision});
  assert.deepEqual(await f.adapters.passengerEnvironmentCleanupHandler({operation:await f.journal.get(f.operation.id),priorReceipt:result,checkpoint:appCheckpoint}),result);
  const persisted=JSON.parse(await readFile(path.join(f.root,'removals.json'),'utf8'));assert.equal(persisted[0].steps.find(s=>s.id===step.id).result.passengerEnvironmentRetirement.state,'retired');
+});
+
+test('actual registries retire the owned include of a never-released Passenger draft and reuse the receipt in Application cleanup',async t=>{
+ const f=await realPassengerControlPlane(t,{released:false});
+ assert.equal(f.application.currentReleaseId,null);assert.deepEqual(f.application.releases,[]);
+ const step=f.operation.steps.find(s=>s.kind==='file_cleanup');
+ const result=await f.adapters.passengerEnvironmentCleanupHandler({operation:f.operation,checkpoint:receipt=>f.journal.checkpointStep(f.operation.id,step.id,{passengerEnvironmentRetirement:receipt})});
+ assert.equal(result.state,'retired');assert.equal(result.includeAbsent,true);assert.equal(result.authoritySnapshot.releaseId,null);
+ await assert.rejects(readFile(f.target),{code:'ENOENT'});
+ await f.journal.succeedStep(f.operation.id,step.id,{passengerEnvironmentRetirement:result});
+ await f.websites.finalizeWebsiteRemoval({websiteId:f.website.id,serverId:f.server.id,applicationId:f.application.id,expectedRevision:f.website.revision,operationId:f.operation.id});
+ const appStep=f.operation.steps.find(s=>s.kind==='application_cleanup');
+ assert.deepEqual(await f.adapters.passengerEnvironmentCleanupHandler({operation:await f.journal.get(f.operation.id),priorReceipt:result,checkpoint:receipt=>f.journal.checkpointStep(f.operation.id,appStep.id,{passengerEnvironmentRetirement:receipt})}),result);
 });
 
 test('actual registry legacy continuation can retire the owned include after Website metadata disappeared without requiring a release symlink',async t=>{

@@ -312,3 +312,34 @@ test('prepared retirement permits a newer saved draft while the same applied aut
   assert.deepEqual(f.checkpoints.map(row => row.state), ['prepared', 'retired']);
   await assert.rejects(lstat(f.target), { code: 'ENOENT' });
 });
+
+test('real filesystem retirement removes the exact provisioning include of an Application that never got a release', async t => {
+  // Provisioning stopped before its first release (failed health check): no release and no applied environment.
+  const f = await realRetirementFixture(t);
+  const authority = { ...f.authority, releaseId: null, appliedRevision: null, appliedReleaseId: null, initialReleaseId: null };
+  let prepared;
+  await assert.rejects(f.manager.retire(authority, { checkpoint: async proof => {
+    await f.checkpoint(proof); prepared = proof; await writeFile(f.root, 'actual checkpoint EISDIR');
+  } }), { code: 'EISDIR' });
+  assert.equal(prepared.state, 'prepared'); assert.equal(prepared.includeSha256, f.authority.originalIncludeSha256);
+  assert.ok((await readFile(f.target)).length > 0);
+  const result = await f.manager.retire(authority, { priorReceipt: prepared, checkpoint: f.checkpoint });
+  assert.equal(result.retired, true); assert.equal(result.includeAbsent, true); assert.equal(result.environmentRevision, 0);
+  await assert.rejects(lstat(f.target), { code: 'ENOENT' });
+  assert.deepEqual(f.checkpoints.map(row => row.state), ['prepared', 'retired']);
+  assert.deepEqual(await f.manager.retire(authority, { priorReceipt: result, checkpoint: f.checkpoint }), result);
+  assert.equal(f.checkpoints.length, 2);
+});
+
+test('unreleased retirement authority rejects include bytes that are not the owned provisioning bytes', async t => {
+  const f = await realRetirementFixture(t);
+  const authority = { ...f.authority, releaseId: null, appliedRevision: null, appliedReleaseId: null, initialReleaseId: null };
+  await f.manager.apply({ applicationId: f.authority.applicationId, environmentRevision: 1,
+    values: { OTHER_WRITER_PROOF: randomUUID() } }, { operationId: randomUUID() });
+  const before = await readFile(f.target);
+  await assert.rejects(f.manager.retire({ ...authority, savedRevision: 1 }, { checkpoint: f.checkpoint }),
+    e => e.code === 'website_passenger_environment_retirement_drift');
+  await assert.rejects(f.manager.retire({ ...authority, releaseId: randomUUID() }, { checkpoint: f.checkpoint }),
+    e => e.code === 'website_passenger_environment_retirement_drift');
+  assert.deepEqual(await readFile(f.target), before); assert.equal(f.checkpoints.length, 0);
+});

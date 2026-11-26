@@ -502,6 +502,14 @@ export function createWebsitePassengerEnvironmentManager({
     return Object.freeze({ ...value });
   }
 
+  // Provisioning that stopped before its first release (for example a failed
+  // health check) leaves no release and no applied environment. Only the exact
+  // bytes of the owned provisioning receipt may then be retired.
+  function unreleasedAuthority(value) {
+    return value.releaseId === null && value.initialReleaseId === null
+      && value.appliedRevision === null && value.appliedReleaseId === null;
+  }
+
   async function retirementState(rawAuthority, priorReceipt = null) {
     const authority = retirementAuthority(rawAuthority);
     const raw = await boundedFile(receiptPath(authority.sourceOperationId), receiptRoot, MAX_INCLUDE_BYTES * 2);
@@ -543,7 +551,9 @@ export function createWebsitePassengerEnvironmentManager({
         const applied = saved.appliedRevision === priorReceipt.environmentRevision && saved.appliedReleaseId === saved.releaseId && saved.releaseId !== null;
         const initial = saved.appliedRevision === null && saved.appliedReleaseId === null && saved.initialReleaseId === authority.sourceOperationId
           && saved.releaseId === saved.initialReleaseId && priorReceipt.environmentRevision === original.environmentRevision && priorReceipt.includeSha256 === original.includeChecksum;
-        if (!applied && !initial) throw retirementError();
+        const unreleased = unreleasedAuthority(saved) && priorReceipt.environmentRevision === original.environmentRevision
+          && priorReceipt.includeSha256 === original.includeChecksum;
+        if (!applied && !initial && !unreleased) throw retirementError();
       } else if (priorReceipt.environmentRevision !== null) throw retirementError();
       if (priorReceipt.state === 'prepared') {
         // A draft-only saved revision change does not change current applied authority.
@@ -562,7 +572,9 @@ export function createWebsitePassengerEnvironmentManager({
       const initial = authority.appliedRevision === null && authority.appliedReleaseId === null
         && authority.initialReleaseId === authority.sourceOperationId && authority.releaseId === authority.initialReleaseId
         && environmentRevision === original.environmentRevision && current.checksum === original.includeChecksum;
-      if (!applied && !initial) throw retirementError();
+      const unreleased = unreleasedAuthority(authority) && environmentRevision === original.environmentRevision
+        && current.checksum === original.includeChecksum;
+      if (!applied && !initial && !unreleased) throw retirementError();
     }
     return { authority, current, proof: Object.freeze({ ...binding, state: 'prepared', hadInclude: current.exists,
       environmentRevision, includeSha256: current.checksum, fileIdentity: current.identity,
