@@ -31,8 +31,6 @@
 .auth-sessionbar > div { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .auth-sessionbar button, .auth-dialog header button, .auth-sessions button { border: 1px solid #cbd4e0; border-radius: 6px; background: #fff; color: #27364e; font: inherit; padding: 7px 12px; min-height: 34px; cursor: pointer; }
 .auth-role { background: var(--ws-surface-subtle, #edf2f9); color: var(--ws-text, #334155); padding: 3px 7px; border-radius: 5px; font-size: 11px; }
-.auth-separator { color: #8190a6; margin: 0 10px; }
-.authenticated-panel .app-shell { min-height: calc(100vh - 52px); }
 .auth-banner { margin: 12px 24px; }
 .auth-dialog { width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 28px; border: 1px solid #d8e1ed; border-radius: 12px; background: #fff; color: #17233b; overflow-y: auto; }
 .auth-dialog::backdrop { background: rgb(15 29 50 / .55); }

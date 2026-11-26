@@ -12,8 +12,6 @@
 .ws-website-task { display: flex; flex-direction: column; min-width: 0; gap: 0.35rem; }
 .ws-website-task .ws-button { justify-content: flex-start; width: 100%; min-height: 44px; white-space: normal; overflow-wrap: anywhere; }
 .ws-website-task small { color: var(--ws-muted); font-size: 0.75rem; overflow-wrap: anywhere; }
-.ws-website-task-secondary { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.75rem; }
-.ws-website-task-secondary > .ws-website-task { flex: 0 1 15rem; }
 .ws-website-task-footer { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 0.75rem; margin-top: 1rem; }
 .ws-website-task-footer .ws-button { white-space: normal; min-height: 44px; overflow-wrap: anywhere; }
 .ws-website-task-details { min-width: 0; max-width: 100%; }
@@ -35,7 +33,6 @@
 @media (max-width: 720px) {
   .ws-website-task-list { padding: 0.75rem; }
   .ws-website-task-card { margin-inline-start: calc(var(--ws-card-depth, 0) * 0.35rem); }
-  .ws-website-task-secondary > .ws-website-task { flex: 1 1 12rem; }
   .ws-website-task-footer .ws-actions { width: 100%; }
   .ws-website-task-footer .ws-button { flex: 1 1 10rem; }
 }

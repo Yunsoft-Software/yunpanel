@@ -13,7 +13,6 @@
 .ws-site-list .ws-row-end .ws-actions { justify-content: flex-end; flex-wrap: nowrap; }
 .ws-site-list .ws-row-end .ws-button { min-height: 40px; }
 .ws-site-list .ws-section-heading { align-items: center; }
-.ws-site-list .ws-inline-summary { border-bottom: 0; padding-top: 12px; padding-bottom: 0; }
 .ws-jobs-table { min-width: 700px; }
 .ws-reseller-row-actions { align-items: center; }
 .ws-row-actions-inline { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -53,7 +52,6 @@
   .ws-site-list .ws-domain-name > div { flex: 1; }
   .ws-site-list .ws-domain-name a { overflow-wrap: anywhere; font-size: 14px; }
   .ws-site-list .ws-tree-spacer { width: 0; }
-  .ws-site-list .ws-tree-toggle { width: 30px; height: 44px; }
   .ws-site-list .ws-row-end .ws-actions { justify-content: stretch; flex-wrap: wrap; }
   .ws-site-list .ws-row-end .ws-button { flex: 1; min-height: 44px; }
   .ws-site-list .ws-pagination { padding: 16px; }

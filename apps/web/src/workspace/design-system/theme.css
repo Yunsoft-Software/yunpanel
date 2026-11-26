@@ -1118,17 +1118,6 @@ html .workspace-shell .ws-website-task-footer .ws-button {
   font-size: 12px !important;
 }
 
-html .workspace-shell .ws-website-task-children {
-  padding: 8px 0 0 0 !important;
-}
-
-html .workspace-shell .ws-website-task-children .ws-button {
-  min-height: 30px !important;
-  height: 30px !important;
-  padding: 0 10px !important;
-  font-size: 12px !important;
-}
-
 /* Compact Horizontal Tab Bar (SiteNavigation) */
 html .workspace-shell .ws-plesk-site-navigation {
   display: flex !important;
@@ -1305,18 +1294,6 @@ html .workspace-shell details.ws-disclosure > summary {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.yp-file-root-tag {
-  padding: 2px 5px;
-  border-radius: 3px;
-  background: var(--ws-surface-raised);
-  border: 1px solid var(--ws-border);
-  color: var(--ws-muted);
-  font-size: 9.5px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
 }
 
 /* Docker Catalog Grid & Quickbar */
@@ -1741,7 +1718,6 @@ html .workspace-shell :is(.yp-notification-body, .ws-drawer-body) {
   gap: 10px !important;
 }
 
-html .workspace-shell .yp-notification-item,
 html .workspace-shell :is(.yp-notification-body, .ws-drawer-body) .ws-alert-item {
   display: flex !important;
   align-items: center !important;
@@ -1753,53 +1729,12 @@ html .workspace-shell :is(.yp-notification-body, .ws-drawer-body) .ws-alert-item
   background: var(--ws-surface-raised) !important;
 }
 
-html .workspace-shell pre.ws-code-block {
-  margin: 4px 0 0 !important;
-  padding: 12px 14px !important;
-  border: 1px solid var(--ws-border) !important;
-  border-radius: 8px !important;
-  background: var(--ws-canvas) !important;
-  color: var(--ws-text) !important;
-  font-family: var(--ws-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace) !important;
-  font-size: 12.5px !important;
-  line-height: 1.55 !important;
-  overflow-x: auto !important;
-}
-
 html .workspace-shell .yp-category-pills {
   display: flex !important;
   flex-wrap: wrap !important;
   gap: 6px !important;
   padding: 14px 18px 0 !important;
   margin-bottom: 0 !important;
-}
-
-html .workspace-shell .yp-preset-grid {
-  display: flex !important;
-  flex-wrap: wrap !important;
-  gap: 8px !important;
-  margin-bottom: 12px !important;
-}
-
-html .workspace-shell .yp-preset-card {
-  display: inline-flex !important;
-  align-items: center !important;
-  gap: 8px !important;
-  padding: 8px 12px !important;
-  border: 1px solid var(--ws-border) !important;
-  border-radius: 8px !important;
-  background: var(--ws-surface-subtle) !important;
-  color: var(--ws-ink) !important;
-  font-size: 12.5px !important;
-  font-weight: 500 !important;
-  cursor: pointer !important;
-  transition: border-color 140ms ease, background-color 140ms ease !important;
-}
-
-html .workspace-shell .yp-preset-card:hover,
-html .workspace-shell .yp-preset-card.is-active {
-  border-color: var(--ws-brand) !important;
-  background: var(--ws-brand-soft) !important;
 }
 
 html .workspace-shell .ws-button.yp-framework-preset-card {
@@ -1822,15 +1757,6 @@ html .workspace-shell .ws-button.yp-framework-preset-card {
 html .workspace-shell :is(.ws-section, .ws-section-body, .ws-form, fieldset) {
   min-width: 0 !important;
   max-width: 100% !important;
-}
-
-html .workspace-shell pre.ws-code-block,
-html .workspace-shell pre.ws-code-block code {
-  min-width: 0 !important;
-  max-width: 100% !important;
-  white-space: pre-wrap !important;
-  overflow-wrap: anywhere !important;
-  word-break: break-word !important;
 }
 
 html .workspace-shell > .ws-main > .ws-content > .ws-tabs {
@@ -2216,10 +2142,6 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
     min-height: 0 !important;
     height: auto !important;
     gap: 2px !important;
-  }
-
-  html .workspace-shell .ws-toolbar-label {
-    display: none !important;
   }
 
   /* 6. Phone Content Area, Page Heading & Section Cards */
@@ -3535,12 +3457,6 @@ html .workspace-shell .ws-websites-table .ws-domain-name a {
 html .workspace-shell .ws-actions > label.ws-check {
   gap: 8px !important;
   margin-right: 10px !important;
-}
-
-html .workspace-shell .domain-card,
-html .workspace-shell .update-package-row {
-  background: var(--ws-surface-subtle) !important;
-  border-color: var(--ws-border) !important;
 }
 
 /* Firewall Status Cards, Service Profiles & Responsive Forms */

@@ -69,7 +69,6 @@
 .workspace-shell .ws-nav a.active > svg { color: inherit; }
 .workspace-shell .ws-nav-count { border-radius: 8px; color: var(--ws-nav-text); background: var(--ws-nav-hover); font-weight: 650; }
 .workspace-shell .ws-nav a.active .ws-nav-count { color: var(--ws-nav-on-active); background: transparent; }
-.workspace-shell .ws-sidebar-footer strong { color: var(--ws-nav-text); }
 .workspace-shell .ws-preferences { border: 0; }
 .workspace-shell .ws-preferences select { color: var(--ws-nav-text); background: var(--ws-nav-hover); border-color: transparent; border-radius: 10px; color-scheme: inherit; }
 .workspace-shell .ws-toolbar { background: var(--ws-canvas); border-bottom: 0; padding-block: 16px; }
@@ -129,7 +128,6 @@
 .workspace-shell .ws-section-heading h2 { font-size: 17px; font-weight: 500; }
 .workspace-shell .ws-section-heading p { line-height: 1.65; }
 .workspace-shell .ws-filters { border-bottom: 0; }
-.workspace-shell .ws-inline-summary { border-bottom: 0; gap: 12px 24px; padding-block: 12px; }
 .workspace-shell .ws-table { border-collapse: separate; border-spacing: 0 3px; padding: 0 10px 10px; }
 .workspace-shell .ws-table th { border: 0; background: transparent; font-size: 11px; font-weight: 550; padding-block: 10px; }
 .workspace-shell .ws-table td { border: 0; padding-block: var(--ws-row-pad); }
@@ -140,7 +138,7 @@
 .workspace-shell :is(.ws-table, .ys-resource-table, .ws-websites-table, .ws-db-table, .ws-mail-table) tbody tr:is(.is-selected, [aria-selected="true"], .ws-context-row) td { color: var(--ws-text); }
 .workspace-shell :is(.ws-table, .yf-table, .ys-resource-table, .ws-websites-table, .ws-db-table, .ws-mail-table) td { overflow-wrap: anywhere; word-break: break-word; }
 .workspace-shell :is(.ws-table, .yf-table, .ys-resource-table, .ws-websites-table, .ws-db-table, .ws-mail-table) td code { overflow-wrap: anywhere; word-break: break-word; white-space: pre-wrap; }
-.workspace-shell .ws-domain-name, .workspace-shell .ws-domain-name a, .workspace-shell .yf-tree-name, .workspace-shell .yf-name { overflow-wrap: anywhere; word-break: break-word; min-width: 0; }
+.workspace-shell .ws-domain-name, .workspace-shell .ws-domain-name a, .workspace-shell .yf-tree-name { overflow-wrap: anywhere; word-break: break-word; min-width: 0; }
 .workspace-shell .ws-table-scroll { width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
 .workspace-shell .ws-table-wrap, .workspace-shell .dns-table-wrap { width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
 .workspace-shell .ws-pagination { border-top: 0; color: var(--ws-muted); padding-top: 18px; }
@@ -182,16 +180,9 @@
 .workspace-shell .ws-server-timestamp, .workspace-shell .ws-alert-item { border: 0; }
 /* Existing site navigation stays in exactly the same order. The indicator is a pill. */
 .workspace-shell .ws-site-meta { border: 0; padding-bottom: 4px; }
-.workspace-shell .ys-site-navigation { border: 0; padding: 5px; border-radius: 18px; background: var(--ws-surface); margin-bottom: 25px; overflow: visible; }
-.workspace-shell .ys-site-primary { gap: 4px; }
-.workspace-shell .ys-site-primary a { min-height: 42px; padding: 10px 14px; border: 0; border-radius: 13px; font-size: 12px; }
-.workspace-shell .ys-site-primary a[aria-current] { color: var(--ws-on-pill); background: var(--ws-pill); border: 0; }
-.workspace-shell .ys-site-more { overflow: visible; }
-.workspace-shell .ys-site-more summary { border-radius: 13px; }
-.workspace-shell .ys-site-more nav { border: 0; border-radius: 17px; padding: 8px; max-width: calc(100vw - 32px); z-index: 50; }
-.workspace-shell .ws-tabs, .workspace-shell .ws-site-groups { border: 0; background: var(--ws-surface); border-radius: 17px; padding: 5px; gap: 4px; }
-.workspace-shell .ws-tabs a, .workspace-shell .ws-site-groups a, .workspace-shell .ws-site-subnav a { border: 0; border-radius: 12px; }
-.workspace-shell .ws-tabs a[aria-current], .workspace-shell .ws-site-groups a[aria-current], .workspace-shell .ws-site-subnav a[aria-current] { color: var(--ws-on-pill); background: var(--ws-pill); border: 0; }
+.workspace-shell .ws-tabs { border: 0; background: var(--ws-surface); border-radius: 17px; padding: 5px; gap: 4px; }
+.workspace-shell .ws-tabs a { border: 0; border-radius: 12px; }
+.workspace-shell .ws-tabs a[aria-current] { color: var(--ws-on-pill); background: var(--ws-pill); border: 0; }
 /* File workspace: the two-pane behaviour is kept, the spreadsheet grid is not. */
 .workspace-shell .yf-browser { border: 0; border-radius: 24px; background: var(--ws-surface); box-shadow: var(--ws-shadow); }
 .workspace-shell .yf-header { padding: 24px; gap: 18px; }
@@ -250,7 +241,6 @@
 .workspace-shell .ys-resource-tabs button[aria-current] { color: var(--ws-on-pill); background: var(--ws-pill); }
 .workspace-shell .ys-webmail-icon { width: 76px; height: 76px; border-radius: 26px 26px 12px 26px; color: var(--ws-on-brand); background: var(--ws-brand); }
 .workspace-shell .ys-webmail-access h3 { font: 500 27px/1.25 var(--ws-font-display); letter-spacing: -.5px; }
-.workspace-shell .ys-resource-link { border: 0; border-radius: 18px; }
 .workspace-shell .ys-resource-actions .ws-button { border-radius: 12px; }
 .workspace-shell .ys-resource-actions .ws-button:first-child { background: var(--ws-accent-soft); color: var(--ws-accent) !important; }
 /* Native dialogs and their focus/scroll behaviour are preserved. */
@@ -280,8 +270,6 @@
   .workspace-shell .ws-console-quicklink { padding: 15px 12px; }
   .workspace-shell :is(.ws-db-table, .ws-websites-table) { padding: 0; }
   .workspace-shell .ws-db-table tr, .workspace-shell .ws-websites-table tbody tr { border: 0; border-radius: 15px; margin: 0 10px 10px; background: var(--ws-surface-subtle); width: auto; }
-  .workspace-shell .ys-site-navigation { padding: 4px; border-radius: 15px; }
-  .workspace-shell .ys-site-primary a { padding-inline: 11px; border-radius: 11px; min-height: 44px; }
   .workspace-shell .yf-header { padding: 20px 16px; }
   .workspace-shell .yf-header h2 { font-size: 21px; }
   .workspace-shell .yf-location { margin: 0 10px 12px; padding-inline: 8px; }
@@ -350,7 +338,7 @@ button::-moz-focus-inner, input::-moz-focus-inner {
   border: 0;
   padding: 0;
 }
-.ws-sr-only, .sr-only {
+.ws-sr-only {
   position: absolute !important;
   width: 1px !important;
   height: 1px !important;
@@ -365,7 +353,6 @@ button::-moz-focus-inner, input::-moz-focus-inner {
   .workspace-shell .ws-button, .ws-modal .ws-button, .workspace-shell .yf-row-actions .ws-button { min-height: 44px; }
   .workspace-shell .yf-row-actions .ws-button { min-width: 40px; }
   .workspace-shell .ws-nav a { min-height: 44px; }
-  .workspace-shell .ys-site-primary a { min-height: 44px; }
   .workspace-shell .ys-resource-tabs button { min-height: 44px; }
   .workspace-shell .ws-tabs a { min-height: 44px; display: inline-flex; align-items: center; }
   .workspace-shell :is(input,select,textarea), .ws-modal :is(input,select,textarea) { min-height: 44px; }

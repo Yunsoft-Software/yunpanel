@@ -10,7 +10,6 @@
 .ws-website-task-quick .ws-website-task { width: auto; }
 .ws-website-task-quick .ws-button { font-size: .8rem; }
 .ws-website-task-card [hidden] { display: none; }
-.ws-website-task-children { padding: 0 1rem .6rem; }
 .ws-settings-advanced { margin: 1rem 0; padding: .9rem 1rem; border: 1px solid var(--ws-border); border-radius: var(--ws-radius); }
 .ws-settings-advanced > summary { cursor: pointer; font-weight: 600; }
 .ws-settings-advanced[open] > summary { margin-bottom: 1rem; }
