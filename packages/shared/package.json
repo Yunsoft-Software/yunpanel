@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.js",
+    "./json-file-store": "./src/json-file-store.js",
     "./nginx-settings": "./src/nginx-settings.js",
     "./redirect-target": "./src/redirect-target.js"
   },
