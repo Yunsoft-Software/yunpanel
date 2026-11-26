@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import path from 'node:path';
+import { readJsonWithFallback, writeTextAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 1;
 const STATUSES = new Set([
@@ -264,16 +263,8 @@ export function createDomainSuspensionOperationRegistry({
 
   async function persist() {
     if (!filePath) return;
-    const directory = path.dirname(filePath);
-    const temporary = `${filePath}.${process.pid}.tmp`;
     const content = `${JSON.stringify(state, null, 2)}\n`;
-    writeChain = writeChain.then(async () => {
-      await mkdir(directory, { recursive: true, mode: 0o700 });
-      await chmod(directory, 0o700);
-      await writeFile(temporary, content, { encoding: 'utf8', mode: 0o600 });
-      await rename(temporary, filePath);
-      await chmod(filePath, 0o600);
-    });
+    writeChain = writeChain.then(() => writeTextAtomic(filePath, content, { directoryMode: 0o700, enforceDirectoryMode: true }));
     await writeChain;
   }
 
@@ -281,7 +272,7 @@ export function createDomainSuspensionOperationRegistry({
     if (initialized) return;
     if (filePath) {
       try {
-        const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+        const parsed = await readJsonWithFallback(filePath);
         if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.operations)
           || Object.keys(parsed).length !== 2
           || Object.keys(parsed).some((field) => !['version', 'operations'].includes(field))) {

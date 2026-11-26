@@ -1,6 +1,4 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import {
   ApplicationValidationError,
   assertUuid,
@@ -9,6 +7,7 @@ import {
   normalizeEnvironmentValue,
   parseApplicationEnvironmentImport,
 } from '@yunpanel/shared';
+import { readJsonWithFallback, writeTextAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 2;
 const ALGORITHM = 'aes-256-gcm';
@@ -269,13 +268,7 @@ export function createApplicationEnvironmentRegistry({
   async function persist() {
     if (!filePath) return;
     const snapshot = JSON.stringify(state, null, 2);
-    const directory = path.dirname(filePath);
-    const temporaryPath = `${filePath}.${process.pid}.tmp`;
-    writeChain = writeChain.catch(() => {}).then(async () => {
-      await mkdir(directory, { recursive: true });
-      await writeFile(temporaryPath, snapshot, { encoding: 'utf8', mode: 0o600 });
-      await rename(temporaryPath, filePath);
-    });
+    writeChain = writeChain.catch(() => {}).then(() => writeTextAtomic(filePath, snapshot));
     return writeChain;
   }
 
@@ -283,7 +276,7 @@ export function createApplicationEnvironmentRegistry({
     if (initialized) return;
     if (filePath) {
       try {
-        const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+        const parsed = await readJsonWithFallback(filePath);
         if (![1, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.variables)
           || (parsed.version === STORE_VERSION && !Array.isArray(parsed.environments))) {
           throw new Error('unsupported or invalid application environment state');

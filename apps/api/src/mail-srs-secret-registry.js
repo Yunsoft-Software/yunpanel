@@ -1,8 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import { assertUuid } from '@yunpanel/shared';
 import { normalizeEnvironmentMasterKey } from './application-environment-registry.js';
+import { readJsonWithFallback, writeTextAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 1;
 const ALGORITHM = 'aes-256-gcm';
@@ -135,16 +134,8 @@ export function createMailSrsSecretRegistry({
 
   async function persist() {
     if (!filePath) return;
-    const directory = path.dirname(filePath);
-    const temporaryPath = `${filePath}.${process.pid}.tmp`;
     const snapshot = `${JSON.stringify(state, null, 2)}\n`;
-    writeChain = writeChain.then(async () => {
-      await mkdir(directory, { recursive: true, mode: 0o700 });
-      await chmod(directory, 0o700);
-      await writeFile(temporaryPath, snapshot, { encoding: 'utf8', mode: 0o600 });
-      await rename(temporaryPath, filePath);
-      await chmod(filePath, 0o600);
-    });
+    writeChain = writeChain.then(() => writeTextAtomic(filePath, snapshot, { directoryMode: 0o700, enforceDirectoryMode: true }));
     return writeChain;
   }
 
@@ -152,7 +143,7 @@ export function createMailSrsSecretRegistry({
     if (initialized) return;
     if (filePath) {
       try {
-        const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+        const parsed = await readJsonWithFallback(filePath);
         if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.records)
           || Object.keys(parsed).length !== 2 || Object.keys(parsed).some((field) => !['version', 'records'].includes(field))) {
           throw new MailSrsSecretRegistryError('mail_srs_secret_state_invalid', 'SRS secret store is invalid', 409);

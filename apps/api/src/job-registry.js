@@ -2,7 +2,6 @@ import { normalizePassengerReleaseResult } from './passenger-release-job-result.
 import { canonicalMailReloadOutcome } from './certificate-mail-reload.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   createOperationEnvelope,
@@ -49,6 +48,7 @@ import { sanitizeWebsitePhpToolJobResult } from './website-php-tool-job-result.j
 import { normalizeWebsiteProvisioningJobAuthorization } from './website-provisioning-job-authorization.js';
 import { createProcessStoreLock } from './process-store-lock.js';
 import { normalizeWebsiteBackupScheduleAuthorization } from './website-backup-schedule-authorization.js';
+import { readJsonWithFallback, writeTextAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 1;
 const JOB_STATUSES = new Set(['queued', 'running', 'succeeded', 'failed', 'cancelled']);
@@ -1361,21 +1361,14 @@ export function createJobRegistry({
   async function persist() {
     if (!filePath) return;
     const snapshot = JSON.stringify(state, null, 2);
-    const directory = path.dirname(filePath);
-    const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
-    writeChain = writeChain.then(async () => {
-      await mkdir(directory, { recursive: true, mode: 0o700 });
-      await writeFile(temporaryPath, snapshot, { encoding: 'utf8', mode: 0o600 });
-      await rename(temporaryPath, filePath);
-    });
+    writeChain = writeChain.then(() => writeTextAtomic(filePath, snapshot, { directoryMode: 0o700 }));
     return writeChain;
   }
 
   async function reload() {
     if (!filePath) return;
     try {
-      const raw = await readFile(filePath, 'utf8');
-      const parsed = JSON.parse(raw);
+      const parsed = await readJsonWithFallback(filePath);
       if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.jobs)) throw new Error('unsupported or invalid job registry state');
       state = parsed;
       initialized = true;

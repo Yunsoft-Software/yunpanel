@@ -1,6 +1,4 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import {
   ApplicationValidationError,
   assertUuid,
@@ -15,6 +13,7 @@ import {
   pythonServiceName,
   pythonSocketPath,
 } from '@yunpanel/config-templates';
+import { readJsonWithFallback, writeTextAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 1;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
@@ -402,13 +401,7 @@ export function createApplicationRegistry({
   async function persist() {
     if (!filePath) return;
     const snapshot = JSON.stringify(state, null, 2);
-    const directory = path.dirname(filePath);
-    const temporaryPath = `${filePath}.${process.pid}.tmp`;
-    writeChain = writeChain.then(async () => {
-      await mkdir(directory, { recursive: true });
-      await writeFile(temporaryPath, snapshot, { encoding: 'utf8', mode: 0o600 });
-      await rename(temporaryPath, filePath);
-    });
+    writeChain = writeChain.then(() => writeTextAtomic(filePath, snapshot));
     return writeChain;
   }
 
@@ -416,7 +409,7 @@ export function createApplicationRegistry({
     if (initialized) return;
     if (filePath) {
       try {
-        const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+        const parsed = await readJsonWithFallback(filePath);
         if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.applications)) throw new Error('unsupported or invalid application registry state');
         state = parsed;
       } catch (error) {

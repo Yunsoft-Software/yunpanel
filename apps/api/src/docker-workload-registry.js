@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import { assertUuid, normalizeProxyHost } from '@yunpanel/shared';
+import { readJsonWithFallback, writeTextAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 1;
 const MANAGEMENT_MODE = 'external';
@@ -206,13 +205,7 @@ export function createDockerWorkloadRegistry({
       };
     }
     const snapshot = JSON.stringify(serialized, null, 2);
-    const directory = path.dirname(filePath);
-    const temporaryPath = `${filePath}.${process.pid}.tmp`;
-    writeChain = writeChain.then(async () => {
-      await mkdir(directory, { recursive: true });
-      await writeFile(temporaryPath, snapshot, { encoding: 'utf8', mode: 0o600 });
-      await rename(temporaryPath, filePath);
-    });
+    writeChain = writeChain.then(() => writeTextAtomic(filePath, snapshot));
     return writeChain;
   }
 
@@ -229,7 +222,7 @@ export function createDockerWorkloadRegistry({
     if (initialized) return;
     if (filePath) {
       try {
-        const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+        const parsed = await readJsonWithFallback(filePath);
         const allowedTopKeys = ['version', 'workloads', 'portainer'];
         if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.workloads)
           || Object.keys(parsed).some((key) => !allowedTopKeys.includes(key))) {

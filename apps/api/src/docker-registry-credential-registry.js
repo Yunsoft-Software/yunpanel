@@ -1,8 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import { assertUuid } from '@yunpanel/shared';
 import { normalizeEnvironmentMasterKey } from './application-environment-registry.js';
+import { readJsonWithFallback, writeTextAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 1;
 const ALGORITHM = 'aes-256-gcm';
@@ -154,13 +153,7 @@ export function createDockerRegistryCredentialRegistry({
   async function persist() {
     if (!filePath) return;
     const snapshot = JSON.stringify(state, null, 2);
-    const directory = path.dirname(filePath);
-    const temporary = `${filePath}.${process.pid}.tmp`;
-    writeChain = writeChain.then(async () => {
-      await mkdir(directory, { recursive: true });
-      await writeFile(temporary, snapshot, { encoding: 'utf8', mode: 0o600 });
-      await rename(temporary, filePath);
-    });
+    writeChain = writeChain.then(() => writeTextAtomic(filePath, snapshot));
     return writeChain;
   }
 
@@ -175,7 +168,7 @@ export function createDockerRegistryCredentialRegistry({
     if (initialized) return;
     if (filePath) {
       try {
-        const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+        const parsed = await readJsonWithFallback(filePath);
         if (!parsed || parsed.version !== STORE_VERSION || !Array.isArray(parsed.credentials)
           || Object.keys(parsed).length !== 2 || Object.keys(parsed).some((key) => !['version', 'credentials'].includes(key))) {
           throw new DockerRegistryCredentialRegistryError('docker_registry_credential_state_invalid', 'Docker registry credential store is invalid', 409);

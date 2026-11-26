@@ -1,6 +1,5 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import path from 'node:path';
+import { readJsonWithFallback, writeTextAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 1;
 const DEFAULT_ENROLLMENT_TTL_MS = 15 * 60 * 1000;
@@ -99,14 +98,8 @@ export function createServerRegistry({
     if (!filePath) return;
 
     const snapshot = JSON.stringify(state, null, 2);
-    const directory = path.dirname(filePath);
-    const temporaryPath = `${filePath}.${process.pid}.tmp`;
 
-    writeChain = writeChain.then(async () => {
-      await mkdir(directory, { recursive: true });
-      await writeFile(temporaryPath, snapshot, { encoding: 'utf8', mode: 0o600 });
-      await rename(temporaryPath, filePath);
-    });
+    writeChain = writeChain.then(() => writeTextAtomic(filePath, snapshot));
 
     return writeChain;
   }
@@ -116,8 +109,7 @@ export function createServerRegistry({
 
     if (filePath) {
       try {
-        const raw = await readFile(filePath, 'utf8');
-        const parsed = JSON.parse(raw);
+        const parsed = await readJsonWithFallback(filePath);
         if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.servers) || !Array.isArray(parsed.enrollmentTokens)) {
           throw new Error('unsupported or invalid server registry state');
         }

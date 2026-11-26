@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -20,6 +20,8 @@ test('writeJsonAtomic keeps the requested format and mode and leaves no temp fil
   await withDirectory(async (directory) => {
     const target = path.join(directory, 'state', 'registry.json');
     await writeJsonAtomic(target, { version: 1, items: [] }, { trailingNewline: true, mode: 0o600, directoryMode: 0o700 });
+    await chmod(path.dirname(target), 0o755);
+    await writeJsonAtomic(target, { version: 1, items: [] }, { trailingNewline: true, directoryMode: 0o700, enforceDirectoryMode: true });
     assert.equal(await readFile(target, 'utf8'), '{\n  "version": 1,\n  "items": []\n}\n');
     assert.equal(await fileMode(target), 0o600);
     assert.equal(await fileMode(path.dirname(target)), 0o700);

@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import { assertUuid } from '@yunpanel/shared';
+import { readJsonWithFallback, writeTextAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 1;
 const STATUSES = new Set(['pending', 'applying', 'succeeded', 'failed']);
@@ -176,16 +175,8 @@ export function createDnsZoneDnssecOperationRegistry({
 
   async function persist() {
     if (!filePath) return;
-    const directory = path.dirname(filePath);
-    const temporary = `${filePath}.${process.pid}.tmp`;
     const snapshot = `${JSON.stringify(state, null, 2)}\n`;
-    writeChain = writeChain.then(async () => {
-      await mkdir(directory, { recursive: true, mode: 0o700 });
-      await chmod(directory, 0o700);
-      await writeFile(temporary, snapshot, { encoding: 'utf8', mode: 0o600 });
-      await rename(temporary, filePath);
-      await chmod(filePath, 0o600);
-    });
+    writeChain = writeChain.then(() => writeTextAtomic(filePath, snapshot, { directoryMode: 0o700, enforceDirectoryMode: true }));
     return writeChain;
   }
 
@@ -193,7 +184,7 @@ export function createDnsZoneDnssecOperationRegistry({
     if (initialized) return;
     if (filePath) {
       try {
-        const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+        const parsed = await readJsonWithFallback(filePath);
         if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.operations)
           || Object.keys(parsed).length !== 2 || Object.keys(parsed).some((field) => !['version', 'operations'].includes(field))) {
           throw new DnsZoneDnssecOperationRegistryError('dnssec_operation_state_invalid', 'DNSSEC operation store is invalid', 409);

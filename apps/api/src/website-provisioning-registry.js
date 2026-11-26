@@ -1,4 +1,3 @@
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { findBlockingLaterCompensationStep } from './website-provisioning-compensation-order.js';
 import { createProcessStoreLock } from './process-store-lock.js';
@@ -6,6 +5,7 @@ import {
   createWebsiteProvisioningPlan,
   WebsiteProvisioningPlanError,
 } from './website-provisioning-plan.js';
+import { readJsonWithFallback, writeTextAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 1;
 const TERMINAL_STATES = new Set(['abandoned']);
@@ -190,21 +190,15 @@ export function createWebsiteProvisioningRegistry({
 
   async function persist() {
     if (!filePath) return;
-    const directory = path.dirname(filePath);
-    const temporaryPath = `${filePath}.${process.pid}.tmp`;
     const snapshot = JSON.stringify(state, null, 2);
-    writeChain = writeChain.then(async () => {
-      await mkdir(directory, { recursive: true, mode: 0o700 });
-      await writeFile(temporaryPath, snapshot, { encoding: 'utf8', mode: 0o600 });
-      await rename(temporaryPath, filePath);
-    });
+    writeChain = writeChain.then(() => writeTextAtomic(filePath, snapshot, { directoryMode: 0o700 }));
     return writeChain;
   }
 
   async function reload() {
     if (!filePath) { initialized = true; return true; }
     try {
-      const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+      const parsed = await readJsonWithFallback(filePath);
       if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.operations)) throw new Error('invalid Website provisioning registry state');
       const operations = parsed.operations.map(normalizeStoredOperation);
       if (new Set(operations.map((operation) => operation.operationId)).size !== operations.length) {

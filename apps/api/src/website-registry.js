@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { assertUuid, normalizeProxyHost } from '@yunpanel/shared';
 import { phpFpmTemplatePolicy } from '@yunpanel/config-templates';
@@ -8,6 +7,7 @@ import {
   normalizeManagedComposeWebsiteBinding,
   resolveManagedComposeWebsiteBinding,
 } from './managed-compose-website-binding.js';
+import { readJsonWithFallback, writeTextAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 6;
 const RUNTIME_TYPES = new Set(['static', 'node', 'php', 'python', 'docker', 'proxy']);
@@ -287,13 +287,7 @@ export function createWebsiteRegistry({
   async function persist() {
     if (!filePath) return;
     const snapshot = JSON.stringify(state, null, 2);
-    const directory = path.dirname(filePath);
-    const temporaryPath = `${filePath}.${process.pid}.tmp`;
-    writeChain = writeChain.catch(() => {}).then(async () => {
-      await mkdir(directory, { recursive: true });
-      await writeFile(temporaryPath, snapshot, { encoding: 'utf8', mode: 0o600 });
-      await rename(temporaryPath, filePath);
-    });
+    writeChain = writeChain.catch(() => {}).then(() => writeTextAtomic(filePath, snapshot));
     return writeChain;
   }
 
@@ -365,7 +359,7 @@ export function createWebsiteRegistry({
     if (initialized) return;
     if (filePath) {
       try {
-        const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+        const parsed = await readJsonWithFallback(filePath);
         if (![1, 2, 3, 4, 5, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.websites)) throw new Error('unsupported or invalid website registry state');
         const sourceVersion = parsed.version;
         const websites = parsed.websites.map((website) => validatePersistedWebsite(website, sourceVersion));

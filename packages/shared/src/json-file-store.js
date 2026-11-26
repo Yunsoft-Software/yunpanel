@@ -67,14 +67,14 @@ async function keepPreviousAsBackup(filePath, mode) {
 }
 
 /**
- * Atomically replace `filePath` with `text`.
- * `directoryMode` creates the parent with that mode and enforces it on an existing parent.
+ * Atomically replace `filePath` with `text` (file `mode`, default 0600).
+ * A missing parent is created with `directoryMode`; `enforceDirectoryMode` also chmods an existing parent.
  */
-export async function writeTextAtomic(filePath, text, { mode = 0o600, directoryMode, backup = true } = {}) {
+export async function writeTextAtomic(filePath, text, { mode = 0o600, directoryMode, enforceDirectoryMode = false } = {}) {
   const directory = path.dirname(filePath);
   await mkdir(directory, { recursive: true, ...(directoryMode === undefined ? {} : { mode: directoryMode }) });
-  if (directoryMode !== undefined) await chmod(directory, directoryMode);
-  if (backup) await keepPreviousAsBackup(filePath, mode);
+  if (enforceDirectoryMode) await chmod(directory, directoryMode);
+  await keepPreviousAsBackup(filePath, mode);
   await replaceDurably(filePath, Buffer.from(text, 'utf8'), mode);
 }
 

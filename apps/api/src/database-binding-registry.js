@@ -1,8 +1,7 @@
 import { isInfrastructureDatabase } from '@yunpanel/shared';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import { assertUuid } from '@yunpanel/shared';
+import { readJsonWithFallback, writeTextAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 1;
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
@@ -96,13 +95,7 @@ export function createDatabaseBindingRegistry({
   async function persist() {
     if (!filePath) return;
     const snapshot = JSON.stringify(state, null, 2);
-    const directory = path.dirname(filePath);
-    const temporary = `${filePath}.${process.pid}.tmp`;
-    writeChain = writeChain.then(async () => {
-      await mkdir(directory, { recursive: true, mode: 0o700 });
-      await writeFile(temporary, snapshot, { encoding: 'utf8', mode: 0o600 });
-      await rename(temporary, filePath);
-    });
+    writeChain = writeChain.then(() => writeTextAtomic(filePath, snapshot, { directoryMode: 0o700 }));
     return writeChain;
   }
 
@@ -191,7 +184,7 @@ export function createDatabaseBindingRegistry({
     if (initialized) return;
     if (filePath) {
       try {
-        const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+        const parsed = await readJsonWithFallback(filePath);
         if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.bindings)
           || Object.keys(parsed).length !== 2 || Object.keys(parsed).some((key) => !['version', 'bindings'].includes(key))) {
           throw new DatabaseBindingRegistryError('database_binding_state_invalid', 'Database binding store is invalid', 409);

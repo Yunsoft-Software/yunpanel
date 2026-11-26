@@ -1,6 +1,4 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import {
   assertUuid,
   DomainValidationError,
@@ -13,6 +11,7 @@ import {
 } from '@yunpanel/shared';
 import { DomainHierarchyError, validateDomainHierarchy, validateDomainParent } from './domain-hierarchy.js';
 import { operationErrorDiagnosis } from './operation-diagnosis.js';
+import { readJsonWithFallback, writeTextAtomic } from '@yunpanel/shared/json-file-store';
 
 const STORE_VERSION = 4;
 const TARGET_TYPES = new Set(['static', 'proxy', 'passenger', 'php', 'python', 'redirect']);
@@ -509,13 +508,7 @@ export function createDomainRegistry({
   async function persist() {
     if (!filePath) return;
     const snapshot = JSON.stringify(state, null, 2);
-    const directory = path.dirname(filePath);
-    const temporaryPath = `${filePath}.${process.pid}.tmp`;
-    writeChain = writeChain.then(async () => {
-      await mkdir(directory, { recursive: true });
-      await writeFile(temporaryPath, snapshot, { encoding: 'utf8', mode: 0o600 });
-      await rename(temporaryPath, filePath);
-    });
+    writeChain = writeChain.then(() => writeTextAtomic(filePath, snapshot));
     return writeChain;
   }
 
@@ -533,7 +526,7 @@ export function createDomainRegistry({
     if (initialized) return;
     if (filePath) {
       try {
-        const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+        const parsed = await readJsonWithFallback(filePath);
         if (![1, 2, 3, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.domains)) throw new Error('unsupported or invalid domain registry state');
         try {
           validateDomainHierarchy(parsed.domains);
