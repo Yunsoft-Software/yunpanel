@@ -118,3 +118,12 @@ Aşağıdaki tüm komutlar mock/stub olmadan gerçek SQLite, gerçek API, gerçe
 
 - **Doğrulama:** `node scripts/verify-and-package-docs.mjs --bundle docs/yunpanel-docs-0.3.0 --package .local/website-docs/yunpanel-docs-0.3.0.tar.gz` geçti: 11 sayfa, 22 kılavuz, 34 görsel kaydı, 50 iç bağlantı, 36 görsel bağlantısı, 64 arşiv girdisi. `node --test apps/web/test/versioned-docs-package.test.js` → 3/3 geçti; test artık kampanya görsellerinin kaynağını sabit commit yerine manifestteki `sourceCommit` ile karşılaştırır. `npm run lint` geçti.
 - **Arşiv:** T959 worktree'sinde `.local/website-docs/yunpanel-docs-0.3.0.tar.gz`, SHA-256 `c28c1a7630802b8471f3518c1d4d59bf72d9baba0409a70817febef1b34b190d`. Yakalama raporu aynı klasörde `capture-report-0.3.0.json`. Website'e aktarım ve yayın yapılmadı.
+
+## 26 Kasım 2026 — yunsoft.com yayını (T959)
+
+- **Kapsam:** Yalnız YunPanel `0.3.0` dokümanları: `content/docs/yunpanel/0.3.0/`, `public/docs-assets/yunpanel/0.3.0/` ve `content/docs/registry.json` içindeki YunPanel kaydı. `.44` erişimi DECISIONS 2026-11-26 istisnasıyla, yalnız senior.
+- **Paket:** `yunpanel-docs-0.3.0.tar.gz` SHA-256 `c28c1a7630802b8471f3518c1d4d59bf72d9baba0409a70817febef1b34b190d`, manifest `sourceCommit` `c1a84a5159add2f2f87fd6e21725f7c657cf98ec`. Yerelde ve sunucuda website doğrulayıcısı geçti (11 sayfa, 34 görsel).
+- **Yedek:** Önceki üç yer `/var/www/vhosts/yunsoft.com/.backups/docs-yunpanel-0.3.0-20261126/before/` altında (4,6 MB). Yayın paketi aynı klasörde.
+- **Yayın:** Sitedeki `scripts/docs-bundle.mjs import` (yereldekiyle aynı hash) Node 24 ile çalıştırıldı: `imported: true`, uyarı ve hata yok. Sürüm klasörleri yine `yunsoft.com_qdablo7xeh9:psacln`, `registry.json` yine `root:root 644`. YunCMS 2.1.4 ve 2.1.3 kayıtları korundu. Build, servis veya backend değişmedi; yeniden başlatma gerekmedi.
+- **Doğrulama:** 22 sayfa (TR/EN) HTTP 200. Docker sayfası iki dilde yeni etiketleri gösteriyor, eski etiket yok, sayfa revizyonu `c1a84a51`. 34 görselin canlı SHA-256 değeri paketle aynı. YunCMS doküman sayfası ve ana sayfa 200.
+- **Açık:** Docker ekran görüntüsünde görüntü ortamından gelen "Docker projeleri · Not found" uyarısı var (eski görselde de vardı); Docker'lı örnek ortamla yeniden alınmalı.
