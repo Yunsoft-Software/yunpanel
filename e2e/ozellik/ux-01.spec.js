@@ -393,7 +393,7 @@ test.describe('UX-01 Plesk görev yerleşimi ve tüm rollerin doğru menüsü', 
     await page.goto(`/websites/${resolvedDomainId}/overview`);
     await expect(page.locator('.ws-plesk-site-navigation')).toBeVisible({ timeout: 15000 });
 
-    // Beklenen: ui-plan.md §1 gereği mobilde .ws-site-tool-select seçicisi görünür olmalıdır
+    // Beklenen: docs/ui-plan.md §1 gereği mobilde .ws-site-tool-select seçicisi görünür olmalıdır
     // Gerçek: theme.css içindeki @media (max-width: 768px) kuralı display: none !important uyguladığı için gizlidir.
     await expect(page.locator('.ws-site-tool-select')).toBeVisible({ timeout: 4000 });
   });
