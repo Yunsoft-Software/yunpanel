@@ -242,8 +242,8 @@ print(json.dumps({'rc':r.returncode,'status':status,'headers':head,'body':body})
       '',
     ].join('\n');
 
-    await createModal.locator('label:has-text("Compose document") textarea').fill(composeYaml);
-    await createModal.locator('button:has-text("Validate")').click();
+    await createModal.locator('label:has-text("Compose içeriği") textarea').fill(composeYaml);
+    await createModal.locator('button:has-text("Doğrula")').click();
     await expect(createModal.locator('dt:has-text("Servis")')).toBeVisible({ timeout: 15_000 });
 
     const saveProjectBtn = createModal.locator('button:has-text("Projeyi kaydet")');
@@ -255,9 +255,9 @@ print(json.dumps({'rc':r.returncode,'status':status,'headers':head,'body':body})
     createdProjectId = urlMatch ? decodeURIComponent(urlMatch[1]) : null;
     expect(createdProjectId).toBeTruthy();
 
-    const lifecycleSection = page.locator('section').filter({ has: page.locator('h2:text-is("Lifecycle")') });
+    const lifecycleSection = page.locator('section').filter({ has: page.locator('h2:text-is("Proje işlemleri")') });
     await expect(lifecycleSection).toBeVisible({ timeout: 15_000 });
-    const startBtn = lifecycleSection.locator('button:has-text("Başlat")');
+    const startBtn = lifecycleSection.locator('button:text-is("Başlat")');
     await expect(startBtn).toBeEnabled({ timeout: 15_000 });
     await startBtn.click();
     await confirmLifecycleAction(page, 'start');

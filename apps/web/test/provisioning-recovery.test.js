@@ -66,15 +66,15 @@ test('provisioning remediation is handler-specific and fail-closed', () => {
   assert.equal(provisioningRemediation({ kind: 'unix_identity', state: 'pending' }), null);
   assert.match(
     provisioningRemediation({ kind: 'unix_identity', state: 'failed', error: 'website_identity_partial_state' }),
-    /UID\/GID ownership/,
+    /kayıtlı UID\/GID bilgisiyle/,
   );
   assert.match(
     provisioningRemediation({ kind: 'runtime', state: 'blocked', error: 'static_runtime_provisioning_pending' }),
-    /Static runtime provisioning/,
+    /Statik site kurulumu/,
   );
   assert.match(
     provisioningRemediation({ kind: 'nginx', state: 'compensating' }),
-    /vhost\/checksum/,
+    /Nginx site yapılandırmasını/,
   );
   assert.match(
     provisioningRemediation({ kind: 'future_adapter', state: 'failed' }),

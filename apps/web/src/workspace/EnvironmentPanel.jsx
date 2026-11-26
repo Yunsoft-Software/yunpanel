@@ -35,7 +35,7 @@ export default function EnvironmentPanel({ application }) {
     event.preventDefault();
     mutate(async () => {
       await panelRequest(`/applications/${encodeURIComponent(application.id)}/environment/${encodeURIComponent(form.key)}`, { method: 'PUT', body: { value: form.value, secret: form.secret }, signal: requests.current.signal });
-      setForm({ key: '', value: '', secret: true }); setNotice('Değişken kaydedildi. Çalışan uygulamaya uygulamak için yeniden başlatın veya deploy edin.');
+      setForm({ key: '', value: '', secret: true }); setNotice('Değişken kaydedildi. Çalışan uygulamaya yansıması için yeniden başlatın veya yeniden dağıtın.');
     });
   }
   function applyImport(mode) {
@@ -49,7 +49,7 @@ export default function EnvironmentPanel({ application }) {
         signal: requests.current.signal,
       });
       setImportForm({ content: '', mode: 'merge', secret: true }); setReplaceImport(false);
-      setNotice(`Ortam değişkenleri ${mode === 'replace' ? 'değiştirildi' : 'birleştirildi'}. Çalışan prosese uygulamak için restart veya deploy başlatın.`);
+      setNotice(`Ortam değişkenleri ${mode === 'replace' ? 'değiştirildi' : 'birleştirildi'}. Çalışan uygulamaya yansıması için yeniden başlatın veya yeniden dağıtın.`);
     });
   }
   function submitImport(event) {
@@ -59,7 +59,7 @@ export default function EnvironmentPanel({ application }) {
   }
   return <Section title="Ortam değişkenleri" description="Değerler yalnızca bu uygulamaya aittir. Gizli değerler listede gösterilmez.">
     <CollectionNotice resource={variables} label="Ortam değişkenleri" />
-    {environment && <div className="ws-section-body"><p role="status"><Badge state={environment.appliedToRunningProcess ? 'active' : 'draft'}>{environment.appliedToRunningProcess ? 'Çalışan prosese uygulandı' : 'Yalnız diskte kayıtlı'}</Badge></p><p className="ws-muted">{environment.appliedToRunningProcess ? 'Değişiklikler çalışan uygulamaya başarıyla uygulandı.' : 'Değişiklikler kaydedildi; çalışan uygulamaya yansıması için yeniden başlatma veya deploy adımı gereklidir.'}</p>{environment.lastChange && <p className="ws-muted">Son değişiklik: {environment.lastChange.added} eklendi, {environment.lastChange.updated} güncellendi, {environment.lastChange.deleted} silindi.</p>}<details className="ws-disclosure"><summary>Tanılama ve teknik sürüm ayrıntıları</summary><p className="ws-muted">Kaydedilen sürüm: <code>{environment.savedRevision}</code> · Uygulanan sürüm: <code>{environment.appliedRevision ?? 'Yok'}</code></p></details></div>}
+    {environment && <div className="ws-section-body"><p role="status"><Badge state={environment.appliedToRunningProcess ? 'active' : 'draft'}>{environment.appliedToRunningProcess ? 'Çalışan uygulamaya uygulandı' : 'Yalnız diskte kayıtlı'}</Badge></p><p className="ws-muted">{environment.appliedToRunningProcess ? 'Değişiklikler çalışan uygulamaya başarıyla uygulandı.' : 'Değişiklikler kaydedildi; çalışan uygulamaya yansıması için yeniden başlatma veya dağıtım gereklidir.'}</p>{environment.lastChange && <p className="ws-muted">Son değişiklik: {environment.lastChange.added} eklendi, {environment.lastChange.updated} güncellendi, {environment.lastChange.deleted} silindi.</p>}<details className="ws-disclosure"><summary>Tanılama ve teknik sürüm ayrıntıları</summary><p className="ws-muted">Kaydedilen sürüm: <code>{environment.savedRevision}</code> · Uygulanan sürüm: <code>{environment.appliedRevision ?? 'Yok'}</code></p></details></div>}
     {variables.items.length > 0 && <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Değişken</th><th>Değer</th><th>Görünürlük</th><th>İşlem</th></tr></thead><tbody>{variables.items.map((variable) => <tr key={variable.key}><td><strong>{variable.key}</strong></td><td>{variable.secret ? '••••••••' : variable.value}</td><td><Badge state="unknown">{variable.secret ? 'Gizli' : 'Düz metin'}</Badge></td><td><Button disabled={busy || variables.status !== 'ready'} onClick={() => setRemove(variable)}>Sil</Button></td></tr>)}</tbody></table></div>}
     {variables.status === 'ready' && !variables.items.length && <EmptyState title="Özel değişken yok" detail="Uygulamanızın ihtiyacı olan ortam değişkenlerini aşağıdan ekleyin." icon="code" />}
     <form className="ws-form" onSubmit={save}>
@@ -151,7 +151,7 @@ export default function EnvironmentPanel({ application }) {
         </Button>
       </fieldset>
     </form>
-    {remove && <ConfirmDialog title="Ortam değişkenini sil" message={`${application.name} uygulamasındaki ${remove.key} değişkeni silinecek. Uygulamaya yeniden başlatma/deploy ile uygulanır.`} confirmation={remove.key} busy={busy} error={error} onCancel={() => setRemove(null)} onConfirm={() => mutate(async () => { await panelRequest(`/applications/${encodeURIComponent(application.id)}/environment/${encodeURIComponent(remove.key)}`, { method: 'DELETE', signal: requests.current.signal }); setRemove(null); setNotice('Değişken silindi. Çalışan uygulamaya uygulamak için yeniden başlatın.'); })} confirmLabel="Değişkeni sil" />}
-    {replaceImport && environment && <ConfirmDialog title="Ortam değişkenlerinin tamamını değiştir" message={`${application.name} için içe aktarılan listede bulunmayan mevcut değişkenler silinecek. Değişiklik yalnız restart/deploy sonrasında çalışan prosese uygulanır.`} confirmation={`replace-environment:${application.id}:${environment.savedRevision}`} busy={busy} error={error} onCancel={() => setReplaceImport(false)} onConfirm={() => applyImport('replace')} confirmLabel="Tümünü değiştir" />}
+    {remove && <ConfirmDialog title="Ortam değişkenini sil" message={`${application.name} uygulamasındaki ${remove.key} değişkeni silinecek. Değişiklik yeniden başlatma veya dağıtımla uygulanır.`} confirmation={remove.key} busy={busy} error={error} onCancel={() => setRemove(null)} onConfirm={() => mutate(async () => { await panelRequest(`/applications/${encodeURIComponent(application.id)}/environment/${encodeURIComponent(remove.key)}`, { method: 'DELETE', signal: requests.current.signal }); setRemove(null); setNotice('Değişken silindi. Çalışan uygulamaya uygulamak için yeniden başlatın.'); })} confirmLabel="Değişkeni sil" />}
+    {replaceImport && environment && <ConfirmDialog title="Ortam değişkenlerinin tamamını değiştir" message={`${application.name} için içe aktarılan listede bulunmayan mevcut değişkenler silinecek. Değişiklik yalnız yeniden başlatma veya dağıtımdan sonra çalışan uygulamaya yansır.`} confirmation={`replace-environment:${application.id}:${environment.savedRevision}`} busy={busy} error={error} onCancel={() => setReplaceImport(false)} onConfirm={() => applyImport('replace')} confirmLabel="Tümünü değiştir" />}
   </Section>;
 }

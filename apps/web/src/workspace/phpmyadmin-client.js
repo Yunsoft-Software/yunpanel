@@ -114,7 +114,7 @@ export async function openWebsitePhpMyAdmin({
   if (typeof issueHandoff !== 'function') {
     throw new PhpMyAdminBrowserHandoffError(
       'phpmyadmin_handoff_client_missing',
-      'phpMyAdmin handoff istemcisi kullanılamıyor.',
+      'phpMyAdmin bağlantısı kullanılamıyor.',
     );
   }
   if (targetWindow === null || targetWindow?.closed === true || locationImpl?.closed === true) {

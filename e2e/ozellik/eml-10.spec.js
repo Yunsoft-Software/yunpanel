@@ -89,10 +89,10 @@ test.describe('EML-10 Giden posta limitleri, kuyruk ve teslimat tanılama', () =
     // A. Postfix mail queue paneli
     const queueSection = page.locator('section').filter({ has: page.locator('h2', { hasText: 'Postfix posta kuyruğu' }) });
     await expect(queueSection).toBeVisible({ timeout: 15000 });
-    await expect(queueSection.locator('input[placeholder*="queue ID, sender"]')).toBeVisible();
+    await expect(queueSection.locator('input[placeholder*="kuyruk numarası, gönderen"]')).toBeVisible();
 
-    // B. Mail servis logları paneli
-    const logsSection = page.locator('section').filter({ has: page.locator('h2', { hasText: 'Mail servis logları' }) });
+    // B. Posta servis günlükleri paneli
+    const logsSection = page.locator('section').filter({ has: page.locator('h2', { hasText: 'Posta servis günlükleri' }) });
     await expect(logsSection).toBeVisible({ timeout: 15000 });
     const serviceSelect = logsSection.locator('select');
     await expect(serviceSelect).toBeVisible();

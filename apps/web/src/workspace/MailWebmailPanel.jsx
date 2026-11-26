@@ -20,8 +20,8 @@ function mappingBadgeState(state) {
 }
 
 function mappingBadgeLabel(state) {
-  if (state === 'active') return 'Aktif (Roundcube bağlı)';
-  if (state === 'pending') return 'Yapılandırılıyor (Job bekleniyor)';
+  if (state === 'active') return 'Aktif';
+  if (state === 'pending') return 'Yapılandırılıyor';
   if (state === 'removing') return 'Kaldırılıyor';
   return state ?? 'Bağlı değil';
 }
@@ -179,7 +179,7 @@ export default function MailWebmailPanel({ domain, onChanged }) {
 
   return (
     <Section
-      title="Webmail (Roundcube)"
+      title="Roundcube Webmail"
       description="Bu mail domain için paylaşımlı Roundcube webmail eşlemesi ve SSL erişimi."
       actions={<Button icon="refresh" disabled={busy} onClick={load}>Yenile</Button>}
     >
@@ -198,11 +198,11 @@ export default function MailWebmailPanel({ domain, onChanged }) {
                 </a>
               )],
               ['Durum', <Badge key="status" state={mappingBadgeState(mapping.state)}>{mappingBadgeLabel(mapping.state)}</Badge>],
-              ['Hostname', mapping.hostname],
+              ['Sunucu adı', mapping.hostname],
               ['Sertifika ID', <code>{mapping.certificateId}</code>],
               ['Revizyon', mapping.revision],
               ['Son Güncelleme', formatDate(mapping.updatedAt)],
-              ...(job ? [['İlgili Job', `${job.status} (${job.id.slice(0, 8)})`]] : []),
+              ...(job ? [['İlgili işlem', `${job.status} (${job.id.slice(0, 8)})`]] : []),
             ]} />
 
             <div className="ws-actions" style={{ marginTop: 16 }}>
@@ -251,7 +251,7 @@ export default function MailWebmailPanel({ domain, onChanged }) {
                       || (Array.isArray(cert.subjectAlternativeNames) && cert.subjectAlternativeNames.includes(host));
                     return (
                       <option key={cert.id} value={cert.id}>
-                        {cert.primaryDomain} ({cert.id.slice(0, 8)}) {matches ? '✓ (uygun)' : ''}
+                        {cert.primaryDomain} ({cert.id.slice(0, 8)}) {matches ? '✓ uygun' : ''}
                       </option>
                     );
                   })}
@@ -270,9 +270,9 @@ export default function MailWebmailPanel({ domain, onChanged }) {
             {bindPreview && (
               <div style={{ marginTop: 16 }}>
                 <KeyValues items={[
-                  ['Hedef Hostname', bindPreview.hostname],
-                  ['Hazır', <Badge key="ready" state={bindPreview.readyToApply ? 'active' : 'warning'}>{bindPreview.readyToApply ? 'Hazır' : 'Blocker var'}</Badge>],
-                  ['Preview Digest', <code>{bindPreview.previewDigest}</code>],
+                  ['Hedef sunucu adı', bindPreview.hostname],
+                  ['Hazır', <Badge key="ready" state={bindPreview.readyToApply ? 'active' : 'warning'}>{bindPreview.readyToApply ? 'Hazır' : 'Engel var'}</Badge>],
+                  ['Önizleme özeti', <code>{bindPreview.previewDigest}</code>],
                 ]} />
                 <div className="ws-actions" style={{ marginTop: 16 }}>
                   <Button
@@ -280,7 +280,7 @@ export default function MailWebmailPanel({ domain, onChanged }) {
                     disabled={busy || !bindPreview.readyToApply}
                     onClick={() => setConfirmingBind(true)}
                   >
-                    Webmail (Roundcube) Bağla
+                    Roundcube Webmail Bağla
                   </Button>
                 </div>
               </div>

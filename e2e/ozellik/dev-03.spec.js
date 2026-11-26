@@ -156,7 +156,7 @@ test.describe.serial('DEV-03 Deploy anahtarı/webhook/ek komut ve işlem sonucu'
     // Git Webhook kartı ve Kopyalama butonu kontrolü
     const webhookSection = page.locator('section').filter({ has: page.locator('h2, h3', { hasText: 'Git Webhook ve Otomatik Yayın' }) });
     await expect(webhookSection).toBeVisible({ timeout: 10000 });
-    await expect(webhookSection).toContainText('GitHub Webhook Endpoint');
+    await expect(webhookSection).toContainText('GitHub webhook adresi');
 
     const copyBtn = webhookSection.locator('button', { hasText: /Webhook URL Kopyala|Webhook URL Kopyalandı/ });
     await expect(copyBtn).toBeVisible();
@@ -164,7 +164,7 @@ test.describe.serial('DEV-03 Deploy anahtarı/webhook/ek komut ve işlem sonucu'
     await expect(webhookSection.locator('button', { hasText: 'Webhook URL Kopyalandı' })).toBeVisible({ timeout: 5000 });
 
     // Manuel Deploy butonu ve tetikleme
-    const deployBtn = page.locator('button', { hasText: 'Deploy başlat' });
+    const deployBtn = page.locator('button', { hasText: 'Dağıtımı başlat' });
     await expect(deployBtn).toBeVisible({ timeout: 10000 });
     await expect(deployBtn).toBeEnabled();
     await deployBtn.click();
@@ -172,8 +172,8 @@ test.describe.serial('DEV-03 Deploy anahtarı/webhook/ek komut ve işlem sonucu'
     // İşlem kuyruğa alındığında durum bildirimi veya işlem tetiklenmesi kontrolü
     await expect(deployBtn.or(page.locator('.ws-notice, [role="status"], .ws-drawer'))).toBeVisible({ timeout: 10000 });
 
-    // Release geçmişi bölümü doğrulaması
-    const releaseSection = page.locator('section').filter({ has: page.locator('h2, h3', { hasText: 'Release geçmişi' }) });
+    // Sürüm geçmişi bölümü doğrulaması
+    const releaseSection = page.locator('section').filter({ has: page.locator('h2, h3', { hasText: 'Sürüm geçmişi' }) });
     await expect(releaseSection).toBeVisible({ timeout: 10000 });
 
     // 3. Fiziksel Sonuç Kontrolü

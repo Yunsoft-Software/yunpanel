@@ -31,7 +31,7 @@ export default function JobsTable({ jobs, limit = 10, onCancel, onRetry, busy = 
       setCancellingId(null);
     }
   };
-  if (!jobs.length) return <EmptyState title="Henüz işlem kaydı yok" detail="Deploy, SSL ve yapılandırma işlemleri çalıştırıldığında burada listelenir." icon="jobs" />;
+  if (!jobs.length) return <EmptyState title="Henüz işlem kaydı yok" detail="Dağıtım, SSL ve yapılandırma işlemleri çalıştırıldığında burada listelenir." icon="jobs" />;
   return <div className="ws-table-scroll"><table className="ws-table ws-jobs-table" role="table" aria-label="İşlem kayıtları"><thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">İşlem</th><th scope="col" role="columnheader">Kaynak</th><th scope="col" role="columnheader">Durum</th><th scope="col" role="columnheader">Oluşturulma</th><th scope="col" role="columnheader" className="ws-row-end"><span className="ws-sr-only">İşlemler</span></th></tr></thead><tbody role="rowgroup">{jobs.slice(0, limit).map((job) => {
     const target = jobResourceTarget(job, { domains: domains.items, websites: websites.items });
     const lifecycle = jobLifecycle(job);

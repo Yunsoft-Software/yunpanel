@@ -121,7 +121,7 @@ function DomainAliasWorkspace({ domain, generation }) {
   }
   if (!canManage) return <EmptyState icon="shield" title="Alan adı yönetimine erişilemiyor" detail="Hesabınızın site yönetimi yetkisini kontrol edin." />;
   return <>
-    <Section title="Ek alan adları (alias)" description="Bu adlar aynı web sitesi içeriğini kullanır; ayrı site veya posta hesabı oluşturulmaz."
+    <Section title="Ek alan adları" description="Bu adlar aynı web sitesi içeriğini kullanır; ayrı site veya posta hesabı oluşturulmaz."
       actions={<Button disabled={busy} icon="refresh" onClick={reload}>Güncel kaydı yükle</Button>}>
       <div className="ws-section-body">
         <p><strong>Ana alan adı:</strong> {base?.primaryDomain ?? domain.primaryDomain}</p>

@@ -61,7 +61,7 @@ test.describe('EML-04 Spam filtre, allow/deny list ve antivirüs politikası', (
 
     // 3. Sistem genelinde Rspamd servis loglarının görüntülenebilir olduğunu doğrula
     await page.goto('/mail');
-    const logsSection = page.locator('section').filter({ has: page.locator('h2', { hasText: 'Mail servis logları' }) });
+    const logsSection = page.locator('section').filter({ has: page.locator('h2', { hasText: 'Posta servis günlükleri' }) });
     if (await logsSection.isVisible({ timeout: 5000 }).catch(() => false)) {
       const serviceSelect = logsSection.locator('select');
       await expect(serviceSelect).toBeVisible();

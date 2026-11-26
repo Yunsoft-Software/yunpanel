@@ -182,7 +182,7 @@ test.describe('RUN-04 MIME, index, hata sayfaları ve parola korumalı dizinler'
     resolvedUnixUser = (await userRow.textContent()).trim();
     expect(resolvedUnixUser).toMatch(/^yunapp-[a-f0-9]+$/);
 
-    const docRootRow = page.locator('dt:has-text("Belge kök dizini (Docroot)") + dd');
+    const docRootRow = page.locator('dt:has-text("Belge kök dizini") + dd');
     await expect(docRootRow).toBeVisible();
     defaultDocRoot = (await docRootRow.textContent()).trim();
     expect(defaultDocRoot).toContain('/var/www/yunpanel/apps/');
@@ -301,7 +301,7 @@ test.describe('RUN-04 MIME, index, hata sayfaları ve parola korumalı dizinler'
     // Formu geçerli değerlere geri al ve Nginx konfigürasyonunun bozulmadığını SSH ile doğrula
     await indexInput.fill('anasayfa.html index.html');
     await saveBtn.click();
-    await expect(page.locator('.ws-badge:has-text("Yayında (Güncel)")').first()).toBeVisible({ timeout: 30000 });
+    await expect(page.locator('.ws-badge:has-text("Yayında, güncel")').first()).toBeVisible({ timeout: 30000 });
 
     // Fiziksel doğrulama: Nginx konfigürasyonu geçerli ve çalışır durumda kalmalı
     const nginxTest = runSsh('nginx -t 2>&1');

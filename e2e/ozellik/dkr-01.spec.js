@@ -103,7 +103,7 @@ test.describe('DKR-01 Registry/image arama, indirme ve image yönetimi', () => {
     const redisCard = page.locator('.yp-docker-catalog-card').filter({ hasText: 'Redis' }).first();
     await expect(redisCard).toBeVisible({ timeout: 15000 });
     await expect(redisCard).toContainText('redis', { timeout: 5000 });
-    await expect(redisCard).toContainText('Inner: 6379/tcp', { timeout: 5000 });
+    await expect(redisCard).toContainText('Konteyner: 6379/tcp', { timeout: 5000 });
 
     // 3. Kategori filtreleme: "Veritabanı & Cache" butonuna tıkla
     const dbCategoryBtn = page.locator('.yp-category-pills button:has-text("Veritabanı & Cache")');
@@ -123,7 +123,7 @@ test.describe('DKR-01 Registry/image arama, indirme ve image yönetimi', () => {
     expect(hasRedis).toBe(true);
   });
 
-  test('hatalı girdi: Registry credentials formunda geçersiz URL-formatlı host reddedilir', async ({ page }) => {
+  test('hatalı girdi: Kayıt defteri erişim bilgileri formunda geçersiz URL-formatlı host reddedilir', async ({ page }) => {
     await page.goto('/docker');
     await expect(page.locator('h1')).toContainText('Docker', { timeout: 15000 });
 
@@ -147,11 +147,11 @@ test.describe('DKR-01 Registry/image arama, indirme ve image yönetimi', () => {
       '',
     ].join('\n');
 
-    const docTextarea = modal.locator('label:has-text("Compose document") textarea');
+    const docTextarea = modal.locator('label:has-text("Compose içeriği") textarea');
     await docTextarea.fill(composeContent);
 
     // Validate ve Projeyi kaydet
-    const validateBtn = modal.locator('button:has-text("Validate")');
+    const validateBtn = modal.locator('button:has-text("Doğrula")');
     await expect(validateBtn).toBeEnabled();
     await validateBtn.click();
     await expect(modal.locator('dt:has-text("Servis")')).toBeVisible({ timeout: 10000 });
@@ -168,20 +168,20 @@ test.describe('DKR-01 Registry/image arama, indirme ve image yönetimi', () => {
 
     await expect(page.locator('h1')).toContainText(projectName, { timeout: 15000 });
 
-    // Registry credentials bölümünü bul
-    const registrySection = page.locator('section').filter({ has: page.locator('h2:text-is("Registry credentials")') });
+    // Kayıt defteri erişim bilgileri bölümünü bul
+    const registrySection = page.locator('section').filter({ has: page.locator('h2:text-is("Kayıt defteri erişim bilgileri")') });
     await expect(registrySection).toBeVisible({ timeout: 15000 });
 
     // Hatalı girdi: URL formatlı geçersiz registry host (örn: https://ghcr.io/invalid/path)
-    const hostInput = registrySection.locator('label:has-text("Registry host") input');
-    const userInput = registrySection.locator('label:has-text("Username") input');
-    const secretInput = registrySection.locator('label:has-text("Secret / token") input');
+    const hostInput = registrySection.locator('label:has-text("Kayıt defteri adresi") input');
+    const userInput = registrySection.locator('label:has-text("Kullanıcı adı") input');
+    const secretInput = registrySection.locator('label:has-text("Parola veya erişim anahtarı") input');
 
     await hostInput.fill('https://ghcr.io/invalid/path');
     await userInput.fill('testuser');
     await secretInput.fill('secret123');
 
-    const saveCredBtn = registrySection.locator('button:has-text("Credential kaydet")');
+    const saveCredBtn = registrySection.locator('button:has-text("Erişim bilgisini kaydet")');
     await expect(saveCredBtn).toBeEnabled();
     await saveCredBtn.click();
 
@@ -202,11 +202,11 @@ test.describe('DKR-01 Registry/image arama, indirme ve image yönetimi', () => {
     await page.goto(`/docker/${encodeURIComponent(createdProjectId)}`);
     await expect(page.locator('h1')).toContainText(projectName, { timeout: 15000 });
 
-    const lifecycleSection = page.locator('section').filter({ has: page.locator('h2:text-is("Lifecycle")') });
+    const lifecycleSection = page.locator('section').filter({ has: page.locator('h2:text-is("Proje işlemleri")') });
     await expect(lifecycleSection).toBeVisible({ timeout: 15000 });
 
     // Projeyi başlat (Compose up/start tetiklenir, imaj docker pull ile indirilir)
-    const startBtn = lifecycleSection.locator('button:has-text("Başlat")');
+    const startBtn = lifecycleSection.locator('button:text-is("Başlat")');
     await expect(startBtn).toBeVisible({ timeout: 10000 });
     await expect(startBtn).toBeEnabled({ timeout: 10000 });
     await startBtn.click();
@@ -229,7 +229,7 @@ test.describe('DKR-01 Registry/image arama, indirme ve image yönetimi', () => {
 
     // 4. Projeyi panel arayüzünden kaldır ve silindiğini doğrula
     await page.reload();
-    const lifecycleSectionAfter = page.locator('section').filter({ has: page.locator('h2:text-is("Lifecycle")') });
+    const lifecycleSectionAfter = page.locator('section').filter({ has: page.locator('h2:text-is("Proje işlemleri")') });
     await expect(lifecycleSectionAfter).toBeVisible({ timeout: 15000 });
     const removeBtn = lifecycleSectionAfter.locator('button:has-text("Projeyi kaldır")');
     await expect(removeBtn).toBeEnabled({ timeout: 35000 });

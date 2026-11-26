@@ -127,9 +127,9 @@ test('validateSafePermissions enforces security rules and fails closed', () => {
   assert.equal(validateSafePermissions('0640'), '0640');
   assert.equal(validateSafePermissions('0755', { isDirectory: true }), '0755');
 
-  assert.throws(() => validateSafePermissions('0777'), /world-writable/);
-  assert.throws(() => validateSafePermissions('0666'), /world-writable/);
-  assert.throws(() => validateSafePermissions('0642'), /world-writable/);
+  assert.throws(() => validateSafePermissions('0777'), /Başkalarına yazma yetkisi verilemez/);
+  assert.throws(() => validateSafePermissions('0666'), /Başkalarına yazma yetkisi verilemez/);
+  assert.throws(() => validateSafePermissions('0642'), /Başkalarına yazma yetkisi verilemez/);
 
   assert.throws(() => validateSafePermissions('0200'), /okuma izni zorunludur/);
   assert.throws(() => validateSafePermissions('0000'), /okuma izni zorunludur/);

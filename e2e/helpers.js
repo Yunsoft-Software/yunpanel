@@ -165,7 +165,7 @@ export async function removeDockerProject(page, projectId, projectName = '') {
       await expect(removeBtn).toBeEnabled({ timeout: 35000 });
       await removeBtn.click();
 
-      const modal = page.locator('.ws-modal').filter({ hasText: 'Docker Compose remove' });
+      const modal = page.locator('.ws-modal').filter({ hasText: 'Docker Compose: Projeyi kaldır' });
       const modalShown = await modal.waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false);
       if (!modalShown) {
         continue;

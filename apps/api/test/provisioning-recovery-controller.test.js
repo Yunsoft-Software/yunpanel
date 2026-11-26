@@ -1705,7 +1705,7 @@ test('Hata ve teknik bilgi görünürlüğü güvenli olmalı, sistem ve kimlik 
   assert.match(panelSource, /<details><summary>Teknik bilgiler ve tanılama<\/summary>/);
   assert.match(panelSource, /İşlem kimliği:\s*<code>\{operation\.operationId\}<\/code>/);
   assert.match(panelSource, /Web sitesi kimliği:\s*<code>\{operation\.websiteId\}<\/code>/);
-  assert.match(panelSource, /Hazır olma durumu \(ready\):\s*<code>\{operation\.ready \? 'true' : 'false'\}<\/code>/);
+  assert.match(panelSource, /Hazır: \{operation\.ready \? 'Evet' : 'Hayır'\}/);
 
   // Sensitive material is strictly prohibited from recovery metadata
   assert.doesNotMatch(panelSource, /password|secret|token|credential|authorization|privateKey/i);

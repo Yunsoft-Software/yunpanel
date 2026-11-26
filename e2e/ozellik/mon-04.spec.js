@@ -198,7 +198,7 @@ test.describe('MON-04 Web/mail/sistem log görüntüleme, filtre/arama ve rotasy
       if (await opsTab.isVisible({ timeout: 5000 }).catch(() => false)) {
         await opsTab.click();
 
-        const mailLogsSection = page.locator('section').filter({ has: page.locator('h2:text-is("Mail servis logları")') });
+        const mailLogsSection = page.locator('section').filter({ has: page.locator('h2:text-is("Posta servis günlükleri")') });
         if (await mailLogsSection.isVisible({ timeout: 8000 }).catch(() => false)) {
           const mailServiceSelect = mailLogsSection.locator('label:has-text("Servis") select');
           await expect(mailServiceSelect).toBeVisible();

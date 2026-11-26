@@ -315,7 +315,7 @@ test.describe('EML-02 Alias, forwarding ve yerel kopya tercihleri', () => {
     const policyBtn = srcRow.locator('button:has-text("Kota ve yönlendirme")');
     await policyBtn.click();
 
-    const policySection = page.locator('section').filter({ has: page.locator('h2', { hasText: `Mailbox policy · ${fullSrcMailboxAddress}` }) });
+    const policySection = page.locator('section').filter({ has: page.locator('h2', { hasText: `Posta kutusu ayarları · ${fullSrcMailboxAddress}` }) });
     await expect(policySection).toBeVisible({ timeout: 15000 });
 
     const fwdForm = policySection.locator('form').filter({ hasText: 'Yönlendirme biçimi' });
@@ -376,9 +376,9 @@ test.describe('EML-02 Alias, forwarding ve yerel kopya tercihleri', () => {
       await expect(clearFwdBtn).toBeVisible({ timeout: 10000 });
       await clearFwdBtn.click();
 
-      const clearFwdModal = page.locator('.ws-modal', { hasText: 'Mailbox forwarding policy kaldır' });
+      const clearFwdModal = page.locator('.ws-modal', { hasText: 'Posta kutusu yönlendirmesini kaldır' });
       await expect(clearFwdModal).toBeVisible({ timeout: 5000 });
-      await fillAndConfirm(clearFwdModal, 'Forwarding policy kaldır');
+      await fillAndConfirm(clearFwdModal, 'Yönlendirmeyi kaldır');
       await expect(clearFwdModal).not.toBeVisible({ timeout: 45000 });
 
       const conflictAlert = policySection.locator('.ws-notice.ws-notice-error, div[role="alert"]').filter({ hasText: 'Site yedekleme' });

@@ -9,7 +9,7 @@ import {createSiteAnalyticsClient} from './site-analytics-client.js';
 import {resolveSiteAnalyticsAccess} from './site-analytics-model.js';
 
 const ACCESS={forbidden:'Bu sitenin istatistiklerine erişim izniniz yok.',unavailable:'Güncel site bilgileri bekleniyor.',
- not_found:'Bu alan adına bağlı tek bir Website kaydı bulunamadı.',unbound:'Alan adı henüz bir Website kaydına bağlı değil.',
+ not_found:'Bu alan adına bağlı tek bir site kaydı bulunamadı.',unbound:'Alan adı henüz bir siteye bağlı değil.',
  inconsistent:'Site ve sunucu bağlantısı doğrulanamadı.'};
 
 export default function SiteAnalyticsPanel({domainId}){

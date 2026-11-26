@@ -113,8 +113,8 @@ test('Centralized swappable primitives render through PanelKit adapter layer', (
     }),
   );
 
-  assert.match(portTableMarkup, /Inner: 8080\/tcp/);
-  assert.match(portTableMarkup, /Outer: 127\.0\.0\.1:18080/);
+  assert.match(portTableMarkup, /Konteyner: 8080\/tcp/);
+  assert.match(portTableMarkup, /Sunucu: 127\.0\.0\.1:18080/);
   assert.match(portTableMarkup, /https:\/\/api\.example\.com → 127\.0\.0\.1:18080/);
 
   const pickerMarkup = renderToStaticMarkup(
@@ -125,8 +125,9 @@ test('Centralized swappable primitives render through PanelKit adapter layer', (
     }),
   );
   assert.match(pickerMarkup, /Docker Hub \/ Hazır Stack Şablonundan Oluştur/);
-  assert.match(pickerMarkup, /Inner Port \(Container targetPort\)/);
-  assert.match(pickerMarkup, /Outer Port \(Host publishedPort\)/);
+  assert.match(pickerMarkup, /Konteyner portu/);
+  assert.match(pickerMarkup, /Sunucu portu/);
+  assert.doesNotMatch(pickerMarkup, /Inner Port|Outer Port|targetPort\)|publishedPort\)/);
   assert.match(pickerMarkup, /Şablondan YAML Oluştur/);
 });
 
@@ -221,7 +222,7 @@ test('Docker Hub quick-generator and Inner <-> Outer Port proxy helpers produce 
 
   assert.equal(
     dockerProjectsPageInternals.innerOuterPortLabel({ hostIp: '127.0.0.1', publishedPort: 18080, targetPort: 80, protocol: 'tcp' }),
-    'Inner: 80/tcp ↔ Outer: 127.0.0.1:18080',
+    'Konteyner: 80/tcp ↔ Sunucu: 127.0.0.1:18080',
   );
 
   // Verify UI wiring in DockerProjectCreateDialog, DockerConfigPanel, DockerProjectsPage, NewWebsitePage, SiteOperations

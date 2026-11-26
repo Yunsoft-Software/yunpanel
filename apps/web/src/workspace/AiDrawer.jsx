@@ -43,7 +43,7 @@ function AiScope({ domainId, actorId, onClose }) {
     resolveAiWebsiteContext(domainId, panelRequest, { signal: controller.signal }).then((websiteId) => {
       if (current()) setContext({ ready: true, websiteId, error: null });
     }).catch(() => {
-      if (current()) setContext({ ready: false, websiteId: null, error: 'Sitenin Website bağı doğrulanamadı. Başka site veya genel bağlam kullanılmadı.' });
+      if (current()) setContext({ ready: false, websiteId: null, error: 'Sitenin bağlantısı doğrulanamadı. Başka site veya genel bağlam kullanılmadı.' });
     });
     return () => controller.abort();
   }, [domainId, attempt]);
@@ -186,7 +186,7 @@ function ConversationPanel({ actorId, websiteId, onClose }) {
           {detail.status === 'loading' && <p role="status">Sohbet açılıyor…</p>}
           {!denied && detail.status !== 'loading' && (!activeConversation || !activeConversation.messages.length) && <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--ws-muted)' }}>
             <Icon name="terminal" size={32} /><h3 style={{ margin: '12px 0 6px 0', fontSize: '16px', color: 'inherit' }}>Nasıl yardımcı olabilirim?</h3>
-            <p style={{ fontSize: '13px', maxWidth: '420px', margin: '0 auto 16px auto' }}>Sunucu sağlığı, Website logları, DNS, sertifika durumu veya yedekleri güvenle kontrol edebilir; onaylayacağınız yönetim işlemlerini başlatabilirsiniz.</p>
+            <p style={{ fontSize: '13px', maxWidth: '420px', margin: '0 auto 16px auto' }}>Sunucu sağlığı, site günlükleri, DNS, sertifika durumu veya yedekleri güvenle kontrol edebilir; onaylayacağınız yönetim işlemlerini başlatabilirsiniz.</p>
             <div className="ws-actions"><Button disabled={sending} onClick={() => handleSend('Sunucu sağlığını kontrol et')}>⚡ Sunucu sağlığı</Button>
               {websiteId && <Button disabled={sending} onClick={() => handleSend('Bu sitenin loglarını incele')}>📄 Site logları</Button>}
               <Button disabled={sending} onClick={() => handleSend('Yedek durumunu incele')}>💾 Yedek durumu</Button></div>

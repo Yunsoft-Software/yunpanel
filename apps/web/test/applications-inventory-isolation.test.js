@@ -22,7 +22,7 @@ test('ApplicationsPage: acts strictly as an Owner diagnostic inventory without o
 
   // Title and description specify diagnostic inventory
   assert.match(appPageSource, /title="Uygulama envanteri"/);
-  assert.match(appPageSource, /Owner tanılama envanteri/);
+  assert.match(appPageSource, /Sunucuda kayıtlı uygulamaların listesi/);
 
   // Standalone creation form NewApplication is removed; create prop redirects to /websites/new
   assert.match(appPageSource, /if \(create\) return <Navigate to="\/websites\/new" replace \/>;/);

@@ -83,7 +83,7 @@ export default function AuditPage() {
       <form className="ws-form ws-section-body" onSubmit={apply}>
         <ErrorNotice error={filterError} />
         <div className="ws-form-grid">
-          <label>Actor kimliği<input value={draft.actorId} onChange={(event) => update('actorId', event.target.value)} maxLength={128} autoComplete="off" spellCheck={false} /></label>
+          <label>İşlemi yapanın kimliği<input value={draft.actorId} onChange={(event) => update('actorId', event.target.value)} maxLength={128} autoComplete="off" spellCheck={false} /></label>
           <label>İşlem adı<input value={draft.action} onChange={(event) => update('action', event.target.value)} maxLength={120} placeholder="site.create" autoComplete="off" spellCheck={false} /></label>
           <label>Sonuç<select value={draft.outcome} onChange={(event) => update('outcome', event.target.value)}><option value="all">Tümü</option><option value="accepted">Kabul edildi</option><option value="succeeded">Başarılı</option><option value="failed">Başarısız</option><option value="denied">Reddedildi</option><option value="cancelled">İptal edildi</option></select></label>
           <label>Kaynak türü<input value={draft.resourceType} onChange={(event) => update('resourceType', event.target.value)} maxLength={64} placeholder="website" autoComplete="off" spellCheck={false} /></label>
@@ -99,7 +99,7 @@ export default function AuditPage() {
       {page.status === 'error' && <div className="ws-section-body"><ErrorNotice error={auditMessage(page.error)} /><Button onClick={refresh}>Listeyi yeniden yükle</Button></div>}
       {ready && (visible.events.length ? <div className="ws-table-scroll"><table className="ws-table ws-audit-table">
         <caption className="ws-muted">En yeni kayıtlar önce gösterilir; her sayfada en fazla {LIMIT} kayıt.</caption>
-        <thead><tr><th scope="col">Zaman</th><th scope="col">İşlem</th><th scope="col">Actor</th><th scope="col">Kaynak</th><th scope="col">Sonuç</th></tr></thead>
+        <thead><tr><th scope="col">Zaman</th><th scope="col">İşlem</th><th scope="col">İşlemi yapan</th><th scope="col">Kaynak</th><th scope="col">Sonuç</th></tr></thead>
         <tbody>{visible.events.map((event) => <tr key={event.id}>
           <td className="ws-col-nowrap">{formatDate(event.createdAt)}</td>
           <td><strong>{event.action}</strong>{event.code && <small>{event.code}</small>}</td>

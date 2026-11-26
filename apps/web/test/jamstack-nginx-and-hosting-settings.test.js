@@ -104,7 +104,7 @@ test('NginxSettingsFields renders all existing controls alongside JAMstack heade
   // Existing controls preserved
   for (const label of [
     'Web sunucusu ayarları',
-    'Document root',
+    'Belge kökü',
     'Tercih edilen alan adı',
     'En büyük yükleme boyutu (MB)',
     'Statik dosya önbelleği (saniye)',

@@ -93,18 +93,18 @@ export function dnsRecordDeletePayload(rrset, zoneName, serial) {
 }
 
 export function dnsSourceLabel(source) {
-  return ({ template: 'Zone Template', runtime: 'Runtime', mail: 'Mail', manual: 'Manual' })[source] ?? 'Bilinmiyor';
+  return ({ template: 'Bölge şablonu', runtime: 'Uygulama', mail: 'Posta', manual: 'Elle eklenen' })[source] ?? 'Bilinmiyor';
 }
 
 export function dnssecPresentation(status) {
   const value = {
     secure_ready: ['active', 'Güvenli delegasyon'],
-    pending_parent_ds: ['pending', 'Parent DS bekleniyor'],
-    parent_ds_mismatch: ['error', 'Parent DS uyuşmuyor'],
-    parent_ds_without_dnssec: ['error', 'İmza kapalı, parent DS açık'],
-    parent_ds_unverifiable: ['warning', 'Parent DS doğrulanamıyor'],
-    signing_material_incomplete: ['error', 'Signing material eksik'],
-    insecure_parent_unverifiable: ['warning', 'DNSSEC kapalı · parent belirsiz'],
+    pending_parent_ds: ['pending', 'Üst alan DS kaydı bekleniyor'],
+    parent_ds_mismatch: ['error', 'Üst alan DS kaydı uyuşmuyor'],
+    parent_ds_without_dnssec: ['error', 'İmza kapalı, üst alanda DS kaydı var'],
+    parent_ds_unverifiable: ['warning', 'Üst alan DS kaydı doğrulanamıyor'],
+    signing_material_incomplete: ['error', 'İmzalama anahtarları eksik'],
+    insecure_parent_unverifiable: ['warning', 'DNSSEC kapalı · üst alan belirsiz'],
     insecure: ['off', 'DNSSEC kapalı'],
   }[status];
   return value ? Object.freeze({ state: value[0], label: value[1] }) : Object.freeze({ state: 'unknown', label: status || 'Bilinmiyor' });

@@ -75,7 +75,7 @@ test.describe('DOS-10 FTP/FTPS hesapları, dizin kapsamı ve kota', () => {
 
     // Protokol ve port bilgisi
     await expect(dl.locator('div:has(dt:has-text("Protokol")) dd')).toHaveText('SFTP / SSH');
-    await expect(dl.locator('div:has(dt:has-text("Bağlantı noktası (Port)")) dd')).toHaveText('22');
+    await expect(dl.locator('div:has(dt:has-text("Bağlantı noktası")) dd')).toHaveText('22');
 
     // Unix kullanıcı adı
     const userDd = dl.locator('div:has(dt:has-text("Kullanıcı adı")) dd');
@@ -84,7 +84,7 @@ test.describe('DOS-10 FTP/FTPS hesapları, dizin kapsamı ve kota', () => {
     expect(resolvedUnixUser).toMatch(/^yunapp-[a-f0-9]{12}$/);
 
     // Belge kök dizini
-    const docRootDd = dl.locator('div:has(dt:has-text("Belge kök dizini (Docroot)")) dd');
+    const docRootDd = dl.locator('div:has(dt:has-text("Belge kök dizini")) dd');
     await expect(docRootDd).toBeVisible();
     resolvedDocRoot = (await docRootDd.textContent()).trim();
     expect(resolvedDocRoot).toContain('/var/www/yunpanel/apps/');

@@ -224,7 +224,7 @@ test.describe.serial('API-03 CLI, olay handler ları ve otomatik provisioning', 
     resolvedUnixUser = (await userRow.textContent()).trim();
     expect(resolvedUnixUser).toMatch(/^yunapp-[a-f0-9]+$/);
 
-    const docRootRow = page.locator('dt:has-text("Belge kök dizini (Docroot)") + dd');
+    const docRootRow = page.locator('dt:has-text("Belge kök dizini") + dd');
     await expect(docRootRow).toBeVisible();
     defaultDocRoot = (await docRootRow.textContent()).trim();
     expect(defaultDocRoot).toContain('/var/www/yunpanel/apps/');

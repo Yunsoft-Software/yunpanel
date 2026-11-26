@@ -516,7 +516,7 @@ test('StrictMode + SessionProvider + Router renders Owner recovery view with act
     assert.ok(text.includes('Durumu yenile'));
     assert.ok(text.includes('Yeniden dene'));
     assert.ok(text.includes('Nginx'));
-    assert.ok(text.includes('vhost/checksum'));
+    assert.ok(text.includes('Nginx site yapılandırmasını'));
     assert.ok(text.includes('zorunlu adım tamamlandı.'));
     assert.ok(text.includes('Teknik bilgiler ve tanılama'));
     assert.ok(text.includes(operationId));

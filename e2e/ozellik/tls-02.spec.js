@@ -228,7 +228,7 @@ test.describe('TLS-02 Wildcard/DNS-01, SAN ve www/mail/webmail kapsamı', () => 
     const webmailCheckbox = page.locator('label:has-text("webmail arayüzünü koru") input[type="checkbox"]');
     const mailCheckbox = page.locator('label:has-text("posta sunucusunu koru") input[type="checkbox"]');
     const assignMailCheckbox = page.locator('label:has-text("Sertifikayı posta alan adına ata") input[type="checkbox"]');
-    const wildcardCheckbox = page.locator('label:has-text("Joker (Wildcard) sertifika çıkar") input[type="checkbox"]');
+    const wildcardCheckbox = page.locator('label:has-text("Joker sertifika çıkar") input[type="checkbox"]');
 
     await expect(wwwCheckbox).toBeVisible();
     await expect(webmailCheckbox).toBeVisible();
@@ -236,7 +236,7 @@ test.describe('TLS-02 Wildcard/DNS-01, SAN ve www/mail/webmail kapsamı', () => 
     await expect(assignMailCheckbox).toBeVisible();
     await expect(wildcardCheckbox).toBeVisible();
 
-    // Joker (Wildcard) tıklandığında DNS-01 uyarı mesajının görüntülenmesi
+    // Joker sertifika tıklandığında DNS-01 uyarı mesajının görüntülenmesi
     const wildcardWarning = page.locator('text=Joker sertifikalar Cloudflare DNS-01 doğrulaması gerektirir');
     await expect(wildcardWarning).toHaveCount(0);
 

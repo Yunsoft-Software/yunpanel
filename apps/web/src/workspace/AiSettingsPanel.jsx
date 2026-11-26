@@ -277,7 +277,7 @@ export default function AiSettingsPanel() {
                 Özel Base URL (İsteğe bağlı):
                 <input
                   type="url"
-                  placeholder={formType === 'openrouter' ? 'https://openrouter.ai/api/v1' : formType === 'ollama' ? 'http://127.0.0.1:11434' : 'Varsayılan endpoint kullanılır'}
+                  placeholder={formType === 'openrouter' ? 'https://openrouter.ai/api/v1' : formType === 'ollama' ? 'http://127.0.0.1:11434' : 'Varsayılan adres kullanılır'}
                   value={formBaseUrl}
                   onChange={(e) => setFormBaseUrl(e.target.value)}
                 />

@@ -452,7 +452,7 @@ function AllocateSiteDialog({ account, reseller, servers, onClose, onSaved }) {
                 <p><strong>{account.username}</strong> müşterisine yeni bir web sitesi tahsis edin. Bu işlem bayi kotanızdan düşülür.</p>
                 {!serverId && <p className="ws-muted">Yerel sunucu bilgisi yükleniyor…</p>}
                 <label>
-                  Alan adı (Domain)
+                  Alan adı
                   <input
                     value={form.primaryDomain}
                     onChange={(event) => update('primaryDomain', event.target.value)}
@@ -464,7 +464,7 @@ function AllocateSiteDialog({ account, reseller, servers, onClose, onSaved }) {
                   />
                 </label>
                 <label>
-                  Çalışma ortamı (Runtime)
+                  Çalışma ortamı
                   <select value={form.runtime} onChange={(event) => update('runtime', event.target.value)}>
                     <option value="new_static">Statik Site (HTML / JS / CSS)</option>
                     <option value="new_node">Node.js Uygulaması</option>

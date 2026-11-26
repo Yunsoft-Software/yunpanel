@@ -193,10 +193,10 @@ print(json.dumps({'content':open(p,'r',encoding='utf-8',errors='replace').read()
       '',
     ].join('\n');
 
-    const docTextarea = modal.locator('label:has-text("Compose document") textarea');
+    const docTextarea = modal.locator('label:has-text("Compose içeriği") textarea');
     await docTextarea.fill(composeContent);
 
-    const validateBtn = modal.locator('button:has-text("Validate")');
+    const validateBtn = modal.locator('button:has-text("Doğrula")');
     await expect(validateBtn).toBeEnabled();
     await validateBtn.click();
     await expect(modal.locator('dt:has-text("Servis")')).toBeVisible({ timeout: 10000 });
@@ -214,10 +214,10 @@ print(json.dumps({'content':open(p,'r',encoding='utf-8',errors='replace').read()
     await expect(page.locator('h1')).toContainText(projectName, { timeout: 15000 });
 
     // 2. Container'ı başlat
-    const lifecycleSection = page.locator('section').filter({ has: page.locator('h2:text-is("Lifecycle")') });
+    const lifecycleSection = page.locator('section').filter({ has: page.locator('h2:text-is("Proje işlemleri")') });
     await expect(lifecycleSection).toBeVisible({ timeout: 15000 });
 
-    const startBtn = lifecycleSection.locator('button:has-text("Başlat")');
+    const startBtn = lifecycleSection.locator('button:text-is("Başlat")');
     await expect(startBtn).toBeVisible({ timeout: 10000 });
     await expect(startBtn).toBeEnabled({ timeout: 10000 });
     await startBtn.click();
@@ -587,7 +587,7 @@ print(json.dumps({'containerId':cid,'containerName':cname,'status':status,'top':
       return info.top.includes(stopSessionTag) && info.hostExec.length > 0;
     }, { timeout: 15_000, intervals: [500, 1000] }).toBe(true);
 
-    const lifecycleSection = page.locator('section').filter({ has: page.locator('h2:text-is("Lifecycle")') });
+    const lifecycleSection = page.locator('section').filter({ has: page.locator('h2:text-is("Proje işlemleri")') });
     const stopBtn = lifecycleSection.locator('button:has-text("Durdur")');
     await expect(stopBtn).toBeEnabled({ timeout: 20_000 });
     await stopBtn.click();

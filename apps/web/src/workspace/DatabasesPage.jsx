@@ -11,7 +11,7 @@ import { databaseAccessView, filterConsoleDatabases, paginateConsoleItems } from
 const SECURITY_REASON_LABELS = Object.freeze({
   database_security_inspection_unavailable: 'Güvenlik durumu okunamadı',
   database_native_socket_admin_auth_required: 'Yerel yönetici bağlantısı yapılandırılmalı',
-  database_anonymous_accounts_present: 'Anonim DB hesabı kaldırılmalı',
+  database_anonymous_accounts_present: 'Anonim veritabanı hesabı kaldırılmalı',
   database_remote_root_accounts_present: 'Uzak root erişimi kapatılmalı',
   database_test_schema_present: 'Varsayılan test veritabanı kaldırılmalı',
 });
@@ -289,16 +289,16 @@ export default function DatabasesPage() {
           </div>
         )}
         <KeyValues items={[
-          ['Engine', engineLabel], ['Sürüm', inventory.version ?? '—'],
+          ['Sunucu türü', engineLabel], ['Sürüm', inventory.version ?? '—'],
           ['Toplam boyut', hasInventory ? formatDatabaseBytes(inventory.totalBytes) : '—'], ['Veritabanı', hasInventory ? inventory.databases.length : '—'],
-          ['DB güvenlik baseline', securityLabel], ['Admin socket auth', adminAuthLabel], ['Güvenlik tanısı', securityReasonLabel],
-          ...(inventory.ownership ? [['Website bağı', inventory.ownership.bindingCount], ['Credential', inventory.ownership.credentialCount], ['Eksik schema bağı', inventory.ownership.missingDatabaseBindingCount]] : []),
+          ['Temel güvenlik ayarları', securityLabel], ['Yönetici bağlantısı', adminAuthLabel], ['Güvenlik tanısı', securityReasonLabel],
+          ...(inventory.ownership ? [['Siteye bağlı veritabanı', inventory.ownership.bindingCount], ['Veritabanı kullanıcısı', inventory.ownership.credentialCount], ['Veritabanı bulunamayan bağlantı', inventory.ownership.missingDatabaseBindingCount]] : []),
         ]} />
       </details>
     </>}
     {(createOpen || params.has("databaseJob")) && !accessTarget && <DatabaseSetupDialog onClose={() => setCreateOpen(false)} onChanged={load} />}
     {accessTarget && <DatabaseSetupDialog website={websites.items.find((item) => item.id === accessTarget.ownership?.websiteId)} databaseName={accessTarget.name} onClose={() => setAccessTarget(null)} onChanged={load} />}
     {connectionTarget && <DatabaseConnectionDialog website={websites.items.find((item) => item.id === connectionTarget.ownership.websiteId)} binding={{ id: connectionTarget.ownership.bindingId, databaseName: connectionTarget.name }} onClose={() => setConnectionTarget(null)} />}
-    {deleteTarget && <ConfirmDialog title={`${deleteTarget.name} silinsin mi?`} message="Veritabanı kalıcı olarak silinir. Website bağı varsa backend işlemi engeller. Devam etmeden önce güncel bir yedeğiniz olduğundan emin olun." confirmation={deleteTarget.name} confirmLabel="Veritabanını sil" busy={busy} disabled={!canAct} error={error} onCancel={() => { if (!busy) setDeleteTarget(null); }} onConfirm={remove} />}
+    {deleteTarget && <ConfirmDialog title={`${deleteTarget.name} silinsin mi?`} message="Veritabanı kalıcı olarak silinir. Veritabanı bir siteye bağlıysa silme işlemi engellenir. Devam etmeden önce güncel bir yedeğiniz olduğundan emin olun." confirmation={deleteTarget.name} confirmLabel="Veritabanını sil" busy={busy} disabled={!canAct} error={error} onCancel={() => { if (!busy) setDeleteTarget(null); }} onConfirm={remove} />}
   </>;
 }

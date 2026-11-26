@@ -71,7 +71,7 @@ test.describe('EML-03 Otomatik yanıt ve tatil mesajları', () => {
     await expect(policyBtn).toBeVisible({ timeout: 10000 });
     await policyBtn.click();
 
-    const policySection = page.locator('section').filter({ has: page.locator('h2', { hasText: `Mailbox policy · ${mailboxAddress}` }) });
+    const policySection = page.locator('section').filter({ has: page.locator('h2', { hasText: `Posta kutusu ayarları · ${mailboxAddress}` }) });
     await expect(policySection).toBeVisible({ timeout: 15000 });
 
     // Kota ve yönlendirme form alanlarını doğrula

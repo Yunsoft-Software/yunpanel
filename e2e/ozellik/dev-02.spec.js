@@ -157,7 +157,7 @@ test.describe.serial('DEV-02 Branch, deployment path, manuel/otomatik deployment
     await expect(pageContent).toContainText('main');
 
     // Manuel Deploy butonu kontrolü ve el ile tetikleme
-    const deployBtn = page.locator('button', { hasText: 'Deploy başlat' });
+    const deployBtn = page.locator('button', { hasText: 'Dağıtımı başlat' });
     await expect(deployBtn).toBeVisible({ timeout: 10000 });
     await expect(deployBtn).toBeEnabled();
 
@@ -170,7 +170,7 @@ test.describe.serial('DEV-02 Branch, deployment path, manuel/otomatik deployment
     // 3. Otomatik Yayın (Webhook) ve Dağıtım Yolu Bilgilerinin Kontrolü
     const webhookSection = page.locator('section').filter({ has: page.locator('h2, h3', { hasText: 'Git Webhook ve Otomatik Yayın' }) });
     await expect(webhookSection).toBeVisible({ timeout: 10000 });
-    await expect(webhookSection).toContainText('GitHub Webhook Endpoint');
+    await expect(webhookSection).toContainText('GitHub webhook adresi');
     await expect(webhookSection).toContainText('refs/heads/main');
 
     // Webhook URL Kopyalama butonu kontrolü
@@ -179,7 +179,7 @@ test.describe.serial('DEV-02 Branch, deployment path, manuel/otomatik deployment
     await copyBtn.click();
     await expect(webhookSection.locator('button', { hasText: 'Webhook URL Kopyalandı' })).toBeVisible({ timeout: 5000 });
 
-    // Build & Çalışma Özeti içinde Dağıtım Yolu (Çıktı Dizini) ve Başlangıç Dosyası kontrolü
+    // Derleme ve Çalışma Özeti içinde Dağıtım Yolu (Çıktı Dizini) ve Başlangıç Dosyası kontrolü
     await expect(webhookSection).toContainText('Çıktı Dizini');
     await expect(webhookSection).toContainText('Başlangıç Dosyası');
 

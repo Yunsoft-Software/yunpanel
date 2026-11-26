@@ -47,8 +47,8 @@ export default function DockerConfigPanel({ data, onChanged }) {
     if (!document) return;
     setConfirm({
       kind: 'document',
-      title: 'Compose desired state’i değiştir',
-      message: `${project.projectName} projesinin revision ${project.revision} Compose document’ı tam olarak verilen yeni document ile değiştirilecek. Çalışan containerlar otomatik değiştirilmez; ayrıca lifecycle işlemi başlatılmalıdır.`,
+      title: 'Compose yapılandırmasını değiştir',
+      message: `${project.projectName} projesinin ${project.revision}. revizyon Compose dosyası girdiğiniz yeni içerikle tamamen değiştirilecek. Çalışan konteynerler otomatik değişmez; değişikliğin çalışması için projeyi ayrıca yeniden başlatın.`,
       value: `replace-compose:${project.projectName}:${project.revision}`,
     });
   }
@@ -59,8 +59,8 @@ export default function DockerConfigPanel({ data, onChanged }) {
       const variables = parseDockerEnvironmentText(environmentText);
       setConfirm({
         kind: 'environment', variables,
-        title: 'Compose environment’ın tamamını değiştir',
-        message: `${project.projectName} için listede bulunmayan mevcut environment anahtarları silinecek. Gizli mevcut değerler API tarafından geri okunmadığı için korunacak bütün değerleri yeniden girmeniz gerekir.`,
+        title: 'Ortam değişkenlerinin tamamını değiştir',
+        message: `${project.projectName} için listede bulunmayan mevcut ortam değişkenleri silinecek. Gizli değerler geri okunamadığı için korumak istediğiniz bütün değerleri yeniden girmeniz gerekir.`,
         value: `replace-compose-env:${project.projectName}:${environment.revision}`,
       });
     } catch (failure) { setError(failure.message); }
@@ -72,17 +72,17 @@ export default function DockerConfigPanel({ data, onChanged }) {
       await mutate(async () => {
         await updateDockerProject(project.id, { expectedRevision: project.revision, document });
         setDocument(''); setValidation(null); setConfirm(null);
-      }, 'Compose desired state kaydedildi. Runtime değiştirilmedi.');
+      }, 'Compose yapılandırması kaydedildi. Çalışan konteynerler değiştirilmedi.');
       return;
     }
     await mutate(async () => {
       await replaceDockerEnvironment(project.id, { expectedRevision: environment.revision, variables: current.variables });
       setEnvironmentText(''); setConfirm(null);
-    }, 'Compose environment şifreli store’a kaydedildi. Runtime değiştirilmedi.');
+    }, 'Ortam değişkenleri şifreli olarak kaydedildi. Çalışan konteynerler değiştirilmedi.');
   }
 
   async function validateSaved() {
-    await mutate(async () => { setValidation(await validateSavedDockerProject(project.id)); }, 'Kayıtlı Compose state environment ile doğrulandı.');
+    await mutate(async () => { setValidation(await validateSavedDockerProject(project.id)); }, 'Kayıtlı Compose yapılandırması ortam değişkenleriyle birlikte doğrulandı.');
   }
 
   async function loadCurrentComposeDocument() {
@@ -104,18 +104,18 @@ export default function DockerConfigPanel({ data, onChanged }) {
     mutate(async () => {
       await setDockerCredential(project.id, input);
       setCredential({ registryHost: '', username: '', secret: '' });
-    }, `${input.registryHost} registry credential kaydedildi.`);
+    }, `${input.registryHost} kayıt defteri erişim bilgisi kaydedildi.`);
   }
 
-  return <><Section title="Compose desired state" description="Mevcut Compose YAML tanımını düzenleyin veya yeni bir yapılandırma kaydedin."><div className="ws-section-body"><ErrorNotice error={error} />{notice && <p role="status" className="ws-notice">{notice}</p>}<div className="ws-actions"><Button disabled={busy} onClick={loadCurrentComposeDocument}>Mevcut Compose YAML'ı Editöre Yükle</Button><Button disabled={busy} onClick={validateSaved}>Kayıtlı state’i validate et</Button></div>{validation && <KeyValues items={[
-    ['Project revizyonu', validation.projectRevision], ['Environment revizyonu', validation.environmentRevision], ['Servis', validation.validation?.serviceCount], ['Compose SHA-256', validation.validation?.composeSha256],
-  ]} />}<form className="ws-form" onSubmit={requestDocumentUpdate}><fieldset disabled={busy}><label>Yeni tam Compose document<textarea rows={14} value={document} onChange={(event) => setDocument(event.target.value)} spellCheck={false} placeholder="services:\n  web:\n    image: nginx:latest" required /></label><Button type="submit" variant="primary" disabled={!document || busy}>Desired state’i değiştir</Button></fieldset></form></div></Section>
-  <Section title="Compose environment" description="Servis ortam değişkenlerini KEY=value biçiminde tanımlayın."><div className="ws-section-body"><KeyValues items={[
+  return <><Section title="Compose yapılandırması" description="Mevcut Compose YAML tanımını düzenleyin veya yeni bir yapılandırma kaydedin."><div className="ws-section-body"><ErrorNotice error={error} />{notice && <p role="status" className="ws-notice">{notice}</p>}<div className="ws-actions"><Button disabled={busy} onClick={loadCurrentComposeDocument}>Mevcut Compose YAML'ı Editöre Yükle</Button><Button disabled={busy} onClick={validateSaved}>Kayıtlı yapılandırmayı doğrula</Button></div>{validation && <KeyValues items={[
+    ['Proje revizyonu', validation.projectRevision], ['Ortam değişkenleri revizyonu', validation.environmentRevision], ['Servis', validation.validation?.serviceCount], ['Compose SHA-256', validation.validation?.composeSha256],
+  ]} />}<form className="ws-form" onSubmit={requestDocumentUpdate}><fieldset disabled={busy}><label>Yeni Compose içeriğinin tamamı<textarea rows={14} value={document} onChange={(event) => setDocument(event.target.value)} spellCheck={false} placeholder="services:\n  web:\n    image: nginx:latest" required /></label><Button type="submit" variant="primary" disabled={!document || busy}>Yapılandırmayı değiştir</Button></fieldset></form></div></Section>
+  <Section title="Ortam değişkenleri" description="Servis ortam değişkenlerini KEY=value biçiminde tanımlayın."><div className="ws-section-body"><KeyValues items={[
     ['Revizyon', environment.revision], ['Değişken', environment.variableCount ?? environment.keys?.length ?? 0], ['Anahtarlar', environment.keys?.join(', ') || '—'], ['Son değişiklik', environment.updatedAt ?? '—'],
-  ]} /><form className="ws-form" onSubmit={requestEnvironmentReplace}><fieldset disabled={busy}><label>Tam environment listesi<textarea rows={9} value={environmentText} onChange={(event) => setEnvironmentText(event.target.value)} spellCheck={false} placeholder="NODE_ENV=production\nAPI_URL=https://example.test" /></label><Button type="submit" disabled={busy}>Environment’ı değiştir</Button></fieldset></form></div></Section>
+  ]} /><form className="ws-form" onSubmit={requestEnvironmentReplace}><fieldset disabled={busy}><label>Ortam değişkenlerinin tamamı<textarea rows={9} value={environmentText} onChange={(event) => setEnvironmentText(event.target.value)} spellCheck={false} placeholder="NODE_ENV=production\nAPI_URL=https://example.test" /></label><Button type="submit" disabled={busy}>Ortam değişkenlerini değiştir</Button></fieldset></form></div></Section>
   <Section
-    title="Registry credentials"
-    description="Özel konteyner kayıt defterleri (GHCR, Docker Hub, özel registry) için erişim bilgileri."
+    title="Kayıt defteri erişim bilgileri"
+    description="GHCR, Docker Hub veya özel konteyner kayıt defterleri için erişim bilgileri."
   >
     <div className="ws-section-body">
       {credentials.length > 0 && (
@@ -123,7 +123,7 @@ export default function DockerConfigPanel({ data, onChanged }) {
           <table className="ws-table">
             <thead>
               <tr>
-                <th>Registry</th>
+                <th>Kayıt defteri</th>
                 <th>Durum</th>
                 <th>Revizyon</th>
                 <th>Güncellendi</th>
@@ -150,7 +150,7 @@ export default function DockerConfigPanel({ data, onChanged }) {
         <fieldset disabled={busy}>
           <div className="ws-form-grid">
             <label>
-              Registry host
+              Kayıt defteri adresi
               <input
                 value={credential.registryHost}
                 onChange={(event) => setCredential({ ...credential, registryHost: event.target.value })}
@@ -161,7 +161,7 @@ export default function DockerConfigPanel({ data, onChanged }) {
               />
             </label>
             <label>
-              Username
+              Kullanıcı adı
               <input
                 value={credential.username}
                 onChange={(event) => setCredential({ ...credential, username: event.target.value })}
@@ -170,7 +170,7 @@ export default function DockerConfigPanel({ data, onChanged }) {
               />
             </label>
             <label>
-              Secret / token
+              Parola veya erişim anahtarı
               <input
                 type="password"
                 value={credential.secret}
@@ -181,7 +181,7 @@ export default function DockerConfigPanel({ data, onChanged }) {
             </label>
           </div>
           <Button type="submit" disabled={busy}>
-            Credential kaydet / rotate et
+            Erişim bilgisini kaydet veya yenile
           </Button>
         </fieldset>
       </form>

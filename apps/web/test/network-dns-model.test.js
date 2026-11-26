@@ -61,20 +61,20 @@ test('Network DNS model blocks missing primary identity and duplicate secondary 
 });
 
 test('Network DNS status presentation keeps local, public and delegation readiness independent', () => {
-  assert.deepEqual(authoritativePresentation({ configured: true, localReady: true, ready: true }), { state: 'active', label: 'Local authoritative hazır' });
+  assert.deepEqual(authoritativePresentation({ configured: true, localReady: true, ready: true }), { state: 'active', label: 'Yerel yetkili DNS hazır' });
   assert.equal(authoritativePresentation({ configured: false, localReady: false, ready: false }).state, 'off');
   assert.equal(authoritativePresentation({ configured: true, localReady: false, ready: false, reason: 'powerdns_tcp_unavailable' }).state, 'warning');
-  assert.deepEqual(publicReachabilityPresentation({ publicReachability: { status: 'ready' } }), { state: 'active', label: 'Public UDP/TCP 53 hazır' });
+  assert.deepEqual(publicReachabilityPresentation({ publicReachability: { status: 'ready' } }), { state: 'active', label: 'Dış UDP/TCP 53 hazır' });
   assert.equal(publicReachabilityPresentation({ publicReachability: { status: 'unverified' } }).state, 'pending');
   assert.equal(publicReachabilityPresentation({ publicReachability: { status: 'unreachable' } }).state, 'error');
   assert.equal(publicReachabilityPresentation({ publicReachability: { status: 'unverifiable' } }).state, 'warning');
-  assert.deepEqual(delegationPresentation('ready'), { state: 'active', label: 'Delegation hazır' });
+  assert.deepEqual(delegationPresentation('ready'), { state: 'active', label: 'Yetki devri hazır' });
   assert.equal(delegationPresentation('pending_glue').state, 'warning');
   assert.equal(delegationPresentation('pending_delegation').state, 'pending');
   assert.equal(delegationPresentation('unverifiable').state, 'warning');
-  assert.deepEqual(authoritativeOperationPresentation({ status: 'applying' }), { state: 'warning', label: 'Recovery incelemesi gerekli' });
+  assert.deepEqual(authoritativeOperationPresentation({ status: 'applying' }), { state: 'warning', label: 'Kurtarma incelemesi gerekli' });
   assert.equal(authoritativeOperationPresentation({ status: 'failed' }).state, 'failed');
-  assert.deepEqual(authoritativeOperationPresentation({ status: 'rolled_back' }), { state: 'succeeded', label: 'Rollback tamamlandı' });
+  assert.deepEqual(authoritativeOperationPresentation({ status: 'rolled_back' }), { state: 'succeeded', label: 'Geri alma tamamlandı' });
   assert.equal(authoritativeOperationPresentation({ status: 'rolling_back' }).state, 'warning');
   assert.equal(authoritativeOperationPresentation({ status: 'rollback_failed' }).state, 'failed');
   assert.equal(authoritativeOperationPresentation(null).state, 'unknown');

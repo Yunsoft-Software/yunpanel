@@ -14,7 +14,7 @@ const ACCESS = {
   forbidden: 'Bu sitenin görevlerini yönetme izniniz yok veya oturumunuz geçerli değil.',
   unavailable: 'Site bilgisi güncel değil. Bilgiler yenilenene kadar işlemler duraklatıldı.',
   not_found: 'Alan adı için tek ve doğrulanmış bir site kaydı bulunamadı.',
-  unbound: 'Önce alan adının mevcut Website kaydıyla bağlantısı kurulmalıdır.',
+  unbound: 'Önce alan adının mevcut site kaydıyla bağlantısı kurulmalıdır.',
   inconsistent: 'Sitenin sunucu, uygulama veya sistem kullanıcısı bağı tutarsız.',
   unsupported: 'Bu araç şu anda statik, Node.js ve PHP sitelerinde kullanılabilir.',
 };

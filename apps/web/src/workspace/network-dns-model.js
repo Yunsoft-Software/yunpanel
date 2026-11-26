@@ -44,9 +44,9 @@ function nameserver(value, label, mustBeLocal = false) {
 }
 
 export function dnsIdentitySettings(draft) {
-  if (!draft || typeof draft !== 'object') throw new Error('DNS identity formu geçersiz.');
+  if (!draft || typeof draft !== 'object') throw new Error('DNS sunucu kimliği formu geçersiz.');
   if (!String(draft.publicIpv4 ?? '').trim()) throw new Error('Public IPv4 gerekli.');
-  if (!String(draft.soa?.rname ?? '').trim()) throw new Error('SOA responsible mailbox hostname gerekli.');
+  if (!String(draft.soa?.rname ?? '').trim()) throw new Error('SOA sorumlu e-posta adresi gerekli.');
   const secondaryDns = String(draft.secondaryDns ?? '').split(/\r?\n|,/).map((entry) => entry.trim()).filter(Boolean);
   if (new Set(secondaryDns).size !== secondaryDns.length) throw new Error('Secondary DNS adresleri tekrar etmemeli.');
   return Object.freeze({
@@ -69,46 +69,46 @@ export function dnsIdentitySettings(draft) {
 
 export function delegationPresentation(status) {
   const value = {
-    ready: ['active', 'Delegation hazır'],
+    ready: ['active', 'Yetki devri hazır'],
     pending_glue: ['warning', 'Glue kaydı bekleniyor'],
-    pending_delegation: ['pending', 'NS delegation bekleniyor'],
-    pending_nameserver_address: ['warning', 'Nameserver adresi uyuşmuyor'],
-    unverifiable: ['warning', 'Delegation doğrulanamıyor'],
+    pending_delegation: ['pending', 'NS yetki devri bekleniyor'],
+    pending_nameserver_address: ['warning', 'Ad sunucusu adresi uyuşmuyor'],
+    unverifiable: ['warning', 'Yetki devri doğrulanamıyor'],
   }[status];
   return value ? Object.freeze({ state: value[0], label: value[1] }) : Object.freeze({ state: 'unknown', label: status || 'Bilinmiyor' });
 }
 
 export function authoritativePresentation(state) {
   if (!state) return Object.freeze({ state: 'unknown', label: 'Durum alınamadı' });
-  if (state.localReady ?? state.ready) return Object.freeze({ state: 'active', label: 'Local authoritative hazır' });
+  if (state.localReady ?? state.ready) return Object.freeze({ state: 'active', label: 'Yerel yetkili DNS hazır' });
   if (!state.configured) return Object.freeze({ state: 'off', label: 'PowerDNS yapılandırılmamış' });
-  return Object.freeze({ state: 'warning', label: state.reason ?? 'Local health hazır değil' });
+  return Object.freeze({ state: 'warning', label: state.reason ?? 'Yerel sağlık kontrolü hazır değil' });
 }
 
 export function publicReachabilityPresentation(state) {
   const status = state?.publicReachability?.status;
   const value = {
-    ready: ['active', 'Public UDP/TCP 53 hazır'],
-    unreachable: ['error', 'Public DNS portu erişilemiyor'],
-    unverified: ['pending', 'Public erişim doğrulanmadı'],
-    unverifiable: ['warning', 'Public erişim doğrulanamıyor'],
-    blocked: ['off', 'Public kontrol bekliyor'],
+    ready: ['active', 'Dış UDP/TCP 53 hazır'],
+    unreachable: ['error', 'DNS portuna dışarıdan erişilemiyor'],
+    unverified: ['pending', 'Dış erişim doğrulanmadı'],
+    unverifiable: ['warning', 'Dış erişim doğrulanamıyor'],
+    blocked: ['off', 'Dış kontrol bekliyor'],
   }[status];
-  return value ? Object.freeze({ state: value[0], label: value[1] }) : Object.freeze({ state: 'unknown', label: status || 'Public durum yok' });
+  return value ? Object.freeze({ state: value[0], label: value[1] }) : Object.freeze({ state: 'unknown', label: status || 'Dış erişim durumu yok' });
 }
 
 export function authoritativeOperationPresentation(operation) {
   const value = {
-    applying: ['warning', 'Recovery incelemesi gerekli'],
+    applying: ['warning', 'Kurtarma incelemesi gerekli'],
     succeeded: ['succeeded', 'Uygulama tamamlandı'],
     failed: ['failed', 'Uygulama başarısız'],
-    rolling_back: ['warning', 'Rollback recovery gerekli'],
-    rolled_back: ['succeeded', 'Rollback tamamlandı'],
-    rollback_failed: ['failed', 'Rollback başarısız'],
+    rolling_back: ['warning', 'Geri alma için inceleme gerekli'],
+    rolled_back: ['succeeded', 'Geri alma tamamlandı'],
+    rollback_failed: ['failed', 'Geri alma başarısız'],
   }[operation?.status];
   return value
     ? Object.freeze({ state: value[0], label: value[1] })
-    : Object.freeze({ state: 'unknown', label: operation?.status ?? 'Operation yok' });
+    : Object.freeze({ state: 'unknown', label: operation?.status ?? 'İşlem yok' });
 }
 
 export const networkDnsModelInternals = Object.freeze({ SOA_DEFAULTS, integer, nameserver });

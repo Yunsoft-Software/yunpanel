@@ -283,7 +283,7 @@ test('SCN-V3-04: Unbound / Suspended domain mail.webrich.news 1-Click Unsuspend 
   const mainText = await page.locator('main').innerText();
   assert.doesNotMatch(
     mainText,
-    /Alan adı henüz bir Website kaydına bağlı değil/,
+    /Alan adı henüz bir siteye bağlı değil/,
     'Unbound domain settings must not render the old dead-end unbound error',
   );
   assert.match(mainText, /mail\.webrich\.news/, 'Settings page must display mail.webrich.news');
@@ -369,7 +369,7 @@ test('SCN-E2E-05: /websites/new Wizard (Domain mode, Subdomain mode & all JAMsta
   // 2. Click Astro (Static / Hybrid)
   await page.locator('button:has-text("Astro (Static / Hybrid)")').click();
   assert.equal(await siteTypeSelect.inputValue(), 'new_static', 'Astro preset must set Site türü to new_static');
-  assert.equal(await page.locator('label:has-text("Build çıktı klasörü") input').inputValue(), 'dist', 'Astro preset must populate dist outputDir');
+  assert.equal(await page.locator('label:has-text("Derleme çıktı klasörü") input').inputValue(), 'dist', 'Astro preset must populate dist outputDir');
 
   // 3. Click Python (FastAPI / Django / Flask)
   await page.locator('button:has-text("Python (FastAPI / Django / Flask)")').click();
@@ -512,8 +512,8 @@ test('SCN-E2E-07 & SCN-V3-05: Sidebar Uygulama Marketi navigation, category filt
   const openedState = await advancedDetails.evaluate((el) => Boolean(el.open));
   assert.equal(openedState, true, 'Clicking summary must expand Gelişmiş Port, İmaj ve Compose YAML Ayarları');
 
-  const yamlTextarea = dialog.locator('label:has-text("Compose document") textarea');
-  assert.equal(await yamlTextarea.isVisible(), true, 'Compose document textarea must be visible after expanding disclosure');
+  const yamlTextarea = dialog.locator('label:has-text("Compose içeriği") textarea');
+  assert.equal(await yamlTextarea.isVisible(), true, 'Compose içeriği textarea must be visible after expanding disclosure');
   const firstYaml = await yamlTextarea.inputValue();
   assert.match(firstYaml, /PB_ENCRYPTION_KEY:/, 'Prepared PocketBase YAML must contain PB_ENCRYPTION_KEY');
 

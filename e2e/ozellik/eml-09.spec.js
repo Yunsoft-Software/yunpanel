@@ -167,7 +167,7 @@ print(json.dumps(result))`, [JSON.stringify(excluded)]);
   async function openDkim(site) {
     await page.goto(`/mail/${site.mailDomainId}?section=security`);
     await expect(section('DKIM')).toBeVisible();
-    await expect(section('DKIM').locator('dt').filter({ hasText: /^Selector$/ })).toBeVisible({ timeout: 30_000 });
+    await expect(section('DKIM').locator('dt').filter({ hasText: /^Seçici$/ })).toBeVisible({ timeout: 30_000 });
     return section('DKIM');
   }
 
@@ -210,14 +210,14 @@ print(json.dumps(result))`, [JSON.stringify(excluded)]);
     const target = sites[1];
     const dkim = await openDkim(target);
     // The wizard derives a per-operation selector (yp- + 24 hex) instead of a shared "mail".
-    const selectorCell = dkim.locator('dt').filter({ hasText: /^Selector$/ }).locator('+ dd');
+    const selectorCell = dkim.locator('dt').filter({ hasText: /^Seçici$/ }).locator('+ dd');
     await expect(selectorCell).toHaveText(/^yp-[a-f0-9]{24}$/);
     const selector = (await selectorCell.innerText()).trim();
     await expect(dkim.locator('dt').filter({ hasText: /^Algoritma$/ }).locator('+ dd')).toHaveText('rsa-sha256');
     await expect(dkim.locator('dt').filter({ hasText: /^DNS adı$/ }).locator('+ dd')).toContainText(`${selector}._domainkey.${target.hostname}`);
-    await expect(dkim.locator('dt').filter({ hasText: /^DNS değer$/ }).locator('+ dd')).toContainText('v=DKIM1');
+    await expect(dkim.locator('dt').filter({ hasText: /^DNS değeri$/ }).locator('+ dd')).toContainText('v=DKIM1');
     await dkim.getByRole('button', { name: 'İmzalama önizlemesi', exact: true }).click();
-    await expect(dkim.locator('dt').filter({ hasText: /^Preview digest$/ }).locator('+ dd')).toHaveText(/^[a-f0-9]{64}$/);
+    await expect(dkim.locator('dt').filter({ hasText: /^Önizleme özeti$/ }).locator('+ dd')).toHaveText(/^[a-f0-9]{64}$/);
     const key = keySnapshot()[target.mailDomainId];
     expect(key?.['private.pem']?.mode).toBe(0o600);
     expect(key?.['metadata.json']?.sha256).toMatch(/^[a-f0-9]{64}$/);

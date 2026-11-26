@@ -51,7 +51,7 @@ export default function WebsiteRemovalRecoveryPanel({onChanged}){
     try{
      const updated=verified(await panelRequest('/website-removal-operations/'+encodeURIComponent(operation.id)),operation);
      if(current())setState(value=>({...value,operations:value.operations.map(item=>item.id===updated.id?updated:item),unknown:true,
-      error:'Devam isteğinin cevabı doğrulanamadı; POST tekrar edilmedi ve işlem kaydı yeniden okundu.'}));
+      error:'Devam isteğinin cevabı doğrulanamadı; istek tekrarlanmadı ve işlem kaydı yeniden okundu.'}));
      if(updated.status==='removed')onChanged?.();return;
     }catch{}
    }

@@ -406,7 +406,7 @@ function DatabaseWorkspace({ domain, website, application, server, activeTab }) 
       }
       const preview = await previewDatabaseCredentialApply(server.id, rotatedCredential.id);
       queued = await applyDatabaseCredential(server.id, rotatedCredential.id, preview);
-      if (!queued?.job?.id) throw new Error('Database credential apply işi oluşturulamadı');
+      if (!queued?.job?.id) throw new Error('Parola değişikliği işlemi başlatılamadı.');
       observe(queued.job); jobs.refresh(); const terminal = await waitForJob(queued.job.id); updateJob(terminal);
       if (terminal.status !== 'succeeded') throw new Error('Parola değişikliği tamamlanmadı. İşlem kaydını inceleyin.');
       await load(); setRotateTarget(null); setNotice(`${rotateTarget.credential.username} parolası değiştirildi. Uygulamanızın bağlantı ayarlarını kontrol edin.`);
@@ -422,10 +422,10 @@ function DatabaseWorkspace({ domain, website, application, server, activeTab }) 
       if (!deleteJob) {
         const preview = await previewDatabaseCredentialDelete(server.id, revokeTarget.credential.id);
         const queued = await queueDatabaseCredentialDelete(server.id, revokeTarget.credential.id, preview); deleteJob = queued?.job;
-        if (!deleteJob?.id) throw new Error('Database credential delete işi oluşturulamadı');
+        if (!deleteJob?.id) throw new Error('Veritabanı kullanıcısını kaldırma işlemi başlatılamadı.');
         setRevokeTarget((current) => current?.credential.id === revokeTarget.credential.id ? { ...current, deleteJob } : current); observe(deleteJob); jobs.refresh();
       }
-      if (['failed', 'cancelled'].includes(deleteJob.status)) throw new Error('Credential delete işi terminal hatayla kapandı; job tanısını inceleyin. Kör replay yapılmadı.');
+      if (['failed', 'cancelled'].includes(deleteJob.status)) throw new Error('Veritabanı kullanıcısını kaldırma işlemi hatayla sonlandı; işlem kaydını inceleyin. İşlem otomatik olarak tekrarlanmadı.');
       const terminal = deleteJob.status === 'succeeded' ? deleteJob : await waitForJob(deleteJob.id); updateJob(terminal);
       setRevokeTarget((current) => current?.credential.id === revokeTarget.credential.id ? { ...current, deleteJob: terminal } : current);
       if (terminal.status !== 'succeeded') throw new Error('Kullanıcı kaldırma işlemi tamamlanmadı.');
@@ -442,10 +442,10 @@ function DatabaseWorkspace({ domain, website, application, server, activeTab }) 
     try {
       if (!backupJob) {
         const queued = await createWebsiteDatabaseBackup(server.id, website.id, backupTarget.binding.id, backupTarget.binding.revision); backupJob = queued?.job;
-        if (!backupJob?.id) throw new Error('Database backup işi oluşturulamadı');
+        if (!backupJob?.id) throw new Error('Veritabanı yedekleme işlemi başlatılamadı.');
         setBackupTarget((current) => current?.binding.id === backupTarget.binding.id ? { ...current, backupJob } : current); observe(backupJob); jobs.refresh();
       }
-      if (['failed', 'cancelled'].includes(backupJob.status)) throw new Error('Database backup işi terminal hatayla kapandı; job tanısını inceleyin. Kör replay yapılmadı.');
+      if (['failed', 'cancelled'].includes(backupJob.status)) throw new Error('Veritabanı yedekleme işlemi hatayla sonlandı; işlem kaydını inceleyin. İşlem otomatik olarak tekrarlanmadı.');
       const terminal = backupJob.status === 'succeeded' ? backupJob : await waitForJob(backupJob.id); updateJob(terminal);
       if (terminal.status !== 'succeeded') throw new Error('Yedek tamamlanmadı.');
       setBackupTarget(null); setNotice(`${backupTarget.binding.databaseName} yedeği doğrulandı. Yedek kimliği: ${terminal.result?.backupId ?? terminal.id}`);
@@ -460,7 +460,7 @@ function DatabaseWorkspace({ domain, website, application, server, activeTab }) 
     try {
       const raw = await previewWebsiteDatabaseRestore(server.id, website.id, restoreTarget.binding.id, restoreTarget.binding.revision, restoreTarget.backupId);
       const preview = databaseRestorePreviewView(raw, { serverId: server.id, databaseName: restoreTarget.binding.databaseName, backupId: restoreTarget.backupId, websiteId: website.id, applicationId: website.applicationId, bindingId: restoreTarget.binding.id, bindingRevision: restoreTarget.binding.revision });
-      if (!preview) throw new Error('Database restore preview durumu geçersiz');
+      if (!preview) throw new Error('Geri yükleme önizlemesi okunamadı.');
       setRestoreTarget((current) => current?.binding.id === restoreTarget.binding.id ? { ...current, preview, restoreJob: null } : current);
     } catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { operationPending.current = false; setBusy(false); }
@@ -471,10 +471,10 @@ function DatabaseWorkspace({ domain, website, application, server, activeTab }) 
     try {
       if (!restoreJob) {
         const queued = await restoreWebsiteDatabase(server.id, website.id, restoreTarget.binding.id, restoreTarget.binding.revision, restoreTarget.preview); restoreJob = queued?.job;
-        if (!restoreJob?.id) throw new Error('Database restore işi oluşturulamadı');
+        if (!restoreJob?.id) throw new Error('Geri yükleme işlemi başlatılamadı.');
         setRestoreTarget((current) => current?.binding.id === restoreTarget.binding.id ? { ...current, restoreJob } : current); observe(restoreJob); jobs.refresh();
       }
-      if (['failed', 'cancelled'].includes(restoreJob.status)) throw new Error('Database restore işi terminal hatayla kapandı; job tanısını inceleyin. Kör replay yapılmadı.');
+      if (['failed', 'cancelled'].includes(restoreJob.status)) throw new Error('Geri yükleme işlemi hatayla sonlandı; işlem kaydını inceleyin. İşlem otomatik olarak tekrarlanmadı.');
       const terminal = restoreJob.status === 'succeeded' ? restoreJob : await waitForJob(restoreJob.id); updateJob(terminal);
       if (terminal.status !== 'succeeded') throw new Error('Geri yükleme tamamlanmadı.');
       await load(); setRestoreTarget(null); setNotice(`${restoreTarget.binding.databaseName} geri yüklendi. İşlem öncesi yedek: ${terminal.result?.preRestoreBackupId ?? 'işlem kaydında'}`);
@@ -489,7 +489,7 @@ function DatabaseWorkspace({ domain, website, application, server, activeTab }) 
     try {
       const raw = await getWebsiteDatabaseDeletePreview(server.id, website.id, binding.id);
       const preview = websiteDatabaseDeletePreviewView(raw, { serverId: server.id, websiteId: website.id, applicationId: website.applicationId, bindingId: binding.id, bindingRevision: binding.revision, databaseName: binding.databaseName });
-      if (!preview) throw new Error('Website database delete preview durumu geçersiz');
+      if (!preview) throw new Error('Silme önizlemesi okunamadı.');
       setDropImpact(preview);
     } catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { operationPending.current = false; setBusy(false); }
@@ -500,10 +500,10 @@ function DatabaseWorkspace({ domain, website, application, server, activeTab }) 
     try {
       if (!deleteJob) {
         const queued = await deleteWebsiteDatabase(server.id, website.id, deleteTarget.bindingId, deleteTarget.bindingRevision, deleteTarget); deleteJob = queued?.job;
-        if (!deleteJob?.id) throw new Error('Database delete işi oluşturulamadı');
+        if (!deleteJob?.id) throw new Error('Veritabanı silme işlemi başlatılamadı.');
         setDeleteTarget((current) => current?.bindingId === deleteTarget.bindingId ? { ...current, deleteJob } : current); observe(deleteJob); jobs.refresh();
       }
-      if (['failed', 'cancelled'].includes(deleteJob.status)) throw new Error('Database delete işi terminal hatayla kapandı; job tanısını inceleyin. Kör replay yapılmadı.');
+      if (['failed', 'cancelled'].includes(deleteJob.status)) throw new Error('Veritabanı silme işlemi hatayla sonlandı; işlem kaydını inceleyin. İşlem otomatik olarak tekrarlanmadı.');
       const terminal = deleteJob.status === 'succeeded' ? deleteJob : await waitForJob(deleteJob.id); updateJob(terminal);
       setDeleteTarget((current) => current?.bindingId === deleteTarget.bindingId ? { ...current, deleteJob: terminal } : current);
       if (terminal.status !== 'succeeded') throw new Error('Veritabanı silme işlemi tamamlanmadı.');
@@ -595,6 +595,6 @@ function DatabaseWorkspace({ domain, website, application, server, activeTab }) 
     ]} /><p className="ws-muted">Silme için güncel bağlantıya ait yedek ve kaldırılmış kullanıcı gerekir. Bu önizleme veri silmez.</p>{dropImpact.blockers.length > 0 && <ul className="ys-blockers">{dropImpact.blockers.map((code) => <li key={code}>{DELETE_BLOCKER_LABELS[code] ?? code}</li>)}</ul>}{dropImpact.readyToFinalize && <div className="ws-notice" role="status">Veritabanı silindi; site bağlantısının kaldırılması bekleniyor. Yeni silme işlemi başlatılmaz.</div>}<details className="ys-technical"><summary>Doğrulama ayrıntıları</summary><KeyValues items={[
       ['Bağlantı',`${dropImpact.bindingId} · ${dropImpact.bindingRevision}`],['Önizleme',dropImpact.previewDigest],
     ]} /></details><footer className="ws-modal-footer"><Button disabled={busy} onClick={() => setDropImpact(null)}>Kapat</Button>{dropImpact.readyToDelete && <Button variant="danger" disabled={busy || !canManage} onClick={() => {setError(null);setDeleteTarget({...dropImpact,deleteJob:null});setDropImpact(null);}}>Silme onayına geç</Button>}{dropImpact.readyToFinalize && <Button variant="primary" disabled={busy || !canManage} onClick={() => {setError(null);setDeleteTarget({...dropImpact,deleteJob:{id:dropImpact.completedDelete.jobId,status:'succeeded'}});setDropImpact(null);}}>Site bağlantısını kaldırmayı tamamla</Button>}</footer></Modal>}
-    {deleteTarget && <ConfirmDialog key={`${deleteTarget.bindingId}:${deleteTarget.bindingRevision}:${deleteTarget.deleteJob?.id ?? 'queue'}`} title={deleteTarget.deleteJob?.status === 'succeeded' ? 'Site bağlantısını kaldırmayı tamamla' : 'Veritabanını kalıcı olarak sil'} message={deleteTarget.deleteJob?.status === 'succeeded' ? 'successful scoped DROP job zaten kanıtlandı. Yeni DROP oluşturulmayacak; yalnız site bağlantısının sonlandırılması doğrulanacak.' : `${deleteTarget.databaseName} güncel bağlantı revizyonuna ait doğrulanmış yedeği kontrol edilerek silinecek. Bu işlem uygulamanın veritabanı erişimini keser.`} confirmation={deleteTarget.databaseName} busy={busy} error={error} onCancel={() => {if(!busy){setDeleteTarget(null);setError(null);}}} onConfirm={deleteDatabaseLifecycle} confirmLabel={deleteTarget.deleteJob?.status === 'succeeded' ? 'Sonlandırmayı tamamla' : 'Veritabanını sil'} />}
+    {deleteTarget && <ConfirmDialog key={`${deleteTarget.bindingId}:${deleteTarget.bindingRevision}:${deleteTarget.deleteJob?.id ?? 'queue'}`} title={deleteTarget.deleteJob?.status === 'succeeded' ? 'Site bağlantısını kaldırmayı tamamla' : 'Veritabanını kalıcı olarak sil'} message={deleteTarget.deleteJob?.status === 'succeeded' ? 'Veritabanı zaten başarıyla silindi. Yeniden silme yapılmayacak; yalnız site bağlantısının kaldırılması tamamlanacak.' : `${deleteTarget.databaseName} güncel bağlantı revizyonuna ait doğrulanmış yedeği kontrol edilerek silinecek. Bu işlem uygulamanın veritabanı erişimini keser.`} confirmation={deleteTarget.databaseName} busy={busy} error={error} onCancel={() => {if(!busy){setDeleteTarget(null);setError(null);}}} onConfirm={deleteDatabaseLifecycle} confirmLabel={deleteTarget.deleteJob?.status === 'succeeded' ? 'Sonlandırmayı tamamla' : 'Veritabanını sil'} />}
   </div>;
 }

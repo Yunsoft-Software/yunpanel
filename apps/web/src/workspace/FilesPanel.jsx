@@ -832,7 +832,7 @@ function FileWorkspace({ websiteId, serverId, runtimeType, domainId = null }) {
                     type="checkbox"
                     checked={false}
                     disabled
-                    title="Başkalarına yazma izni (world-writable) güvenlik gerekçesiyle yasaktır"
+                    title="Başkalarına yazma izni güvenlik gerekçesiyle yasaktır"
                   />
                 </td>
                 <td>
@@ -850,7 +850,7 @@ function FileWorkspace({ websiteId, serverId, runtimeType, domainId = null }) {
           </table>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <label>
-              Sekizli (Octal): <code className="yf-permissions-octal">{dialog.octal ?? '0640'}</code>
+              Sekizli: <code className="yf-permissions-octal">{dialog.octal ?? '0640'}</code>
             </label>
           </div>
           <p className="ws-muted">

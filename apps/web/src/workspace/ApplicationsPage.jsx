@@ -64,7 +64,7 @@ function ApplicationInventory() {
       </nav>
       <PageHeading
         title="Uygulama envanteri"
-        description="Sistemde kayıtlı çalışma zamanı uygulamalarının Owner tanılama envanteri. Günlük uygulama yönetimi ve yayın işlemleri yalnızca ait oldukları web sitesi altında yürütülür."
+        description="Sunucuda kayıtlı uygulamaların listesi. Günlük uygulama yönetimi ve yayın işlemleri uygulamanın bağlı olduğu web sitesinden yapılır."
         actions={
           <Button
             className="ws-icon-btn"
@@ -79,7 +79,7 @@ function ApplicationInventory() {
       <div className="ws-notice">
         <div>
           <strong>Site odaklı uygulama işletimi</strong>
-          <p>Uygulama runtime, environment, yayın geçmişi, sağlık kontrolü ve rollback işlemleri doğrudan ilgili web sitesinin yönetim alanından yürütülür.</p>
+          <p>Çalışma ortamı, ortam değişkenleri, yayın geçmişi, sağlık kontrolü ve önceki sürüme dönme işlemleri ilgili web sitesinin yönetim alanından yapılır.</p>
         </div>
         <LinkButton to="/websites">Web Sitelerine Git</LinkButton>
       </div>
@@ -102,9 +102,9 @@ function ApplicationInventory() {
               <thead>
                 <tr>
                   <th>Uygulama</th>
-                  <th>Runtime / Port</th>
+                  <th>Çalışma ortamı / Port</th>
                   <th>Durum</th>
-                  <th>Son deploy</th>
+                  <th>Son dağıtım</th>
                   <th>Bağlı web sitesi</th>
                   <th>İşlem</th>
                 </tr>

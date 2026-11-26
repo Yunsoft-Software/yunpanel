@@ -58,7 +58,7 @@ test.describe('DKR-03 Port, environment, volume ve restart politikası', () => {
   }
 
   async function confirmEnvReplace(page) {
-    const modal = page.locator('.ws-modal').filter({ hasText: 'Compose environment’ın tamamını değiştir' });
+    const modal = page.locator('.ws-modal').filter({ hasText: 'Ortam değişkenlerinin tamamını değiştir' });
     await expect(modal).toBeVisible({ timeout: 15000 });
 
     const confirmStr = await modal.locator('label strong').textContent();
@@ -115,10 +115,10 @@ test.describe('DKR-03 Port, environment, volume ve restart politikası', () => {
     const nameInput = modal.locator('label:has-text("Proje adı") input');
     await nameInput.fill(`inv_env_${timestamp}`);
 
-    const docTextarea = modal.locator('label:has-text("Compose document") textarea');
+    const docTextarea = modal.locator('label:has-text("Compose içeriği") textarea');
     await docTextarea.fill(`services:\n  bad:\n    image: nginx:alpine\n    ports:\n      - "invalid_port_spec"\n`);
 
-    const validateBtn = modal.locator('button:has-text("Validate")');
+    const validateBtn = modal.locator('button:has-text("Doğrula")');
     await expect(validateBtn).toBeEnabled({ timeout: 5000 });
     await validateBtn.click();
     const notice = modal.locator('.ws-notice-warn, [role="alert"]');
@@ -165,10 +165,10 @@ test.describe('DKR-03 Port, environment, volume ve restart politikası', () => {
       `  ${volumeName}:`,
     ].join('\n');
 
-    const docTextarea = modal.locator('label:has-text("Compose document") textarea');
+    const docTextarea = modal.locator('label:has-text("Compose içeriği") textarea');
     await docTextarea.fill(composeContent);
 
-    const validateBtn = modal.locator('button:has-text("Validate")');
+    const validateBtn = modal.locator('button:has-text("Doğrula")');
     await expect(validateBtn).toBeEnabled({ timeout: 5000 });
     await validateBtn.click();
     await expect(modal.locator('dt:has-text("Servis")')).toBeVisible({ timeout: 10000 });
@@ -189,8 +189,8 @@ test.describe('DKR-03 Port, environment, volume ve restart politikası', () => {
     // a) Port Eşlemesi doğrulaması
     const desiredStateSection = page.locator('section').filter({ has: page.locator('h2:text-is("Hedef yapılandırma")') });
     await expect(desiredStateSection).toBeVisible({ timeout: 10000 });
-    await expect(desiredStateSection).toContainText(`Inner: 80/tcp`);
-    await expect(desiredStateSection).toContainText(`Outer: 127.0.0.1:${hostPort}`);
+    await expect(desiredStateSection).toContainText(`Konteyner: 80/tcp`);
+    await expect(desiredStateSection).toContainText(`Sunucu: 127.0.0.1:${hostPort}`);
 
     // b) Depolama (Volume) doğrulaması
     const storageSection = page.locator('section').filter({ has: page.locator('h2:text-is("Depolama")') });
@@ -200,10 +200,10 @@ test.describe('DKR-03 Port, environment, volume ve restart politikası', () => {
     await expect(storageSection).toContainText('/usr/share/nginx/html');
 
     // 3. Projeyi Başlat (Lifecycle: Start)
-    const lifecycleSection = page.locator('section').filter({ has: page.locator('h2:text-is("Lifecycle")') });
+    const lifecycleSection = page.locator('section').filter({ has: page.locator('h2:text-is("Proje işlemleri")') });
     await expect(lifecycleSection).toBeVisible({ timeout: 10000 });
 
-    const startBtn = lifecycleSection.locator('button:has-text("Başlat")');
+    const startBtn = lifecycleSection.locator('button:text-is("Başlat")');
     await expect(startBtn).toBeVisible({ timeout: 10000 });
     await startBtn.click();
 
@@ -252,13 +252,13 @@ test.describe('DKR-03 Port, environment, volume ve restart politikası', () => {
 
     // 5. Compose Environment Panelinden Dinamik Environment Değiştirme
     await page.reload();
-    const envSection = page.locator('section').filter({ has: page.locator('h2:text-is("Compose environment")') });
+    const envSection = page.locator('section').filter({ has: page.locator('h2:text-is("Ortam değişkenleri")') });
     await expect(envSection).toBeVisible({ timeout: 15000 });
 
     const envTextarea = envSection.locator('textarea');
     await envTextarea.fill(`RUNTIME_DYNAMIC_KEY=YunPanelDynamicVal_${timestamp}\nANOTHER_ENV=Success123`);
 
-    const envSubmitBtn = envSection.locator('button:has-text("Environment’ı değiştir")');
+    const envSubmitBtn = envSection.locator('button:has-text("Ortam değişkenlerini değiştir")');
     await expect(envSubmitBtn).toBeEnabled({ timeout: 10000 });
     await envSubmitBtn.click();
 
@@ -269,7 +269,7 @@ test.describe('DKR-03 Port, environment, volume ve restart politikası', () => {
 
     // 6. Projeyi Temizleme (Lifecycle: Projeyi kaldır)
     await page.reload();
-    const lifecycleSectionAfter = page.locator('section').filter({ has: page.locator('h2:text-is("Lifecycle")') });
+    const lifecycleSectionAfter = page.locator('section').filter({ has: page.locator('h2:text-is("Proje işlemleri")') });
     await expect(lifecycleSectionAfter).toBeVisible({ timeout: 15000 });
 
     const removeBtn = lifecycleSectionAfter.locator('button:has-text("Projeyi kaldır")');

@@ -74,7 +74,7 @@ export default function SiteCreateResult({ state }) {
       ['İşlem kimliği', state.operationId ?? domain?.operationId ?? '—'],
       ['Alan adı kimliği', domain?.id ?? '—'],
       ['Web sitesi kimliği', domain?.websiteId ?? '—'],
-      ['Aşama (phase)', state.phase],
+      ['Aşama', state.phase],
     ]} /></details>
   </Section>
   </div>;

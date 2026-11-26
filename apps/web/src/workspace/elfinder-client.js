@@ -58,7 +58,7 @@ export async function openWebsiteElFinder({
   if (typeof issueHandoff !== 'function') {
     throw new ElFinderBrowserHandoffError(
       'elfinder_handoff_client_missing',
-      'Dosya yöneticisi handoff istemcisi kullanılamıyor.',
+      'Dosya yöneticisi bağlantısı kullanılamıyor.',
     );
   }
   if (!locationImpl

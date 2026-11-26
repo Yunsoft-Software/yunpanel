@@ -36,7 +36,7 @@ test('database console retains search, pagination and explicit access alternativ
 test('database create form is opt-in; technical security facts remain available', () => {
   assert.match(source, /createOpen.*DatabaseSetupDialog/);
   assert.match(source, /<details className="ws-section ws-disclosure ws-database-diagnostics"/);
-  for (const label of ['Engine', 'DB güvenlik baseline', 'Admin socket auth', 'Website bağı', 'Credential', 'Eksik schema bağı']) assert.ok(source.includes(label));
+  for (const label of ['Sunucu türü', 'Temel güvenlik ayarları', 'Yönetici bağlantısı', 'Siteye bağlı veritabanı', 'Veritabanı kullanıcısı', 'Veritabanı bulunamayan bağlantı']) assert.ok(source.includes(label));
 });
 
 test('database deletion modal preserves state on failure/cancellation and closes on success', () => {

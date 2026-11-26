@@ -180,7 +180,7 @@ test.describe('RUN-01 Document root, sistem kullanıcısı ve hosting ayarları'
     resolvedUnixUser = (await userRow.textContent()).trim();
     expect(resolvedUnixUser).toMatch(/^yunapp-[a-f0-9]+$/);
 
-    const docRootRow = page.locator('dt:has-text("Belge kök dizini (Docroot)") + dd');
+    const docRootRow = page.locator('dt:has-text("Belge kök dizini") + dd');
     await expect(docRootRow).toBeVisible();
     defaultDocRoot = (await docRootRow.textContent()).trim();
     expect(defaultDocRoot).toContain('/var/www/yunpanel/apps/');
@@ -202,7 +202,7 @@ test.describe('RUN-01 Document root, sistem kullanıcısı ve hosting ayarları'
     await page.goto(`/websites/${encodeURIComponent(createdDomainId)}/hosting`);
     await expect(page.locator('h2, h3', { hasText: 'Barındırma ayarları' })).toBeVisible({ timeout: 15000 });
 
-    const docRootInput = page.locator('label:has-text("Document root") input');
+    const docRootInput = page.locator('label:has-text("Belge kökü") input');
     await expect(docRootInput).toBeVisible({ timeout: 10000 });
     await docRootInput.fill('public');
 
@@ -241,7 +241,7 @@ test.describe('RUN-01 Document root, sistem kullanıcısı ve hosting ayarları'
     await page.goto(`/websites/${encodeURIComponent(createdDomainId)}/hosting`);
     await expect(page.locator('h2, h3', { hasText: 'Barındırma ayarları' })).toBeVisible({ timeout: 15000 });
 
-    const docRootInput = page.locator('label:has-text("Document root") input');
+    const docRootInput = page.locator('label:has-text("Belge kökü") input');
     await expect(docRootInput).toBeVisible({ timeout: 10000 });
 
     // Kök dizin dışına çıkma (path traversal) denemesi
@@ -254,7 +254,7 @@ test.describe('RUN-01 Document root, sistem kullanıcısı ve hosting ayarları'
     // Form doğrulaması hata bildirmeli
     const errorNotice = page.locator('.ws-notice-error, [role="alert"]').or(page.locator('.ws-error'));
     await expect(errorNotice).toBeVisible({ timeout: 10000 });
-    await expect(errorNotice).toContainText(/Web sunucusu ayarlarını kontrol edin|Document root/i);
+    await expect(errorNotice).toContainText(/Web sunucusu ayarlarını kontrol edin|Belge kökü|Document root/i);
 
     // Fiziksel Kontrol (SSH): Nginx config dosyasında geçersiz traversal yolunun YER ALMADIĞI doğrulanır
     const nginxConf = runSsh(`cat /etc/nginx/sites-enabled/yunpanel-${siteDomain}.conf`);

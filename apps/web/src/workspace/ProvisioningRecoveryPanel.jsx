@@ -119,7 +119,7 @@ function RecoveryPanel({ websiteId, canManage, onChanged }) {
         })}</tbody>
       </table></div></details>}
       <div className="ws-section-body">
-        {operation && <details><summary>Teknik bilgiler ve tanılama</summary><p>İşlem kimliği: <code>{operation.operationId}</code></p><p>Web sitesi kimliği: <code>{operation.websiteId}</code></p><p>Hazır olma durumu (ready): <code>{operation.ready ? 'true' : 'false'}</code></p></details>}
+        {operation && <details><summary>Teknik bilgiler ve tanılama</summary><p>İşlem kimliği: <code>{operation.operationId}</code></p><p>Web sitesi kimliği: <code>{operation.websiteId}</code></p><p>Hazır: {operation.ready ? 'Evet' : 'Hayır'}</p></details>}
       </div>
     </Section>
     {approval && copy && <ConfirmDialog key={`${approval.confirmation}:${approval.snapshot}`}

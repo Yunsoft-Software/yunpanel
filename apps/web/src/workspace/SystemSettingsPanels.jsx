@@ -195,7 +195,7 @@ export default function SystemSettingsPanels({
           ['Panel sürümü', `YunPanel v${panel.version}`],
           ['Node.js sürümü', panel.nodeVersion],
           ['Platform ve mimari', `${panel.platform} (${panel.arch})`],
-          ['Sunucu adı (Hostname)', panel.hostname],
+          ['Sunucu adı', panel.hostname],
           ['Sunucu görünen adı', panel.displayName ?? '—'],
           ['Yerel sunucu kimliği', panel.localServerId ?? '—'],
           ['Çalışma süresi', formatUptime(panel.uptimeSeconds)],
@@ -212,12 +212,12 @@ export default function SystemSettingsPanels({
           </div>
         )}
         <KeyValues items={[
-          ['Backend API sürümü', `v${data.deployment.version}`],
-          ['Backend derleme kimliği', formatDiagnosticIdentity(data.deployment.buildId)],
-          ['Backend commit', formatDiagnosticIdentity(data.deployment.commit)],
+          ['Sunucu tarafı sürümü', `v${data.deployment.version}`],
+          ['Sunucu tarafı derleme kimliği', formatDiagnosticIdentity(data.deployment.buildId)],
+          ['Sunucu tarafı commit', formatDiagnosticIdentity(data.deployment.commit)],
           ['Veri şema sürümü', `Şema v${data.deployment.schemaVersion}`],
-          ['Frontend derleme kimliği', formatDiagnosticIdentity(activeFrontend.buildId)],
-          ['Frontend varlık kimliği', formatDiagnosticIdentity(activeFrontend.assetId)],
+          ['Arayüz derleme kimliği', formatDiagnosticIdentity(activeFrontend.buildId)],
+          ['Arayüz dosya kimliği', formatDiagnosticIdentity(activeFrontend.assetId)],
           ['Çalışma zamanı senkronizasyonu', (
             <Badge state={runtimeSync.state}>
               {runtimeSync.label}
@@ -241,7 +241,7 @@ export default function SystemSettingsPanels({
           ['Varsayılan Node.js sürümü', `Node.js ${websiteDefaults.defaultNodeMajor}`],
           ['Varsayılan PHP sürümü', `PHP ${websiteDefaults.defaultPhpVersion}`],
           ['Belge kök şablonu', websiteDefaults.defaultDocumentRootPattern],
-          ['Dosya izin maskesi (UMask)', websiteDefaults.defaultUmask],
+          ['Dosya izin maskesi', websiteDefaults.defaultUmask],
           ['Unix kimlik izolasyonu', `${websiteDefaults.isolationUserPrefix}* (Site başına bağımsız Unix kullanıcısı ve grubu)`],
         ]} />
       </Section>}
@@ -330,7 +330,7 @@ export default function SystemSettingsPanels({
       </Section>
 
       <Section
-        title="Veritabanı ve önbellek (Cache)"
+        title="Veritabanı ve önbellek"
         description="MariaDB veritabanı, phpMyAdmin güvenli erişim köprüsü ve site izolasyonlu Redis/Memcached politikası."
       >
         <KeyValues items={[
@@ -344,10 +344,10 @@ export default function SystemSettingsPanels({
 
       <Section
         title="Yedekleme ve depolama"
-        description="restic ile şifreli, tekilleştirilmiş (deduplicated) anlık görüntü yedekleme ve rclone uzak depolama."
+        description="restic ile şifreli ve tekilleştirilmiş anlık görüntü yedekleme, rclone ile uzak depolama."
       >
         <KeyValues items={[
-          ['Yedekleme motoru', `${backup.engine} (Durable snapshot & retention)`],
+          ['Yedekleme motoru', `${backup.engine} · anlık görüntü ve saklama`],
           ['Uzak depolama motoru', `${backup.remoteEngine} (S3, B2, Google Cloud, SFTP desteği)`],
           ['Yerel yedek deposu', backup.localBackupRoot],
           ['Varsayılan saklama politikası', `Günlük: ${backup.retentionDefaults.retentionDaily}, Haftalık: ${backup.retentionDefaults.retentionWeekly}, Aylık: ${backup.retentionDefaults.retentionMonthly}`],

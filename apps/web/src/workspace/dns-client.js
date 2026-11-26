@@ -100,7 +100,7 @@ export async function waitForDnsOperation({ domainId, kind, operation, attempts 
     });
     current = await getter(domainId, current.id);
   }
-  const error = new Error('DNS operation is still applying. Refresh the operation status before retrying.');
+  const error = new Error('DNS işlemi hâlâ uygulanıyor. Yeniden denemeden önce işlem durumunu yenileyin.');
   error.code = 'dns_operation_timeout';
   throw error;
 }

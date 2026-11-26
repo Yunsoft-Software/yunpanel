@@ -193,7 +193,7 @@ test.describe.serial('RUN-08 Dil/runtime eklentilerinin kurulum ve erişim polit
     resolvedUnixUser = (await userRow.textContent()).trim();
     expect(resolvedUnixUser).toMatch(/^yunapp-[a-f0-9]+$/);
 
-    const docRootRow = page.locator('dt:has-text("Belge kök dizini (Docroot)") + dd');
+    const docRootRow = page.locator('dt:has-text("Belge kök dizini") + dd');
     await expect(docRootRow).toBeVisible({ timeout: 10000 });
     defaultDocRoot = (await docRootRow.textContent()).trim();
     expect(defaultDocRoot).toMatch(/\/(?:var\/www|var\/lib)\/yunpanel\/apps\/[^/]+\/current(?:\/public)?$/);

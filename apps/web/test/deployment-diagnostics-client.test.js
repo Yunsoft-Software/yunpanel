@@ -359,7 +359,7 @@ test('fetchDeploymentDiagnostics and compareDeploymentWithServer work through re
     () => fetchDeploymentDiagnostics({
       endpoint: `${baseUrl}/api/system/diagnostics/version`,
     }),
-    /status 401/,
+    /HTTP 401/,
   );
 
   await assert.rejects(
@@ -375,7 +375,7 @@ test('fetchDeploymentDiagnostics and compareDeploymentWithServer work through re
         origin: PUBLIC_ORIGIN,
       },
     }),
-    /status 403/,
+    /HTTP 403/,
   );
 
   const authHeaders = {
@@ -470,10 +470,10 @@ test('default diagnostics client routes cross the real public panel gateway with
     assert.equal(response.status, 404);
     await response.text();
   }
-  await assert.rejects(fetchDeploymentDiagnostics({ fetchFn: gatewayFetch }), /status 401/);
+  await assert.rejects(fetchDeploymentDiagnostics({ fetchFn: gatewayFetch }), /HTTP 401/);
   await assert.rejects(compareDeploymentWithServer(manifests[1], {
     fetchFn: gatewayFetch, headers: authHeaders,
-  }), /status 403/);
+  }), /HTTP 403/);
 
   const cases = [
     { identity: manifests[1], status: DEPLOYMENT_COMPARISON_STATUSES.SYNCHRONIZED, compatible: true },
@@ -507,10 +507,10 @@ test('SystemSettingsPanels renders Doğrulanmadı, Senkronize, and Farklılaşm�
     initialData: baseSettingsPayload(unverifiedDeployment),
   }));
 
-  assert.match(unverifiedHtml, /Backend derleme kimliği<\/dt><dd>Doğrulanmadı<\/dd>/);
-  assert.match(unverifiedHtml, /Backend commit<\/dt><dd>Doğrulanmadı<\/dd>/);
-  assert.match(unverifiedHtml, /Frontend derleme kimliği<\/dt><dd>Doğrulanmadı<\/dd>/);
-  assert.match(unverifiedHtml, /Frontend varlık kimliği<\/dt><dd>Doğrulanmadı<\/dd>/);
+  assert.match(unverifiedHtml, /Sunucu tarafı derleme kimliği<\/dt><dd>Doğrulanmadı<\/dd>/);
+  assert.match(unverifiedHtml, /Sunucu tarafı commit<\/dt><dd>Doğrulanmadı<\/dd>/);
+  assert.match(unverifiedHtml, /Arayüz derleme kimliği<\/dt><dd>Doğrulanmadı<\/dd>/);
+  assert.match(unverifiedHtml, /Arayüz dosya kimliği<\/dt><dd>Doğrulanmadı<\/dd>/);
   assert.match(
     unverifiedHtml,
     /Çalışma zamanı senkronizasyonu<\/dt><dd><span class="ws-badge ws-badge-neutral"><span aria-hidden="true"><\/span>Doğrulanmadı<\/span><\/dd>/,
@@ -537,8 +537,8 @@ test('SystemSettingsPanels renders Doğrulanmadı, Senkronize, and Farklılaşm�
       buildVerified: true,
     },
   }));
-  assert.match(packageOnlyHtml, /Backend derleme kimliği<\/dt><dd>build-pkg-01<\/dd>/);
-  assert.match(packageOnlyHtml, /Backend commit<\/dt><dd>abcdef1234567890<\/dd>/);
+  assert.match(packageOnlyHtml, /Sunucu tarafı derleme kimliği<\/dt><dd>build-pkg-01<\/dd>/);
+  assert.match(packageOnlyHtml, /Sunucu tarafı commit<\/dt><dd>abcdef1234567890<\/dd>/);
   assert.match(
     packageOnlyHtml,
     /Çalışma zamanı senkronizasyonu<\/dt><dd><span class="ws-badge ws-badge-neutral"><span aria-hidden="true"><\/span>Doğrulanmadı<\/span><\/dd>/,

@@ -23,5 +23,5 @@ test('global recovery remains available after Website metadata disappears',async
  assert.match(page,/WebsiteRemovalRecoveryPanel/);
  const recovery=await source('WebsiteRemovalRecoveryPanel.jsx');
  assert.match(recovery,/website-removal-operations/);
- assert.match(recovery,/POST tekrar edilmedi/);
+ assert.match(recovery,/istek tekrarlanmadı/);
 });

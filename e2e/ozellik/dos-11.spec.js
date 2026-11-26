@@ -126,7 +126,7 @@ test.describe('DOS-11 SSH/SFTP/shell erişimi ve anahtarlar; kullanıcı izolasy
     await expect(dl.locator('div:has(dt:has-text("Protokol")) dd')).toHaveText('SFTP / SSH');
 
     // Bağlantı noktası
-    await expect(dl.locator('div:has(dt:has-text("Bağlantı noktası (Port)")) dd')).toHaveText('22');
+    await expect(dl.locator('div:has(dt:has-text("Bağlantı noktası")) dd')).toHaveText('22');
 
     // Kullanıcı adı
     const userDd = dl.locator('div:has(dt:has-text("Kullanıcı adı")) dd');
@@ -135,7 +135,7 @@ test.describe('DOS-11 SSH/SFTP/shell erişimi ve anahtarlar; kullanıcı izolasy
     expect(resolvedUnixUser).toMatch(/^yunapp-[a-f0-9]{12}$/);
 
     // Belge kök dizini
-    const docRootDd = dl.locator('div:has(dt:has-text("Belge kök dizini (Docroot)")) dd');
+    const docRootDd = dl.locator('div:has(dt:has-text("Belge kök dizini")) dd');
     await expect(docRootDd).toBeVisible();
     resolvedDocRoot = (await docRootDd.textContent()).trim();
     expect(resolvedDocRoot).toContain('/var/www/yunpanel/apps/');

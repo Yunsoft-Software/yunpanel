@@ -108,7 +108,7 @@ test('JAMSTACK_FRAMEWORK_PRESETS exposes all 9 frozen presets with exact runtime
     {
       id: 'node_api',
       label: 'Node.js API (Express / Fastify / Nest)',
-      category: 'Backend API',
+      category: 'API sunucusu',
       sourceMode: 'new_node',
       entryFile: 'server.js',
       outputDir: 'dist',
@@ -120,7 +120,7 @@ test('JAMSTACK_FRAMEWORK_PRESETS exposes all 9 frozen presets with exact runtime
     {
       id: 'python_api',
       label: 'Python (FastAPI / Django / Flask)',
-      category: 'Backend API',
+      category: 'API sunucusu',
       sourceMode: 'new_python',
       entryFile: 'app.py',
       outputDir: 'static',
@@ -313,14 +313,14 @@ test('NewWebsitePage and SiteOperations wire JAMstack presets and Git Push Webho
 
   // SiteOperations Git Webhook ve Otomatik Yayın section wiring
   assert.match(siteOpsSource, /Git Webhook ve Otomatik Yayın/);
-  assert.match(siteOpsSource, /GitHub Webhook Endpoint/);
+  assert.match(siteOpsSource, /GitHub webhook adresi/);
   assert.match(siteOpsSource, /\/api\/webhooks\/github/);
   assert.match(siteOpsSource, /Webhook URL Kopyala/);
   assert.match(siteOpsSource, /Tetiklenen Dal/);
   assert.match(siteOpsSource, /refs\/heads\/\$\{application\.branch \|\| 'main'\}/);
   assert.match(siteOpsSource, /İçerik Türü/);
   assert.match(siteOpsSource, /application\/json/);
-  assert.match(siteOpsSource, /Build & Çalışma Özeti/);
+  assert.match(siteOpsSource, /Derleme ve Çalışma Özeti/);
   assert.match(siteOpsSource, /Çıktı Dizini/);
   assert.match(siteOpsSource, /Başlangıç Dosyası/);
   assert.match(siteOpsSource, /Sağlık Kontrolü/);

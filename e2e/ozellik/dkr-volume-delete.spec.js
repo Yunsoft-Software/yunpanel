@@ -163,8 +163,8 @@ print(json.dumps({'removed':True,'wasPresent':True,'rc':0}))`, [spec.volumeName,
     const modal = page.locator('.ws-modal').filter({ hasText: 'Docker Compose projesi ekle' });
     await expect(modal).toBeVisible({ timeout: 10_000 });
     await modal.locator('label:has-text("Proje adı") input').fill(name);
-    await modal.locator('label:has-text("Compose document") textarea').fill(composeYaml);
-    await modal.locator('button:has-text("Validate")').click();
+    await modal.locator('label:has-text("Compose içeriği") textarea').fill(composeYaml);
+    await modal.locator('button:has-text("Doğrula")').click();
     await expect(modal.locator('dt:has-text("Servis")')).toBeVisible({ timeout: 15_000 });
 
     const saveBtn = modal.locator('button:has-text("Projeyi kaydet")');
@@ -271,9 +271,9 @@ print(json.dumps({'removed':True,'wasPresent':True,'rc':0}))`, [spec.volumeName,
 
     project1Id = await createProjectViaUi(page, project1Name, composeYaml);
 
-    const lifecycleSection = page.locator('section').filter({ has: page.locator('h2:text-is("Lifecycle")') });
+    const lifecycleSection = page.locator('section').filter({ has: page.locator('h2:text-is("Proje işlemleri")') });
     await expect(lifecycleSection).toBeVisible({ timeout: 15_000 });
-    const startBtn = lifecycleSection.locator('button:has-text("Başlat")');
+    const startBtn = lifecycleSection.locator('button:text-is("Başlat")');
     await expect(startBtn).toBeEnabled({ timeout: 15_000 });
     await startBtn.click();
     await confirmLifecycleAction(page, 'start');
@@ -329,9 +329,9 @@ print(json.dumps({'removed':True,'wasPresent':True,'rc':0}))`, [spec.volumeName,
 
     project2Id = await createProjectViaUi(page, project2Name, initialYaml);
 
-    const lifecycleSection = page.locator('section').filter({ has: page.locator('h2:text-is("Lifecycle")') });
+    const lifecycleSection = page.locator('section').filter({ has: page.locator('h2:text-is("Proje işlemleri")') });
     await expect(lifecycleSection).toBeVisible({ timeout: 15_000 });
-    const startBtn = lifecycleSection.locator('button:has-text("Başlat")');
+    const startBtn = lifecycleSection.locator('button:text-is("Başlat")');
     await expect(startBtn).toBeEnabled({ timeout: 15_000 });
     await startBtn.click();
     await confirmLifecycleAction(page, 'start');
@@ -415,7 +415,7 @@ print(json.dumps({'removed':True,'wasPresent':True,'rc':0}))`, [spec.volumeName,
 
     await page.reload();
     await expect(lifecycleSection).toBeVisible({ timeout: 15_000 });
-    const restartBtn = lifecycleSection.locator('button:has-text("Başlat")');
+    const restartBtn = lifecycleSection.locator('button:text-is("Başlat")');
     await expect(restartBtn).toBeEnabled({ timeout: 35_000 });
     await restartBtn.click();
     await confirmLifecycleAction(page, 'start');

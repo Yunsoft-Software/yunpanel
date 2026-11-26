@@ -110,7 +110,7 @@ test.describe('WEB-03 Domain alias; web/mail/DNS ve yönlendirme tercihleri', ()
     await waitForWebsiteSetup(page, siteDomainId);
     await page.goto(`/websites/${siteDomainId}/domains`);
     await expect(page.locator('h1')).toContainText(siteDomain, { timeout: 20000 });
-    await expect(page.locator('h2', { hasText: 'Ek alan adları (alias)' })).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('h2', { hasText: 'Ek alan adları' })).toBeVisible({ timeout: 15000 });
 
     const aliasInput = page.locator('label:has-text("Yeni ek alan adı") input');
     const addDraftBtn = page.locator('button[type="submit"]:has-text("Taslağa ekle")');
@@ -208,7 +208,7 @@ test.describe('WEB-03 Domain alias; web/mail/DNS ve yönlendirme tercihleri', ()
     test.skip(!siteDomainId, 'Site oluşturulamadığı için atlandı');
     await page.goto(`/websites/${siteDomainId}/domains`);
     await expect(page.locator('h1')).toContainText(siteDomain, { timeout: 20000 });
-    await expect(page.locator('h2', { hasText: 'Ek alan adları (alias)' })).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('h2', { hasText: 'Ek alan adları' })).toBeVisible({ timeout: 15000 });
 
     const aliasInput = page.locator('label:has-text("Yeni ek alan adı") input');
     const addDraftBtn = page.locator('button[type="submit"]:has-text("Taslağa ekle")');

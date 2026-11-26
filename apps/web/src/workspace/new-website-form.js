@@ -79,7 +79,7 @@ export const JAMSTACK_FRAMEWORK_PRESETS = Object.freeze([
   Object.freeze({
     id: 'node_api',
     label: 'Node.js API (Express / Fastify / Nest)',
-    category: 'Backend API',
+    category: 'API sunucusu',
     sourceMode: 'new_node',
     entryFile: 'server.js',
     outputDir: 'dist',
@@ -91,7 +91,7 @@ export const JAMSTACK_FRAMEWORK_PRESETS = Object.freeze([
   Object.freeze({
     id: 'python_api',
     label: 'Python (FastAPI / Django / Flask)',
-    category: 'Backend API',
+    category: 'API sunucusu',
     sourceMode: 'new_python',
     entryFile: 'app.py',
     outputDir: 'static',
@@ -222,15 +222,15 @@ export function availableSharedWebsites({ websites = [], applications = [], serv
 }
 
 export function sharedWebsiteConfirmation(primaryDomain, websiteId) {
-  return `share-site:${requiredText(primaryDomain, 'Alan adı gereklidir.')}:${requiredText(websiteId, 'Website kimliği gereklidir.')}`;
+  return `share-site:${requiredText(primaryDomain, 'Alan adı gereklidir.')}:${requiredText(websiteId, 'Site kimliği gereklidir.')}`;
 }
 
 export function sharedDomainCreateInput({ domain, website, applications = [], wwwMode = 'none' } = {}) {
   if (!domain || !website || domain.serverId !== website.serverId) {
-    throw new Error('Paylaşılacak Website bu alan adıyla aynı yerel sunucuda olmalıdır.');
+    throw new Error('Paylaşılacak site bu alan adıyla aynı yerel sunucuda olmalıdır.');
   }
   const routing = sharedWebsiteTarget(website, applications);
-  if (!routing) throw new Error('Seçilen Website güvenli shared-site routing için uygun değil.');
+  if (!routing) throw new Error('Seçilen site güvenli paylaşım için uygun değil.');
   if (domain.parentDomainId === null && wwwMode === 'alias' && domain.primaryDomain.startsWith('www.')) {
     throw new Error('www ile başlayan alan adı için ayrıca www alias oluşturulamaz.');
   }
@@ -302,7 +302,7 @@ function sourceFromForm(form, selectedApplication) {
   if (form.sourceMode === 'new_static_upload') return { kind: 'new_static' };
   if (existingApplicationType(form.sourceMode)) {
     if (!selectedApplication || selectedApplication.type !== existingApplicationType(form.sourceMode)) {
-      throw new Error('Bu Website için kullanılmamış uygun uygulamayı seçin.');
+      throw new Error('Bu site için kullanılmamış uygun uygulamayı seçin.');
     }
     return { kind: 'existing_application', applicationId: selectedApplication.id };
   }
@@ -322,7 +322,7 @@ function sourceFromForm(form, selectedApplication) {
       : 'web';
     const targetPort = Number(form.dockerTargetPort ?? form.defaultPort ?? 8080);
     if (!Number.isInteger(targetPort) || targetPort < 1 || targetPort > 65535) {
-      throw new Error('Docker container iç portu (targetPort) 1–65535 aralığında olmalıdır.');
+      throw new Error('Docker konteyner portu 1–65535 aralığında olmalıdır.');
     }
     return {
       kind: 'existing_managed_compose',
@@ -337,7 +337,7 @@ function sourceFromForm(form, selectedApplication) {
     const serviceName = requiredText(form.dockerServiceName, 'Docker Compose servisini girin.');
     const targetPort = Number(form.dockerTargetPort);
     if (!Number.isInteger(targetPort) || targetPort < 1 || targetPort > 65535) {
-      throw new Error('Docker container iç portu (targetPort) 1–65535 aralığında olmalıdır.');
+      throw new Error('Docker konteyner portu 1–65535 aralığında olmalıdır.');
     }
     return {
       kind: 'existing_managed_compose',
@@ -353,14 +353,14 @@ function sourceFromForm(form, selectedApplication) {
       dockerWorkloadId: requiredText(form.dockerWorkloadId, 'Docker iş yükü kimliğini girin.'),
     };
   }
-  throw new Error('Website yayın kaynağı geçersiz.');
+  throw new Error('Site yayın kaynağı geçersiz.');
 }
 
 export function siteCreateInputFromForm({ form, operationId, serverId, domain, selectedApplication = null } = {}) {
-  if (!form || !domain) throw new Error('Website formu tamamlanmadı.');
+  if (!form || !domain) throw new Error('Site formu tamamlanmadı.');
   const isSubdomain = domain.parentDomainId !== null;
   if (!isSubdomain && form.wwwMode === 'independent') {
-    throw new Error('Bağımsız www, üst alan adı seçilmiş ayrı bir Website olarak oluşturulmalıdır.');
+    throw new Error('Bağımsız www, üst alan adı seçilmiş ayrı bir site olarak oluşturulmalıdır.');
   }
   let siteAdmin = null;
   if (form.ownerMode != null && !['owner', 'customer', 'new_admin'].includes(form.ownerMode)) throw new Error('Site sahibini seçin.');
@@ -378,7 +378,7 @@ export function siteCreateInputFromForm({ form, operationId, serverId, domain, s
   if (form.initialDatabase === true && ![
     'existing_application', 'new_static', 'new_node', 'new_php', 'new_python',
   ].includes(source.kind)) {
-    throw new Error('Başlangıç veritabanı yalnız yönetilen Application Website için oluşturulabilir.');
+    throw new Error('Başlangıç veritabanı yalnız yönetilen uygulama sitesi için oluşturulabilir.');
   }
   const mailMode = isSubdomain ? 'none' : (form.mailMode || 'local');
   return {

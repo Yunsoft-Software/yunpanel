@@ -37,9 +37,9 @@ export default function SiteAccessPanel({ domain, website, server, isOwner, canM
       <KeyValues items={[
         ['Protokol', 'SFTP / SSH'],
         ['Sunucu adresi', serverHost],
-        ['Bağlantı noktası (Port)', '22'],
+        ['Bağlantı noktası', '22'],
         ['Kullanıcı adı', unixUser],
-        ['Belge kök dizini (Docroot)', docRoot],
+        ['Belge kök dizini', docRoot],
         ['İzolasyon durumu', isolationLevel],
         ['Uygulama çalışma türü', website.runtimeType ?? 'Standart'],
       ]} />

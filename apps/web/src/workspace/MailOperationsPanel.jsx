@@ -19,7 +19,7 @@ function RoundcubePanel() {
   useEffect(() => { refresh(); }, [refresh]);
   async function prepare() {
     setBusy(true); setError(null); setNotice(null);
-    try { setPreview(await prepareRoundcube()); setNotice('Roundcube protected secret state hazırlandı; host config henüz uygulanmadı.'); }
+    try { setPreview(await prepareRoundcube()); setNotice('Roundcube gizli anahtarları hazırlandı; ayarlar henüz sunucuya uygulanmadı.'); }
     catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { setBusy(false); }
   }
@@ -27,16 +27,16 @@ function RoundcubePanel() {
     setBusy(true); setError(null); setNotice(null);
     try {
       const job = await applyRoundcube(preview); observe(job); setConfirming(false);
-      setNotice('Roundcube configuration işi kuyruğa alındı. Job başarıyla tamamlanmadan webmail aktif sayılmaz.');
+      setNotice('Roundcube ayarı işlem kuyruğuna alındı. İşlem başarıyla bitmeden webmail etkin sayılmaz.');
     } catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { setBusy(false); }
   }
-  return <Section title="Roundcube webmail" description="Mail TLS identity ve protected secret üzerinden generated Roundcube/FPM/Nginx config."><div className="ws-section-body"><ErrorNotice error={error} />{notice && <p className="ws-notice" role="status">{notice}</p>}{preview === undefined ? <div className="ws-loading"><span className="ws-spinner" />Roundcube durumu yükleniyor…</div> : <><KeyValues items={[
-    ['Hazır', <Badge key="ready" state={preview.readyToApply ? 'active' : 'warning'}>{preview.readyToApply ? 'apply edilebilir' : 'hazırlık gerekli'}</Badge>],
-    ['Web endpoint', preview.webEndpoint ?? '—'],
-    ['Mail hostname', preview.mailHostname ?? '—'],
-    ['Preview SHA-256', preview.sha256 ?? '—'],
-    ['Config SHA-256', preview.configuration?.sha256 ?? '—'],
+  return <Section title="Roundcube webmail" description="Posta sunucusu sertifikası ve gizli anahtarlarla oluşturulan Roundcube, PHP-FPM ve Nginx ayarları."><div className="ws-section-body"><ErrorNotice error={error} />{notice && <p className="ws-notice" role="status">{notice}</p>}{preview === undefined ? <div className="ws-loading"><span className="ws-spinner" />Roundcube durumu yükleniyor…</div> : <><KeyValues items={[
+    ['Hazır', <Badge key="ready" state={preview.readyToApply ? 'active' : 'warning'}>{preview.readyToApply ? 'uygulanabilir' : 'hazırlık gerekli'}</Badge>],
+    ['Web adresi', preview.webEndpoint ?? '—'],
+    ['Posta sunucusu adı', preview.mailHostname ?? '—'],
+    ['Önizleme SHA-256', preview.sha256 ?? '—'],
+    ['Yapılandırma SHA-256', preview.configuration?.sha256 ?? '—'],
     ['FPM SHA-256', preview.fpm?.sha256 ?? '—'],
     ['Nginx SHA-256', preview.nginx?.sha256 ?? '—'],
   ]} />{preview.blockers?.length > 0 && <div className="ws-notice ws-notice-warn"><div><strong>Roundcube engeli</strong><p>{preview.blockers.join(', ')}</p></div></div>}<div className="ws-actions">{!preview.readyToApply && <Button disabled={busy} onClick={prepare}>{busy ? 'Hazırlanıyor…' : 'Roundcube hazırla'}</Button>}<Button icon="refresh" disabled={busy} onClick={refresh}>Yenile</Button>{preview.readyToApply && <Button variant="primary" disabled={busy} onClick={() => setConfirming(true)}>Ayarları uygula</Button>}</div></>}</div>{confirming && preview?.readyToApply && <ConfirmDialog title="Roundcube ayarlarını uygula" message="Roundcube ayarları, PHP-FPM havuzu ve Nginx adresi bir işlem olarak uygulanacak. Sunucu sağlığı doğrulanmadan tamamlandı sayılmaz." busy={busy} error={error} onCancel={() => setConfirming(false)} onConfirm={apply} confirmLabel="Roundcube ayarlarını uygula" />}</Section>;
@@ -155,7 +155,7 @@ function ServiceTestDeliveryPanel({ serverId }) {
         )}
         <form className="ws-form" onSubmit={submit}>
           <fieldset disabled={busy}>
-            <label>Gönderen adresi (Opsiyonel)
+            <label>Gönderen adresi (isteğe bağlı)
               <input type="email" value={sender} onChange={(e) => setSender(e.target.value)} placeholder="postmaster@domain.com" />
             </label>
             <label>Alıcı adresi
@@ -195,8 +195,8 @@ function QueuePanel({ serverId }) {
           }}
         >
           <label className="ws-filter-search">
-            Queue ara
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="queue ID, sender veya recipient" />
+            Kuyrukta ara
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="kuyruk numarası, gönderen veya alıcı" />
           </label>
           <Button type="submit" disabled={busy}>
             {busy ? 'Okunuyor…' : 'Ara'}
@@ -211,8 +211,8 @@ function QueuePanel({ serverId }) {
           <table className="ws-table" role="table" aria-label="Mail kuyruğu">
             <thead>
               <tr role="row">
-                <th scope="col">Queue ID</th>
-                <th scope="col">Queue</th>
+                <th scope="col">Kuyruk numarası</th>
+                <th scope="col">Kuyruk</th>
                 <th scope="col">Yönlendirme</th>
                 <th scope="col">Gönderen</th>
                 <th scope="col">Alıcılar</th>
@@ -249,7 +249,7 @@ function QueuePanel({ serverId }) {
           </table>
         </div>
       ) : (
-        queue && <EmptyState icon="mail" title="Queue boş" detail="Filtreye uyan bekleyen Postfix mesajı yok." />
+        queue && <EmptyState icon="mail" title="Kuyruk boş" detail="Filtreye uyan bekleyen Postfix mesajı yok." />
       )}
       {queue?.page && (
         <div className="ws-section-body">
@@ -273,7 +273,7 @@ function LogsPanel({ serverId }) {
   }, [serverId, service, search]);
   useEffect(() => { load(); }, [serverId, service]);
   return (
-    <Section title="Mail servis logları" description="Postfix, Dovecot ve Rspamd servis günlükleri.">
+    <Section title="Posta servis günlükleri" description="Postfix, Dovecot ve Rspamd servis günlükleri.">
       <div className="ws-section-body">
         <ErrorNotice error={error} />
         <form
@@ -298,8 +298,8 @@ function LogsPanel({ serverId }) {
             </select>
           </label>
           <label className="ws-filter-search">
-            Log ara
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="adres, hata veya event" />
+            Günlükte ara
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="adres, hata veya olay" />
           </label>
           <Button type="submit" disabled={busy}>
             {busy ? 'Okunuyor…' : 'Ara'}
@@ -317,7 +317,7 @@ function LogsPanel({ serverId }) {
             </pre>
           </div>
         ) : (
-          result && <EmptyState icon="file" title="Log kaydı yok" detail="Seçili zaman aralığı ve filtre için kayıt bulunamadı." />
+          result && <EmptyState icon="file" title="Günlük kaydı yok" detail="Seçili zaman aralığı ve filtre için kayıt bulunamadı." />
         )}
       </div>
     </Section>

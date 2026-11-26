@@ -67,7 +67,7 @@ export default function NginxSettingsFields({ targetType, settings, disabled, on
   return <fieldset disabled={disabled} className="ws-form">
     <legend>Web sunucusu ayarları</legend>
     <div className="ws-form-grid">
-      {['php', 'static'].includes(targetType) && <label>Document root<input
+      {['php', 'static'].includes(targetType) && <label>Belge kökü<input
         value={settings.documentRoot ?? ''} maxLength="192" spellCheck={false} placeholder="Site kökü"
         onChange={event => change('documentRoot', event.target.value || null)} />
         <span className="ws-field-hint">Site köküne göre klasör yolu. Örneğin public veya uygulama/public. Klasör önceden oluşturulmalıdır.</span></label>}

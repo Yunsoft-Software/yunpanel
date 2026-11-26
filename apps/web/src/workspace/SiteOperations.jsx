@@ -96,7 +96,7 @@ export function ApplicationOperations({ domain, application, website = null, dep
       ? 'Python uygulaması'
       : (isNode ? 'Node.js uygulaması' : `${application.type} uygulaması`));
   const runtimeItem = [
-    isPython ? 'Python' : (isNode ? 'Node.js' : 'Runtime'),
+    isPython ? 'Python' : (isNode ? 'Node.js' : 'Çalışma ortamı'),
     isPython
       ? (application.runtime?.pythonVersion ? `Python ${application.runtime.pythonVersion}` : 'Python 3')
       : (application.runtime?.nodeMajor ? `Node.js ${application.runtime.nodeMajor}` : '—'),
@@ -107,7 +107,7 @@ export function ApplicationOperations({ domain, application, website = null, dep
     <Section title={sectionTitle} description={`${application.name} · ${domain.primaryDomain} hedefiyle port eşleşmesi`}>
       <div className="ws-section-body"><div className="ws-actions">
         <Badge state={application.state} />
-        <Button icon="git" variant="primary" disabled={locked || Boolean(application.activeDeploymentId)} onClick={() => run('deploy')}>Deploy başlat</Button>
+        <Button icon="git" variant="primary" disabled={locked || Boolean(application.activeDeploymentId)} onClick={() => run('deploy')}>Dağıtımı başlat</Button>
         {!deployOnly && <Button icon="refresh" disabled={locked || !application.currentReleaseId || Boolean(application.activeDeploymentId)} onClick={() => run('restart')}>Yeniden başlat</Button>}
         {!deployOnly && <Button disabled={locked || !application.currentReleaseId} onClick={() => run('status')}>Durumu kontrol et</Button>}
         <Button disabled={locked || !application.previousReleaseId || Boolean(application.activeDeploymentId)} onClick={() => setRollback(application.previousReleaseId)}>Önceki sürüme dön</Button>
@@ -118,7 +118,7 @@ export function ApplicationOperations({ domain, application, website = null, dep
         ['Başlangıç', application.runtime?.startMode === 'npm' ? `npm run ${application.runtime?.startScript ?? 'start'}` : application.runtime?.entryFile],
         ['Port', application.runtime?.port], ['Servis', application.serviceName], ['Sağlık yolu', application.runtime?.healthPath],
         ['Repository', application.repositoryUrl], ['Branch', application.branch], ['Commit', application.currentCommitSha],
-        ['Son deploy', formatDate(application.lastDeployedAt)], ['Aktif release', application.currentReleaseId],
+        ['Son dağıtım', formatDate(application.lastDeployedAt)], ['Etkin sürüm', application.currentReleaseId],
       ]} />
     </Section>
     {showGitWebhook && <Section
@@ -138,12 +138,12 @@ export function ApplicationOperations({ domain, application, website = null, dep
       </Button>}
     >
       <KeyValues items={[
-        ['GitHub Webhook Endpoint', ciCdSummary.webhookEndpoint],
+        ['GitHub webhook adresi', ciCdSummary.webhookEndpoint],
         ['Tetiklenen Dal', `refs/heads/${application.branch || 'main'}`],
         ['İçerik Türü', 'application/json'],
       ]} />
       <div className="ws-section-body">
-        <h3>Build & Çalışma Özeti</h3>
+        <h3>Derleme ve Çalışma Özeti</h3>
         <KeyValues items={[
           ['Çıktı Dizini', ciCdSummary.outputDir],
           ['Başlangıç Dosyası', ciCdSummary.startEntry],
@@ -152,15 +152,15 @@ export function ApplicationOperations({ domain, application, website = null, dep
         ]} />
       </div>
     </Section>}
-    {deployOnly && <Section title="Release geçmişi"><div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Release</th><th>Commit</th><th>Yayın zamanı</th><th>Durum</th></tr></thead><tbody>{(application.releases ?? []).map((release) => <tr key={release.releaseId}><td>{release.releaseId}</td><td>{release.commitSha?.slice(0, 12) ?? '—'}</td><td>{formatDate(release.deployedAt)}</td><td>{release.releaseId === application.currentReleaseId ? <Badge state="active" /> : 'Önceki sürüm'}</td></tr>)}</tbody></table></div>{!application.releases?.length && <EmptyState title="Henüz release yok" detail="İlk başarılı deploy sonrasında yayın geçmişi burada görünecek." icon="git" />}</Section>}
-    {rollback && <ConfirmDialog title="Önceki sürüme dön" message={`${application.name} uygulaması ${rollback} release’ine dönecek. Başarılı dönüş uygulamanın yayınını değiştirir.`} confirmation={application.name} busy={operation.busy} error={operation.error} onCancel={() => setRollback(null)} onConfirm={async () => {
+    {deployOnly && <Section title="Sürüm geçmişi"><div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Sürüm</th><th>Commit</th><th>Yayın zamanı</th><th>Durum</th></tr></thead><tbody>{(application.releases ?? []).map((release) => <tr key={release.releaseId}><td>{release.releaseId}</td><td>{release.commitSha?.slice(0, 12) ?? '—'}</td><td>{formatDate(release.deployedAt)}</td><td>{release.releaseId === application.currentReleaseId ? <Badge state="active" /> : 'Önceki sürüm'}</td></tr>)}</tbody></table></div>{!application.releases?.length && <EmptyState title="Henüz sürüm yok" detail="İlk başarılı dağıtımdan sonra yayın geçmişi burada görünecek." icon="git" />}</Section>}
+    {rollback && <ConfirmDialog title="Önceki sürüme dön" message={`${application.name} uygulaması ${rollback} sürümüne dönecek. Başarılı dönüş uygulamanın yayınını değiştirir.`} confirmation={application.name} busy={operation.busy} error={operation.error} onCancel={() => setRollback(null)} onConfirm={async () => {
       const success = await operation.perform(async () => {
-        if (application.previousReleaseId !== rollback) throw new Error('Önceki release değişti. Pencereyi kapatıp güncel hedefi inceleyin.');
+        if (application.previousReleaseId !== rollback) throw new Error('Önceki sürüm değişti. Pencereyi kapatıp güncel hedefi inceleyin.');
         const endpoint = websiteId ? `/websites/${websiteId}/application/rollback` : `/applications/${id}/rollback`;
         await runJob(endpoint, { releaseId: rollback });
       });
       if (success) setRollback(null);
-    }} confirmLabel="Rollback başlat" />}
+    }} confirmLabel="Önceki sürüme dön" />}
   </>;
 }
 
@@ -183,7 +183,7 @@ export function DomainOperations({ domain }) {
       ['Alan adı', domain.primaryDomain], ['Aliaslar', domain.aliases?.join(', ') || 'Yok'],
       ['Hedef', domainTargetLabel(domain)],
       ['HTTPS tercihi', domain.httpsMode === 'managed' ? 'Yönetilen sertifika' : 'Kapalı'],
-      ['Yayın durumu', !pendingPublication ? 'Yayında (Güncel)' : 'Yapılandırma yayına uygulanmayı bekliyor'],
+      ['Yayın durumu', !pendingPublication ? 'Yayında, güncel' : 'Yapılandırma yayına uygulanmayı bekliyor'],
       ['Son etkinleştirme', formatDate(domain.lastAppliedAt)],
     ]} />
     <div className="ws-section-body">
@@ -226,8 +226,8 @@ export function DomainOperations({ domain }) {
       ['Yapılandırma özeti', domain.stagedChecksum ?? '—'],
     ]} />
     <div className="ws-actions" style={{ marginTop: '0.5rem' }}>
-      <Button disabled={locked} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/stage`))}>Ayrı hazırla (stage)</Button>
-      <Button disabled={locked || domain.stagedRevision !== domain.desiredRevision || !domain.stagedChecksum} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/activate`))}>Ayrı etkinleştir (activate)</Button>
+      <Button disabled={locked} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/stage`))}>Ayrı hazırla</Button>
+      <Button disabled={locked || domain.stagedRevision !== domain.desiredRevision || !domain.stagedChecksum} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/activate`))}>Ayrı etkinleştir</Button>
     </div>
     </details>
   </Section>;
@@ -318,7 +318,7 @@ function SslOperationForm({ domain, session }) {
         if (stageJobId) {
           await waitForJob(stageJob.id ?? stageJobId);
         } else if (stageJob?.status !== 'succeeded') {
-          throw new Error('Alan adı hazırlama (stage) iş kaydı alınamadı.');
+          throw new Error('Alan adı hazırlama işlem kaydı alınamadı.');
         }
         const stagedDomain = await panelRequest(`/domains/${encodeURIComponent(currentDomain.id)}`);
         currentDomain = stagedDomain?.domain ?? stagedDomain?.data ?? stagedDomain ?? currentDomain;
@@ -332,7 +332,7 @@ function SslOperationForm({ domain, session }) {
         if (activateJobId) {
           await waitForJob(activateJob.id ?? activateJobId);
         } else if (activateJob?.status !== 'succeeded') {
-          throw new Error('Alan adı etkinleştirme (activate) iş kaydı alınamadı.');
+          throw new Error('Alan adı etkinleştirme işlem kaydı alınamadı.');
         }
       }
       const issueJob = await runJob(`/domains/${encodeURIComponent(currentDomain.id)}/certificates/issue`, {
@@ -432,7 +432,7 @@ function SslOperationForm({ domain, session }) {
               disabled={locked}
               style={{ marginTop: '3px', flexShrink: 0, accentColor: 'var(--ws-brand)' }}
             />
-            <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>Sertifikayı posta alan adına ata (Postfix/Dovecot TLS SNI)</span>
+            <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>Sertifikayı posta alan adına ata</span>
           </label>
           <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', cursor: 'pointer', color: 'var(--ws-text)', minWidth: 0 }}>
             <input
@@ -442,7 +442,7 @@ function SslOperationForm({ domain, session }) {
               disabled={locked}
               style={{ marginTop: '3px', flexShrink: 0, accentColor: 'var(--ws-brand)' }}
             />
-            <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>Joker (Wildcard) sertifika çıkar (<strong>*.{domain.primaryDomain}</strong>)</span>
+            <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>Joker sertifika çıkar (<strong>*.{domain.primaryDomain}</strong>)</span>
           </label>
           {includeWildcard && (
             <p className="ws-muted" style={{ margin: '0 0 0 24px', fontSize: '0.85rem', color: 'var(--ws-warning, #75521c)' }}>

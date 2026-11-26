@@ -207,7 +207,7 @@ test.describe.serial('RUN-06 Node paket kurulumu, script, restart ve loglar', ()
     const restartBtn = nodeSection.locator('button', { hasText: 'Yeniden başlat' });
     await expect(restartBtn).toBeVisible({ timeout: 10000 });
 
-    const deployBtn = nodeSection.locator('button', { hasText: 'Deploy başlat' });
+    const deployBtn = nodeSection.locator('button', { hasText: 'Dağıtımı başlat' });
     await expect(deployBtn).toBeVisible({ timeout: 10000 });
 
     // Eğer restart butonu etkinse restart işlemini test et; aktif release kilitliyken buton güvenli şekilde devre dışıdır

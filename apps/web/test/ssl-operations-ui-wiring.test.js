@@ -14,7 +14,7 @@ test('SiteOperations SSL issuance preserves account-bound contact defaults and t
   assert.match(operations, /www\.\$\{domain\.primaryDomain\}/);
   assert.match(operations, /webmail\.\$\{domain\.primaryDomain\}/);
   assert.match(operations, /mail\.\$\{domain\.primaryDomain\}/);
-  assert.match(operations, /Sertifikayı posta alan adına ata \(Postfix\/Dovecot TLS SNI\)/);
+  assert.match(operations, /Sertifikayı posta alan adına ata</);
   assert.match(operations, /\*\.\$\{domain\.primaryDomain\}/);
 
   // Passes domains and assignToMail payload to API

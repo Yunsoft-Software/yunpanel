@@ -159,7 +159,7 @@ print(len(active))
     const policyBtn = mailboxRow.locator('button:has-text("Kota ve yönlendirme")');
     await policyBtn.click();
 
-    const policySection = page.locator('section').filter({ has: page.locator('h2', { hasText: `Mailbox policy · ${fullAddress}` }) });
+    const policySection = page.locator('section').filter({ has: page.locator('h2', { hasText: `Posta kutusu ayarları · ${fullAddress}` }) });
     await expect(policySection).toBeVisible({ timeout: 15000 });
 
     const quotaInput = policySection.locator('label:has-text("Kota (MiB)") input');
@@ -182,7 +182,7 @@ print(len(active))
     await expect(clearQuotaBtn).toBeVisible({ timeout: 10000 });
     await clearQuotaBtn.click();
 
-    const clearQuotaModal = page.locator('.ws-modal', { hasText: 'Mailbox quota policy kaldır' });
+    const clearQuotaModal = page.locator('.ws-modal', { hasText: 'Posta kutusu kotasını kaldır' });
     await expect(clearQuotaModal).toBeVisible({ timeout: 5000 });
     await fillAndConfirm(clearQuotaModal);
     await expect(clearQuotaModal).not.toBeVisible({ timeout: 45000 });

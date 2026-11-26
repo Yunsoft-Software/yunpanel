@@ -101,7 +101,7 @@ test.describe('BAK-05 Yerel ve uzak FTP/cloud/object storage hedefleri', () => {
     await diagnosticsDetails.evaluate((el) => { el.open = true; });
     const backupSection = page.locator('section.ws-section', { hasText: 'Yedekleme ve depolama' });
     await expect(backupSection).toBeVisible({ timeout: 10000 });
-    await expect(backupSection).toContainText('restic (Durable snapshot & retention)');
+    await expect(backupSection).toContainText('restic · anlık görüntü ve saklama');
     await expect(backupSection).toContainText('rclone (S3, B2, Google Cloud, SFTP desteği)');
     await expect(backupSection).toContainText('/var/lib/yunpanel/backups');
 

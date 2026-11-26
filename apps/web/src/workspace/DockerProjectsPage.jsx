@@ -67,14 +67,14 @@ function portLabel(port) {
 
 function innerOuterPortLabel(port) {
   const host = port.hostIp ?? '127.0.0.1';
-  return `Inner: ${port.targetPort}/${port.protocol ?? 'tcp'} ↔ Outer: ${host}:${port.publishedPort}`;
+  return `Konteyner: ${port.targetPort}/${port.protocol ?? 'tcp'} ↔ Sunucu: ${host}:${port.publishedPort}`;
 }
 
 function storageKindLabel(mount) {
-  if (mount.kind === 'named_volume') return 'Named volume';
-  if (mount.kind === 'bind' && mount.sourceScope === 'project') return 'Project bind';
-  if (mount.kind === 'bind' && mount.sourceScope === 'host') return 'Host bind';
-  return 'Ephemeral';
+  if (mount.kind === 'named_volume') return 'Adlandırılmış volume';
+  if (mount.kind === 'bind' && mount.sourceScope === 'project') return 'Proje dizini';
+  if (mount.kind === 'bind' && mount.sourceScope === 'host') return 'Sunucu dizini';
+  return 'Geçici';
 }
 
 function storageResourceKey(serviceName, mount) {
@@ -82,10 +82,10 @@ function storageResourceKey(serviceName, mount) {
 }
 
 function storagePolicyLabel(policy) {
-  if (policy?.disposition === 'include') return "Manifest'e dahil";
-  if (policy?.disposition === 'exclude') return 'Backup dışı';
+  if (policy?.disposition === 'include') return 'Yedeğe dahil';
+  if (policy?.disposition === 'exclude') return 'Yedek dışı';
   if (policy?.disposition === 'reject') return 'Varsayılan reddedilir';
-  return 'Policy kullanılamıyor';
+  return 'Yedek kuralı okunamadı';
 }
 
 function storagePolicyBadge(policy) {
@@ -113,7 +113,7 @@ const EASYPANEL_CATEGORY_FILTERS = [
 ];
 
 const FALLBACK_EASYPANEL_ONE_CLICK_APPS = [
-  { id: 'pocketbase', name: 'PocketBase', label: 'PocketBase', image: 'ghcr.io/muchobien/pocketbase:latest', innerPort: 8090, targetPort: 8090, outerPort: 18090, publishedPort: 18090, category: 'jamstack_baas', categoryLabel: 'JAMstack & BaaS', oneClick: true, hasAutoSecrets: true, description: 'JAMstack Backend-in-a-file: Auth, Realtime DB, File Storage ve REST API.' },
+  { id: 'pocketbase', name: 'PocketBase', label: 'PocketBase', image: 'ghcr.io/muchobien/pocketbase:latest', innerPort: 8090, targetPort: 8090, outerPort: 18090, publishedPort: 18090, category: 'jamstack_baas', categoryLabel: 'JAMstack & BaaS', oneClick: true, hasAutoSecrets: true, description: 'Tek dosyalık arka uç: kimlik doğrulama, gerçek zamanlı veritabanı, dosya depolama ve REST API.' },
   { id: 'n8n', name: 'n8n Workflow Automation', label: 'n8n Workflow Automation', image: 'n8nio/n8n:latest', innerPort: 5678, targetPort: 5678, outerPort: 15678, publishedPort: 15678, category: 'automation_ai', categoryLabel: 'Otomasyon & AI', oneClick: true, hasAutoSecrets: true, description: 'Self-hosted workflow automation ve AI ajan orkestrasyon platformu.' },
   { id: 'directus', name: 'Directus Headless CMS', label: 'Directus Headless CMS', image: 'directus/directus:11', innerPort: 8055, targetPort: 8055, outerPort: 18055, publishedPort: 18055, category: 'headless_cms', categoryLabel: 'Headless CMS', oneClick: true, hasAutoSecrets: true, description: 'SQL veritabanları için anında REST + GraphQL API üreten modern Headless CMS.' },
   { id: 'strapi', name: 'Strapi Headless CMS', label: 'Strapi Headless CMS', image: 'strapi/strapi:latest', innerPort: 1337, targetPort: 1337, outerPort: 13370, publishedPort: 13370, category: 'headless_cms', categoryLabel: 'Headless CMS', oneClick: true, hasAutoSecrets: true, description: 'JAMstack siteler için açık kaynaklı Node.js Headless CMS ve içerik API motoru.' },
@@ -125,7 +125,7 @@ const FALLBACK_EASYPANEL_ONE_CLICK_APPS = [
   { id: 'minio', name: 'MinIO S3 Storage', label: 'MinIO S3 Storage', image: 'minio/minio:latest', innerPort: 9000, targetPort: 9000, outerPort: 19000, publishedPort: 19000, category: 'storage', categoryLabel: 'Depolama & S3', oneClick: true, hasAutoSecrets: true, description: 'Yüksek performanslı, AWS S3 uyumlu nesne depolama sunucusu.' },
   { id: 'grafana', name: 'Grafana Dashboards', label: 'Grafana Dashboards', image: 'grafana/grafana:latest', innerPort: 3000, targetPort: 3000, outerPort: 13000, publishedPort: 13000, category: 'analytics_monitoring', categoryLabel: 'İzleme & Analitik', oneClick: true, hasAutoSecrets: true, description: 'Metrik görselleştirme, sunucu gözlemlenebilirliği ve alarm panoları.' },
   { id: 'redis', name: 'Redis 7 Cache', label: 'Redis 7 Cache', image: 'redis:7-alpine', innerPort: 6379, targetPort: 6379, outerPort: 16379, publishedPort: 16379, category: 'database_cache', categoryLabel: 'Veritabanı & Cache', oneClick: true, hasAutoSecrets: false, description: 'Yüksek hızlı bellek içi anahtar-değer deposu, önbellek ve mesaj kuyruğu.' },
-  { id: 'postgres', name: 'PostgreSQL 16', label: 'PostgreSQL 16', image: 'postgres:16-alpine', innerPort: 5432, targetPort: 5432, outerPort: 15432, publishedPort: 15432, category: 'database_cache', categoryLabel: 'Veritabanı & Cache', oneClick: true, hasAutoSecrets: true, description: 'Kalıcı disk (named volume) tanımlı kurumsal ilişkisel PostgreSQL veritabanı.' },
+  { id: 'postgres', name: 'PostgreSQL 16', label: 'PostgreSQL 16', image: 'postgres:16-alpine', innerPort: 5432, targetPort: 5432, outerPort: 15432, publishedPort: 15432, category: 'database_cache', categoryLabel: 'Veritabanı & Cache', oneClick: true, hasAutoSecrets: true, description: 'Kalıcı disk tanımlı kurumsal ilişkisel PostgreSQL veritabanı.' },
   { id: 'ollama-webui', name: 'Open WebUI (AI Chat)', label: 'Open WebUI (AI Chat)', image: 'ghcr.io/open-webui/open-webui:main', innerPort: 8080, targetPort: 8080, outerPort: 18088, publishedPort: 18088, category: 'automation_ai', categoryLabel: 'Otomasyon & AI', oneClick: true, hasAutoSecrets: true, description: 'Ollama ve OpenAI uyumlu LLM modelleri için kendi kendine barındırılan yapay zeka arayüzü.' },
 ];
 
@@ -265,8 +265,8 @@ function DockerProjectList() {
               <tr>
                 <th>Proje</th>
                 <th>Servis</th>
-                <th>Inner ↔ Outer Port Eşlemesi</th>
-                <th>Network</th>
+                <th>Konteyner ↔ Sunucu portu</th>
+                <th>Ağ</th>
                 <th>Volume</th>
                 <th>Revizyon</th>
                 <th />
@@ -283,7 +283,7 @@ function DockerProjectList() {
                       {allPorts.length > 0
                         ? allPorts.map((p) => (
                             <span key={`${p.service}:${p.publishedPort}:${p.targetPort}`} className="yp-port-mapping-badge" style={{ marginRight: '6px' }}>
-                              {p.service}: Inner {p.targetPort}/{p.protocol ?? 'tcp'} ↔ Outer {p.hostIp ?? '127.0.0.1'}:{p.publishedPort}
+                              {p.service}: Konteyner {p.targetPort}/{p.protocol ?? 'tcp'} ↔ Sunucu {p.hostIp ?? '127.0.0.1'}:{p.publishedPort}
                             </span>
                           ))
                         : <span className="ws-muted">Port yayımlanmadı</span>}
@@ -360,8 +360,8 @@ function DockerProjectList() {
                   </div>
                   {tpl.description && <p className="ws-muted" style={{ margin: '0 0 10px 0', fontSize: '12px' }}>{tpl.description}</p>}
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                    <span className="yp-port-mapping-badge">Inner: {innerPort}/tcp</span>
-                    <span className="yp-port-mapping-badge">Outer: 127.0.0.1:{outerPort}</span>
+                    <span className="yp-port-mapping-badge">Konteyner: {innerPort}/tcp</span>
+                    <span className="yp-port-mapping-badge">Sunucu: 127.0.0.1:{outerPort}</span>
                   </div>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px', marginTop: '8px' }}>
@@ -406,14 +406,14 @@ function DiagnosisPanel({ project }) {
     [project.id, selected],
     { enabled: Boolean(binding) },
   );
-  if (options.length === 0) return <EmptyState icon="alert" title="HTTP target seçilemiyor" detail="Projede yayınlanan TCP portu yok. Siteye bağlamak için bir servis portunu sunucuya yayınlayın." />;
+  if (options.length === 0) return <EmptyState icon="alert" title="Siteye bağlanacak port yok" detail="Projede yayınlanan TCP portu yok. Siteye bağlamak için bir servis portunu sunucuya yayınlayın." />;
   const result = diagnosis.data;
-  return <div className="ws-section-body"><div className="ws-filters"><label>Website target<select value={selected} onChange={(event) => setSelected(event.target.value)}>{options.map((item) => <option key={item.key} value={item.key}>{item.serviceName} · {item.targetPort}/tcp</option>)}</select></label><Button icon="refresh" onClick={diagnosis.refresh}>Kontrol et</Button></div><LoadNotice resource={diagnosis} label="Target diagnosis" />{result && <><KeyValues items={[
+  return <div className="ws-section-body"><div className="ws-filters"><label>Site hedefi<select value={selected} onChange={(event) => setSelected(event.target.value)}>{options.map((item) => <option key={item.key} value={item.key}>{item.serviceName} · {item.targetPort}/tcp</option>)}</select></label><Button icon="refresh" onClick={diagnosis.refresh}>Kontrol et</Button></div><LoadNotice resource={diagnosis} label="Bağlantı tanısı" />{result && <><KeyValues items={[
     ['Durum', <Badge key="status" state={result.status === 'ready' ? 'active' : result.status === 'attention' ? 'warning' : 'error'}>{result.status}</Badge>],
-    ['Nginx target', result.target?.ready ? `${result.target.host}:${result.target.port}` : 'Hazır değil'],
-    ['Runtime', result.runtime?.status ?? 'unknown'],
-    ['Container', result.runtime?.containerCount ?? 0],
-  ]} />{result.issues?.length > 0 && <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Sorun</th><th>Aksiyon</th><th>Açıklama</th></tr></thead><tbody>{result.issues.map((item) => <tr key={`${item.code}:${item.action}`}><td><Badge state={item.severity === 'error' ? 'error' : 'warning'}>{item.code}</Badge></td><td><code>{item.action}</code></td><td>{item.message}</td></tr>)}</tbody></table></div>}</>}</div>;
+    ['Nginx hedefi', result.target?.ready ? `${result.target.host}:${result.target.port}` : 'Hazır değil'],
+    ['Çalışma durumu', result.runtime?.status ?? 'unknown'],
+    ['Konteyner', result.runtime?.containerCount ?? 0],
+  ]} />{result.issues?.length > 0 && <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Sorun</th><th>Önerilen işlem</th><th>Açıklama</th></tr></thead><tbody>{result.issues.map((item) => <tr key={`${item.code}:${item.action}`}><td><Badge state={item.severity === 'error' ? 'error' : 'warning'}>{item.code}</Badge></td><td><code>{item.action}</code></td><td>{item.message}</td></tr>)}</tbody></table></div>}</>}</div>;
 }
 
 function StoragePanel({ project, backup }) {
@@ -425,14 +425,14 @@ function StoragePanel({ project, backup }) {
   ]));
   return <Section title="Depolama" description="Konteyner servislerinin kalıcı disk (volume) ve dizin bağlantıları.">
     {currentBackup && <div className="ws-section-body"><KeyValues items={[
-      ['Manifest', `v${currentBackup.manifestVersion}`],
+      ['Yedek tanımı', `v${currentBackup.manifestVersion}`],
       ['Dahil', currentBackup.counts?.included ?? 0],
-      ['Backup dışı', currentBackup.counts?.excluded ?? 0],
+      ['Yedek dışı', currentBackup.counts?.excluded ?? 0],
       ['Reddedilen', currentBackup.counts?.rejected ?? 0],
     ]} /></div>}
     {mounts.length > 0 ? <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Servis</th><th>Tür</th><th>Kaynak</th><th>Konteyner hedefi</th><th>Mod</th><th>Yedek</th></tr></thead><tbody>{mounts.map((mount) => {
       const policy = policyByMount.get(storageResourceKey(mount.serviceName, mount)) ?? null;
-      return <tr key={`${mount.serviceName}:${mount.target}`}><td><strong>{mount.serviceName}</strong></td><td>{storageKindLabel(mount)}</td><td><code>{mount.source ?? '—'}</code></td><td><code>{mount.target}</code></td><td>{mount.readOnly ? 'Read only' : 'Read / write'}</td><td><Badge state={storagePolicyBadge(policy)}>{storagePolicyLabel(policy)}</Badge></td></tr>;
+      return <tr key={`${mount.serviceName}:${mount.target}`}><td><strong>{mount.serviceName}</strong></td><td>{storageKindLabel(mount)}</td><td><code>{mount.source ?? '—'}</code></td><td><code>{mount.target}</code></td><td>{mount.readOnly ? 'Salt okunur' : 'Okuma ve yazma'}</td><td><Badge state={storagePolicyBadge(policy)}>{storagePolicyLabel(policy)}</Badge></td></tr>;
     })}</tbody></table></div> : <EmptyState icon="archive" title="Kalıcı veya geçici bağlama yok" detail="Bu Compose projesinin servislerinde depolama bağlantısı bulunmuyor." />}
   </Section>;
 }
@@ -627,11 +627,11 @@ function DockerProjectDetail({ projectId }) {
                   ['Revizyon', project.revision],
                   ['Compose SHA-256', project.composeSha256],
                   ['Servis', project.services?.length ?? 0],
-                  ['Network', project.networks?.length ?? 0],
-                  ['Named volume', project.volumes?.length ?? 0],
-                  ['Mount', storageCount],
-                  ['Env revizyonu', data.environment?.revision ?? 0],
-                  ['Registry credential', data.credentials?.length ?? 0],
+                  ['Ağ', project.networks?.length ?? 0],
+                  ['Adlandırılmış volume', project.volumes?.length ?? 0],
+                  ['Bağlama', storageCount],
+                  ['Ortam değişkenleri revizyonu', data.environment?.revision ?? 0],
+                  ['Kayıt defteri erişimi', data.credentials?.length ?? 0],
                 ]}
               />
               <div className="ws-table-scroll">
@@ -642,7 +642,7 @@ function DockerProjectDetail({ projectId }) {
                       <th>Kaynak</th>
                       <th>Konteyner portu</th>
                       <th>Sunucu portu</th>
-                      <th>Published ports</th>
+                      <th>Yayımlanan portlar</th>
                       <th>Domain / Subdomain Proxy Hedefi</th>
                     </tr>
                   </thead>
@@ -652,12 +652,12 @@ function DockerProjectDetail({ projectId }) {
                         <td>
                           <strong>{service.name}</strong>
                         </td>
-                        <td>{service.imageConfigured ? 'image' : service.buildConfigured ? 'build' : '—'}</td>
+                        <td>{service.imageConfigured ? 'İmaj' : service.buildConfigured ? 'Derleme' : '—'}</td>
                         <td>
                           {publishedPorts(service).length
                             ? publishedPorts(service).map((port) => (
                                 <span key={`in:${portLabel(port)}`} className="yp-port-mapping-badge">
-                                  Inner: {port.targetPort}/{port.protocol ?? 'tcp'}
+                                  Konteyner: {port.targetPort}/{port.protocol ?? 'tcp'}
                                 </span>
                               ))
                             : '—'}
@@ -666,7 +666,7 @@ function DockerProjectDetail({ projectId }) {
                           {publishedPorts(service).length
                             ? publishedPorts(service).map((port) => (
                                 <span key={`out:${portLabel(port)}`} className="yp-port-mapping-badge">
-                                  Outer: {port.hostIp ?? '127.0.0.1'}:{port.publishedPort}
+                                  Sunucu: {port.hostIp ?? '127.0.0.1'}:{port.publishedPort}
                                 </span>
                               ))
                             : '—'}
@@ -695,7 +695,7 @@ function DockerProjectDetail({ projectId }) {
           <DockerVolumesPanel project={project} onChanged={refresh} />
           <DockerConfigPanel data={data} onChanged={detail.refresh} />
           <DockerLifecyclePanel project={project} onChanged={detail.refresh} />
-          <Section title="Website / Nginx diagnosis" description="Konteyner servislerinin web sitesi ve alan adı yönlendirme durumu.">
+          <Section title="Site ve Nginx tanısı" description="Konteyner servislerinin web sitesi ve alan adı yönlendirme durumu.">
             <DiagnosisPanel project={project} />
           </Section>
           <RuntimePanel key={project.id} projectId={project.id} projectRevision={project.revision} />

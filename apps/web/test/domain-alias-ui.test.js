@@ -18,7 +18,7 @@ test('source: common components and existing preview/job API adapters are used',
   assert.doesNotMatch(ui, /localStorage|sessionStorage|document.cookie|dangerouslySetInnerHTML|fetch\(/);
 });
 test('source: alias actions and publication are visible; only diagnostics are disclosed', () => {
-  assert.ok(ui.indexOf('<Section title="Ek alan adları (alias)"') < ui.indexOf('<details'));
+  assert.ok(ui.indexOf('<Section title="Ek alan adları"') < ui.indexOf('<details'));
   assert.ok(ui.indexOf('<Section title="Yayın durumu"') < ui.indexOf('<details'));
   assert.match(ui, /Taslağa ekle/); assert.match(ui, /Değişiklikleri incele/);
   assert.match(ui, /Değişiklikleri iptal et/); assert.match(ui, /<summary>Teknik yayın bilgileri<\/summary>/);

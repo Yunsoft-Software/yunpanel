@@ -47,7 +47,7 @@ export default function MailDomainCreateDialog({ onCreated, onClose }) {
         <ErrorNotice error={error} />
         {candidates.length === 0 ? (
           <div className="ws-notice ws-notice-warn">
-            Posta hizmetini oluşturmak için önce bu yerel sunucuda bir üst seviye web Domain kaydı gerekir.
+            Posta hizmetini oluşturmak için önce bu yerel sunucuda bir üst seviye alan adı kaydı gerekir.
           </div>
         ) : (
           <fieldset disabled={busy}>

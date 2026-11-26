@@ -100,7 +100,7 @@ test.describe('TLS-04 Panel, website ve mail servisine doğru sertifika atama', 
     }
     const webmailSection = page.locator('section').filter({ has: page.locator('h2', { hasText: /Webmail/i }) }).first();
     if (await webmailSection.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await expect(webmailSection.locator('dt', { hasText: 'Hostname' })).toBeVisible();
+      await expect(webmailSection.locator('dt', { hasText: 'Sunucu adı' })).toBeVisible();
       await expect(webmailSection.locator('dt', { hasText: 'Sertifika ID' })).toBeVisible();
     }
 

@@ -261,7 +261,7 @@ test('mail detail mounts all 6 real subpanels concurrently with section tab togg
 
   // Verify authentic content of each real subpanel
   assert.ok(panes[0].textContent.includes('admin@şirket-ana.com'), 'Pane 0 contains real MailboxesPanel data');
-  assert.ok(panes[1].textContent.includes('Webmail (Roundcube)'), 'Pane 1 contains real MailWebmailPanel data');
+  assert.ok(panes[1].textContent.includes('Roundcube Webmail'), 'Pane 1 contains real MailWebmailPanel data');
   assert.ok(panes[2].textContent.includes('Mail aliasları'), 'Pane 2 contains real MailAliasesPanel data');
   assert.ok(panes[3].textContent.includes('DKIM') && panes[3].textContent.includes('rsa2048'), 'Pane 3 contains real MailDkimDiagnosticsPanel data');
   assert.ok(panes[4].textContent.includes('Sunucu posta ayarları'), 'Pane 4 contains real MailConfigurationPanel data');
@@ -663,7 +663,7 @@ test('fixture component actions: authentic SMTP test delivery, DKIM preview & ap
   assert.ok(dkimApplyCall, 'DKIM apply endpoint called');
   assert.equal(observedJobs.length, 1, 'Job observer must be invoked');
   assert.equal(observedJobs[0].id, 'job-dkim-apply-1', 'Observed DKIM durable job');
-  assert.ok(securityPane.textContent.includes('DKIM configuration işi kuyruğa alındı'), 'Job queue notice displayed');
+  assert.ok(securityPane.textContent.includes('DKIM ayarı işlem kuyruğuna alındı'), 'Job queue notice displayed');
 
   // 3. SMTP Mailbox Delivery Test via MailboxDiagnosticsModal in Mailboxes panel
   const tabLinks = container.querySelector('.ws-tabs').querySelectorAll('a');
@@ -792,7 +792,7 @@ test('fixture component actions: Roundcube webmail preview & bind with durable j
   assert.ok(webmailPane.textContent.includes('digest-rc-bind-777'), 'Preview digest rendered');
 
   // 2. Bind Roundcube with ConfirmDialog
-  const bindBtn = webmailPane.querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('Webmail (Roundcube) Bağla'))[0];
+  const bindBtn = webmailPane.querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('Roundcube Webmail Bağla'))[0];
   assert.ok(bindBtn, 'Webmail Bağla button must exist');
 
   await act(async () => {

@@ -271,7 +271,7 @@ function PolicyPanel({ mailbox, onChanged }) {
   }
   return (
     <Section
-      title={`Mailbox policy · ${mailbox.address}`}
+      title={`Posta kutusu ayarları · ${mailbox.address}`}
       description="Kota ve yönlendirme değişiklikleri kaydettiğinizde posta hizmetine uygulanır."
     >
       <div className="ws-section-body">
@@ -343,7 +343,7 @@ function PolicyPanel({ mailbox, onChanged }) {
       </div>
       {confirm === 'quota' && quota && (
         <ConfirmDialog
-          title="Mailbox quota policy kaldır"
+          title="Posta kutusu kotasını kaldır"
           message={`${mailbox.address} kota sınırı kaldırılacak ve posta hizmetine uygulanacak.`}
           confirmation={`clear-mailbox-quota:${mailbox.id}`}
           busy={busy}
@@ -354,12 +354,12 @@ function PolicyPanel({ mailbox, onChanged }) {
               await clearMailboxQuota(mailbox.id, { expectedRevision: quota.revision });
             }, 'quota')
           }
-          confirmLabel="Quota policy kaldır"
+          confirmLabel="Kotayı kaldır"
         />
       )}
       {confirm === 'forwarding' && forwarding && (
         <ConfirmDialog
-          title="Mailbox forwarding policy kaldır"
+          title="Posta kutusu yönlendirmesini kaldır"
           message={`${mailbox.address} yönlendirmesi kaldırılacak ve posta hizmetine uygulanacak.`}
           confirmation={`clear-mailbox-forwarding:${mailbox.id}`}
           busy={busy}
@@ -370,7 +370,7 @@ function PolicyPanel({ mailbox, onChanged }) {
               await clearMailboxForwarding(mailbox.id, { expectedRevision: forwarding.revision });
             }, 'forwarding')
           }
-          confirmLabel="Forwarding policy kaldır"
+          confirmLabel="Yönlendirmeyi kaldır"
         />
       )}
     </Section>

@@ -57,7 +57,7 @@ test.describe('DB-06 Veritabanı denetimi/onarımı; desteklenen engine sınır�
     }
   });
 
-  test('mutlu yol: Veritabanları sayfasında MariaDB/MySQL motoru, versiyon ve DB güvenlik baseline denetiminin doğrulanması; canlı API sağlık yanıtı', async ({ page }) => {
+  test('mutlu yol: Veritabanları sayfasında MariaDB/MySQL motoru, versiyon ve temel güvenlik ayarları denetiminin doğrulanması; canlı API sağlık yanıtı', async ({ page }) => {
     await page.goto('/databases');
     await expect(page.locator('h1:has-text("Veritabanları")')).toBeVisible({ timeout: 15000 });
 
@@ -74,16 +74,16 @@ test.describe('DB-06 Veritabanı denetimi/onarımı; desteklenen engine sınır�
       await diagnosticsDetails.locator('summary').click();
     }
 
-    // Engine: MariaDB veya MySQL olarak görünmeli
-    const engineTerm = diagnosticsDetails.locator('dt:has-text("Engine")');
+    // Sunucu türü: MariaDB veya MySQL olarak görünmeli
+    const engineTerm = diagnosticsDetails.locator('dt:has-text("Sunucu türü")');
     await expect(engineTerm).toBeVisible({ timeout: 5000 });
     const engineDesc = diagnosticsDetails.locator('dd').filter({ hasText: /MariaDB|MySQL/i }).first();
     await expect(engineDesc).toBeVisible({ timeout: 5000 });
 
     // Sürüm ve baseline durumunu doğrula
     await expect(diagnosticsDetails.locator('dt:has-text("Sürüm")')).toBeVisible();
-    await expect(diagnosticsDetails.locator('dt:has-text("DB güvenlik baseline")')).toBeVisible();
-    await expect(diagnosticsDetails.locator('dt:has-text("Admin socket auth")')).toBeVisible();
+    await expect(diagnosticsDetails.locator('dt:has-text("Temel güvenlik ayarları")')).toBeVisible();
+    await expect(diagnosticsDetails.locator('dt:has-text("Yönetici bağlantısı")')).toBeVisible();
 
     // Veritabanı tablosundaki motor etiketini veya sayfalama altbilgisindeki motor etiketini doğrula
     const footerEngine = page.locator('.ws-pagination').filter({ hasText: /MariaDB|MySQL/i });

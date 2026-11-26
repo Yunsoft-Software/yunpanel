@@ -9,7 +9,7 @@ import {createWebsiteSuspensionClient,resumeDomainOrWebsite} from './website-sus
 import {domainSuspensionAction,resolveWebsiteSuspensionAccess,suspensionAction,websiteSuspensionErrorMessage} from './website-suspension-model.js';
 
 const ACCESS={forbidden:'Bu siteyi yönetme izniniz yok.',unavailable:'Güncel site bilgileri bekleniyor.',
- not_found:'Bu alan adına bağlı tek bir Website kaydı bulunamadı.',unbound:'Alan adı henüz bir Website kaydına bağlı değil.',
+ not_found:'Bu alan adına bağlı tek bir site kaydı bulunamadı.',unbound:'Alan adı henüz bir siteye bağlı değil.',
  inconsistent:'Site ve sunucu bağlantısı doğrulanamadı.'};
 const labels={pending:'Hazırlanıyor',suspending:'Askıya alınıyor',suspended:'Askıda',partial:'Kısmi başarılı',failed:'Başarısız',
  resuming:'Yeniden açılıyor',resumed:'Aktif',resume_partial:'Kısmi açıldı',resume_failed:'Yeniden açma başarısız'};
@@ -106,7 +106,7 @@ function SuspensionWorkspace({scope,generation,onChanged}){
  async function quickResume(){if(!action||(action.kind!=='resume'&&action.kind!=='retry-resume'))return;const result=await ref.current?.mutate(action.kind);if(result)onChanged?.();}
  const failedDomains=latest?.domainOperations?.filter((item)=>['failed','resume_failed'].includes(item.status)).length??0;
  return <>
-  <Section title="Site erişimi" description="Bu Website'e bağlı web yayınlarını birlikte askıya alın veya yeniden açın."
+  <Section title="Site erişimi" description="Bu siteye bağlı web yayınlarını birlikte askıya alın veya yeniden açın."
    actions={<Button icon="refresh" disabled={state?.loading||state?.busy||state?.denied} onClick={()=>void ref.current?.load()}>Durumu yenile</Button>}>
    <div className="ws-section-body"><ErrorNotice error={state?.error}/>
     {state?.loading&&!data&&<p role="status">Site erişim durumu kontrol ediliyor…</p>}

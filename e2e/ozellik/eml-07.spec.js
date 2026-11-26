@@ -90,13 +90,13 @@ test.describe('EML-07 Webmail, mail istemci ayarları ve otomatik yapılandırma
     await diagModal.locator('footer button:has-text("Kapat")').click();
     await expect(diagModal).not.toBeVisible({ timeout: 5000 });
 
-    // 3. "Webmail" sekmesine geç ve Webmail (Roundcube) bölümünü doğrula
+    // 3. "Webmail" sekmesine geç ve Roundcube Webmail bölümünü doğrula
     const webmailTab = page.locator('nav.ws-tabs a:has-text("Webmail")');
     await expect(webmailTab).toBeVisible({ timeout: 10000 });
     await webmailTab.click();
     await page.waitForURL(/section=webmail/, { timeout: 10000 });
 
-    const webmailSection = page.locator('section').filter({ has: page.locator('h2', { hasText: 'Webmail (Roundcube)' }) });
+    const webmailSection = page.locator('section').filter({ has: page.locator('h2', { hasText: 'Roundcube Webmail' }) });
     await expect(webmailSection).toBeVisible({ timeout: 15000 });
     await expect(webmailSection.locator('text=Roundcube webmail eşlemesi')).toBeVisible();
     await expect(webmailSection.locator('text=Webmail henüz bağlı değil').or(webmailSection.locator('dt:has-text("Webmail Adresi")'))).toBeVisible();

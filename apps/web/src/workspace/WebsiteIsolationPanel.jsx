@@ -344,7 +344,7 @@ export default function WebsiteIsolationPanel({ websiteId, onChanged = null }) {
           setMigrationError(null);
         }}
         onConfirm={() => mutate((signal) => rollbackWebsiteIsolationMigration(websiteId, confirmation.operation, { signal }))}
-        confirmLabel="Receipt rollback"
+        confirmLabel="Geri al"
       />
     )}
   </Section>;

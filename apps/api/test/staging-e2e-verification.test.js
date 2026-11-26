@@ -19053,8 +19053,8 @@ test('Source contract Files: Hedef Node24/npm11 tam React/Vite build; gerçek ta
   // Safe permission validation
   assert.doesNotThrow(() => validateSafePermissions('0640', { isDirectory: false }));
   assert.doesNotThrow(() => validateSafePermissions('0750', { isDirectory: true }));
-  assert.throws(() => validateSafePermissions('0777'), (err) => err.message.includes('world-writable'));
-  assert.throws(() => validateSafePermissions('0666'), (err) => err.message.includes('world-writable'));
+  assert.throws(() => validateSafePermissions('0777'), (err) => err.message.includes('Başkalarına yazma yetkisi verilemez'));
+  assert.throws(() => validateSafePermissions('0666'), (err) => err.message.includes('Başkalarına yazma yetkisi verilemez'));
 
   assert.ok(checkItemConflict([{ name: 'file.txt', path: 'file.txt' }], 'FILE.TXT'));
   assert.equal(checkItemConflict([{ name: 'file.txt', path: 'file.txt' }], 'other.txt'), null);

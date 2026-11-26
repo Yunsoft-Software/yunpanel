@@ -45,17 +45,17 @@ const SAFE_RESULT_FIELDS = Object.freeze([
   ['subState', 'Alt durum'],
   ['serviceName', 'Servis'],
   ['databaseName', 'Veritabanı'],
-  ['engine', 'Engine'],
+  ['engine', 'Veritabanı sunucusu'],
   ['version', 'Sürüm'],
   ['commitSha', 'Commit'],
-  ['releaseId', 'Release'],
-  ['previousReleaseId', 'Önceki release'],
+  ['releaseId', 'Yayın kimliği'],
+  ['previousReleaseId', 'Önceki yayın'],
   ['environmentRevision', 'Ortam sürümü'],
   ['artifactFiles', 'Dosya sayısı'],
   ['artifactBytes', 'Dosya boyutu'],
   ['port', 'Port'],
   ['healthy', 'Sağlık'],
-  ['selector', 'DKIM selector'],
+  ['selector', 'DKIM seçicisi'],
 ]);
 
 function boundedScalar(value) {

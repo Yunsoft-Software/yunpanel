@@ -122,13 +122,13 @@ export function validateSafePermissions(modeStr, { isDirectory = false } = {}) {
   const parsed = parsePermissions(modeStr);
   const octalNum = Number.parseInt(parsed.octal, 8);
   if ((octalNum & 0o002) !== 0) {
-    throw new Error('Güvenlik ihlali: Başkalarına yazma yetkisi (world-writable) verilemez.');
+    throw new Error('Güvenlik ihlali: Başkalarına yazma yetkisi verilemez.');
   }
   if (!parsed.user.read) {
     throw new Error('Dosya sahibi için okuma izni zorunludur.');
   }
   if (isDirectory && !parsed.user.execute) {
-    throw new Error('Klasörler için arama/geçiş (execute) izni gereklidir.');
+    throw new Error('Klasörler için arama/geçiş izni gereklidir.');
   }
   return parsed.octal;
 }

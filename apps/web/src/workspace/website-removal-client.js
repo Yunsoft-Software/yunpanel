@@ -76,7 +76,7 @@ export function createWebsiteRemovalClient({scope:input,request,isCurrent=()=>tr
   }catch(error){
    if(!current())return null;
    if([401,403].includes(error?.status)){deny();return null;}
-   if(sent&&!terminalHttp.has(error?.status)){try{const op=await refreshOperation(operation.id);publish({unknownMutation:true,error:'Devam isteğinin cevabı kayboldu; POST tekrar edilmedi ve işlem kaydı yeniden okundu.'});return op;}catch{}}
+   if(sent&&!terminalHttp.has(error?.status)){try{const op=await refreshOperation(operation.id);publish({unknownMutation:true,error:'Devam isteğinin cevabı kayboldu; istek tekrarlanmadı ve işlem kaydı yeniden okundu.'});return op;}catch{}}
    if(error?.status===409){try{return await refreshOperation(operation.id);}catch{}}
    publish({error:removalErrorMessage(error)});return null;
   }finally{if(current())publish({busy:false});}
@@ -93,7 +93,7 @@ export function createWebsiteRemovalClient({scope:input,request,isCurrent=()=>tr
   }catch(error){
    if(!current())return null;
    if([401,403].includes(error?.status)||['unauthorized','forbidden'].includes(error?.code)){deny();return null;}
-   if(sent&&!terminalHttp.has(error?.status)){try{const op=await refreshOperation(operation.id);publish({unknownMutation:true,error:'Önceki silme adımının cevabı kayboldu; POST tekrar edilmedi ve journal sunucudan yeniden okundu.'});return op;}catch{}}
+   if(sent&&!terminalHttp.has(error?.status)){try{const op=await refreshOperation(operation.id);publish({unknownMutation:true,error:'Önceki silme adımının cevabı kayboldu; istek tekrarlanmadı ve işlem kaydı sunucudan yeniden okundu.'});return op;}catch{}}
    if(error?.status===409){try{return await refreshOperation(operation.id);}catch{}}
    publish({error:removalErrorMessage(error)});return null;
   }finally{if(current())publish({busy:false});}

@@ -90,7 +90,7 @@ test('managed Website can request an initial scoped database without choosing na
       serverId,
       domain: { primaryDomain: 'proxy.example.test', parentDomainId: null },
     }),
-    /yalnız yönetilen Application Website/,
+    /yalnız yönetilen uygulama sitesi/,
   );
 });
 
@@ -102,7 +102,7 @@ test('stale independent-www state never reaches the site-create API', () => {
       serverId,
       domain: { primaryDomain: 'example.test', parentDomainId: null },
     }),
-    /ayrı bir Website/,
+    /ayrı bir site/,
   );
 });
 

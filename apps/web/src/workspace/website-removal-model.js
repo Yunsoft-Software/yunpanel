@@ -82,14 +82,14 @@ export function resolveRemovalAccess({domainId,domains,websites,isOwner}){
  try{return{state:'ready',scope:removalScope({websiteId:w.id,serverId:w.serverId,label:d.primaryDomain})};}catch{return{state:'inconsistent'};}
 }
 const blockerLabels=Object.freeze({
- application_cleanup_unavailable:'Uygulama kaydı ve kalıcı uygulama durumu için güvenli silme lifecycle’ı henüz bağlı değil.',
- file_cleanup_unavailable:'Site dosyaları için doğrulanabilir cleanup adapterı henüz bağlı değil.',
- unix_cleanup_unavailable:'Site Unix kullanıcısı için doğrulanabilir cleanup adapterı henüz bağlı değil.',
+ application_cleanup_unavailable:'Uygulama kaydı ve kalıcı uygulama verileri için güvenli silme yolu henüz hazır değil.',
+ file_cleanup_unavailable:'Site dosyaları için doğrulanabilir temizlik yolu henüz hazır değil.',
+ unix_cleanup_unavailable:'Site sistem kullanıcısı için doğrulanabilir temizlik yolu henüz hazır değil.',
  active_jobs_present:'Bu site veya uygulamada devam eden bir işlem var.',
  dependency_inventory_unavailable:'Silme etkisi için gerekli bağımlılık envanteri okunamadı.',
  database_cleanup_unavailable:'Veritabanı bağlantıları güvenli biçimde temizlenemiyor.',
  sftp_cleanup_unavailable:'SFTP anahtarları güvenli biçimde temizlenemiyor.',
- runtime_cleanup_unavailable:'Runtime bağlantısı güvenli biçimde temizlenemiyor.',
+ runtime_cleanup_unavailable:'Uygulama çalışma ortamı güvenli biçimde temizlenemiyor.',
  cron_cleanup_unavailable:'Zamanlanmış görevler güvenli biçimde temizlenemiyor.',
  metadata_cleanup_unavailable:'Site kayıtları güvenli biçimde temizlenemiyor.',
  website_removal_domain_inventory_invalid:'Siteye bağlı alan adlarının listesi doğrulanamadı.',
@@ -100,11 +100,11 @@ const blockerLabels=Object.freeze({
  website_removal_state_mismatch:'Site kaydı değişti. Silme durumunu yeniden kontrol edin.',
  website_removal_dependencies_added:'Silme planlandıktan sonra siteye bir veritabanı bağlandı. Önce o bağlantıyı kaldırın, sonra devam edin.',
  website_cleanup_identity_unowned_account:'Sunucuda bu site kullanıcısı adıyla, panelin oluşturmadığı bir hesap var. Hesaba dokunulmadı; silme durduruldu.',
- application_env_cleanup_unavailable:'Application metadata/env cleanup lifecycle’ı kullanılamıyor.',
- file_cleanup_preflight_failed:'Canonical site dosya kökleri güvenli olarak doğrulanamadı.',
- unix_cleanup_evidence_unavailable:'Site Unix kullanıcısının ownership receipt’i bulunamadı; legacy kullanıcı otomatik silinmez.',
- runtime_cleanup_adapter_unsupported:'Bu runtime adapterı için doğrulanmış kaldırma yolu henüz yok.',
- runtime_cleanup_unverified:'Runtime binding cleanup durumu doğrulanamadı.',
+ application_env_cleanup_unavailable:'Uygulama kaydı ve ortam değişkenleri temizlenemiyor.',
+ file_cleanup_preflight_failed:'Site dosya kökleri güvenli olarak doğrulanamadı.',
+ unix_cleanup_evidence_unavailable:'Site sistem kullanıcısının sahiplik kaydı bulunamadı; eski kullanıcı otomatik silinmez.',
+ runtime_cleanup_adapter_unsupported:'Bu çalışma ortamı için doğrulanmış kaldırma yolu henüz yok.',
+ runtime_cleanup_unverified:'Çalışma ortamı bağlantısının temizliği doğrulanamadı.',
  website_removal_cleanup_unverified:'Temizlik adımı doğrulanamadı veya beklenen kanıt eşleşmedi.',
  website_cleanup_elfinder_unavailable:'Dosya yöneticisinin güvenli kaldırma yolu hazır değil. Site dosyaları ve kullanıcısı silinmedi.',
  website_cleanup_elfinder_evidence_invalid:'Dosya yöneticisinin site bağlantısı doğrulanamadı. Silme durduruldu.',
@@ -125,8 +125,8 @@ const blockerLabels=Object.freeze({
 export function removalBlockerLabel(code){return blockerLabels[code]??'Silme işlemi için gerekli güvenlik kontrolü tamamlanmadı: '+code;}
 export function removalErrorMessage(error){return ({
  website_removal_preview_stale:'Site durumu değişti. Silme etkisini yeniden yükleyin.',
- website_removal_operation_in_progress:'Bu site için mevcut silme journal’ı tamamlanmadan yeni işlem başlatılamaz.',
- website_removal_step_continuation_stale:'Silme adımı değişti. Güncel journal yeniden okundu.',
+ website_removal_operation_in_progress:'Bu site için devam eden silme işlemi tamamlanmadan yeni işlem başlatılamaz.',
+ website_removal_step_continuation_stale:'Silme adımı değişti. Güncel işlem kaydı yeniden okundu.',
  site_scope_forbidden:'Bu siteye erişim izniniz yok.',
  forbidden:'Site silme yalnız Owner tarafından yönetilir.',
 })[error?.code]??'Site silme bilgileri alınamadı.';}

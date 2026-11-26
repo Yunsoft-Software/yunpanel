@@ -14,8 +14,8 @@ import { createSiteBackupClient } from './site-backup-client.js';
 const ACCESS = {
   forbidden: 'Bu sitenin yedeklerine erişim izniniz yok.',
   unavailable: 'Güncel site bilgileri bekleniyor.',
-  not_found: 'Bu alan adına bağlı tek bir Website kaydı bulunamadı.',
-  unbound: 'Alan adı henüz bir Website kaydına bağlı değil.',
+  not_found: 'Bu alan adına bağlı tek bir site kaydı bulunamadı.',
+  unbound: 'Alan adı henüz bir siteye bağlı değil.',
   inconsistent: 'Site ve sunucu bağlantısı doğrulanamadı.',
 };
 const repoState = (value) => value === 'ready' ? 'Hazır' : value === 'error' ? 'Kontrol gerekli' : 'Hazırlanmadı';
@@ -362,7 +362,7 @@ function BackupWorkspace({ scope, generation, isOwner }) {
             ['Kapsam özeti', `${data.scopeSummary?.paths ?? data.backupSet.pathCount} dosya yolu, ${data.scopeSummary?.databases ?? data.backupSet.databaseCount} veritabanı, ${data.scopeSummary?.mailboxes ?? data.backupSet.mailCount} posta, ${data.scopeSummary?.dnsZones ?? data.backupSet.dnsCount} DNS`],
             ['Saklama politikası', retentionLabel(data.retentionPolicy)],
             ['Uzak depo (rclone)', data.remoteRepositoryStatus === 'ready' ? 'Bağlı ve hazır' : data.remoteRepositoryStatus === 'uninitialized' ? 'Hazırlanmadı' : data.remoteRepositoryStatus === 'error' ? 'Hata / Kontrol gerekli' : 'Yapılandırılmadı'],
-            ['Son geri yükleme sonucu', data.restoreOutcome?.status === 'succeeded' ? `Başarılı${data.restoreOutcome.selective ? ' (Seçici)' : ''}${data.restoreOutcome.finishedAt ? ' · ' + formatDate(data.restoreOutcome.finishedAt) : ''}` : data.restoreOutcome?.status === 'failed' ? 'Başarısız' : data.restoreOutcome?.status === 'rolled_back' ? 'Geri alındı (Rollback)' : 'İşlem yok'],
+            ['Son geri yükleme sonucu', data.restoreOutcome?.status === 'succeeded' ? `Başarılı${data.restoreOutcome.selective ? ' (Seçici)' : ''}${data.restoreOutcome.finishedAt ? ' · ' + formatDate(data.restoreOutcome.finishedAt) : ''}` : data.restoreOutcome?.status === 'failed' ? 'Başarısız' : data.restoreOutcome?.status === 'rolled_back' ? 'Geri alındı' : 'İşlem yok'],
             ['Yedekleme sırasında uygulamayı duraklatma', data.backupSet.composeHooksEnabled ? 'Kullanılıyor' : 'Gerekli değil'],
           ]} /></>}
         <p className="ws-muted">{isOwner
@@ -382,7 +382,7 @@ function BackupWorkspace({ scope, generation, isOwner }) {
       <div className="ws-section-body">
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
           <Badge state={activeOp.status === 'succeeded' ? 'succeeded' : activeOp.status === 'rolled_back' ? 'warning' : activeOp.status === 'failed' ? 'error' : 'running'}>
-            {activeOp.status === 'queued' ? 'Kuyrukta' : activeOp.status === 'running' ? 'Yürütülüyor' : activeOp.status === 'succeeded' ? 'Başarılı' : activeOp.status === 'rolled_back' ? 'Geri Alındı (Rollback)' : 'Başarısız'}
+            {activeOp.status === 'queued' ? 'Kuyrukta' : activeOp.status === 'running' ? 'Yürütülüyor' : activeOp.status === 'succeeded' ? 'Başarılı' : activeOp.status === 'rolled_back' ? 'Geri alındı' : 'Başarısız'}
           </Badge>
           <span>{activeOp.progress?.message ?? (activeOp.status === 'queued' ? 'İşlem sırada bekliyor…' : 'İşlem devam ediyor…')}</span>
         </div>
@@ -592,8 +592,8 @@ function Repository({ repository, isOwner, isOperationBusy, onRestore, onCheckHe
     {repository.snapshots.length === 0
       ? <EmptyState icon="archive" title="Bu site için yedek yok"
         detail={repository.snapshotStatus === 'error'
-          ? 'Snapshot listesi okunamadı; depo yolunu veya ham hatayı site hesabına göstermeden Owner kontrolü gerekir.'
-          : 'Bu depoda bu Website etiketiyle eşleşen snapshot bulunamadı.'} />
+          ? 'Yedek listesi okunamadı. Sunucu yöneticisinin yedek deposunu kontrol etmesi gerekir.'
+          : 'Bu depoda bu siteye ait yedek bulunamadı.'} />
       : <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Yedek</th><th>Tür</th><th>Durum</th><th>Tarih</th>{isOwner && <th>İşlem</th>}</tr></thead><tbody>
         {repository.snapshots.map((snapshot) => {
           const isFailed = snapshot.status === 'failed';

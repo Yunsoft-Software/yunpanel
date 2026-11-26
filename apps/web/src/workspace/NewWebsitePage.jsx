@@ -238,8 +238,8 @@ function WebsiteForm({ parentId }) {
   return <>
     <nav className="ws-breadcrumb" aria-label="Konum"><Link to="/websites">Web siteleri</Link><span>/</span><span>Yeni kayıt</span></nav>
     <PageHeading title={form.mode === 'subdomain' ? 'Alt alan adı ekle' : 'Web sitesi ekle'} description="Alan adını, site sahibini ve barındırma türünü seçin. Kurulumun sonucunu burada takip edin." />
-    {submission.created || submission.phase === 'uncertain' ? <SiteCreateResult state={submission} /> : created ? <div ref={sharedResultRef} tabIndex={-1} aria-live="polite" aria-atomic="true" className="ws-site-create-result" style={{ outline: 'none' }}><Section title="Alan adı bağlantısı oluşturuldu"><EmptyState icon="check" title={created.primaryDomain} detail="Alan adı mevcut Website’e bağlandı. Yayın ve servis durumunu site araçlarından kontrol edin." action={<LinkButton variant="primary" icon="arrow" to={siteHref(created.id, 'files')}>Dosyaları aç</LinkButton>} /></Section></div> : <Section title={step === 1 ? 'Alan adı ve sahip' : step === 2 ? 'Barındırma türü' : 'Son kontrol ve kurulum'}>
-      <CollectionNotice resource={domains} label="Alan adları" /><CollectionNotice resource={servers} label="Yerel sunucu" />{(existingType || sharedMode) && <><CollectionNotice resource={applications} label="Uygulamalar" /><CollectionNotice resource={websites} label="Website bağları" /></>}
+    {submission.created || submission.phase === 'uncertain' ? <SiteCreateResult state={submission} /> : created ? <div ref={sharedResultRef} tabIndex={-1} aria-live="polite" aria-atomic="true" className="ws-site-create-result" style={{ outline: 'none' }}><Section title="Alan adı bağlantısı oluşturuldu"><EmptyState icon="check" title={created.primaryDomain} detail="Alan adı mevcut siteye bağlandı. Yayın ve servis durumunu site araçlarından kontrol edin." action={<LinkButton variant="primary" icon="arrow" to={siteHref(created.id, 'files')}>Dosyaları aç</LinkButton>} /></Section></div> : <Section title={step === 1 ? 'Alan adı ve sahip' : step === 2 ? 'Barındırma türü' : 'Son kontrol ve kurulum'}>
+      <CollectionNotice resource={domains} label="Alan adları" /><CollectionNotice resource={servers} label="Yerel sunucu" />{(existingType || sharedMode) && <><CollectionNotice resource={applications} label="Uygulamalar" /><CollectionNotice resource={websites} label="Site bağlantıları" /></>}
       <ol className="ws-setup-steps" aria-label="Site oluşturma adımları">{['Alan adı ve sahip', 'Barındırma', 'Kurulum'].map((label, index) => <li key={label} aria-current={step === index + 1 ? 'step' : undefined}><span>{index + 1}</span>{label}</li>)}</ol>
       <form className="ws-form" onSubmit={submit}><ErrorNotice error={error ?? submission.error} /><fieldset disabled={baseLocked}>
         {step === 1 && <>        <h3>1. Alan adı</h3><div className="ws-form-grid" style={{ marginTop: 16 }}>
@@ -375,17 +375,17 @@ function WebsiteForm({ parentId }) {
               <option value="existing_static">Kullanılmamış mevcut statik uygulama</option>
               <option value="existing_managed_compose">Mevcut Compose Projesi</option>
               <option value="existing_docker">Mevcut Docker Konteyner İş Yükü</option>
-              <option value="shared_website">Mevcut Website’i paylaş (shared-site)</option>
+              <option value="shared_website">Mevcut siteyi paylaş</option>
               <option value="external_proxy">Gelişmiş: yerel proxy</option>
             </select>
           </label>
           {['new_node', 'new_static', 'new_python'].includes(form.sourceMode) && <><label>GitHub repository<input type="url" required placeholder="https://github.com/organization/repository" value={form.repositoryUrl} onChange={(event) => update('repositoryUrl', event.target.value)} /></label><label>Branch<input value={form.branch} required onChange={(event) => update('branch', event.target.value)} /></label></>}
           {['new_node', 'new_python'].includes(form.sourceMode) && <><label>Başlangıç dosyası<input value={form.entryFile} required onChange={(event) => update('entryFile', event.target.value)} /></label><label>Sağlık kontrolü yolu<input value={form.healthPath} required onChange={(event) => update('healthPath', event.target.value)} /></label></>}
-          {form.sourceMode === 'new_static' && <label>Build çıktı klasörü<input value={form.outputDir} required onChange={(event) => update('outputDir', event.target.value)} /><span className="ws-field-hint">npm ci ve npm run build kullanılır; index.html sağlık dosyasıdır.</span></label>}
-          {existingType && <label>{existingType === 'node' ? 'Node.js uygulaması' : 'Statik uygulama'}<select value={form.applicationId} required onChange={(event) => update('applicationId', event.target.value)}><option value="">Kullanılmamış uygulama seçin</option>{eligible.map((app) => <option key={app.id} value={app.id}>{app.name}{app.type === 'node' ? ` · Node ${app.runtime.nodeMajor}` : ` · ${app.build?.outputDir ?? 'build'}`}</option>)}</select><span className="ws-field-hint">Başka bir Website’e bağlı uygulamalar listelenmez; bir Application iki Website tarafından paylaşılamaz.</span></label>}
-          {sharedMode && <label>Paylaşılacak Website<select value={form.websiteId} required onChange={(event) => update('websiteId', event.target.value)}><option value="">Mevcut Website seçin</option>{sharedWebsites.map((website) => { const bound = domains.items.find((item) => item.websiteId === website.id); return <option key={website.id} value={website.id}>{bound?.primaryDomain ?? website.name} · {website.runtimeType} · {website.unixUser ?? 'proxy'}</option>; })}</select><span className="ws-field-hint">Yalnız canonical routing hedefi doğrulanabilen yerel Website’ler gösterilir.</span></label>}
+          {form.sourceMode === 'new_static' && <label>Derleme çıktı klasörü<input value={form.outputDir} required onChange={(event) => update('outputDir', event.target.value)} /><span className="ws-field-hint">npm ci ve npm run build kullanılır; index.html sağlık dosyasıdır.</span></label>}
+          {existingType && <label>{existingType === 'node' ? 'Node.js uygulaması' : 'Statik uygulama'}<select value={form.applicationId} required onChange={(event) => update('applicationId', event.target.value)}><option value="">Kullanılmamış uygulama seçin</option>{eligible.map((app) => <option key={app.id} value={app.id}>{app.name}{app.type === 'node' ? ` · Node ${app.runtime.nodeMajor}` : ` · ${app.build?.outputDir ?? 'build'}`}</option>)}</select><span className="ws-field-hint">Başka bir siteye bağlı uygulamalar listelenmez; bir uygulama iki site tarafından paylaşılamaz.</span></label>}
+          {sharedMode && <label>Paylaşılacak site<select value={form.websiteId} required onChange={(event) => update('websiteId', event.target.value)}><option value="">Mevcut siteyi seçin</option>{sharedWebsites.map((website) => { const bound = domains.items.find((item) => item.websiteId === website.id); return <option key={website.id} value={website.id}>{bound?.primaryDomain ?? website.name} · {website.runtimeType} · {website.unixUser ?? 'proxy'}</option>; })}</select><span className="ws-field-hint">Yalnız yönlendirme hedefi doğrulanabilen yerel siteler gösterilir.</span></label>}
           {form.sourceMode === 'external_proxy' && <label>Yerel uygulama portu<input type="number" min={1024} max={65535} value={form.targetValue} required placeholder="4301" onChange={(event) => update('targetValue', event.target.value)} /></label>}
-          {['existing_managed_compose', 'docker_compose'].includes(form.sourceMode) && <><label>Docker Compose proje kimliği<input value={form.dockerProjectId} required={form.sourceMode === 'existing_managed_compose'} placeholder="compose-project-id" onChange={(event) => update('dockerProjectId', event.target.value)} /></label><label>Compose servisi<input value={form.dockerServiceName} required placeholder="web" onChange={(event) => update('dockerServiceName', event.target.value)} /></label><label>Inner Port (Container targetPort)<input type="number" min={1} max={65535} value={form.dockerTargetPort} required placeholder="8080" onChange={(event) => update('dockerTargetPort', event.target.value)} /></label></>}
+          {['existing_managed_compose', 'docker_compose'].includes(form.sourceMode) && <><label>Docker Compose proje kimliği<input value={form.dockerProjectId} required={form.sourceMode === 'existing_managed_compose'} placeholder="compose-project-id" onChange={(event) => update('dockerProjectId', event.target.value)} /></label><label>Compose servisi<input value={form.dockerServiceName} required placeholder="web" onChange={(event) => update('dockerServiceName', event.target.value)} /></label><label>Konteyner portu<input type="number" min={1} max={65535} value={form.dockerTargetPort} required placeholder="8080" onChange={(event) => update('dockerTargetPort', event.target.value)} /></label></>}
           {form.sourceMode === 'existing_docker' && <label>Docker iş yükü kimliği<input value={form.dockerWorkloadId} required placeholder="docker-workload-id" onChange={(event) => update('dockerWorkloadId', event.target.value)} /></label>}
           {form.sourceMode === 'new_static_upload' && <p className="ws-muted">HTML, CSS ve görsellerinizi Dosya Yöneticisi ile yükleyin. Git deposu veya derleme komutu gerekmez.</p>}
           {form.sourceMode === 'new_php' && <p className="ws-muted">Siteniz dosya yüklemeye hazır olarak açılır. Ardından Dosya Yöneticisi veya WordPress aracından devam edebilirsiniz.</p>}
@@ -395,10 +395,10 @@ function WebsiteForm({ parentId }) {
               <strong>Bu {form.mode === 'subdomain' ? 'alt alan adı' : 'site'} için otomatik veritabanı oluştur</strong>
               <small>Veritabanı ve kullanıcı bilgileri kurulum sırasında hazırlanır.</small>
             </span>
-          </label>}{existingType && !eligible.length && applications.status === 'ready' && websites.status === 'ready' && <p className="ws-muted">Bu sunucuda kullanılmamış uygun uygulama bulunmuyor. Yeni Application oluşturma seçeneklerinden birini kullanın.</p>}{sharedMode && !sharedWebsites.length && applications.status === 'ready' && websites.status === 'ready' && <p className="ws-muted">Canonical routing hedefi paylaşılabilecek yerel Website bulunmuyor.</p>}{selectedSharedWebsite && <div className="ws-notice ws-notice-warn">
+          </label>}{existingType && !eligible.length && applications.status === 'ready' && websites.status === 'ready' && <p className="ws-muted">Bu sunucuda kullanılmamış uygun uygulama bulunmuyor. Yeni uygulama oluşturma seçeneklerinden birini kullanın.</p>}{sharedMode && !sharedWebsites.length && applications.status === 'ready' && websites.status === 'ready' && <p className="ws-muted">Yönlendirme hedefi paylaşılabilecek yerel site bulunmuyor.</p>}{selectedSharedWebsite && <div className="ws-notice ws-notice-warn">
             <div>
-              <strong>{selectedSharedDomain?.primaryDomain ?? selectedSharedWebsite.name} Website bağı paylaşılacak</strong>
-              <p>Website <code>{selectedSharedWebsite.id}</code> · runtime {selectedSharedWebsite.runtimeType} · Unix kullanıcı {selectedSharedWebsite.unixUser ?? 'uygulanamaz'}. Bu seçim yeni Application, Unix user, SFTP scope veya mailbox oluşturmaz.</p>
+              <strong>{selectedSharedDomain?.primaryDomain ?? selectedSharedWebsite.name} site bağlantısı paylaşılacak</strong>
+              <p>Site <code>{selectedSharedWebsite.id}</code> · çalışma ortamı {selectedSharedWebsite.runtimeType} · sistem kullanıcısı {selectedSharedWebsite.unixUser ?? 'yok'}. Bu seçim yeni uygulama, sistem kullanıcısı, SFTP erişimi veya posta kutusu oluşturmaz.</p>
             </div>
           </div>}</div>
         </>}
@@ -414,14 +414,14 @@ function WebsiteForm({ parentId }) {
       </fieldset></form>
     </Section>}
     {sharedConfirmation && <ConfirmDialog
-      title="Mevcut Website’i paylaş"
-      message={`${sharedConfirmation.input.primaryDomain}, ${sharedConfirmation.currentDomain?.primaryDomain ?? sharedConfirmation.website.name} Website kimliğine bağlanacak. Yeni Application, Unix user, runtime, SFTP scope veya mailbox oluşturulmayacak; seçili www kaydı varsa yalnız aynı Domain kaydının alias’ı olacak.`}
+      title="Mevcut siteyi paylaş"
+      message={`${sharedConfirmation.input.primaryDomain}, ${sharedConfirmation.currentDomain?.primaryDomain ?? sharedConfirmation.website.name} sitesine bağlanacak. Yeni uygulama, sistem kullanıcısı, çalışma ortamı, SFTP erişimi veya posta kutusu oluşturulmayacak; seçili www kaydı varsa yalnız aynı alan adının takma adı olacak.`}
       confirmation={sharedConfirmation.confirmation}
       error={error}
       busy={busy}
       onCancel={() => { if (!busy) setSharedConfirmation(null); }}
       onConfirm={confirmSharedSite}
-      confirmLabel="Website bağını oluştur"
+      confirmLabel="Site bağlantısını oluştur"
     />}
   </>;
 }

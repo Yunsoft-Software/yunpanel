@@ -108,7 +108,7 @@ test.describe.serial('SYS-03 Hostname, saat/saat dilimi ve sistem ayarları', ()
     await expect(panelSection).toBeVisible({ timeout: 10000 });
     await expect(panelSection.getByText('Panel sürümü')).toBeVisible();
     await expect(panelSection.getByText('Node.js sürümü')).toBeVisible();
-    await expect(panelSection.getByText('Sunucu adı (Hostname)')).toBeVisible();
+    await expect(panelSection.getByText('Sunucu adı', { exact: true })).toBeVisible();
 
     // 4. API üzerinden sistem ayarları detayları sorgulanır
     const res = await apiCall(page, '/api/panel/settings');

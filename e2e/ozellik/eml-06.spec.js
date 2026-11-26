@@ -359,7 +359,7 @@ print(len(active))
 
     // Preview ayrıntılarının geldiğini doğrula
     await expect(page.locator('dl dt:has-text("Hedef durum") + dd:has-text("disabled")')).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('text=apply edilebilir').first()).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('text=uygulanabilir').first()).toBeVisible({ timeout: 15000 });
 
     // Preview'ı uygula
     const applyPreviewBtn = page.locator('button:has-text("Önizlemeyi uygula")');
@@ -394,7 +394,7 @@ print(len(active))
     await rePreviewBtn.click();
 
     await expect(page.locator('dl dt:has-text("Hedef durum") + dd:has-text("enabled")')).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('text=apply edilebilir').first()).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('text=uygulanabilir').first()).toBeVisible({ timeout: 15000 });
 
     const reApplyPreviewBtn = page.locator('button:has-text("Önizlemeyi uygula")');
     await expect(reApplyPreviewBtn).toBeEnabled({ timeout: 10000 });

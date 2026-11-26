@@ -24,7 +24,7 @@ function actionCopy(selection) {
     return {
       title: `${label} kurulsun mu?`,
       message: unitless
-        ? `${label} için allowlist paketleri APT üzerinden kurulacak; sabit application/config dosyaları doğrulanacak. Ayrı bir systemd servisi oluşturulmayacak.`
+        ? `${label} için izin verilen paketler APT üzerinden kurulacak; uygulama ve yapılandırma dosyaları doğrulanacak. Ayrı bir systemd servisi oluşturulmayacak.`
         : `${label} paketleri APT üzerinden kurulacak, systemd servisi etkinleştirilecek ve başlatılacak.`,
       confirmLabel: unitless ? 'Kur ve doğrula' : 'Kur ve başlat',
     };

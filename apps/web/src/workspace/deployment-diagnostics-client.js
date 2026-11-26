@@ -134,7 +134,7 @@ export async function fetchDeploymentDiagnostics({
     headers: { Accept: 'application/json', ...headers },
   });
   if (!res.ok) {
-    throw new Error(`Diagnostics request failed with status ${res.status}`);
+    throw new Error(`Tanılama bilgisi alınamadı (HTTP ${res.status}).`);
   }
   const json = await res.json();
   return json.data ?? json;
@@ -175,7 +175,7 @@ export async function compareDeploymentWithServer(frontendInfo, {
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
-    throw new Error(`Comparison request failed with status ${res.status}`);
+    throw new Error(`Sürüm karşılaştırması alınamadı (HTTP ${res.status}).`);
   }
   const json = await res.json();
   return json.data ?? json;

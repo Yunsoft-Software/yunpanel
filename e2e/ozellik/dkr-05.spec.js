@@ -74,7 +74,7 @@ test.describe('DKR-05 Compose stack oluşturma/yükleme/güncelleme/up/stop/down
   }
 
   async function confirmDocumentUpdate(page) {
-    const modal = page.locator('.ws-modal').filter({ hasText: 'Compose desired state’i değiştir' });
+    const modal = page.locator('.ws-modal').filter({ hasText: 'Compose yapılandırmasını değiştir' });
     await expect(modal).toBeVisible({ timeout: 15000 });
 
     const confirmStr = await modal.locator('label strong').textContent();
@@ -144,11 +144,11 @@ test.describe('DKR-05 Compose stack oluşturma/yükleme/güncelleme/up/stop/down
     await expect(nameInput).toBeVisible();
     await nameInput.fill(`inv_${timestamp}`);
 
-    const docTextarea = modal.locator('label:has-text("Compose document") textarea');
+    const docTextarea = modal.locator('label:has-text("Compose içeriği") textarea');
     await expect(docTextarea).toBeVisible();
     await docTextarea.fill('services:\n  invalid:\n    [broken yaml structure: {\n');
 
-    const validateBtn = modal.locator('button:has-text("Validate")');
+    const validateBtn = modal.locator('button:has-text("Doğrula")');
     await expect(validateBtn).toBeEnabled();
     await validateBtn.click();
 
@@ -198,12 +198,12 @@ test.describe('DKR-05 Compose stack oluşturma/yükleme/güncelleme/up/stop/down
     await fileInput.setInputFiles(tempYmlPath);
 
     // Textarea'nın yüklenen dosya içeriğiyle dolduğunu doğrula
-    const docTextarea = modal.locator('label:has-text("Compose document") textarea');
+    const docTextarea = modal.locator('label:has-text("Compose içeriği") textarea');
     await expect(docTextarea).toHaveValue(/web1:/);
     await expect(docTextarea).toHaveValue(/nginx:alpine/);
 
     // Validasyon yap
-    const validateBtn = modal.locator('button:has-text("Validate")');
+    const validateBtn = modal.locator('button:has-text("Doğrula")');
     await expect(validateBtn).toBeEnabled();
     await validateBtn.click();
     await expect(modal.locator('dt:has-text("Servis")')).toBeVisible({ timeout: 10000 });
@@ -221,11 +221,11 @@ test.describe('DKR-05 Compose stack oluşturma/yükleme/güncelleme/up/stop/down
 
     await expect(page.locator('h1')).toContainText(projectName, { timeout: 15000 });
 
-    const lifecycleSection = page.locator('section').filter({ has: page.locator('h2:text-is("Lifecycle")') });
+    const lifecycleSection = page.locator('section').filter({ has: page.locator('h2:text-is("Proje işlemleri")') });
     await expect(lifecycleSection).toBeVisible({ timeout: 15000 });
 
     // 4. STACK UP (Başlat)
-    const startBtn = lifecycleSection.locator('button:has-text("Başlat")');
+    const startBtn = lifecycleSection.locator('button:text-is("Başlat")');
     await expect(startBtn).toBeEnabled({ timeout: 15000 });
     await startBtn.click();
 
@@ -239,9 +239,9 @@ test.describe('DKR-05 Compose stack oluşturma/yükleme/güncelleme/up/stop/down
     const httpOutput1 = hostProbe.runArgvStdout(['curl', '-sS', '-m', '5', `http://127.0.0.1:${hostPort1}`]);
     expect(httpOutput1).toContain('nginx');
 
-    // 5. STACK GÜNCELLEME (Compose desired state güncelle: web2 servisi ekle)
+    // 5. STACK GÜNCELLEME (Compose yapılandırmasını güncelle: web2 servisi ekle)
     await page.reload();
-    const desiredStateSection = page.locator('section').filter({ has: page.locator('h2:text-is("Compose desired state")') });
+    const desiredStateSection = page.locator('section').filter({ has: page.locator('h2:text-is("Compose yapılandırması")') });
     await expect(desiredStateSection).toBeVisible({ timeout: 15000 });
 
     // Mevcut YAML'ı editöre yükle ve kontrol et
@@ -249,7 +249,7 @@ test.describe('DKR-05 Compose stack oluşturma/yükleme/güncelleme/up/stop/down
     await expect(loadDocBtn).toBeEnabled({ timeout: 10000 });
     await loadDocBtn.click();
 
-    const updateDocTextarea = desiredStateSection.locator('label:has-text("Yeni tam Compose document") textarea');
+    const updateDocTextarea = desiredStateSection.locator('label:has-text("Yeni Compose içeriğinin tamamı") textarea');
     await expect(updateDocTextarea).toHaveValue(/web1:/, { timeout: 15000 });
 
     const updatedComposeYaml = [
@@ -268,17 +268,17 @@ test.describe('DKR-05 Compose stack oluşturma/yükleme/güncelleme/up/stop/down
     await updateDocTextarea.fill(updatedComposeYaml);
     await expect(updateDocTextarea).toHaveValue(/web2:/);
 
-    const updateSubmitBtn = desiredStateSection.locator('button:has-text("Desired state’i değiştir")');
+    const updateSubmitBtn = desiredStateSection.locator('button:has-text("Yapılandırmayı değiştir")');
     await expect(updateSubmitBtn).toBeEnabled({ timeout: 10000 });
     await updateSubmitBtn.click();
 
     await confirmDocumentUpdate(page);
 
     // Başarı bildirimini doğrula
-    await expect(desiredStateSection.locator('.ws-notice')).toContainText('Compose desired state kaydedildi', { timeout: 15000 });
+    await expect(desiredStateSection.locator('.ws-notice')).toContainText('Compose yapılandırması kaydedildi', { timeout: 15000 });
 
-    // Kayıtlı state'i validate et butonuna tıkla ve 2 servis olduğunu doğrula
-    const validateSavedBtn = desiredStateSection.locator('button:has-text("Kayıtlı state’i validate et")');
+    // Kayıtlı yapılandırmayı doğrula butonuna tıkla ve 2 servis olduğunu doğrula
+    const validateSavedBtn = desiredStateSection.locator('button:has-text("Kayıtlı yapılandırmayı doğrula")');
     await expect(validateSavedBtn).toBeEnabled({ timeout: 10000 });
     await validateSavedBtn.click();
 
@@ -288,7 +288,7 @@ test.describe('DKR-05 Compose stack oluşturma/yükleme/güncelleme/up/stop/down
     // 6. GÜNCELLENMİŞ STACK'İ UP ET (Başlat ile yeni servisleri ayağa kaldır)
     await page.reload();
     await expect(lifecycleSection).toBeVisible({ timeout: 15000 });
-    const applyStartBtn = lifecycleSection.locator('button:has-text("Başlat")');
+    const applyStartBtn = lifecycleSection.locator('button:text-is("Başlat")');
     await expect(applyStartBtn).toBeEnabled({ timeout: 35000 });
     await applyStartBtn.click();
 

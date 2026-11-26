@@ -46,15 +46,15 @@ test('BUG-20260923-02: preview covers domain/subdomain, files, db, email, runtim
   const panelText = await source('WebsiteRemovalPanel.jsx');
   // Impact preview items
   assert.match(panelText, /Bağlı alan adı/);
-  assert.match(panelText, /Alt alan adı \(subdomain\)/);
+  assert.match(panelText, /'Alt alan adı'/);
   assert.match(panelText, /Site dosyaları/);
   assert.match(panelText, /Veritabanı bağlantısı/);
   assert.match(panelText, /E-posta etkisi/);
-  assert.match(panelText, /Uygulama çalışma zamanı \(runtime\)/);
+  assert.match(panelText, /'Uygulama çalışma ortamı'/);
   assert.match(panelText, /DNS bölgesi ve kayıtları/);
   assert.match(panelText, /SSL\/TLS sertifikası/);
   assert.match(panelText, /Korunacak yedek kaydı/);
-  assert.match(panelText, /Kalıcı silme ve veri saklama \(retention\)/);
+  assert.match(panelText, /Kalıcı silme ve saklanan veriler/);
   assert.match(panelText, /yedek kayıtları silinmez, korunur/);
 });
 
@@ -62,7 +62,7 @@ test('BUG-20260923-02: explicit confirmation, retention notice, and safe journal
   const panelText = await source('WebsiteRemovalPanel.jsx');
   assert.match(panelText, /confirmation=\{scope\.label\}/);
   assert.match(panelText, /Yedek kayıtları silinmeyecek/);
-  assert.match(panelText, /backup evidence/);
+  assert.match(panelText, /Yedek kayıtları ve günlükler silinmez/);
   assert.match(panelText, /WebsiteRemovalProgress/);
   assert.match(panelText, /runAutomatic/);
   assert.doesNotMatch(panelText, /continueStep/);

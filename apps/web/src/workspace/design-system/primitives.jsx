@@ -38,7 +38,7 @@ export const DEFAULT_DOCKER_STACK_TEMPLATES = Object.freeze([
   Object.freeze({ id: 'n8n', category: 'automation', label: 'n8n Workflow Automation', image: 'n8n:latest', serviceName: 'n8n', targetPort: 5678, publishedPort: 15678, description: 'Görsel iş akışı ve API otomasyon platformu' }),
   Object.freeze({ id: 'minio', category: 'storage', label: 'MinIO S3 Object Storage', image: 'minio/minio:latest', serviceName: 'minio', targetPort: 9000, publishedPort: 19000, description: 'S3 uyumlu yüksek hızlı nesne depolama servisi' }),
   Object.freeze({ id: 'wordpress', category: 'cms', label: 'WordPress PHP/Apache', image: 'wordpress:latest', serviceName: 'wordpress', targetPort: 80, publishedPort: 18081, description: 'Hazır konteyner tabanlı WordPress yayın yığını' }),
-  Object.freeze({ id: 'node', category: 'runtime', label: 'Node.js 24 Runtime', image: 'node:24-alpine', serviceName: 'app', targetPort: 3000, publishedPort: 13000, description: 'İzole Node.js uygulama konteyneri' }),
+  Object.freeze({ id: 'node', category: 'runtime', label: 'Node.js 24', image: 'node:24-alpine', serviceName: 'app', targetPort: 3000, publishedPort: 13000, description: 'İzole Node.js uygulama konteyneri' }),
 ]);
 
 export function ThemeRoot({ theme = 'dark', density = 'comfortable', className = '', children }) {
@@ -142,7 +142,7 @@ export function PortMappingTable({ services = [], proxyTarget = null }) {
       return [{
         key: `${service.name}:none`,
         serviceName: service.name,
-        sourceKind: service.imageConfigured ? 'image' : service.buildConfigured ? 'build' : '—',
+        sourceKind: service.imageConfigured ? 'İmaj' : service.buildConfigured ? 'Derleme' : '—',
         innerPort: null,
         outerPort: null,
         hostIp: null,
@@ -152,7 +152,7 @@ export function PortMappingTable({ services = [], proxyTarget = null }) {
     return ports.map((port) => ({
       key: `${service.name}:${port.hostIp ?? '*'}:${port.publishedPort}:${port.targetPort}/${port.protocol ?? 'tcp'}`,
       serviceName: service.name,
-      sourceKind: service.imageConfigured ? 'image' : service.buildConfigured ? 'build' : '—',
+      sourceKind: service.imageConfigured ? 'İmaj' : service.buildConfigured ? 'Derleme' : '—',
       innerPort: port.targetPort,
       outerPort: port.publishedPort,
       hostIp: port.hostIp ?? '127.0.0.1',
@@ -162,14 +162,14 @@ export function PortMappingTable({ services = [], proxyTarget = null }) {
 
   return (
     <div className="ws-table-scroll">
-      <table className="ws-table" aria-label="Docker Inner ve Outer Port Eşlemeleri">
+      <table className="ws-table" aria-label="Docker konteyner ve sunucu port eşlemeleri">
         <thead>
           <tr>
             <th>Servis</th>
             <th>Kaynak</th>
-            <th>Inner Port (Container)</th>
-            <th>Outer Port (Host)</th>
-            <th>Published ports</th>
+            <th>Konteyner portu</th>
+            <th>Sunucu portu</th>
+            <th>Yayımlanan portlar</th>
             <th>Domain / Proxy Bağlantısı</th>
           </tr>
         </thead>
@@ -179,13 +179,13 @@ export function PortMappingTable({ services = [], proxyTarget = null }) {
               ? `${row.hostIp === '127.0.0.1' ? '127.0.0.1' : (row.hostIp ?? '*')}:${row.outerPort} → ${row.innerPort}/${row.protocol}`
               : '—';
             const proxyText = proxyTarget
-              || (row.innerPort != null ? `127.0.0.1:${row.outerPort} ↔ container:${row.innerPort}/${row.protocol}` : 'Port yayımlanmadı');
+              || (row.innerPort != null ? `127.0.0.1:${row.outerPort} ↔ konteyner:${row.innerPort}/${row.protocol}` : 'Port yayımlanmadı');
             return (
               <tr key={row.key}>
                 <td><strong>{row.serviceName}</strong></td>
                 <td>{row.sourceKind}</td>
-                <td>{row.innerPort != null ? <span className="yp-port-mapping-badge">Inner: {row.innerPort}/{row.protocol}</span> : '—'}</td>
-                <td>{row.outerPort != null ? <span className="yp-port-mapping-badge">Outer: {row.hostIp}:{row.outerPort}</span> : '—'}</td>
+                <td>{row.innerPort != null ? <span className="yp-port-mapping-badge">Konteyner: {row.innerPort}/{row.protocol}</span> : '—'}</td>
+                <td>{row.outerPort != null ? <span className="yp-port-mapping-badge">Sunucu: {row.hostIp}:{row.outerPort}</span> : '—'}</td>
                 <td>{row.innerPort != null ? <small>{rawLabel}</small> : '—'}</td>
                 <td><code>{proxyText}</code></td>
               </tr>
@@ -251,10 +251,10 @@ export function DockerHubCatalogPicker({
         </select>
       </label>
       <label>
-        Inner Port (Container targetPort)
+        Konteyner portu
         <input
           type="number"
-          aria-label="Inner Port (Container targetPort)"
+          aria-label="Konteyner portu"
           min={1}
           max={65535}
           value={targetPort}
@@ -263,10 +263,10 @@ export function DockerHubCatalogPicker({
         />
       </label>
       <label>
-        Outer Port (Host publishedPort)
+        Sunucu portu
         <input
           type="number"
-          aria-label="Outer Port (Host publishedPort)"
+          aria-label="Sunucu portu"
           min={1024}
           max={65535}
           value={publishedPort}

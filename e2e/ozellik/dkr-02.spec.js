@@ -103,12 +103,12 @@ test.describe('DKR-02 Container oluşturma, başlatma, durdurma, yeniden oluştu
     await expect(nameInput).toBeVisible();
     await nameInput.fill(`inv_${timestamp}`);
 
-    const docTextarea = modal.locator('label:has-text("Compose document") textarea');
+    const docTextarea = modal.locator('label:has-text("Compose içeriği") textarea');
     await expect(docTextarea).toBeVisible();
     // Sözdizimi bozuk YAML gir
     await docTextarea.fill('services:\n  broken:\n    [invalid yaml structure\n');
 
-    const validateBtn = modal.locator('button:has-text("Validate")');
+    const validateBtn = modal.locator('button:has-text("Doğrula")');
     await expect(validateBtn).toBeEnabled();
     await validateBtn.click();
 
@@ -148,11 +148,11 @@ test.describe('DKR-02 Container oluşturma, başlatma, durdurma, yeniden oluştu
       '',
     ].join('\n');
 
-    const docTextarea = modal.locator('label:has-text("Compose document") textarea');
+    const docTextarea = modal.locator('label:has-text("Compose içeriği") textarea');
     await docTextarea.fill(composeContent);
 
     // Validasyon yap
-    const validateBtn = modal.locator('button:has-text("Validate")');
+    const validateBtn = modal.locator('button:has-text("Doğrula")');
     await expect(validateBtn).toBeEnabled();
     await validateBtn.click();
     await expect(modal.locator('dt:has-text("Servis")')).toBeVisible({ timeout: 10000 });
@@ -170,11 +170,11 @@ test.describe('DKR-02 Container oluşturma, başlatma, durdurma, yeniden oluştu
 
     await expect(page.locator('h1')).toContainText(projectName, { timeout: 15000 });
 
-    const lifecycleSection = page.locator('section').filter({ has: page.locator('h2:text-is("Lifecycle")') });
+    const lifecycleSection = page.locator('section').filter({ has: page.locator('h2:text-is("Proje işlemleri")') });
     await expect(lifecycleSection).toBeVisible({ timeout: 15000 });
 
     // 2. BAŞLAT (start)
-    const startBtn = lifecycleSection.locator('button:has-text("Başlat")');
+    const startBtn = lifecycleSection.locator('button:text-is("Başlat")');
     await expect(startBtn).toBeVisible({ timeout: 10000 });
     await expect(startBtn).toBeEnabled({ timeout: 10000 });
     await startBtn.click();
@@ -197,7 +197,7 @@ test.describe('DKR-02 Container oluşturma, başlatma, durdurma, yeniden oluştu
     // 3. RESTART (yeniden başlat)
     await page.reload();
     await expect(lifecycleSection).toBeVisible({ timeout: 15000 });
-    const restartBtn = lifecycleSection.locator('button:has-text("Restart")');
+    const restartBtn = lifecycleSection.locator('button:has-text("Yeniden başlat")');
     await expect(restartBtn).toBeEnabled({ timeout: 35000 });
     await restartBtn.click();
 

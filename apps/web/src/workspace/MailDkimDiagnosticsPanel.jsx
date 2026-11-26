@@ -32,7 +32,7 @@ function DkimKeyModal({ keyState, domain, onClose, onChanged }) {
     } catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { setBusy(false); }
   }
-  return <Modal title={keyState ? 'DKIM anahtarını yenile' : 'DKIM anahtarı oluştur'} onClose={onClose} busy={busy}><form className="ws-form" onSubmit={submit}><ErrorNotice error={error} /><label>Seçici adı<input value={selector} required pattern="[a-z0-9](?:[a-z0-9-]*[a-z0-9])?" autoCapitalize="none" spellCheck={false} onChange={(event) => setSelector(event.target.value)} placeholder={keyState ? 'mail-2026' : 'mail'} /></label>{keyState && <p className="ws-muted">Mevcut seçici <strong>{keyState.selector}</strong>. Yenileme için farklı bir seçici gerekir; eski DNS kaydı geçiş tamamlanana kadar korunur.</p>}<p className="ws-muted">Özel anahtar sunucuda korunur; panel yalnız DNS kaydı bilgisini gösterir.</p><footer className="ws-modal-footer"><ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton><Button type="submit" variant="primary" disabled={busy || !selector}>{busy ? 'Hazırlanıyor…' : keyState ? 'Rotate et' : 'DKIM oluştur'}</Button></footer></form></Modal>;
+  return <Modal title={keyState ? 'DKIM anahtarını yenile' : 'DKIM anahtarı oluştur'} onClose={onClose} busy={busy}><form className="ws-form" onSubmit={submit}><ErrorNotice error={error} /><label>Seçici adı<input value={selector} required pattern="[a-z0-9](?:[a-z0-9-]*[a-z0-9])?" autoCapitalize="none" spellCheck={false} onChange={(event) => setSelector(event.target.value)} placeholder={keyState ? 'mail-2026' : 'mail'} /></label>{keyState && <p className="ws-muted">Mevcut seçici <strong>{keyState.selector}</strong>. Yenileme için farklı bir seçici gerekir; eski DNS kaydı geçiş tamamlanana kadar korunur.</p>}<p className="ws-muted">Özel anahtar sunucuda korunur; panel yalnız DNS kaydı bilgisini gösterir.</p><footer className="ws-modal-footer"><ModalCloseButton disabled={busy}>Vazgeç</ModalCloseButton><Button type="submit" variant="primary" disabled={busy || !selector}>{busy ? 'Hazırlanıyor…' : keyState ? 'Anahtarı yenile' : 'DKIM oluştur'}</Button></footer></form></Modal>;
 }
 
 export default function MailDkimDiagnosticsPanel({ domain, onChanged }) {
@@ -92,7 +92,7 @@ export default function MailDkimDiagnosticsPanel({ domain, onChanged }) {
     try {
       const job = await applyMailDkim(domain.id, { expectedKeyRevision: keyState.revision, preview });
       observe(job); setConfirming(false); setPreview(null);
-      setNotice('DKIM configuration işi kuyruğa alındı. Signing state job başarıyla tamamlanmadan uygulanmış sayılmaz.');
+      setNotice('DKIM ayarı işlem kuyruğuna alındı. İşlem başarıyla bitmeden imzalama etkin sayılmaz.');
       onChanged?.();
     } catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { setBusy(false); }
@@ -114,17 +114,17 @@ export default function MailDkimDiagnosticsPanel({ domain, onChanged }) {
             <>
               <KeyValues
                 items={[
-                  ['Selector', keyState.selector],
+                  ['Seçici', keyState.selector],
                   ['Algoritma', keyState.algorithm],
                   ['Revizyon', keyState.revision],
-                  ['Public key', keyState.publicKey],
+                  ['Açık anahtar', keyState.publicKey],
                   ['DNS tipi', keyState.dnsRecord?.type ?? 'TXT'],
                   ['DNS adı', keyState.dnsRecord?.name ?? `${keyState.selector}._domainkey.${domain.domainName}`],
-                  ['DNS değer', keyState.dnsRecord?.content ?? keyState.dnsRecord?.value ?? '—'],
+                  ['DNS değeri', keyState.dnsRecord?.content ?? keyState.dnsRecord?.value ?? '—'],
                 ]}
               />
               <div className="ws-actions">
-                <Button onClick={() => setEditing(true)}>Key rotate</Button>
+                <Button onClick={() => setEditing(true)}>Anahtarı yenile</Button>
                 <Button disabled={busy} onClick={buildPreview}>
                   {busy ? 'Hazırlanıyor…' : 'İmzalama önizlemesi'}
                 </Button>
@@ -133,8 +133,8 @@ export default function MailDkimDiagnosticsPanel({ domain, onChanged }) {
           ) : keyState === null ? (
             <EmptyState
               icon="shield"
-              title="DKIM key yok"
-              detail="Local mail domain için protected private key ve public DNS metadata oluşturun."
+              title="DKIM anahtarı yok"
+              detail="Bu posta alan adı için sunucuda saklanan özel anahtarı ve DNS kaydını oluşturun."
               action={
                 <Button variant="primary" onClick={() => setEditing(true)}>
                   DKIM oluştur
@@ -154,13 +154,13 @@ export default function MailDkimDiagnosticsPanel({ domain, onChanged }) {
                   [
                     'Hazır',
                     <Badge key="ready" state={preview.readyToApply ? 'active' : 'warning'}>
-                      {preview.readyToApply ? 'apply edilebilir' : 'DNS hazır değil'}
+                      {preview.readyToApply ? 'uygulanabilir' : 'DNS hazır değil'}
                     </Badge>,
                   ],
-                  ['Selector', preview.selector],
-                  ['Preview digest', preview.previewDigest],
-                  ['Config SHA-256', preview.configuration?.sha256 ?? '—'],
-                  ['Signing domain', preview.configuration?.domains ?? '—'],
+                  ['Seçici', preview.selector],
+                  ['Önizleme özeti', preview.previewDigest],
+                  ['Yapılandırma SHA-256', preview.configuration?.sha256 ?? '—'],
+                  ['İmzalayan alan adı', preview.configuration?.domains ?? '—'],
                 ]}
               />
               {preview.blockers?.length > 0 && (
@@ -194,7 +194,7 @@ export default function MailDkimDiagnosticsPanel({ domain, onChanged }) {
               <KeyValues
                 items={[
                   [
-                    'Attention required',
+                    'İnceleme gerekli',
                     <Badge key="attention" state={diagnostics.attentionRequired ? 'warning' : 'active'}>
                       {diagnostics.attentionRequired ? 'Evet' : 'Hayır'}
                     </Badge>,
@@ -210,7 +210,7 @@ export default function MailDkimDiagnosticsPanel({ domain, onChanged }) {
                     ),
                   ],
                   [
-                    'Forwarding',
+                    'Yönlendirme',
                     forwarding ? (
                       <Badge key="fwd" state={diagnosticState(forwarding.state)}>
                         {forwarding.state}
@@ -219,9 +219,9 @@ export default function MailDkimDiagnosticsPanel({ domain, onChanged }) {
                       '—'
                     ),
                   ],
-                  ['External forwarding', forwarding?.externalDestinationCount ?? 0],
+                  ['Dış adrese yönlendirme', forwarding?.externalDestinationCount ?? 0],
                   [
-                    'SRS ready',
+                    'SRS hazır',
                     forwarding?.srsReady === null || forwarding?.srsReady === undefined ? '—' : forwarding.srsReady ? 'Evet' : 'Hayır',
                   ],
                 ]}
@@ -233,7 +233,7 @@ export default function MailDkimDiagnosticsPanel({ domain, onChanged }) {
                       <tr role="row">
                         <th scope="col">Tür</th>
                         <th scope="col">Sebep</th>
-                        <th scope="col">Aksiyon</th>
+                        <th scope="col">Önerilen işlem</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -256,7 +256,7 @@ export default function MailDkimDiagnosticsPanel({ domain, onChanged }) {
           ) : (
             <div className="ws-loading">
               <span className="ws-spinner" />
-              Diagnostics yükleniyor…
+              Tanılama yükleniyor…
             </div>
           )}
         </div>
@@ -269,7 +269,7 @@ export default function MailDkimDiagnosticsPanel({ domain, onChanged }) {
           <div className="ws-section-body">
             <KeyValues
               items={[
-                ['Posta Sunucusu (Host)', deliveryDiagnostics.connectionSettings.hostname],
+                ['Posta Sunucusu', deliveryDiagnostics.connectionSettings.hostname],
                 [
                   'IMAP Portları & TLS',
                   `${deliveryDiagnostics.connectionSettings.imap.ports.join(', ')} · ${deliveryDiagnostics.connectionSettings.imap.tls}`,

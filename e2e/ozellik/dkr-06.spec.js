@@ -137,10 +137,10 @@ test.describe('DKR-06 Container yapılandırma yedeği ile volume verisi yedeği
       `  ${volumeName}:`,
     ].join('\n');
 
-    const docTextarea = modal.locator('label:has-text("Compose document") textarea');
+    const docTextarea = modal.locator('label:has-text("Compose içeriği") textarea');
     await docTextarea.fill(composeContent);
 
-    const validateBtn = modal.locator('button:has-text("Validate")');
+    const validateBtn = modal.locator('button:has-text("Doğrula")');
     await expect(validateBtn).toBeEnabled({ timeout: 5000 });
     await validateBtn.click();
     await expect(modal.locator('dt:has-text("Servis")')).toBeVisible({ timeout: 10000 });
@@ -164,22 +164,22 @@ test.describe('DKR-06 Container yapılandırma yedeği ile volume verisi yedeği
     await expect(storageSection).toBeVisible({ timeout: 15000 });
 
     // Manifest sürümü ve dahil/hariç sayıları
-    await expect(storageSection.locator('dt:has-text("Manifest") + dd')).toContainText('v1');
+    await expect(storageSection.locator('dt:has-text("Yedek tanımı") + dd')).toContainText('v1');
     await expect(storageSection.locator('dt:has-text("Dahil") + dd')).toContainText('1');
-    await expect(storageSection.locator('dt:has-text("Backup dışı") + dd')).toContainText('1');
+    await expect(storageSection.locator('dt:has-text("Yedek dışı") + dd')).toContainText('1');
 
     // Depolama tablosunda named volume ve ephemeral satırları
     const table = storageSection.locator('table.ws-table');
     await expect(table).toBeVisible();
     await expect(table.locator(`text=${volumeName}`)).toBeVisible();
-    await expect(table.locator('text=Manifest\'e dahil')).toBeVisible();
-    await expect(table.locator('text=Backup dışı')).toBeVisible();
+    await expect(table.locator('text=Yedeğe dahil')).toBeVisible();
+    await expect(table.locator('text=Yedek dışı')).toBeVisible();
 
     // 4. Konteyneri başlat ve fiziksel volume varlığını doğrula
-    const lifecycleSection = page.locator('section').filter({ has: page.locator('h2:text-is("Lifecycle")') });
+    const lifecycleSection = page.locator('section').filter({ has: page.locator('h2:text-is("Proje işlemleri")') });
     await expect(lifecycleSection).toBeVisible({ timeout: 15000 });
 
-    const startBtn = lifecycleSection.locator('button:has-text("Başlat")');
+    const startBtn = lifecycleSection.locator('button:text-is("Başlat")');
     await expect(startBtn).toBeEnabled({ timeout: 15000 });
     await startBtn.click();
 
@@ -207,7 +207,7 @@ test.describe('DKR-06 Container yapılandırma yedeği ile volume verisi yedeği
 
     // 5. Projeyi panel arayüzünden kaldır ve silindiğini doğrula
     await page.reload();
-    const lifecycleSectionAfter = page.locator('section').filter({ has: page.locator('h2:text-is("Lifecycle")') });
+    const lifecycleSectionAfter = page.locator('section').filter({ has: page.locator('h2:text-is("Proje işlemleri")') });
     await expect(lifecycleSectionAfter).toBeVisible({ timeout: 15000 });
     const removeBtn = lifecycleSectionAfter.locator('button:has-text("Projeyi kaldır")');
     await expect(removeBtn).toBeEnabled({ timeout: 35000 });

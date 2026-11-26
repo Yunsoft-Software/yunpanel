@@ -4,13 +4,17 @@ import { useWorkspace } from './WorkspaceContext.jsx';
 import { Button, ConfirmDialog, ErrorNotice, Section } from './PanelKit.jsx';
 
 const ACTIONS = Object.freeze([
-  ['build', 'Build'],
-  ['pull', 'Pull'],
+  ['build', 'Derle'],
+  ['pull', 'İmajları indir'],
   ['start', 'Başlat'],
   ['stop', 'Durdur'],
-  ['restart', 'Restart'],
+  ['restart', 'Yeniden başlat'],
   ['remove', 'Projeyi kaldır'],
 ]);
+
+function actionLabel(action) {
+  return ACTIONS.find(([key]) => key === action)?.[1] ?? action;
+}
 
 export default function DockerLifecyclePanel({ project, onChanged }) {
   const { observe, jobs, resourceBusy, setNotice } = useWorkspace();
@@ -50,9 +54,9 @@ export default function DockerLifecyclePanel({ project, onChanged }) {
     }
   }
 
-  return <><Section title="Lifecycle" description="Projeyi başlatın, durdurun veya kaldırın. Kaldırma container ve projeye ait ağları temizler; volume ve image verileri korunur."><div className="ws-section-body"><ErrorNotice error={error} /><div className="ws-actions">{ACTIONS.map(([action, label]) => <Button key={action} disabled={locked} onClick={() => preview(action)}>{label}</Button>)}</div></div></Section>{pending && <ConfirmDialog
-    title={`Docker Compose ${pending.action}`}
-    message={pending.action === 'remove' ? `${project.projectName} projesinin container ve ağları kaldırılacak, kayıtlı yapılandırma ve erişim sırları silinecek. Volume ve image verileri korunur. Bağlı siteler varken kaldırma engellenir.` : `${project.projectName} için işlem sıraya alınacak.`}
+  return <><Section title="Proje işlemleri" description="Projeyi başlatın, durdurun veya kaldırın. Kaldırma konteynerleri ve projeye ait ağları temizler; volume ve imaj verileri korunur."><div className="ws-section-body"><ErrorNotice error={error} /><div className="ws-actions">{ACTIONS.map(([action, label]) => <Button key={action} disabled={locked} onClick={() => preview(action)}>{label}</Button>)}</div></div></Section>{pending && <ConfirmDialog
+    title={`Docker Compose: ${actionLabel(pending.action)}`}
+    message={pending.action === 'remove' ? `${project.projectName} projesinin konteynerleri ve ağları kaldırılacak, kayıtlı yapılandırma ve erişim sırları silinecek. Volume ve imaj verileri korunur. Bağlı siteler varken kaldırma engellenir.` : `${project.projectName} için işlem sıraya alınacak.`}
     confirmation={pending.preview.confirmation}
     busy={busy}
     error={error}

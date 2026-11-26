@@ -260,7 +260,7 @@ export default function LoginForm({ setupRequired, setupOffer = null, notice, on
             <button className="auth-primary" type="submit">{busy ? 'Gönderiliyor…' : 'Sıfırlama bağlantısı gönder'}</button>
             <button type="button" className="auth-secondary" onClick={() => { setView('login'); setError(''); }}>Girişe dön</button>
           </> : view === 'reset' ? <>
-            {!resetToken && <label>Sıfırlama anahtarı (Token)
+            {!resetToken && <label>Sıfırlama anahtarı
               <input
                 type="text"
                 value={resetToken}

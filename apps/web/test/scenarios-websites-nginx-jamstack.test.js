@@ -571,7 +571,7 @@ test('SCN-WEB-02c: siteCreateInputFromForm allows initialDatabase on managed app
   for (const form of disallowedForms) {
     assert.throws(
       () => siteCreateInputFromForm({ form, operationId: OPERATION_ID, serverId: SERVER_ID, domain }),
-      /Başlangıç veritabanı yalnız yönetilen Application Website için oluşturulabilir/,
+      /Başlangıç veritabanı yalnız yönetilen uygulama sitesi için oluşturulabilir/,
     );
   }
 });
@@ -668,7 +668,7 @@ test('SCN-WEB-02d: siteCreateInputFromForm validates ownerMode (owner, customer,
       serverId: SERVER_ID,
       domain,
     }),
-    /Bağımsız www, üst alan adı seçilmiş ayrı bir Website olarak oluşturulmalıdır/,
+    /Bağımsız www, üst alan adı seçilmiş ayrı bir site olarak oluşturulmalıdır/,
   );
 });
 
@@ -790,7 +790,7 @@ test('SCN-WEB-03b: siteCreateInputFromForm validates port boundaries and require
         serverId: SERVER_ID,
         domain,
       }),
-      /Docker container iç portu \(targetPort\) 1–65535 aralığında olmalıdır/,
+      /Docker konteyner portu 1–65535 aralığında olmalıdır/,
     );
   }
 
@@ -847,7 +847,7 @@ test('SCN-WEB-03b: siteCreateInputFromForm validates port boundaries and require
       serverId: SERVER_ID,
       domain,
     }),
-    /Website yayın kaynağı geçersiz/,
+    /Site yayın kaynağı geçersiz/,
   );
 });
 
@@ -894,7 +894,7 @@ test('SCN-WEB-03c: availableExistingApplications filters unbound applications by
       domain: { primaryDomain: 'webrich.news', parentDomainId: null },
       selectedApplication: { id: 'app-static-free', serverId: SERVER_ID, type: 'static' },
     }),
-    /Bu Website için kullanılmamış uygun uygulamayı seçin/,
+    /Bu site için kullanılmamış uygun uygulamayı seçin/,
   );
 });
 
@@ -1338,7 +1338,7 @@ test('SCN-WEB-05d: NginxSettingsFields renders target-specific controls for stat
       }),
     }),
   );
-  assert.ok(staticHtml.includes('Document root'));
+  assert.ok(staticHtml.includes('Belge kökü'));
   assert.ok(staticHtml.includes('Statik dosya önbelleği (saniye)'));
   assert.ok(staticHtml.includes('Bulunamayan sayfalarda index.html kullan'));
   assert.ok(staticHtml.includes('Özel hata sayfaları'));
@@ -1361,7 +1361,7 @@ test('SCN-WEB-05d: NginxSettingsFields renders target-specific controls for stat
       }),
     }),
   );
-  assert.ok(phpHtml.includes('Document root'));
+  assert.ok(phpHtml.includes('Belge kökü'));
   assert.ok(phpHtml.includes('Başlangıç dosyaları'));
   assert.ok(phpHtml.includes('Özel hata sayfaları'));
   // 27 Ekim 2026: PHP siteleri statik dosya önbelleğini ve sıkıştırmayı seçebilir.
@@ -1386,7 +1386,7 @@ test('SCN-WEB-05d: NginxSettingsFields renders target-specific controls for stat
     );
     assert.ok(html.includes('Uygulama yanıt süresi (saniye)'));
     assert.ok(html.includes('WebSocket bağlantılarına izin ver'));
-    assert.equal(html.includes('Document root'), false);
+    assert.equal(html.includes('Belge kökü'), false);
     assert.equal(html.includes('Statik dosya önbelleği (saniye)'), false);
   }
 
@@ -1401,7 +1401,7 @@ test('SCN-WEB-05d: NginxSettingsFields renders target-specific controls for stat
     }),
   );
   assert.ok(passengerHtml.includes('En büyük yükleme boyutu (MB)'));
-  assert.equal(passengerHtml.includes('Document root'), false);
+  assert.equal(passengerHtml.includes('Belge kökü'), false);
   assert.equal(passengerHtml.includes('Uygulama yanıt süresi (saniye)'), false);
 });
 

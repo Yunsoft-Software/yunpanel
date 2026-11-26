@@ -24,7 +24,7 @@ test('management UI has one implicit local server and no server chooser', async 
   assert.match(sources[5], /previewDigest: preview\.previewDigest/);
   assert.match(sources[0], /<option value="new_node">Node\.js/);
   assert.match(sources[0], /<option value="new_php">PHP \/ WordPress/);
-  assert.match(sources[0], /Mevcut Website’i paylaş \(shared-site\)/);
+  assert.match(sources[0], /Mevcut siteyi paylaş/);
   assert.match(sources[0], /ConfirmDialog/);
   assert.match(sources[0], /<option value="alias">www aynı siteye alias olsun/);
   assert.doesNotMatch(sources[0], /<option value="independent"/);

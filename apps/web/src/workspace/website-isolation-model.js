@@ -7,8 +7,8 @@ const RUNTIME_LABELS = Object.freeze({
 });
 
 const STEP_LABELS = Object.freeze({
-  unix_identity: 'Unix kimliği',
-  runtime: 'Runtime izolasyonu',
+  unix_identity: 'Sistem kullanıcısı',
+  runtime: 'Çalışma ortamı izolasyonu',
   php_runtime: 'PHP-FPM izolasyonu',
   sftp: 'SFTP izolasyonu',
 });
