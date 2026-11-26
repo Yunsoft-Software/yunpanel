@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { usePolling } from './usePolling.js';
 import { useSearchParams } from 'react-router';
 import { panelRequest } from '../api.js';
 import { sessionVersion, sessionTransitionPending } from '../session-client.js';
@@ -59,11 +60,8 @@ export default function SiteWordPressPanel({ domainId, scope }) {
     if (requestRef.current) void readRequest(requestRef.current).catch(failure => { if (isCurrent()) setError(failure); });
     return () => { live.current = false; previewRequest.current?.abort(); };
   }, [scope.websiteId]);
-  useEffect(() => {
-    if (!job || terminal(job) || !requestRef.current) return;
-    const timer = setInterval(() => { void readRequest(requestRef.current).catch(failure => { if (isCurrent()) setError(failure); }); }, 1500);
-    return () => clearInterval(timer);
-  }, [job?.id, job?.status]);
+  usePolling(() => requestRef.current && readRequest(requestRef.current).catch(failure => { if (isCurrent()) setError(failure); }),
+    1500, { enabled: Boolean(job && !terminal(job) && requestRef.current) });
 
   const disabled = !canManage || busy || selectivePreviewing || (job && !terminal(job));
   const targetPhpSites = (websites.items ?? []).filter(site => site.id !== scope.websiteId && site.runtimeType === 'php' && site.serverId === scope.serverId);

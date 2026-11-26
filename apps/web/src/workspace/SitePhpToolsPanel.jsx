@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { usePolling } from './usePolling.js';
 import { panelRequest } from '../api.js';
 import { usePanelSession } from '../panel-session.jsx';
 import { sessionTransitionPending, sessionVersion } from '../session-client.js';
@@ -38,12 +39,8 @@ function PhpToolsWorkspace({ domainId, scope, generation, tool }) {
     setState(client.getSnapshot()); void client.loadAll();
     return () => { unsubscribe(); client.dispose(); ref.current = null; };
   }, [scope.websiteId, scope.serverId, scope.applicationId, scope.unixUser, generation, observe, updateJob, jobs.refresh]);
-  useEffect(() => {
-    const job = state?.action?.job;
-    if (!job || !['queued', 'running'].includes(job.status)) return undefined;
-    const timer = setInterval(() => { void ref.current?.refreshAction(); }, 3000);
-    return () => clearInterval(timer);
-  }, [state?.action?.job?.id, state?.action?.job?.status]);
+  const actionJob = state?.action?.job;
+  usePolling(() => ref.current?.refreshAction(), 3000, { enabled: Boolean(actionJob && ['queued', 'running'].includes(actionJob.status)) });
   const actionBusy = state?.action?.busy || jobs.status !== 'ready' || resourceBusy('application', scope.applicationId);
   const actionReady = (item) => {
     const status = state?.[item.tool];

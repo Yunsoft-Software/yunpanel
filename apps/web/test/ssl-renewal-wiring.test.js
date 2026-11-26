@@ -27,8 +27,7 @@ test('existing job drawer remains accessible and terminal plus verified metadata
   assert.match(workspace, /domains.refresh\(\); websites.refresh\(\); certificates.refresh\(\)/);
 });
 test('status polling and result re-read never dispatch another POST', () => {
-  assert.match(panel, /setTimeout\(\(\) => \{ void flow.current\?\.refresh\(\); \}, 2000\)/);
-  assert.match(panel, /if \(!\['waiting', 'syncing'\].includes\(state.status\)\)/);
+  assert.match(panel, /usePolling\(\(\) => flow.current\?\.refresh\(\), 2000, \{ enabled: \['waiting', 'syncing'\].includes\(state.status\) \}\)/);
   assert.equal((controller.match(/method: 'POST'/g) ?? []).length, 1);
   assert.match(controller, /body: \{ dryRun: approval.dryRun \}/);
 });

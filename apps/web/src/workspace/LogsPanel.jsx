@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { panelRequest } from '../api.js';
 import { Button, EmptyState, ErrorNotice, Section } from './PanelKit.jsx';
 import { formatDate } from './site-model.js';
+import { startPolling } from './usePolling.js';
 
 const LIVE_INTERVAL_MS = 3000;
 const LIVE_MAX_ROWS = 500;
@@ -55,9 +56,8 @@ export default function LogsPanel({ application, domain }) {
         setError(null);
       } catch (failure) { if (!stopped && failure.name !== 'AbortError') setError(failure.message); }
     };
-    void tick();
-    const timer = setInterval(tick, LIVE_INTERVAL_MS);
-    return () => { stopped = true; clearInterval(timer); };
+    const stop = startPolling(tick, LIVE_INTERVAL_MS, { immediate: true });
+    return () => { stopped = true; stop(); };
   }, [live, canFollow, source, domain?.id, search]);
 
   const download = domain?.websiteId ? `/api/panel${siteLogPath({ domain, source }).replace('/logs', '/logs/download')}` : null;

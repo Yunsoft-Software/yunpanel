@@ -8,6 +8,7 @@ import { useUnsavedChanges } from './UnsavedChanges.jsx';
 import { CronTaskClientError, createCronTaskClient, cronDraft, cronErrorMessage } from './cron-task-client.js';
 import { resolveCronAccess } from './cron-task-access.js';
 import './ui/cron-tasks.css';
+import { startPolling } from './usePolling.js';
 
 const ACCESS = {
   forbidden: 'Bu sitenin görevlerini yönetme izniniz yok veya oturumunuz geçerli değil.',
@@ -76,12 +77,11 @@ function CronWorkspace({ scope, name, ready, generation }) {
     if (!ready || !operation?.job || !['queued', 'running', 'verifying'].includes(operation.phase)) return undefined;
     let count = 0;
     // Only GETs; stopping UI observation never cancels or resubmits host work.
-    const timer = setInterval(() => {
-      if (++count > 20) { clearInterval(timer); return; }
-      void client.current?.refreshOperation();
-    }, 3000);
-    void client.current?.refreshOperation();
-    return () => clearInterval(timer);
+    return startPolling(async () => {
+      if (count++ > 20) return false;
+      await client.current?.refreshOperation();
+      return true;
+    }, 3000, { immediate: true });
   }, [ready, operation?.job?.id, operation?.phase]);
   useEffect(() => { if (state.denied) { setEditor(null); setRemoveTarget(null); setAcknowledge(false); } }, [state.denied]);
   useUnsavedChanges(isDirty(editor));

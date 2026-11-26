@@ -5,6 +5,7 @@ import {sessionTransitionPending,sessionVersion} from '../session-client.js';
 import {Badge,Button,ConfirmDialog,ErrorNotice,hasOpenModalLayer,Icon} from './PanelKit.jsx';
 import {globalRemovalOperation,removalErrorMessage} from './website-removal-model.js';
 import WebsiteRemovalProgress from './WebsiteRemovalProgress.jsx';
+import { usePolling } from './usePolling.js';
 
 export default function WebsiteRemovalRecoveryPanel({onChanged}){
  const {session}=usePanelSession(),generation=sessionVersion();
@@ -26,10 +27,8 @@ export default function WebsiteRemovalRecoveryPanel({onChanged}){
     ...([401,403].includes(error?.status)?{operations:[]}:{}),error:removalErrorMessage(error)}));}
  }
  useEffect(()=>{live.current=true;knownActive.current=new Set();void load();return()=>{live.current=false;++seq.current;};},[session?.user?.id,generation]);
- useEffect(()=>{
-  if(state.loading||!state.operations.some(operation=>operation.execution?.mode==='automatic'&&['pending','running'].includes(operation.status)))return;
-  const timer=setTimeout(()=>void load(),2000);return()=>clearTimeout(timer);
- },[state.operations,state.loading,generation]);
+ const automaticRemovalActive=!state.loading&&state.operations.some(operation=>operation.execution?.mode==='automatic'&&['pending','running'].includes(operation.status));
+ usePolling(()=>load(),2000,{enabled:automaticRemovalActive});
  const active=state.operations.filter(operation=>operation.status!=='removed');
  const runningCount=active.filter(operation=>['pending','running'].includes(operation.status)).length;
  const pausedCount=active.length-runningCount;

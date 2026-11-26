@@ -23,8 +23,8 @@ test('new flow is lifetime scoped and uses the existing authenticated transport'
   assert.match(panel, /request: panelRequest/);
   assert.match(panel, /version === sessionVersion\(\) && !sessionTransitionPending\(\)/);
   assert.match(panel, /flow.dispose\(\)/);
-  assert.match(panel, /const timer = setTimeout\(\(\) => \{ void client.current\?\.refresh\(\); \}, 2000\)/);
-  assert.doesNotMatch(panel, /setTimeout[^\n]*(?:confirm|prepare)\(/);
+  assert.match(panel, /usePolling\(\(\) => client.current\?\.refresh\(\), 2000, \{ enabled: state.status === 'waiting' \}\)/);
+  assert.doesNotMatch(panel, /(?:setTimeout|usePolling)[^\n]*(?:confirm|prepare)\(/);
 });
 
 test('explicit confirmations preserve the exact current backend token', () => {

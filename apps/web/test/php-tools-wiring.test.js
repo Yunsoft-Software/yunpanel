@@ -26,7 +26,7 @@ test('status panels remain independent while reviewed actions use one known-job 
   const text = await source('SitePhpToolsPanel.jsx');
   assert.match(text, /tool="wordpress"/); assert.match(text, /tool="composer"/);
   assert.match(text, /client.current\?\.load\(tool\)/);
-  assert.match(text, /setInterval\(\(\) => \{ void ref\.current\?\.refreshAction\(\); \}, 3000\)/);
+  assert.match(text, /usePolling\(\(\) => ref\.current\?\.refreshAction\(\), 3000,/);
   assert.match(text, /ConfirmDialog/); assert.match(text, /İşlemi kuyruğa al/);
   assert.doesNotMatch(text, /wp-cli\/run|composer\/run|dangerouslySetInnerHTML/);
 });

@@ -3,6 +3,7 @@ import { panelRequest } from '../api.js';
 import { sessionVersion, sessionTransitionPending } from '../session-client.js';
 import { Button, ConfirmDialog, ErrorNotice, LinkButton } from './PanelKit.jsx';
 import { createMailboxAccessPreparation, EMPTY_MAILBOX_ACCESS, mailboxAccessBusy } from './mailbox-access-preparation.js';
+import { usePolling } from './usePolling.js';
 
 // Mounted inside the existing actor-keyed removal panel. This only prepares
 // access; backup, data removal and finalization stay in the existing controller.
@@ -26,11 +27,7 @@ export default function MailboxAccessPreparation({ mailbox, domain, canManage, b
   const occupied = busy || state.status === 'waiting' || Boolean(state.approval);
   useEffect(() => { onBusyChange?.(occupied); return () => onBusyChange?.(false); }, [occupied, onBusyChange]);
   useEffect(() => { if (state.changes > 0 || state.applied) changed.current?.(); }, [state.changes, state.applied]);
-  useEffect(() => {
-    if (state.status !== 'waiting') return undefined;
-    const timer = setTimeout(() => { void flow.current?.load(); }, 2000);
-    return () => clearTimeout(timer);
-  }, [state.status, state.job]);
+  usePolling(() => flow.current?.load(), 2000, { enabled: state.status === 'waiting' });
   const view = state.snapshot;
   const available = canManage && !blocked && !occupied && state.status === 'ready';
   const approval = state.approval;

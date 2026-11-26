@@ -6,6 +6,7 @@ import { Button, ConfirmDialog, ErrorNotice, KeyValues, LinkButton, Section } fr
 import MailboxAccessPreparation from './MailboxAccessPreparation.jsx';
 import { createMailboxRemoval, EMPTY_MAILBOX_REMOVAL } from './mailbox-removal-controller.js';
 import { mailboxRemovalBusy, mailboxRemovalEligible, mailboxRemovalJobId } from './mailbox-removal-model.js';
+import { usePolling } from './usePolling.js';
 
 const ACTIONS = Object.freeze({
   backup: ['Silmeden önce yedekle', 'Yalnız seçilen posta kutusunun verisi yedeklenecek. Bu işlem hesabı veya mesajları silmez.', 'Yedeği oluştur'],
@@ -37,11 +38,7 @@ export function RemovalSession({ mailbox, domain, canManage, onChanged, onPolicy
     client.current = flow; void flow.refresh();
     return () => { flow.dispose(); if (client.current === flow) client.current = null; };
   }, [mailbox.id, mailbox.address, domain.id, canManage, initialState, createFlow]);
-  useEffect(() => {
-    if (state.status !== 'waiting') return undefined;
-    const timer = setTimeout(() => { void client.current?.refresh(); }, 2000);
-    return () => clearTimeout(timer);
-  }, [state.status, state.job]);
+  usePolling(() => client.current?.refresh(), 2000, { enabled: state.status === 'waiting' });
   useEffect(() => {
     if (state.status === 'deleted' && !notified.current) { notified.current = true; changed.current?.(); }
   }, [state.status]);

@@ -5,6 +5,7 @@ import { Button, ConfirmDialog, ErrorNotice, KeyValues } from './PanelKit.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { formatDate } from './site-model.js';
 import { createSslRenewal, EMPTY_SSL_RENEWAL, sslRenewalBusy } from './ssl-renewal.js';
+import { usePolling } from './usePolling.js';
 
 const OUTCOMES = Object.freeze({
   tested: 'Yenileme testi tamamlandı. Bu test üretim sertifikası oluşturmaz veya geçerlilik süresini uzatmaz.',
@@ -43,11 +44,7 @@ export default function SslRenewalPanel({ domain, certificate, disabled = false 
     const key = `${state.terminalVersion}:${state.syncVersion}`;
     if (invalidated.current !== key) { invalidated.current = key; callbacks.current.refreshAll(); }
   }, [state.terminalVersion, state.syncVersion]);
-  useEffect(() => {
-    if (!['waiting', 'syncing'].includes(state.status)) return undefined;
-    const timer = setTimeout(() => { void flow.current?.refresh(); }, 2000);
-    return () => clearTimeout(timer);
-  }, [state]);
+  usePolling(() => flow.current?.refresh(), 2000, { enabled: ['waiting', 'syncing'].includes(state.status) });
   const busy = sslRenewalBusy(state);
   const renewable = certificate?.state === 'active' && certificate.source === 'acme'
     && certificate.renewalMode === 'automatic' && certificate.staging === false;

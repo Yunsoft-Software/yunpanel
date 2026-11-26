@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { usePolling } from './usePolling.js';
 import { useSearchParams } from 'react-router';
 import { backupScheduleDraft, backupScheduleRequest, backupRetentionRequest } from './backup-schedule-form.js';
 import { panelRequest } from '../api.js';
@@ -104,21 +105,16 @@ function BackupWorkspace({ scope, generation, isOwner }) {
     return () => { disposed = true; };
   }, [operationId, isOwner, scope.websiteId]);
 
-  useEffect(() => {
-    if (!activeOp || !['queued', 'running'].includes(activeOp.status)) return;
-    let disposed = false, timer;
-    async function poll() {
-      try {
-        const updated = await ref.current.getOperation(activeOp.id);
-        if (disposed || !live.current) return;
-        setActiveOp(updated); setOperationError(null);
-        if (!['queued', 'running'].includes(updated.status)) { await ref.current.load(); return; }
-      } catch (error) { if (!disposed) setOperationError(siteBackupErrorMessage(error)); }
-      if (!disposed) timer = setTimeout(poll, 1500);
-    }
-    timer = setTimeout(poll, 1500);
-    return () => { disposed = true; clearTimeout(timer); };
-  }, [activeOp?.id, activeOp?.status]);
+  const pollingOpId = activeOp && ['queued', 'running'].includes(activeOp.status) ? activeOp.id : null;
+  usePolling(async () => {
+    try {
+      const updated = await ref.current.getOperation(pollingOpId);
+      if (!live.current) return false;
+      setActiveOp(updated); setOperationError(null);
+      if (!['queued', 'running'].includes(updated.status)) { await ref.current.load(); return false; }
+    } catch (error) { if (live.current) setOperationError(siteBackupErrorMessage(error)); }
+    return true;
+  }, 1500, { enabled: pollingOpId !== null });
 
   function followOperation(operation) {
     setActiveOp(operation); setOperationError(null);
