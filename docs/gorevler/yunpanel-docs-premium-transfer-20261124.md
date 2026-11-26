@@ -83,3 +83,38 @@ Aşağıdaki tüm komutlar mock/stub olmadan gerçek SQLite, gerçek API, gerçe
 - Son adayla `python3 orkestra/orchestrator.py verify` geçti. Lisans API ve tarayıcı regresyonları ile Website'in 25 birim ve gerçek geçici MySQL kullanan 6 kampanya testi geçti. Bağımsız inceleme kabul verdi. İlk tam koşuda kırılan eski modal testi [T950](../../tasks/done/T950.md) altında güncellendi.
 - `.28` üzerindeki izole Linux örneğinde önceki kampanyanın gerçek, Yunsoft imzalı jetonu API'de `promotional` döndü. Chromium'da `Kampanya · 3 ay` etiketi yenileme sonrasında göründü. Yanlış kurulum için jeton 422 ile reddedildi. Önceki türsüz jeton ayrı kurulumda sınandı. Aynı kurulumdaki yenileme kaynak testinde doğrulandı. Sonuç `.local/campaign-live-20261125/dot28-campaign-verification.json` içinde.
 - Test ortamı kaldırıldı ve kurulu `.28` ana panelinin API/web sağlık kontrolleri geçti. Ana panel paketi `0.3.0-2026112301` olarak kaldı. Yunsoft Website imzalayıcı düzeltmesi yerel kaynakta test edildi. Website yayını ve ana panel paket kurulumu ayrı dağıtım adımları olarak açık.
+
+## 26 Kasım 2026 — Güncel arayüzle yenileme (T959)
+
+- **Neden:** 25 Kasım üst bar ve kenar menü değişikliği ile 26 Kasım metin temizliği ([T953](../../tasks/review/T953.md), [T961](../../tasks/review/T961.md)) eski görüntülerden (`f30fd779`) sonra geldi.
+- **Arayüz kaynağı (`sourceCommit`):** `c1a84a5159add2f2f87fd6e21725f7c657cf98ec` (`26-11-2026` dalı). Görüntüler bu commit'te temiz çalışma ağacıyla alındı. Metin ve manifest değişiklikleri `c81c332c` commit'indedir; bu commit arayüz kodunu değiştirmez. `verifiedAt`: `2026-11-26T05:57:22.971Z`.
+- **Metin değişiklikleri (TR + EN):**
+  - `docker`: **Compose / Stack Ekle** → **Compose projesi ekle**; **Inner Port** / **Outer Port** → **Konteyner portu** / **Sunucu portu**; **Depolama / Volumes** → **Depolama** ve **Kalıcı volume yönetimi**; geçmiş ve işlemler için **Konteyner günlükleri**, **Proje işlemleri**, **Dağıtım ve çalıştırma geçmişi**.
+  - `sites-and-roles`: Ekleme düğmeleri sayfa başlığındadır; ana alan adı kartındaki düğme **Alt alan adı** olarak geçer.
+  - `domains-and-ssl`: Sertifika uyarıları üst bardaki zil simgesiyle açılan **Bildirim ve Görev Merkezi** içindeki **Bildirimler** sekmesindedir.
+  - `files`: Sunucu kök terminali **Araçlar ve Ayarlar → Sunucu ve servis yönetimi** (`/servers`) altında gösterilir.
+  - Tüm 22 sayfada doğrulanmış kaynak revizyonu `c1a84a51` olarak güncellendi. Diğer kalın arayüz etiketleri `apps/web/src` ile karşılaştırıldı; kaldırılmış başka etiket bulunmadı.
+- **Görseller:** `node scripts/capture-docs-screenshots.mjs` yerel örnek veri ve yerelde imzalanan deneme lisansıyla çalıştı: 17 PNG, 30 `tr-TR`/`en-US` kontrolü, 0 `pageerror`, 0 yatay taşma. Dosya adları aynı kaldı; `assets/en/` aynı dosyaların kopyasıdır. Tüm görseller tek tek açılıp eskileriyle karşılaştırıldı: yeni üst bar ve gruplu kenar menü görünüyor. Görsellerde yalnız `ornek.example` örnek verisi var; gerçek müşteri verisi, parola, jeton veya `.local` değeri yok. Yan not: yakalama sırasında `/websites/<id>/wordpress` locale kontrolü API günlüğüne yerel `/var/lib/yunpanel/...` yolu için `ENOENT` yazdı. Bu sayfanın görüntüsü pakette yoktur, tarayıcıda sayfa hatası oluşmadı.
+
+| Görsel (`assets/tr/` = `assets/en/`) | Yeni SHA-256 |
+| :--- | :--- |
+| `01-first-time-setup-dark.png` | `4b1e04253bf8427205f6a7c99272a4986b1ea42822fe473cd4253505fe09601d` |
+| `02-first-time-setup-light.png` | `e793213753005cafb7cd4636936e9d64f26314ffa67365771cb98cce4a13cb16` |
+| `03-login.png` | `88e6fd75e6308c53ceab2af9998727a96313f9952840c72e61a591f2bebd0a4e` |
+| `04-websites-hierarchy.png` | `8df6248763b18cf4defdaf1b2db92829d5656ecb66c19e6b85b3196b8e03fafc` |
+| `05-new-website.png` | `e5d0c7b900f7b20d4605e71773ac8e27fa057f881327ab00a567e352fd8fa31d` |
+| `06-site-overview.png` | `ea6d4d2af8d44f00bd59befc2baeb478a8a3ddfa17c4d2958b814e4759cfe6d2` |
+| `07-users-and-roles.png` | `815dd7f021ee1ae58ed53c68f424d1655c5fe521a8e8051047969b1ce7bcfeb6` |
+| `08-site-ssl.png` | `b677d5c8582e892f6adfc2ea41436efef7fee520777f9d67f4cd6c27038c2019` |
+| `09-site-dns.png` | `f2825e18f625980b60f219f45e78557db0d5c0b93d99034c8e15cc281216c760` |
+| `11-files-editor.png` | `a7ccb231911c076388aaf238ed6a18ff46b06fd36c0242e3c84ab1a3aa6f9cf9` |
+| `12-docker-compose.png` | `dd7a5261151584ae07d4a1803bfdc300a28d493ae28247015a5b03cae44b9432` |
+| `13-databases.png` | `89568e8ce5a7939b93e651dcb7c4e1fd0f9c0118346245569e77f24a05add72b` |
+| `14-mail-domains.png` | `1d7dc5c3112b548b8e9c79d187108192d39e7d35041588520337ee9b2dbac03d` |
+| `15-site-backup.png` | `9fee6475754bb8da2862f0426c5b6c7c1282c7e001c49adde4610bfe4930f041` |
+| `16-license-free-offer.png` | `5897b88173ad3ccd5a39f4cfdb941fb57df50dc7f1a18b638165d97fe62da348` |
+| `17-license-campaign-active.png` | `296898340d699380814fc93df4aabb754ed4173e74b734aac538e35724bc384d` |
+| `18-tools-settings.png` | `0b43ce08b49fad1715078da99020765633f0595fe0d155c859c935cea1a29784` |
+
+- **Doğrulama:** `node scripts/verify-and-package-docs.mjs --bundle docs/yunpanel-docs-0.3.0 --package .local/website-docs/yunpanel-docs-0.3.0.tar.gz` geçti: 11 sayfa, 22 kılavuz, 34 görsel kaydı, 50 iç bağlantı, 36 görsel bağlantısı, 64 arşiv girdisi. `node --test apps/web/test/versioned-docs-package.test.js` → 3/3 geçti; test artık kampanya görsellerinin kaynağını sabit commit yerine manifestteki `sourceCommit` ile karşılaştırır. `npm run lint` geçti.
+- **Arşiv:** T959 worktree'sinde `.local/website-docs/yunpanel-docs-0.3.0.tar.gz`, SHA-256 `c28c1a7630802b8471f3518c1d4d59bf72d9baba0409a70817febef1b34b190d`. Yakalama raporu aynı klasörde `capture-report-0.3.0.json`. Website'e aktarım ve yayın yapılmadı.
