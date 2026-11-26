@@ -1,23 +1,19 @@
-# YunPanel — Gerçek host ve tarayıcı kabulü
+# YunPanel — Açık canlı kabuller
+
+Güncelleme: 26 Kasım 2026. Bu dosya yalnız açık gerçek host ve tarayıcı kabullerini tutar. Kapananlar ve eski giriş notları [arşivde](docs/history/todo-2026-11-26.md). Güncel durum [devir notunda](docs/DEVIR.md), açık kaynak işleri [plan.md](plan.md).
+
+Canlı işler yalnız `.local/test-server.env` ile doğrulanan `.28` hedefinde ve izinli Contabo test sunucularında yapılır. `.44` ile biten Plesk sunucusu hiçbir kabulde kullanılmaz. Geçen alt test bütün kapıyı kapatmaz.
 
 ## Linux hosting pilotu ve Plesk geçişi
 
 [Onaylanan plan](plan.md#20-kasım-2026--onaylanan-linux-hosting-pilotu-ve-plesk-geçişi) ve [yerel kanıt](docs/gorevler/linux-hosting-pilot.md#20-kasım-yerel-ubuntu-kanıtı) pilotu hazırlıyor. Aşağıdaki maddeler bağımsız ortamda sistem servisi, müşteri verisi ve canlı taşıma sonuçlarını izler.
 
-- [x] Debian kaynak kapalıyken bağımsız Restic/rclone deposundan boş Ubuntu 24.04 hedefine panel hesapları ve yetkileri, WordPress, SQL ve IMAP geri yüklendi. Anahtar erişimi ve 241,33 saniyelik kurtarma ölçüldü. [Kabul kaydı](docs/gorevler/contabo-cold-recovery-20261122.md)
-- [x] İki Contabo VPS’te Debian 12 ve Ubuntu 24.04 arasında YunPanel yedeğinden PHP sitesi, MariaDB ve Dovecot IMAP iki yönde geri yüklendi. [Kabul kaydı](docs/gorevler/contabo-cross-restore-20261122.md)
 - [ ] Tek veritabanlı PHP ve postalı WordPress pilotlarında izinli Plesk dışa aktarımı, dosya/SQL/posta bütünlüğü, aynı girdinin tekrar işlenmesi, DNS öncesi test ve son eşitleme doğrulanır. Prova sırasında hedefte yeni yazılmış içerik ve postalar korunarak geri dönülür.
-- [x] Debian 12 ve Ubuntu 24.04’te Sieve Vacation, Rspamd Multimap, SMTP STARTTLS, SASL, LMTP/IMAP teslimi ve DKIM gerçek servislerle doğrulandı. [Kabul kaydı](docs/gorevler/contabo-mail-dns-20261122.md#posta-ve-spam-politikası)
-- [x] İkinci ağdaki PowerDNS ikincil sunucusu NOTIFY/AXFR ile güncellendi ve birincil durduğunda güncel bölgeyi yetkili olarak sunmayı sürdürdü. [Kabul kaydı](docs/gorevler/contabo-mail-dns-20261122.md#powerdns-ikincil-sunucusu)
-- [x] .28 üzerinde CrowdSec AppSec gözlem trafiği, izole kural engellemesi ve ayar geri dönüşü doğrulandı. [Kabul kaydı](docs/gorevler/crowdsec-waf-20261121.md)
-- [x] .28 üzerinde aylık HTTP trafik ölçümü, müşteri veritabanı sınırı, panel dosya yazma kotası ve isteğe bağlı HTTP trafik engellemesi doğrulandı. Mevcut Nginx yapılandırmalarının kapsamı ve yeniden uygulama adımı kayıtlı. [Kabul kaydı](docs/gorevler/trafik-kota-20261122.md)
 - [ ] WordPress staging’den seçili tema ve eklenti dosyalarının panelde önizleme, kuyruk ve geri alma akışı gerçek Debian 12 PHP-FPM, MariaDB ve Chromium’da doğrulandı. Farklı tablo önekleri, canlı WordPress yazısı ve korunan dosyalar denetlendi. `.28` yayın kabulü bekleniyor. [Kabul kaydı](docs/gorevler/linux-hosting-pilot.md#22-kasım--wordpress-staging-dosyalarının-panelden-aktarımı)
 
-## Önceki kabul matrisi
+## Ürün kabul kapıları
 
-Güncel devam noktası: [12 Ekim güvenli durma ve devam kaydı](docs/history/checkpoint-2026-10-12.md). Kullanıcı isteğiyle çalışma durdu; `.28` paket `0.3.0-2026101141`, 8143/8143 kaynak testi, native queue/recovery temiz. Kalan test kaynakları, commitlenmemiş dilimler ve kabul sınırları bu kayıtta; aşağıdaki eski ara sonuçlar güncel kabul diye kullanılmaz.
-
-9–10 Ekim 2026. Aşağıdaki tam kabul kapıları açık; önceki checkbox veya Code Factory DONE kanıt değildir. Kullanıcı bu tur `.28` üzerinde izole gerçek kur/deneyip/kaldır testlerini açıkça onayladı. 10 Ekim ürün geliştirmesi onaylandı ve başladı; 11 Ekim yalnız `.28` temiz OS/YunPanel kurulumu ayrıca onaylandı ve tamamlandı. Başka hedef veya yeni deployment kapsamı ayrı onaya tabidir. `.44` kesinlikle kullanılmaz. Gerçek test sonuçları ve kapı sınırları [audit](docs/history/audit-2026-10-09.md) içindedir; geçen alt test bütün kapıyı kapatmaz.
+9–10 Ekim 2026'da açıldı. Önceki checkbox veya Code Factory DONE kanıt değildir.
 
 Her senaryo: kaynak commit, çalışan API release, web asset/hash, tarih, rol, site/runtime, viewport, adımlar, beklenen/gerçek sonuç, okunabilir artifact ve fiziksel çıktı. Test parolası/cookie/token/private key raporda bulunmaz. Negatif, hata, restart ve rollback ayrı kaydedilir. Bu tur mutation izni var; yeni ortam veya mevcut kullanıcı verisini değiştiren kapsam için hedef/scope yeniden doğrulanır.
 
@@ -36,12 +32,11 @@ Her senaryo: kaynak commit, çalışan API release, web asset/hash, tarih, rol, 
 - [ ] **T-JOBS / YP2-12:** çift tık, kayıp POST, uzun job, reload/tarayıcı kapanışı, iki process yarışları, diske yazma/crash, stale confirmation ve reauthorization. Kör retry yok; Güvenli otomatik retry/backoff/kalıcı bütçe ve site-admin hata yayılımı `plan.md` içinde açık backend işleridir.
 - [ ] **T-ROLES / YP2-13/18:** bağlı site_manager hesap kapatma 409 hatasını gider; site verisini silmeden erişim/oturum/WS iptalini fiziksel doğrula.  doğru yönetim gateway yoluyla gerçek site consumption;  gerçek Owner, iki reseller, direct Owner customer, customer ve Site A/B; Files/DB/mail/job/log/backup/AI/tool/gateway/WS. Suspend/remove/logout/session rotation, quota ve veri içeren ownership migration/rollback. Sahipsiz kayda rastgele kullanıcı ataması yok.
 - [ ] **T-LIFECYCLE / YP2-15:** 409 veren hazır-site removal önizlemesi, DB credential delete, mailbox backup/delete ve eksik Docker project remove akışları; audit run mv1f65iv-90e268 kapalı artıklarını temizleme.  site/domain silme/askı/resume, sibling veri korunması, gerçek cron/Unix/runtime/env/file/DB/mail/SSL/DNS cleanup; kalıcı receipt, interruption/recovery ve kontenjanın güvenli bırakılması.
-  Alt kabul: temiz `.28` paket `0.3.0-2026101108` üzerinde değişmemiş, provisioning receipt sahibi PHP havuzu ve SFTP mount silmesi; kardeş PHP HTTP, aynı silme kaydından devam, dokuz test sitesinin Unix/dosya/Nginx/FPM/mount/DNS temizliği ve cold-start sonrası yokluğu geçti. SFTP motorunun sıfır anahtarlı yönetim dosyaları korunur; aktif anahtar yokluğu ayrıca doğrulandı. Ayar değişimi sonrası güncel kaynak adapter’ının `.28` izole testi geçti: normal PHP UI’sinde 8→9, ilk kurulum receipt’i + kayıtlı güncel havuzla silme, aynı operation replay’i, kardeş HTTP ve iki sitenin normal kaldırılması. Güncel kaynak paketiyle bütün silme akışının kabulü, PHP sürüm değişimi, imported pool, DB/mail bağımlılıkları ve tam kapı açık.
+  Alt kabul: temiz `.28` paketinde PHP havuzu, SFTP mount ve dokuz test sitesinin silme temizliği geçti; [ayrıntı](docs/history/todo-2026-11-26.md#11-ekim-2026--t-lifecycle--yp2-15-alt-kabul-kanıtı). Güncel kaynak paketiyle bütün silme akışının kabulü, PHP sürüm değişimi, imported pool, DB/mail bağımlılıkları ve tam kapı açık.
 - [ ] **T-RUNTIME:** Passenger/static/direct-systemd uyumluluğu, PHP multi-version, Python venv/Gunicorn, Docker Compose volume/env/network ve Git build/deploy/restart/rollback; workload dedicated Unix kullanıcıda. Panel durunca hosted servisler devam eder.
 - [ ] **T-SECURITY / T-DR:** auth/CSRF/MFA opsiyonel .28 politikası, Owner recovery mail, firewall/CrowdSec, port/allowlist, secret masking/master-key rotation ve private migration backup/restore. Paket upgrade/rollback, dpkg/Nginx/systemd sağlığı ve cold-start kalıcılığı.
 - [ ] **T-AI:** iki kullanıcı/iki site sohbet geçmişi/stream/tool yetkileri, cancel/reconnect, cursor/pagination, migration, kayıp cevap ve provider sınırı. AI kabulü hosting görevlerinin yerine geçmez.
 - [ ] **T-PARITY / T-PL / YP2-14:** [162 ID](docs/plesk-feature-parity.md) için gerçek endpoint + UI + host kanıtı. Windows/IIS/.NET/MSSQL ve premium/vendor hatları kendi ortamında; Linux mock veya unsupported adapter kabul değildir.
+- [ ] **T-WP / YP2-16:** gerçek veritabanı ile WordPress install/login/admin-password/plugin/theme/update/clone/staging/uninstall; iki PHP girişinin tek doğru amaca bağlanması. Core download geçti; uygulama kurulum/kullanım kabulü açık.
 
 Node >=24.11.1/npm >=11 tam lint/test/build uygulama diliminde çalıştırılır. Sonuçlar ve bağımsız review aynı candidate'a ait olmalı. Kök plan açık iş, bu belge dış kabul, Code Factory görev/run/event sonuç ve Git geçmişi eski belgelerin kaydıdır.
-
-- [ ] **T-WP / YP2-16:** gerçek veritabanı ile WordPress install/login/admin-password/plugin/theme/update/clone/staging/uninstall; iki PHP girişinin tek doğru amaca bağlanması. Core download geçti; uygulama kurulum/kullanım kabulü açık.
