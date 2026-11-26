@@ -37,6 +37,14 @@ function createMockApp({ panelSettingsService, userRole = 'owner' }) {
   return app;
 }
 
+// Yalnız 127.0.0.1'e bağlan: fetch aynı adrese gider, başka sürecin aynı portuna düşmez.
+function listenLocal(app) {
+  return new Promise((resolve, reject) => {
+    const server = app.listen(0, '127.0.0.1', () => resolve(server));
+    server.once('error', reject);
+  });
+}
+
 test('Panel Settings HTTP API', async (t) => {
   const mockService = {
     settingsData: {
@@ -57,7 +65,7 @@ test('Panel Settings HTTP API', async (t) => {
 
   await t.test('GET /api/panel/settings returns 200 and system settings for owner', async () => {
     const app = createMockApp({ panelSettingsService: mockService, userRole: 'owner' });
-    const server = app.listen(0);
+    const server = await listenLocal(app);
     const port = server.address().port;
 
     try {
@@ -73,7 +81,7 @@ test('Panel Settings HTTP API', async (t) => {
 
   await t.test('GET /api/settings (proxied path) returns 200 and system settings for owner', async () => {
     const app = createMockApp({ panelSettingsService: mockService, userRole: 'owner' });
-    const server = app.listen(0);
+    const server = await listenLocal(app);
     const port = server.address().port;
 
     try {
@@ -89,7 +97,7 @@ test('Panel Settings HTTP API', async (t) => {
 
   await t.test('GET /api/panel/settings returns 200 and system settings for read_only', async () => {
     const app = createMockApp({ panelSettingsService: mockService, userRole: 'read_only' });
-    const server = app.listen(0);
+    const server = await listenLocal(app);
     const port = server.address().port;
 
     try {
@@ -104,7 +112,7 @@ test('Panel Settings HTTP API', async (t) => {
 
   await t.test('PATCH /api/panel/settings updates settings and returns 200 for owner', async () => {
     const app = createMockApp({ panelSettingsService: mockService, userRole: 'owner' });
-    const server = app.listen(0);
+    const server = await listenLocal(app);
     const port = server.address().port;
 
     try {
@@ -123,7 +131,7 @@ test('Panel Settings HTTP API', async (t) => {
 
   await t.test('PATCH /api/panel/settings rejects read_only role with 403', async () => {
     const app = createMockApp({ panelSettingsService: mockService, userRole: 'read_only' });
-    const server = app.listen(0);
+    const server = await listenLocal(app);
     const port = server.address().port;
 
     try {
@@ -140,7 +148,7 @@ test('Panel Settings HTTP API', async (t) => {
 
   await t.test('GET /api/panel/settings rejects unauthenticated with 401', async () => {
     const app = createMockApp({ panelSettingsService: mockService, userRole: 'unauthenticated' });
-    const server = app.listen(0);
+    const server = await listenLocal(app);
     const port = server.address().port;
 
     try {
