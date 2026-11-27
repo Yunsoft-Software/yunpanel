@@ -19,6 +19,18 @@ const MAIL_REMOVAL_CHILD_STATUSES = new Set([
   'blocked', 'failed', 'removed',
 ]);
 const SAFE_REFERENCE_ID = /^[A-Za-z0-9._:@-]{1,160}$/;
+// A child that advanced one durable phase, or whose own job is still queued or
+// running, keeps the parent step running under the same approval (T966). Every
+// other child state, and any wait beyond the limit, still blocks for the Owner.
+const MAIL_REMOVAL_CHILD_PROGRESS_STATUSES = new Set([
+  'pending', 'disabling', 'cleaning', 'backing_up', 'deleting_data', 'finalizing',
+]);
+const MAIL_REMOVAL_CHILD_JOB_PENDING_CODES = new Set([
+  'mail_domain_removal_config_job_pending',
+  'mail_domain_removal_backup_job_pending',
+  'mail_domain_removal_data_delete_job_pending',
+]);
+const APPROVED_CHILD_WAIT_LIMIT_MS = 60 * 60 * 1000;
 
 export class DomainRemovalRuntimeError extends Error {
   constructor(code, message, status = 400) {
@@ -947,9 +959,11 @@ export function createDomainRemovalRuntime({
   roundcubeDomainMappingRegistry = null,
   roundcubeDomainMappingService = null,
   nginxManager = createNginxManager(),
+  now = Date.now,
 } = {}) {
   if (!registry || typeof registry.init !== 'function' || typeof registry.create !== 'function'
     || typeof registry.get !== 'function' || typeof registry.listForDomain !== 'function'
+    || typeof now !== 'function'
     || typeof registry.listInterrupted !== 'function' || typeof registry.markStepRunning !== 'function'
     || typeof registry.succeedStep !== 'function' || typeof registry.blockStep !== 'function'
     || typeof registry.failStep !== 'function'
@@ -1110,6 +1124,19 @@ export function createDomainRemovalRuntime({
       );
     }
     return Object.freeze({ operation, step, wasRunning });
+  }
+
+  // The step's updatedAt is set once when it starts running and is not touched
+  // while it waits, so it bounds how long one approval stays valid.
+  function withinApprovedChildWait(step) {
+    const startedAt = Date.parse(step.updatedAt);
+    return Number.isFinite(startedAt) && now() - startedAt <= APPROVED_CHILD_WAIT_LIMIT_MS;
+  }
+
+  function mailChildStillProgressing(step, child) {
+    return withinApprovedChildWait(step)
+      && (MAIL_REMOVAL_CHILD_PROGRESS_STATUSES.has(child.status)
+        || (child.status === 'blocked' && MAIL_REMOVAL_CHILD_JOB_PENDING_CODES.has(child.error?.code)));
   }
 
   async function blockControlPlaneStep(operation, step, error) {
@@ -1566,6 +1593,9 @@ export function createDomainRemovalRuntime({
         503,
       )));
     }
+    if (result.status !== 'removed' && mailChildStillProgressing(step, result)) {
+      return publicOperation(operation);
+    }
     if (result.status !== 'removed') {
       return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
         result.error?.code ?? 'domain_removal_mail_retry_required',
@@ -1706,6 +1736,7 @@ export function createDomainRemovalRuntime({
       )));
     }
     if (!state.actions?.continuation) {
+      if (withinApprovedChildWait(step)) return publicOperation(operation);
       return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
         'domain_removal_webmail_apply_pending',
         'Shared Roundcube mapping apply is still queued or running',
@@ -1734,6 +1765,10 @@ export function createDomainRemovalRuntime({
         step,
         webmailRemovalEvidence(operation, intent, next),
       ));
+    }
+    if (next?.state === 'removing' && exactOwnedWebmailRemoval(operation, intent, next)
+      && withinApprovedChildWait(step)) {
+      return publicOperation(operation);
     }
     return publicOperation(await blockControlPlaneStep(operation, step, new DomainRemovalRuntimeError(
       'domain_removal_webmail_apply_pending',
