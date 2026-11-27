@@ -10,10 +10,10 @@ Kapsam: kullanıcının açıkça istediği eski e2e test kalıntılarının tes
 | Durmuş `ypaudit_mw*-web-1` konteynerleri | 6 | 0 | Panel kaldırmasıyla gitti |
 | `ypaudit_mw*_default` ağları | 6 | 0 | Panel kaldırmasıyla gitti |
 | Sahipsiz `tdkr03_*` / `tdkr06_*` volume'ları | 16 | 0 | Docker CLI, yalnız tam adlarla |
-| `tdb04_*` veritabanları (şema + kayıt) | 24 | 3 | Panel silme akışı |
+| `tdb04_*` veritabanları (şema + kayıt) | 24 | 3 | Panel silme akışı; kalan 3 T968'e bağlı |
 | `tdb04_*` MariaDB kullanıcıları | 21 (3'ü zaten yoktu) | 0 | Panel kimlik bilgisi silme akışı |
-| Bağlantısız alan adları (`dom-test-6792.site`, `dom-test-6704.site`) | 2 | 2 | Bekliyor: senior kilidi boşalmadı |
-| Sahipsiz etkin Nginx dosyaları | 18 | 18 | Dokunulmadı (aşağıya bakın) |
+| Bağlantısız alan adları (`dom-test-6792.site`, `dom-test-6704.site`) | 2 | 0 | Panel kaldırma akışı (senior, kilit boşalınca) |
+| Sahipsiz etkin Nginx dosyaları | 18 | 0 | Yedek sonrası kaldırma, `nginx -t` + reload (senior) |
 | `staging/nginx` kök `.conf` dosyaları | 987 | 204 | Yedek sonrası tek tek silme |
 
 ## Ayrıntılar
@@ -30,14 +30,18 @@ Kapsam: kullanıcının açıkça istediği eski e2e test kalıntılarının tes
 - Bu kapsam dışında kalan `tdb02_*` (17) ve `tdb03_*` (6) veritabanları da aynı sitede duruyor. Dokunulmadı.
 
 ### Alan adları
-- Depoda `dom-test-6792.site` veya `dom-test-6704.site` bekleyen bir test yok. Yalnız `tasks/done/T872.md` notunda bir testi bozduğu için geçiyor.
-- Kaldırma yapılmadı. Bu adım Nginx'i yeniden yüklediği için `sunucu-28-3` kilidinin boşalması gerekiyordu ve kilit iş bitene kadar boşalmadı. İkisinin de kaldırma önizlemesi hazır, engel yok.
+- Depoda `dom-test-6792.site` veya `dom-test-6704.site` bekleyen bir test yok; yalnız `tasks/done/T872.md` notunda geçiyor. Önizlemede engel yoktu.
+- T883 koşusu bitip kilit boşalınca ikisi de panelin kaldırma akışıyla silindi (`removed`).
 
-### Sahipsiz etkin Nginx dosyaları (18): dokunulmadı
-- Görevin ön koşulu "denetim kayıtlarında hiç geçmemesi" idi. Bu koşul sağlanmadı: her dosyanın alan adı 5–9 kayıt dosyasında geçiyor.
-- Geçtikleri yerler: tamamlanmış (`removed`) alan adı ve site kaldırma günlükleri, `retired` sertifika kayıtları (tdkr04 ve teml09), sunucu envanteri ve site kurulum geçmişi. Canlı alan adı veya site kaydında hiçbiri yok.
-- **Ürün bulgusu:** Bu sitelerin kaldırılması panelde `removed` olarak bitmiş, ama etkin Nginx dosyası `sites-enabled` içinde kalmış.
-- Silinmeleri için senior'ın ön koşulu "canlı alan adı/site kaydında yok" olarak daraltması gerekiyor.
+### Sahipsiz etkin Nginx dosyaları (18): kaldırıldı
+- Alan adları yalnız tamamlanmış (`removed`) kaldırma günlüklerinde, `retired` sertifika kayıtlarında ve geçmiş envanterde geçiyor; canlı alan adı veya site kaydında yok. Senior ön koşulu "canlı alan adı/site kaydında yok" olarak daralttı ve hemen öncesinde yeniden doğruladı.
+- Önce yedeklendi (`nginx-enabled/sites-enabled-orphans.tar.gz`, sha256 `98bb94f5b45308d585bfdbe62367f1143338320b206b685728aa4d432a04025b`), sonra kaldırıldı; `nginx -t` başarılı, `nginx` yeniden yüklendi. Ana siteler ve panel öncesinde ve sonrasında 200.
+- **Ürün bulgusu (T970):** Bu sitelerin kaldırılması panelde `removed` olarak bitmiş, ama etkin Nginx dosyası `sites-enabled` içinde kalmıştı (2–9 Kasım sürümleri).
+
+### Ayrıca
+- 26 Kasım'da kopan tls-01 koşusunun bıraktığı `ttls01-a1-mwxqi5xm` sitesi ve senior'ın durdurduğu ilk T883 koşusunun bıraktığı `ypaudit-t887-dns-hosting-cr-w1-…` sitesi panelin silme akışıyla kaldırıldı.
+- Son okumada `ypaudit-` önekli site, alan adı, uygulama, DNS bölgesi, posta alan adı, yedek deposu, nginx dosyası ve Unix kullanıcısı 0.
+- Ürün bulguları: T968 (başka oturumda başlayan kimlik bilgisi silmesi sonlandırılamıyor), T969 (Compose volume'ları), T970 (nginx hazırlık ve etkin dosya artıkları).
 
 ### Nginx hazırlık dizini
 - Ürün bu dizini etkinleştirme için okuyor. `deactivation/` ve `rollback/` alt dizinleri olduğu gibi kaldı. Alan adı kaldırılınca hazırlık dosyası silinmiyor. Bu da birikmenin nedeni (**ürün bulgusu**).
