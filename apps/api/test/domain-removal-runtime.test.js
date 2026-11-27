@@ -7,6 +7,8 @@ import test from 'node:test';
 import { createNginxManager } from '@yunpanel/host-runtime';
 
 import { createDomainRemovalOperationRegistry } from '../src/domains/domain-removal-operation-registry.js';
+import { createMailDomainRemovalOperationRegistry } from '../src/mail/mail-domain-removal-operation-registry.js';
+import { createMailDomainRemovalRuntime } from '../src/mail/mail-domain-removal-runtime.js';
 import {
   createDomainRemovalRuntime,
   domainRemovalRuntimeInternals,
@@ -2833,3 +2835,275 @@ test('routing step suspends an unpublished draft or failed Domain directly throu
 }
 });
 
+
+// T966: the real Mail Domain removal runtime executes one durable phase per call
+// and reports a still-active job as blocked "*_job_pending". The parent step must
+// keep one approved continuation valid until that child finishes or truly stops.
+function phasedMailRemovalRuntime({ backupPendingSweeps = 2, divert = null } = {}) {
+  let clock = Date.parse('2026-09-18T20:40:00.000Z');
+  const registry = createMailDomainRemovalOperationRegistry({
+    now: () => clock++,
+    idFactory: () => 'mail-removal-operation-1',
+  });
+  const cleanupPlan = {
+    version: 2,
+    mailDomainId: 'mail-domain-1',
+    mailboxes: [],
+    aliases: [],
+    quotas: [],
+    forwardings: [],
+    dkim: null,
+    mailData: { present: false, bytes: 0, snapshotSha256: 'd'.repeat(64) },
+    disableConfiguration: { previewDigest: 'e'.repeat(64), configurationSha256: 'f'.repeat(64) },
+  };
+  const evidence = (overrides = {}) => ({
+    disableJobId: 'mail-config-job-1',
+    finalRevision: 6,
+    cleanupEvidenceDigest: '5'.repeat(64),
+    dataDeleteJobId: 'mail-delete-job-1',
+    backupId: 'mail-backup-job-1',
+    ...overrides,
+  });
+  const outcome = (operation, disposition, details) => ({
+    version: 1,
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    fromStatus: operation.status,
+    disposition,
+    sideEffects: true,
+    ...details,
+  });
+  const advance = (operation, status, values) => outcome(operation, 'advance', { status, evidence: values });
+  let backupInspections = 0;
+  const history = [];
+  const runtime = createMailDomainRemovalRuntime({
+    registry,
+    previewProvider: async ({ mailDomainId, parentOperationId }) => {
+      assert.equal(mailDomainId, 'mail-domain-1');
+      return {
+        ...mailDomainRemovalPreview({ parentOperationId }),
+        cleanupPlan,
+        planDigest: createHash('sha256').update(JSON.stringify(cleanupPlan)).digest('hex'),
+      };
+    },
+    stepExecutor: async (operation) => {
+      const diverted = divert?.(operation, outcome);
+      if (diverted) return diverted;
+      if (operation.status === 'pending') {
+        return advance(operation, 'disabling', evidence({
+          disableJobId: null, finalRevision: null, cleanupEvidenceDigest: null, dataDeleteJobId: null, backupId: null,
+        }));
+      }
+      if (operation.status === 'disabling') {
+        return advance(operation, 'cleaning', evidence({ cleanupEvidenceDigest: null, dataDeleteJobId: null, backupId: null }));
+      }
+      if (operation.status === 'cleaning') {
+        return advance(operation, 'backing_up', evidence({ dataDeleteJobId: null, backupId: null }));
+      }
+      if (operation.status === 'backing_up' && operation.backupId === null) {
+        return advance(operation, 'backing_up', evidence({ dataDeleteJobId: null }));
+      }
+      if (operation.status === 'backing_up') {
+        backupInspections += 1;
+        if (backupInspections <= backupPendingSweeps) {
+          return outcome(operation, 'blocked', { error: {
+            code: 'mail_domain_removal_backup_job_pending',
+            message: 'Mail Domain backup job is still active',
+          } });
+        }
+        return advance(operation, 'deleting_data', evidence({ dataDeleteJobId: null }));
+      }
+      if (operation.status === 'deleting_data' && operation.dataDeleteJobId === null) {
+        return advance(operation, 'deleting_data', evidence());
+      }
+      if (operation.status === 'deleting_data') return advance(operation, 'finalizing', evidence());
+      return outcome(operation, 'removed', { deletedAt: '2026-09-18T21:30:00.000Z' });
+    },
+    stepInspector: async () => { throw new Error('startup inspection is not part of this flow'); },
+  });
+  return {
+    runtime: {
+      preview: runtime.preview,
+      start: async (input) => { const value = await runtime.start(input); history.push(value.status); return value; },
+      retry: async (input) => { const value = await runtime.retry(input); history.push(value.status); return value; },
+      listForMailDomain: runtime.listForMailDomain,
+    },
+    history: () => [...history],
+  };
+}
+
+// Mirrors the Website removal worker: one Owner approval starts the step, then
+// sweeps continue only while the Domain operation is still running (never blocked).
+async function approveOnceThenSweep(runtime, operation, stepIndex, { maxSweeps = 40 } = {}) {
+  const continuation = (current) => ({
+    domainId: current.domainId,
+    operationId: current.id,
+    expectedUpdatedAt: current.updatedAt,
+    stepId: current.steps[stepIndex].id,
+    checksum: current.checksum,
+    confirmation: current.actions?.stepContinuationConfirmation
+      ?? `continue-domain-remove-step:${current.domainId}:${current.id}:${current.steps[stepIndex].id}:${current.updatedAt}:${current.checksum}`,
+  });
+  let current = await runtime.continueStep(continuation(operation));
+  const stepStatuses = [current.steps[stepIndex].status];
+  let sweeps = 0;
+  while (current.steps[stepIndex].status === 'running' && sweeps < maxSweeps) {
+    sweeps += 1;
+    current = await runtime.continueStep(continuation(current));
+    stepStatuses.push(current.steps[stepIndex].status);
+  }
+  return { operation: current, stepStatuses, sweeps };
+}
+
+test('T966: one approval completes local Mail Domain removal while child phases and backup job finish later', async () => {
+  const registry = createRegistry();
+  const preview = mailRemovalPreview();
+  const operation = await completeRoutingStep(registry, preview);
+  const domains = domainRegistryFixture();
+  const mail = phasedMailRemovalRuntime({ backupPendingSweeps: 2 });
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => preview,
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domains.manager,
+    mailDomainRemovalRuntime: mail.runtime,
+    now: () => Date.parse('2026-09-18T20:45:00.000Z'),
+  });
+
+  const result = await approveOnceThenSweep(runtime, operation, 1);
+
+  assert.equal(result.operation.steps[1].kind, 'mail_domain');
+  assert.equal(result.operation.steps[1].status, 'succeeded');
+  assert.equal(result.operation.steps[1].result.referenceId, 'mail-removal-operation-1');
+  assert.equal(result.stepStatuses.includes('blocked'), false);
+  assert.deepEqual(mail.history(), [
+    'disabling', 'cleaning', 'backing_up', 'backing_up', 'blocked', 'blocked',
+    'deleting_data', 'deleting_data', 'finalizing', 'removed',
+  ]);
+  assert.equal(result.operation.steps[2].kind, 'website_binding');
+});
+
+test('T966: a failed Mail Domain child phase still blocks the approved step', async () => {
+  const registry = createRegistry();
+  const preview = mailRemovalPreview();
+  const operation = await completeRoutingStep(registry, preview);
+  const domains = domainRegistryFixture();
+  const mail = phasedMailRemovalRuntime({
+    divert: (child, outcome) => (child.status === 'cleaning'
+      ? outcome(child, 'failed', { error: {
+        code: 'mail_domain_removal_mailbox_drift',
+        message: 'Mailbox credential state changed after removal approval',
+      } })
+      : null),
+  });
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => preview,
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domains.manager,
+    mailDomainRemovalRuntime: mail.runtime,
+    now: () => Date.parse('2026-09-18T20:45:00.000Z'),
+  });
+
+  const result = await approveOnceThenSweep(runtime, operation, 1);
+
+  assert.equal(result.operation.steps[1].status, 'blocked');
+  assert.equal(result.operation.steps[1].error.code, 'mail_domain_removal_mailbox_drift');
+  assert.deepEqual(mail.history(), ['disabling', 'cleaning', 'failed']);
+});
+
+test('T966: Domain drift while the Mail Domain child is still running blocks before another child call', async () => {
+  const registry = createRegistry();
+  const preview = mailRemovalPreview();
+  let operation = await completeRoutingStep(registry, preview);
+  const domains = domainRegistryFixture();
+  const mail = phasedMailRemovalRuntime();
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => preview,
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domains.manager,
+    mailDomainRemovalRuntime: mail.runtime,
+    now: () => Date.parse('2026-09-18T20:45:00.000Z'),
+  });
+
+  operation = await runtime.continueStep({
+    domainId: operation.domainId,
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    stepId: operation.steps[1].id,
+    checksum: operation.checksum,
+    confirmation: `continue-domain-remove-step:${operation.domainId}:${operation.id}:${operation.steps[1].id}:${operation.updatedAt}:${operation.checksum}`,
+  });
+  assert.equal(operation.steps[1].status, 'running');
+  domains.removeDomain();
+
+  const result = await approveOnceThenSweep(runtime, operation, 1);
+
+  assert.equal(result.operation.steps[1].status, 'blocked');
+  assert.equal(result.operation.steps[1].error.code, 'domain_removal_mail_domain_drift');
+  assert.deepEqual(mail.history(), ['disabling']);
+});
+
+test('T966: a Mail Domain job pending past the approved wait limit asks for a new continuation', async () => {
+  const registry = createRegistry();
+  const preview = mailRemovalPreview();
+  const operation = await completeRoutingStep(registry, preview);
+  const domains = domainRegistryFixture();
+  const mail = phasedMailRemovalRuntime({ backupPendingSweeps: 1_000 });
+  let clock = Date.parse('2026-09-18T20:45:00.000Z');
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => preview,
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domains.manager,
+    mailDomainRemovalRuntime: mail.runtime,
+    now: () => { clock += 10 * 60 * 1000; return clock; },
+  });
+
+  const result = await approveOnceThenSweep(runtime, operation, 1);
+
+  assert.equal(result.operation.steps[1].status, 'blocked');
+  assert.equal(result.operation.steps[1].error.code, 'mail_domain_removal_backup_job_pending');
+  assert.ok(result.sweeps < 40);
+});
+
+test('T966: one approval completes Webmail mapping removal after its Roundcube apply job finishes', async () => {
+  const registry = createRegistry();
+  const preview = webmailRemovalPreview();
+  let operation = await completeRoutingStep(registry, preview);
+  operation = await registry.markStepRunning(operation.id, operation.steps[1].id);
+  operation = await registry.succeedStep(operation.id, operation.steps[1].id, {
+    referenceId: 'certificate-1',
+    evidenceDigest: '6'.repeat(64),
+  });
+  const domains = domainRegistryFixture({ certificateId: null });
+  const webmail = webmailLifecycleFixture();
+  let jobSweeps = 0;
+  const service = {
+    ...webmail.service,
+    // The apply job is still queued for two sweeps, so no continuation is offered yet.
+    async inspect(id) {
+      const state = await webmail.service.inspect(id);
+      jobSweeps += 1;
+      return jobSweeps <= 2 ? { ...state, actions: { continuation: null } } : state;
+    },
+  };
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => preview,
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domains.manager,
+    roundcubeDomainMappingRegistry: webmail.registry,
+    roundcubeDomainMappingService: service,
+    now: () => Date.parse('2026-09-18T20:45:00.000Z'),
+  });
+
+  const result = await approveOnceThenSweep(runtime, operation, 2);
+
+  assert.equal(result.operation.steps[2].kind, 'webmail_mapping');
+  assert.equal(result.operation.steps[2].status, 'succeeded');
+  assert.equal(result.stepStatuses.includes('blocked'), false);
+  assert.equal(webmail.counts().beginCalls, 1);
+  assert.equal(webmail.counts().continueCalls, 1);
+});
