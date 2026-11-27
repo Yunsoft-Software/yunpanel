@@ -86,7 +86,7 @@ Her iş tek satır olarak [yapılanlar](yapilanlar.md) içinde. Öne çıkanlar:
 
 ## 5. Test sunucusu (`.28`)
 
-- Panel: `https://server.cryptoraichu.website`. SSH takma adı `yunpanel-test` (root). Adres ve giriş bilgisi yalnız `.local/test-server.env` ve `.local/yunpanel-owner-password-only.json`'da; Git'e, rapora veya loga yazılmaz.
+- Panel adresi, SSH takma adı (`yunpanel-test`, root) ve giriş bilgisi yalnız `.local/test-server.env` ve `.local/yunpanel-owner-password-only.json`'da; Git'e, rapora veya loga yazılmaz.
 - **`.44` (gerçek Plesk sunucusu): yasak.** Juniorlar hiç girmez. Senior yalnız İNSAN'ın açtığı oturumda, salt okunur bakar.
 - **Kilitler:** Kurallar [PROJE.md](orkestra/PROJE.md) "İzinli test hedefleri" bölümündedir. Canlı işten önce boş bir `sunucu-28-1/2/3` kilidi alınır (`bash orkestra/lock.sh acquire sunucu-28-1 AGENT_n`). Sunucu geneli işler ayrıca `sunucu-28-genel` ister. API yeniden başlatmak veya paket kurmak çalışan testleri keser; o sırada başka canlı iş olmamalı. Kilitler yalnız `lock.sh` ile alınıp bırakılır.
 - Yerleşim: API `/usr/lib/yunpanel` (127.0.0.1:3001), web arayüzü `/usr/share/yunpanel/web` (**`apps/web/dist` değil**), kayıtlar `/var/lib/yunpanel/control-plane/*.json`, gizli ayarlar `/etc/yunpanel`.
@@ -119,7 +119,7 @@ Her iş tek satır olarak [yapılanlar](yapilanlar.md) içinde. Öne çıkanlar:
 - Test sitelerinin adı `t<alan><nn>[ek]-…` ya da `ypaudit-…` biçimindedir.
 - Listele: `node e2e/tools/remove-test-sites.mjs` · sil: `--apply` (isteğe bağlı ad öneki). Araç panelin kendi silme akışını kullanır.
 - Silmeden önce bir `sunucu-28-*` kilidi al; başka görevin sitelerini silme.
-- Silme denemelerinde gerçekten çözümlenen bir ad kullan (`….157.180.11.28.sslip.io`). `.example.internal` gibi adlarda üst alan DNSSEC durumu doğrulanamaz ve silme durur.
+- Silme denemelerinde gerçekten çözümlenen bir ad kullan (test sunucusunun IP'siyle `….<ip>.sslip.io`). `.example.internal` gibi adlarda üst alan DNSSEC durumu doğrulanamaz ve silme durur.
 
 ## 9. Açık işler
 
