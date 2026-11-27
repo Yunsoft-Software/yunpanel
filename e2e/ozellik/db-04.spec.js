@@ -12,82 +12,90 @@ test.describe('DB-04 phpMyAdmin geçişi ve oturum/yetki izolasyonu', () => {
   let testServerId = null;
   let createdWebsiteId = null;
 
+  // Removes the database this run created through the panel's own flow:
+  // credential delete + finalize, binding backup, database delete + finalize.
   test.afterAll(async ({ browser }) => {
+    test.setTimeout(300000);
     const context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     try {
       await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
-
-      const sessionRes = await page.request.get('/api/auth/session');
-      const sessionJson = await sessionRes.json().catch(() => ({}));
-      const csrf = sessionJson.data?.csrfToken;
-      const headers = { 'Content-Type': 'application/json', 'x-csrf-token': csrf };
-
-      let serverId = testServerId;
-      if (!serverId) {
-        const serversRes = await page.request.get('/api/panel/servers', { headers });
-        if (serversRes.status() === 200) {
-          const serversJson = await serversRes.json();
-          serverId = serversJson.data?.servers?.[0]?.id || serversJson.data?.[0]?.id;
+      const origin = new URL(page.url()).origin;
+      const csrf = (await (await page.request.get('/api/auth/session')).json().catch(() => ({}))).data?.csrfToken;
+      const headers = { 'Content-Type': 'application/json', 'x-csrf-token': csrf, Origin: origin };
+      const call = async (method, path, data) => {
+        const res = await page.request.fetch(`/api/panel${path}`, { method, headers, data });
+        return { status: res.status(), data: (await res.json().catch(() => ({})))?.data };
+      };
+      const waitJob = async (jobId) => {
+        for (let i = 0; jobId && i < 120; i++) {
+          const job = (await call('GET', `/jobs/${encodeURIComponent(jobId)}`)).data;
+          if (['succeeded', 'failed', 'cancelled'].includes(job?.status)) return job;
+          await new Promise((r) => setTimeout(r, 1000));
         }
-      }
+        return null;
+      };
 
-      if (serverId) {
-        const websitesRes = await page.request.get(`/api/panel/servers/${encodeURIComponent(serverId)}/websites`, { headers });
-        const websitesList = (await websitesRes.json().catch(() => ({})))?.data?.websites || [];
-        for (const w of websitesList) {
-          const resourcesRes = await page.request.get(
-            `/api/panel/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(w.id)}/database-resources`,
-            { headers }
-          );
-          if (resourcesRes.status() === 200) {
-            const resourcesJson = await resourcesRes.json();
-            const databases = resourcesJson.data?.databases || [];
-            const targets = databases.filter((d) => d.binding?.databaseName?.startsWith(`tdb04_a${agentN}_`));
+      // The panel lists servers as an array; the second test falls back to the 'local' alias, which these routes do not accept.
+      const servers = (await call('GET', '/servers')).data;
+      const serverId = servers?.servers?.[0]?.id || servers?.[0]?.id;
+      if (!serverId) return;
+      const server = `/servers/${encodeURIComponent(serverId)}`;
+      const websiteIds = createdWebsiteId
+        ? [createdWebsiteId]
+        : ((await call('GET', '/websites')).data || []).map((w) => w.id);
 
-            for (const matched of targets) {
-              const credential = matched.credential;
-              if (credential) {
-                const prevRes = await page.request.get(
-                  `/api/panel/servers/${encodeURIComponent(serverId)}/database-credentials/${encodeURIComponent(credential.id)}/delete-preview`,
-                  { headers }
-                );
-                if (prevRes.status() === 200) {
-                  const prevJson = await prevRes.json();
-                  const preview = prevJson.data;
-                  if (preview) {
-                    const qRes = await page.request.post(
-                      `/api/panel/servers/${encodeURIComponent(serverId)}/database-credentials/${encodeURIComponent(credential.id)}/delete`,
-                      {
-                        headers,
-                        data: {
-                          expectedCredentialRevision: preview.expectedCredentialRevision,
-                          expectedBindingRevision: preview.expectedBindingRevision,
-                          expectedDesiredStateSha256: preview.desiredStateSha256,
-                          confirmation: preview.confirmation,
-                        },
-                      }
-                    );
-                    if (qRes.status() === 202) {
-                      const qJson = await qRes.json();
-                      const jobId = qJson.data?.job?.id;
-                      if (jobId) {
-                        for (let i = 0; i < 30; i++) {
-                          await new Promise((r) => setTimeout(r, 1000));
-                          const jRes = await page.request.get(`/api/panel/jobs/${encodeURIComponent(jobId)}`, { headers });
-                          if (jRes.status() === 200) {
-                            const jJson = await jRes.json();
-                            if (['succeeded', 'failed', 'cancelled'].includes(jJson.data?.status)) break;
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
+      for (const websiteId of websiteIds) {
+        const resources = await call('GET', `${server}/websites/${encodeURIComponent(websiteId)}/database-resources`);
+        const matched = (resources.data?.databases || []).find((d) => d.binding?.databaseName === targetDatabaseName);
+        if (!matched) continue;
+        const { binding, credential } = matched;
+
+        if (credential) {
+          const credentialPath = `${server}/database-credentials/${encodeURIComponent(credential.id)}`;
+          const preview = (await call('GET', `${credentialPath}/delete-preview`)).data;
+          const queued = await call('POST', `${credentialPath}/delete`, {
+            expectedCredentialRevision: preview?.expectedCredentialRevision,
+            expectedBindingRevision: preview?.expectedBindingRevision,
+            expectedDesiredStateSha256: preview?.desiredStateSha256,
+            confirmation: preview?.confirmation,
+          });
+          const job = await waitJob(queued.data?.job?.id);
+          if (job?.status !== 'succeeded') throw new Error(`credential delete ${queued.status} ${job?.status}`);
+          await call('DELETE', credentialPath, {
+            expectedRevision: credential.revision,
+            deleteJobId: job.id,
+            confirmation: `finalize-database-credential-delete:${credential.id}:${credential.revision}:${job.id}`,
+          });
         }
+
+        const bindingPath = `${server}/websites/${encodeURIComponent(websiteId)}/database-bindings/${encodeURIComponent(binding.id)}`;
+        let preview = (await call('GET', `${bindingPath}/delete-preview`)).data;
+        if (preview?.exists && !preview.backup) {
+          const queued = await call('POST', `${bindingPath}/backup`, {
+            expectedBindingRevision: binding.revision,
+            confirmation: `backup-website-database:${binding.id}:${binding.revision}`,
+          });
+          const job = await waitJob(queued.data?.job?.id);
+          if (job?.status !== 'succeeded') throw new Error(`database backup ${queued.status} ${job?.status}`);
+          preview = (await call('GET', `${bindingPath}/delete-preview`)).data;
+        }
+        if (!preview?.readyToDelete) throw new Error(`database delete blocked: ${(preview?.blockers || []).join(',')}`);
+        const queued = await call('POST', `${bindingPath}/delete`, {
+          expectedBindingRevision: binding.revision,
+          expectedPreviewDigest: preview.previewDigest,
+          expectedBackupId: preview.backup.backupId,
+          expectedBackupSha256: preview.backup.dumpSha256,
+          confirmation: preview.confirmation,
+        });
+        const job = await waitJob(queued.data?.job?.id);
+        if (job?.status !== 'succeeded') throw new Error(`database delete ${queued.status} ${job?.status}`);
+        const finalized = await call('POST', `${bindingPath}/delete-finalize`, {
+          expectedBindingRevision: binding.revision,
+          deleteJobId: job.id,
+          confirmation: `finalize-website-database-delete:${binding.id}:${binding.revision}:${job.id}`,
+        });
+        if (finalized.status !== 200) throw new Error(`database delete finalize ${finalized.status}`);
       }
     } catch (cleanupErr) {
       console.warn('DB-04 cleanup error:', cleanupErr.message);

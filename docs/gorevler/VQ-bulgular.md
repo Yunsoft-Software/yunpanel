@@ -2200,3 +2200,33 @@
     ℹ duration_ms 238.05475
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T968 · Başka oturumda başlatılmış veritabanı kimlik bilgisi silme işi tamamlanamıyor
+- **Bağımlı:** —
+- **Dosyalar:** `apps/api/src/jobs/job-registry.js`, `apps/api/src/databases/database-credential-http.js`
+- **Kaynak:** QA · 2026-11-28 01:33
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    Bir Owner oturumu credential delete işini başlatıp sonlandırmadan (finalize) ayrılırsa, aynı Owner yeni oturumda aynı silmeyi başlatınca 409 job_authorization_conflict alıyor: idempotency anahtarı eski oturumun yetki kapsamına bağlı (job-registry.js assertSameWork, sessionId karşılaştırması). Sonuç: .28'de tdb04_a3_mvqgctuk, tdb04_a3_mw50g4j5, tdb04_a3_mw518gcu panelden silinemiyor; MariaDB kullanıcıları yok, şema/binding/credential kayıtları duruyor. Beklenen: aynı kullanıcı ve aynı iş için oturum farkı engel olmamalı ya da arayüz önceki başarılı işten sonlandırmayı sunmalı. Önce testle tekrar üret.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T969 · Compose projesi kaldırılınca adlı volume'lar panelden yönetilemez kalıyor
+- **Bağımlı:** —
+- **Dosyalar:** `apps/api/src/docker`
+- **Kaynak:** QA · 2026-11-28 01:33
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    Docker Compose projesi panelden kaldırıldığında adlı volume'lar sunucuda kalıyor. Volume silme yalnız proje içinden (/docker/projects/:id/volumes/delete) yapılabildiği için proje gidince bu volume'lar panelde görünmüyor ve silinemiyor. .28'de 6 Kasım'da kaldırılan projelerden 16 volume kaldı (28 Kasım'da CLI ile silindi). Beklenen: kaldırma önizlemesi volume'ları açıkça listeleyip 'volume'ları da sil' seçeneği sunmalı ya da sahipsiz volume'lar panelde görünmeli.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T970 · Nginx hazırlık dosyaları silinen sitelerden sonra birikiyor
+- **Bağımlı:** T892, T966
+- **Dosyalar:** `packages/host-runtime/src/nginx-manager.js`, `apps/api/src/domains/domain-removal-runtime.js`
+- **Kaynak:** QA · 2026-11-28 01:33
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    /var/lib/yunpanel/staging/nginx içindeki hazırlık (staged) .conf dosyaları alan adı veya site silindikten sonra hiç temizlenmiyor; .28'de 987 dosya birikmişti (784'ü 28 Kasım'da yedeklenip elle kaldırıldı). Ayrıca 2–9 Kasım'da 'removed' olarak kapanan 18 site silmesinin sites-enabled içindeki etkin .conf dosyası kalmış. Beklenen: alan adı silme işlemi kendi staged dosyasını ve etkin yapılandırmasını kaldırmalı; mevcut sürümde yeniden üretilip üretilmediği önce kontrol edilmeli.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.

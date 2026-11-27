@@ -625,8 +625,26 @@ async function ensureTopology(page, via = 'api') {
   record('three-sites-ready', { via, distinctNonRootUids: true, distinctReleases: true, exactHttpMarkers: true }); state.provisioned = true; save();
 }
 
+// The Free license refuses reseller accounts; verify that gate and skip only the Premium continuation.
+let premiumGateSkip = null;
+async function verifyResellerPremiumGate() {
+  const probe = await apiContext();
+  try {
+    const license = await call(probe, 'GET', '/api/panel/license'); expect(license.status).toBe(200);
+    if (license.data?.valid === true && license.data?.capabilities?.resellerAccounts === true) return null;
+    const username = 'ypaudit-t888-gate-' + randomBytes(4).toString('hex');
+    const refused = await call(probe, 'POST', ACCOUNTS + '/create-login', { username, password: randomBytes(30).toString('base64url'), kind: 'reseller', limits: { maxCustomers: 1, maxWebsites: 2 } });
+    expect(refused.status).toBe(403); expect(refused.body?.error?.code).toBe('premium_license_required'); expect(refused.body?.error?.capability).toBe('resellerAccounts');
+    const resellers = await call(probe, 'GET', ACCOUNTS + '?kind=reseller&limit=100'); expect(resellers.status).toBe(200);
+    expect((resellers.data?.accounts ?? []).some(a => a.username === username)).toBe(false);
+    return 'YunPanel Premium etkin değil (resellerAccounts): kapı doğrulandı, Premium gerektiren devam adımı atlandı';
+  } finally { await probe.api.dispose(); }
+}
+
 test.describe('Owned reseller customer site isolation and revocation', () => {
   test.beforeAll(async ({}, info) => {
+    premiumGateSkip = await verifyResellerPremiumGate();
+    test.skip(Boolean(premiumGateSkip), premiumGateSkip ?? '');
     phase4Prefix = 'native20-phase4-' + info.project.name.replace(/[^a-z0-9]/gi, '').slice(0, 12).toLowerCase();
     expect(fs.existsSync(phase4Artifact('suite', 'STARTED'))).toBe(false); expect(fs.existsSync(phase4Artifact('suite', 'KEEP'))).toBe(false);
     phase4Durable('suite', 'STARTED', { version: 1, policy: 'normal-owner-dual-persistent-http1', at: new Date().toISOString(), automaticRetry: false });
@@ -650,6 +668,7 @@ test.describe('Owned reseller customer site isolation and revocation', () => {
     } else phase4CompletedCases++;
   });
   test.afterAll(async () => {
+    if (premiumGateSkip) return;
     test.setTimeout(360000);
     const complete = phase4CompletedCases === 3 && !phase4Hold && phase4Inflight.size === 0 && phase4Rows.every(v => v.responseKnown) && pendingActions.every(v => v.proof.outcome === 'KNOWN');
     phase4Active = false; phase4Closed = true; if (!complete) phase4Keep('suite-incomplete');
