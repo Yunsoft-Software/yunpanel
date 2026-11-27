@@ -2230,3 +2230,33 @@
     /var/lib/yunpanel/staging/nginx içindeki hazırlık (staged) .conf dosyaları alan adı veya site silindikten sonra hiç temizlenmiyor; .28'de 987 dosya birikmişti (784'ü 28 Kasım'da yedeklenip elle kaldırıldı). Ayrıca 2–9 Kasım'da 'removed' olarak kapanan 18 site silmesinin sites-enabled içindeki etkin .conf dosyası kalmış. Beklenen: alan adı silme işlemi kendi staged dosyasını ve etkin yapılandırmasını kaldırmalı; mevcut sürümde yeniden üretilip üretilmediği önce kontrol edilmeli.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T971 · Doğrulama: tasks_lint — 297 tasks
+- **Bağımlı:** —
+- **Dosyalar:** —
+- **Kaynak:** QA · 2026-11-28 02:17
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    297 tasks
+    WARN T805: no Dosyalar line
+    WARN T806: no Dosyalar line
+    WARN T807: no Dosyalar line
+    WARN T808: no Dosyalar line
+    WARN T809: no Dosyalar line
+    WARN T810: no Dosyalar line
+    WARN T814: no Dosyalar line
+    WARN T815: no Dosyalar line
+    WARN T816: no Dosyalar line
+    WARN T858: no Dosyalar line
+    WARN T862: no Dosyalar line
+    WARN T914: no Dosyalar line
+    WARN T915: no Dosyalar line
+    WARN T918: no Dosyalar line
+    WARN T919: no Dosyalar line
+    WARN T948: no Dosyalar line
+    WARN T950: no Dosyalar line
+    WARN T963: no Dosyalar line
+    WARN T946: no Dosyalar line
+    ERROR unordered writers of e2e/live-audit/13-native-source-mutation.spec.js: T905, T967
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
