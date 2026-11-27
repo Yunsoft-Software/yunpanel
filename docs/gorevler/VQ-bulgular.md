@@ -2229,4 +2229,16 @@
 
     /var/lib/yunpanel/staging/nginx içindeki hazırlık (staged) .conf dosyaları alan adı veya site silindikten sonra hiç temizlenmiyor; .28'de 987 dosya birikmişti (784'ü 28 Kasım'da yedeklenip elle kaldırıldı). Ayrıca 2–9 Kasım'da 'removed' olarak kapanan 18 site silmesinin sites-enabled içindeki etkin .conf dosyası kalmış. Beklenen: alan adı silme işlemi kendi staged dosyasını ve etkin yapılandırmasını kaldırmalı; mevcut sürümde yeniden üretilip üretilmediği önce kontrol edilmeli.
 
+    Ek (28 Kasım, T883 incelemesi): aynı artık deseni `staging/website-hosting-restore` altındaki bitmiş geri yükleme klasörlerinde (38) ve panelin `retired` yaptığı sertifikaların certbot kayıtlarında (`/etc/letsencrypt/{live,archive,renewal}`, 5; yenileme zamanlayıcısı açık) da görüldü. Hepsi yedeklenip elle kaldırıldı (`docs/gorevler/kalinti-temizlik-20261128.md`).
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T971 · Site silme yedek kaynak klasörünü bırakıyor
+- **Bağımlı:** —
+- **Dosyalar:** `apps/api/src/backup`, `apps/api/src/websites`
+- **Kaynak:** QA · 2026-11-28 02:41
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    Silinen bir test sitesinin /var/lib/yunpanel/backups/resources/website/<websiteId> klasörü (veritabanı ön-geri-yükleme dökümleri, posta sanal eşlemesi, posta verisi) site silindikten sonra kaldı; .28'de 12 Kasım'dan kalan bir klasör 28 Kasım'da yedeklenip elle kaldırıldı. Beklenen: site silme kendi yedek kaynak klasörünü ya kaldırmalı ya da bilinçli tutuyorsa panelde görünür ve silinebilir olmalı. Önce mevcut sürümde tekrar üret.
+
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.

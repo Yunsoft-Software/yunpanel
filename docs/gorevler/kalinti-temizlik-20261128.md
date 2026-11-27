@@ -62,3 +62,13 @@ Kapsam: kullanıcının açıkça istediği eski e2e test kalıntılarının tes
 - Neden kalıntı bırakıyordu: temizlik kodu var olmayan `/api/panel/servers/:id/websites` yolunu kullanıyordu (404). Bu yüzden hiçbir siteyi bulamıyor ve hiçbir şey silmiyordu. Bulsa bile yalnız kimlik bilgisi silme işini kuyruğa koyuyordu. Sonlandırma, yedek ve veritabanı silme adımları yoktu. Değişiklik isteklerinde `Origin` başlığı da gönderilmiyordu. Ayrıca ikinci test sunucu kimliği olarak bu yolların kabul etmediği `local` değerini saklıyordu.
 - Düzeltme (`e2e/ozellik/db-04.spec.js`, yalnız `afterAll`): çalışmanın oluşturduğu tam veritabanı adını, seçilen siteden ya da `/api/panel/websites` listesinden buluyor. Sonra panelin silme akışını uyguluyor: kimlik bilgisi silme ve sonlandırma, yedek, veritabanı silme ve sonlandırma. Başarısız adım uyarı olarak loglanıyor. Testlerin doğrulamaları değişmedi.
 - `npm run lint` geçti. `node --check` ve `playwright --list` sorunsuz. Test `.28` üzerinde koşulmadı. phpMyAdmin kurulum adımı olduğu için senior kilidinin boşalması bekleniyordu.
+
+## REV5 incelemesi sonrası ek temizlik (28 Kasım)
+T883 incelemesi, `.28`'de sertifika ve hazırlık dosyalarında `ypaudit-` artığı buldu. Dosya sisteminin tamamında ad taraması yapıldı; bulunanlar aynı yedek klasörüne alınıp kaldırıldı:
+- 5 Let's Encrypt sertifikası (`certbot delete`; panelde `retired`): `letsencrypt-ypaudit.tar.gz`.
+- 1.793 `ypaudit-` nginx hazırlık dosyası (kök, `deactivation/`, `rollback/`): `staging-ypaudit.tar.gz`, liste `staging-ypaudit-list.txt`.
+- 38 bitmiş geri yükleme hazırlık klasörü (`staging/website-hosting-restore`): `hosting-restore-ypaudit.tar.gz`.
+- Silinmiş test sitelerinin 1.680 nginx log dosyası: `nginx-logs-ypaudit.tar.gz`.
+- Silinmiş test sitesinin yedek kaynak klasörü (`backups/resources/website/e598f78e-…`): ayrı tar; bulgu T971.
+
+Son tarama: dosya sisteminde, MariaDB'de, PowerDNS'te, systemd/PHP-FPM'de ve Docker'da `ypaudit` adlı öğe yok. `nginx -t` başarılı, servisler aktif. SHA-256 değerleri `tasks/review/T883.md`'de.
