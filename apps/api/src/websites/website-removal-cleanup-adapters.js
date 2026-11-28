@@ -1,4 +1,5 @@
 import { lstat, rm } from 'node:fs/promises';
+import path from 'node:path';
 import { createNodeServiceRemovalManager, createWebsitePathContract } from '@yunpanel/host-runtime';
 import { createNodeDeploymentReceiptStore } from '../applications/node-deployment-receipt.js';
 import { createWebsitePassengerEnvironmentManager } from '@yunpanel/host-runtime/website-passenger-environment-manager';
@@ -14,6 +15,19 @@ export class WebsiteRemovalCleanupAdapterError extends Error {
 
 function unavailable(code, message) {
   throw new WebsiteRemovalCleanupAdapterError(code, message, 409);
+}
+
+const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+// Website backup and restore staging root (website-backup-set.js stagedRoot).
+// Restic repositories live elsewhere and are never touched by Website removal.
+const DEFAULT_BACKUP_RESOURCE_ROOT = createWebsitePathContract({
+  websiteId: '00000000-0000-4000-8000-000000000000', applicationId: '00000000-0000-4000-8000-000000000001',
+}).backup.artifactRoot;
+
+function validBackupResourceRoot(value) {
+  return typeof value === 'string' && path.posix.isAbsolute(value)
+    && path.posix.normalize(value) === value && value.split('/').filter(Boolean).length >= 2
+    && !value.endsWith('/');
 }
 
 async function absentOrDirectory(target, lstatFn) {
@@ -37,6 +51,7 @@ export function createWebsiteRemovalCleanupAdapters({
   passengerEnvironmentManager = createWebsitePassengerEnvironmentManager(),
   nodeServiceRemovalManager = createNodeServiceRemovalManager(),
   nodeDeploymentReceiptStore = createNodeDeploymentReceiptStore(),
+  backupResourceRoot = DEFAULT_BACKUP_RESOURCE_ROOT,
   lstatFn = lstat,
   rmFn = rm,
 } = {}) {
@@ -48,7 +63,8 @@ export function createWebsiteRemovalCleanupAdapters({
     || !nodeServiceRemovalManager || typeof nodeServiceRemovalManager.inspectRemoval !== 'function'
     || typeof nodeServiceRemovalManager.removeService !== 'function'
     || !nodeDeploymentReceiptStore || typeof nodeDeploymentReceiptStore.read !== 'function'
-    || typeof lstatFn !== 'function' || typeof rmFn !== 'function') {
+    || typeof lstatFn !== 'function' || typeof rmFn !== 'function'
+    || !validBackupResourceRoot(backupResourceRoot)) {
     throw new WebsiteRemovalCleanupAdapterError(
       'website_removal_cleanup_dependencies_invalid',
       'Website removal cleanup dependencies are invalid',
@@ -542,8 +558,38 @@ export function createWebsiteRemovalCleanupAdapters({
     ]);
   }
 
+  // Backup/restore staging for exactly this Website: <root>/website/<websiteId>.
+  // Every managed component is checked without following symlinks, and anything
+  // other than a real directory stops removal before a recursive delete.
+  async function backupResourceTarget(websiteId) {
+    if (typeof websiteId !== 'string' || !UUID_PATTERN.test(websiteId)) {
+      unavailable('website_cleanup_backup_resource_scope_invalid', 'Website backup resource identity is invalid');
+    }
+    const websitesRoot = path.posix.join(backupResourceRoot, 'website');
+    const target = path.posix.join(websitesRoot, websiteId);
+    if (path.posix.dirname(target) !== websitesRoot || path.posix.basename(target) !== websiteId) {
+      unavailable('website_cleanup_backup_resource_scope_invalid', 'Website backup resource path is outside its root');
+    }
+    for (const component of [backupResourceRoot, websitesRoot, target]) {
+      if (await absentOrDirectory(component, lstatFn)) return Object.freeze({ target, present: false });
+    }
+    return Object.freeze({ target, present: true });
+  }
+
+  async function removeBackupResources(websiteId) {
+    const resource = await backupResourceTarget(websiteId);
+    if (!resource.present) return 0;
+    // fs.rm removes symlinks inside the folder as links; it never follows them.
+    await rmFn(resource.target, { recursive: true, force: false, maxRetries: 0 });
+    if ((await backupResourceTarget(websiteId)).present) {
+      unavailable('website_cleanup_backup_resource_unverified', 'Website backup resource folder is still present');
+    }
+    return 1;
+  }
+
   async function inspectFileCleanup({ websiteId, applicationId } = {}) {
     const { website, application } = await currentTarget(websiteId, applicationId, { allowExternalProxy: true });
+    await backupResourceTarget(websiteId);
     if (application === null) return Object.freeze({ ready: true, websiteId, applicationId, targets: Object.freeze([]) });
     const targets = canonicalFileCleanupTargets(websiteId, applicationId);
     for (const target of targets) await absentOrDirectory(target, lstatFn);
@@ -558,9 +604,10 @@ export function createWebsiteRemovalCleanupAdapters({
       unavailable('website_cleanup_retained_scope_invalid', 'Retained backup or log scope is invalid');
     }
     if (applicationId === null) {
+      const removedResources = await removeBackupResources(websiteId);
       return Object.freeze({ websiteId, applicationId,
         retainedBackups: Object.freeze([...retainedBackups]), retainedLogScopes: Object.freeze([...retainedLogScopes]),
-        filesCleaned: true, cleanedFilesCount: 0 });
+        filesCleaned: true, cleanedFilesCount: removedResources });
     }
     const { website } = await currentTarget(websiteId, applicationId);
     const source = await ownedIdentitySource({ websiteId, systemUser: website.unixUser });
@@ -577,6 +624,7 @@ export function createWebsiteRemovalCleanupAdapters({
       }
       removed += 1;
     }
+    removed += await removeBackupResources(websiteId);
     return Object.freeze({
       websiteId,
       applicationId,
