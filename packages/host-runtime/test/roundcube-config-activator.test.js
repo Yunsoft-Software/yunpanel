@@ -113,7 +113,7 @@ function enoent() {
   return Object.assign(new Error('missing'), { code: 'ENOENT' });
 }
 
-function fixture({ existingDatabase = false, failFirstFpmValidation = false, failFirstNginxConflict = false, groups = 'yunpanel-roundcube www-data', curlFailures = 0 } = {}) {
+function fixture({ existingDatabase = false, failFirstFpmValidation = false, failFirstNginxConflict = false, groups = 'yunpanel-roundcube www-data', curlFailures = 0, cleandbDropIn = null } = {}) {
   const calls = [];
   const state = {
     databaseExists: existingDatabase,
@@ -188,7 +188,8 @@ function fixture({ existingDatabase = false, failFirstFpmValidation = false, fai
     if (target === '/var/lib/yunpanel/roundcube' || target === roundcubeTemplatePolicy.temporaryDirectory) {
       return directory({ uid: 2001, gid: 2001, mode: 0o700 });
     }
-    if (target === '/etc/roundcube' || target === '/etc/php/8.3/fpm/pool.d' || target === '/etc/nginx/sites-enabled') {
+    if (target === '/etc/roundcube' || target === '/etc/php/8.3/fpm/pool.d' || target === '/etc/nginx/sites-enabled'
+      || target === '/etc/systemd/system/roundcube-cleandb.service.d') {
       return directory();
     }
     if (target === '/stage/config.inc.php') return file({ mode: 0o600, size: CONFIG.length });
@@ -212,12 +213,17 @@ function fixture({ existingDatabase = false, failFirstFpmValidation = false, fai
     lstatFn,
     sleepFn: async (ms) => { calls.push(['sleep', ms]); },
     readFileFn: async (target) => {
+      if (target.endsWith('/yunpanel-runtime-user.conf')) {
+        if (cleandbDropIn === null) throw enoent();
+        return cleandbDropIn;
+      }
       if (target.includes('config.inc')) return CONFIG;
       if (target.includes('nginx')) return NGINX;
       return FPM;
     },
-    writeFileFn: async () => {},
-    renameFn: async () => {},
+    writeFileFn: async (target, content) => { calls.push(['write', target, String(content)]); },
+    renameFn: async (from, to) => { calls.push(['rename', from, to]); },
+    mkdirFn: async (target, options) => { calls.push(['mkdir', target, options?.mode]); },
     rmFn: async (target) => {
       calls.push(['rm', target]);
       if (target === roundcubeTemplatePolicy.databasePath) state.databaseExists = false;
@@ -316,4 +322,32 @@ test('an endpoint that stays unhealthy still fails activation and restores the p
     (error) => error.code === 'roundcube_http_health_failed',
   );
   assert.equal(fx.state.restored, true);
+});
+
+test('activation runs the packaged Roundcube cleandb timer as the managed runtime user (T973)', async () => {
+  const fx = fixture({ existingDatabase: true });
+  await fx.activator.activateConfiguration(preview(), { transactionId: TX });
+  const target = '/etc/systemd/system/roundcube-cleandb.service.d/yunpanel-runtime-user.conf';
+  const write = fx.calls.find((entry) => entry[0] === 'write' && entry[1].startsWith(`${target}.`));
+  assert.ok(write, 'the drop-in is written atomically');
+  assert.match(write[2], /^\[Service\]$/m);
+  assert.match(write[2], /^User=yunpanel-roundcube$/m);
+  assert.match(write[2], /^Group=yunpanel-roundcube$/m);
+  assert.ok(fx.calls.some((entry) => entry[0] === 'rename' && entry[2] === target));
+  assert.ok(fx.calls.some((entry) => entry[0] === 'chown' && entry[1].startsWith(`${target}.`) && entry[2] === 0 && entry[3] === 0));
+  const reload = fx.calls.findIndex((entry) => entry[0] === 'run' && entry[1] === '/usr/bin/systemctl' && entry[2][0] === 'daemon-reload');
+  const renamed = fx.calls.findIndex((entry) => entry[0] === 'rename' && entry[2] === target);
+  assert.ok(reload > renamed, 'systemd reloads after the drop-in is in place');
+});
+
+
+test('an unchanged cleandb drop-in is not rewritten and systemd is not reloaded (T973)', async () => {
+  const target = '/etc/systemd/system/roundcube-cleandb.service.d/yunpanel-runtime-user.conf';
+  const first = fixture({ existingDatabase: true });
+  await first.activator.activateConfiguration(preview(), { transactionId: TX });
+  const content = first.calls.find((entry) => entry[0] === 'write' && entry[1].startsWith(`${target}.`))[2];
+  const again = fixture({ existingDatabase: true, cleandbDropIn: content });
+  await again.activator.activateConfiguration(preview(), { transactionId: TX });
+  assert.equal(again.calls.some((entry) => entry[0] === 'write' && entry[1].startsWith(`${target}.`)), false);
+  assert.equal(again.calls.some((entry) => entry[0] === 'run' && entry[1] === '/usr/bin/systemctl' && entry[2][0] === 'daemon-reload'), false);
 });

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { chmod, chown, lstat, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, chown, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import {
@@ -34,6 +34,12 @@ const NGINX_MODE = 0o640;
 const DATABASE_MODE = 0o600;
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const SOCKET_MODE = 0o660;
+// T973: the Debian roundcube-cleandb.timer runs as www-data, which cannot read the managed
+// configuration or SQLite database. A drop-in runs it as the managed Roundcube runtime user.
+const CLEANDB_DROPIN_DIRECTORY = '/etc/systemd/system/roundcube-cleandb.service.d';
+const CLEANDB_DROPIN_PATH = `${CLEANDB_DROPIN_DIRECTORY}/yunpanel-runtime-user.conf`;
+const CLEANDB_DROPIN_MODE = 0o644;
+const SYSTEMD_DIRECTORY_MODE = 0o755;
 
 export class RoundcubeConfigActivationError extends Error {
   constructor(code, message) {
@@ -119,6 +125,7 @@ export function createRoundcubeConfigActivator({
   renameFn = rename,
   rmFn = rm,
   writeFileFn = writeFile,
+  mkdirFn = mkdir,
   sleepFn = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   socketTimeoutMs = 5_000,
 } = {}) {
@@ -221,6 +228,25 @@ export function createRoundcubeConfigActivator({
       try { await rmFn(temporaryPath, { force: true }); } catch {}
       throw error;
     }
+  }
+
+  function cleandbDropIn() {
+    const user = roundcubeFpmTemplatePolicy.runtimeUser;
+    return `# Managed by YunPanel: Roundcube uses its own runtime user and database.\n[Service]\nUser=${user}\nGroup=${user}\n`;
+  }
+
+  async function ensureCleandbRuntimeUser() {
+    const content = cleandbDropIn();
+    await mkdirFn(CLEANDB_DROPIN_DIRECTORY, { recursive: true, mode: SYSTEMD_DIRECTORY_MODE });
+    const directory = await lstatFn(CLEANDB_DROPIN_DIRECTORY);
+    if (!directory.isDirectory() || directory.isSymbolicLink() || directory.uid !== ROOT_UID) {
+      throw activationError('roundcube_cleandb_dropin_unsafe', 'Roundcube cleanup unit directory is unsafe');
+    }
+    let current = null;
+    try { current = String(await readFileFn(CLEANDB_DROPIN_PATH, 'utf8')); } catch (error) { if (error?.code !== 'ENOENT') throw error; }
+    if (current === content) return;
+    await atomicReplace(CLEANDB_DROPIN_PATH, content, { uid: ROOT_UID, gid: ROOT_GID, mode: CLEANDB_DROPIN_MODE });
+    await runCommand(SYSTEMCTL, ['daemon-reload'], 'roundcube_cleandb_reload_failed', 'systemd could not reload the Roundcube cleanup unit');
   }
 
   async function inspectDatabase(runtimeIdentity) {
@@ -467,6 +493,7 @@ export function createRoundcubeConfigActivator({
       await reloadFpm();
       await assertFpmSocket(wwwIdentity, true);
       await reloadNginx();
+      await ensureCleandbRuntimeUser();
       await assertHttpHealthy(expected);
       return Object.freeze({
         version: 1,
@@ -512,6 +539,7 @@ export const roundcubeConfigActivatorInternals = Object.freeze({
   databaseMode: DATABASE_MODE,
   privateDirectoryMode: PRIVATE_DIRECTORY_MODE,
   socketMode: SOCKET_MODE,
+  cleandbDropInPath: CLEANDB_DROPIN_PATH,
   validatePreview,
   boundedOutput,
 });
