@@ -415,6 +415,12 @@ export function createWebsiteBackupOperationRegistry({
     resticManager = null, resticRepositoryRegistry = null, receiptStore = null,
     websiteRegistry = null, websiteBackupSetProvider = null, jobRegistry = null, siteMutationLock = null, databaseBackupAdapter = null, mailBackupAdapter = null, environmentBackupAdapter = null, dnsBackupAdapter = null, hostingBackupAdapter = null,
   } = {}) {
+    // T970: a recovered restore that is terminal no longer needs its hosting
+    // staging folder; cleanup never changes the recovered result.
+    async function cleanupHostingRestoreStaging(operationId) {
+      if (typeof hostingBackupAdapter?.cleanupOperationStaging !== 'function') return;
+      try { await hostingBackupAdapter.cleanupOperationStaging(operationId); } catch { /* left for the operator */ }
+    }
     const candidates = await listOperations();
     const reconciled = [];
     for (const publicOperation of candidates) {
@@ -485,11 +491,13 @@ export function createWebsiteBackupOperationRegistry({
                 await clearStagedRoot(backupSet);
               }
               await receiptStore.write({ ...receipt, status: 'rolled_back', rollbackReason: 'interrupted_by_restart_rollback_recovered' });
+              await cleanupHostingRestoreStaging(op.id);
               return { status: 'rolled_back', preRestoreSnapshotId: receipt.preRestoreSnapshotId,
                 result: { status: 'rolled_back', websiteId: op.websiteId, snapshotId: op.snapshotId, preRestoreSnapshotId: receipt.preRestoreSnapshotId, rollbackReason: 'interrupted_by_restart_rollback_recovered' },
                 restartEvidence: { status: 'recovered_via_rollback', reconciledAt: now() } };
             }
             if (['succeeded', 'rolled_back'].includes(receipt.status) && (receipt.status !== 'succeeded' || receipt.healthCheck?.satisfied === true)) {
+              await cleanupHostingRestoreStaging(op.id);
               return { status: receipt.status, preRestoreSnapshotId: receipt.preRestoreSnapshotId,
                 result: { status: receipt.status, websiteId: op.websiteId, snapshotId: op.snapshotId, preRestoreSnapshotId: receipt.preRestoreSnapshotId, healthCheck: receipt.healthCheck, rollbackReason: receipt.rollbackReason },
                 restartEvidence: { status: 'reconciled_from_receipt', reconciledAt: now() } };

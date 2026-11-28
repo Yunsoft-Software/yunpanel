@@ -411,3 +411,70 @@ test('native backup worker rejects another actor or resource before any host ope
   assert.equal(calls.executeBackup.length, 0);
   assert.equal((await registry.getOperation(op.id)).status, 'queued');
 });
+
+// T970: startup recovery that ends a restore as rolled_back (or reconciles a
+// terminal receipt) removes that operation's hosting restore staging folder.
+test('T970: restore recovery removes only the recovered operation hosting staging folder', async (t) => {
+  const { mkdtemp, mkdir, rm, writeFile, access } = await import('node:fs/promises');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { createWebsiteHostingBackupAdapter } = await import('../src/backup/website-hosting-backup-adapter.js');
+  const root = await mkdtemp(path.join(os.tmpdir(), 't970-recovery-staging-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const stagingRoot = path.join(root, 'website-hosting-restore');
+  const hostingBackupAdapter = createWebsiteHostingBackupAdapter({
+    websiteRegistry: { getWebsite: async () => null },
+    domainRegistry: { getDomain: async () => null },
+    applicationRegistry: { getApplication: async () => null },
+    certificateRegistry: { getCertificate: async () => null },
+    runtimeBindingRegistry: { getBinding: async () => null },
+    dockerComposeProjectRegistry: { getProject: async () => null },
+    configRoot: path.join(root, 'sites'),
+    stagingRoot,
+  });
+  const seed = async (id) => {
+    await mkdir(path.join(stagingRoot, id, 'rollback', 'domain-1'), { recursive: true });
+    await writeFile(path.join(stagingRoot, id, 'rollback', 'domain-1', 'yunpanel-example.com.conf'), '# staged\n');
+  };
+  const exists = (id) => access(path.join(stagingRoot, id)).then(() => true, () => false);
+
+  for (const receiptStatus of ['pre_restore_created', 'succeeded']) {
+    const registry = createWebsiteBackupOperationRegistry();
+    const op = await registry.createOperation({
+      websiteId, serverId, repositoryId, kind: 'restore', snapshotId: 'snap-1', previewDigest, confirmation: 'restore-confirm',
+    });
+    await registry.updateOperation(op.id, { status: 'running' });
+    const otherId = '0f9e8d7c-6b5a-4c3d-8e2f-1a0b9c8d7e6f';
+    await seed(op.id);
+    await seed(otherId);
+    const transactionId = websiteRestoreTransactionId({ websiteId, previewDigest, operationId: op.id });
+    const receipts = new Map([[transactionId, {
+      status: receiptStatus,
+      websiteId, snapshotId: 'snap-1', repositoryId, previewDigest,
+      rollbackPaths: ['/var/lib/yunpanel/data/site-one'],
+      preRestoreSnapshotId: 'pre-snap-recovery-1',
+      ...(receiptStatus === 'succeeded' ? { healthCheck: { satisfied: true } } : {}),
+    }]]);
+    const reconciled = await registry.reconcileInterruptedOperations({
+      resticManager: {
+        async listSnapshots() { return [{ id: 'pre-snap-recovery-1', tags: [`website:${websiteId}`, 'pre-restore', `tx:${transactionId}`] }]; },
+        async restore() {},
+      },
+      resticRepositoryRegistry: {
+        async getRepository(id) { return { id, serverId, target: '/var/backups/repo' }; },
+        async revealPassword() { return 'secret-pass'; },
+      },
+      receiptStore: {
+        async read(key) { return receipts.get(key) ?? null; },
+        async write(record) { receipts.set(record.transactionId ?? transactionId, record); },
+      },
+      websiteRegistry: { getWebsite: async () => ({ id: websiteId, serverId }) },
+      websiteBackupSetProvider: { getWebsiteBackupSet: async () => ({ targetPaths: ['/var/lib/yunpanel/data/site-one'] }) },
+      siteMutationLock: { withSiteLock: async (_identity, action) => action() },
+      hostingBackupAdapter,
+    });
+    assert.equal(reconciled[0].status, receiptStatus === 'succeeded' ? 'succeeded' : 'rolled_back');
+    assert.equal(await exists(op.id), false, receiptStatus);
+    assert.equal(await exists(otherId), true);
+  }
+});

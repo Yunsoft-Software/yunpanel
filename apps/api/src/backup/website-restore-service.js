@@ -260,6 +260,15 @@ export function createWebsiteRestoreService({
     });
   }
 
+  // T970: the hosting adapter stages Nginx configs and activation receipts
+  // under <stagingRoot>/<operationId>. After the terminal receipt is written
+  // they are no longer needed; a failed rollback keeps them for recovery.
+  // Cleanup is hygiene after a durable result and never changes that result.
+  async function cleanupHostingRestoreStaging(operationId) {
+    if (!operationId || typeof hostingBackupAdapter?.cleanupOperationStaging !== 'function') return;
+    try { await hostingBackupAdapter.cleanupOperationStaging(operationId); } catch { /* left for the operator */ }
+  }
+
   async function executeRestore({
     websiteId, repositoryId, snapshotId, expectedPreviewDigest, confirmation,
     healthPath = '/', timeoutSeconds = 30, include = [], executionJobId = null, operationId = null,
@@ -355,6 +364,7 @@ export function createWebsiteRestoreService({
         );
       }
       await resolvedReceiptStore.write({ ...journal, status: 'rolled_back', rollbackReason: reason, healthCheck });
+      await cleanupHostingRestoreStaging(operationId);
       return Object.freeze({
         status: 'rolled_back',
         websiteId: website.id,
@@ -400,6 +410,7 @@ export function createWebsiteRestoreService({
       catch { healthCheck = { satisfied: false, statusCode: null, attempts: 1, error: 'Website health check could not complete' }; }
       if (healthCheck?.satisfied !== true) return await rollback('health_check_failed', 'health_check', healthCheck);
       await resolvedReceiptStore.write({ ...journal, status: 'succeeded', healthCheck });
+      await cleanupHostingRestoreStaging(operationId);
       return Object.freeze({ status: 'succeeded', websiteId: website.id, snapshotId: preview.snapshotId, preRestoreSnapshotId: preRestore.snapshotId,
         selective: preview.selective, include: [...preview.include], healthCheck, restoredAt: new Date().toISOString() });
     } finally {

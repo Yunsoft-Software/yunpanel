@@ -1,5 +1,5 @@
 import {createHash} from 'node:crypto';
-import {chmod,lstat,mkdir,readFile,rename,writeFile} from 'node:fs/promises';
+import {chmod,lstat,mkdir,readFile,rename,rm,writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {createNginxManager,createPhpFpmSiteManager} from '@yunpanel/host-runtime';
 import {createServiceUmaskManager} from '@yunpanel/host-runtime/service-umask-manager';
@@ -11,6 +11,7 @@ import {materializeApplicationPassengerMigrationDomainEnvelope} from '../applica
 const fail=code=>Object.assign(new Error('Site barındırma yedeği güvenli biçimde doğrulanamadı'),{code,status:409});
 const digest=value=>createHash('sha256').update(value).digest('hex');
 const within=(value,root)=>value===root||value.startsWith(root+'/');
+const OPERATION_ID=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 export function createWebsiteHostingBackupAdapter({websiteRegistry,domainRegistry,applicationRegistry,certificateRegistry,
  runtimeBindingRegistry,dockerComposeProjectRegistry,provisioningRegistry=null,
  phpFpmSiteManager=createPhpFpmSiteManager(),serviceUmaskManager=createServiceUmaskManager(),
@@ -87,7 +88,7 @@ export function createWebsiteHostingBackupAdapter({websiteRegistry,domainRegistr
  }
  async function restore({backupSet,include,operationId,rollback=false}){
   const entries=selected(backupSet,include);if(!entries.length)return[];
-  if(!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(operationId??''))throw fail('website_hosting_restore_operation_invalid');
+  if(!OPERATION_ID.test(operationId??''))throw fail('website_hosting_restore_operation_invalid');
   await assertSupported(backupSet,include);const results=[];
   for(const entry of entries){
    let context=await scope(backupSet,entry);const saved=codec.decode(context.identity,await protectedFile(context.metadata));
@@ -145,5 +146,19 @@ export function createWebsiteHostingBackupAdapter({websiteRegistry,domainRegistr
   }
   return results;
  }
- return Object.freeze({capture,assertSupported,restore,configured:codec.configured});
+ // T970: once a restore operation is succeeded or rolled_back its staged
+ // configs and activation receipts under <stagingRoot>/<operationId> have no
+ // further use. Only that exact real directory is removed; a symlink stops.
+ async function cleanupOperationStaging(operationId){
+  if(!OPERATION_ID.test(operationId??''))throw fail('website_hosting_restore_operation_invalid');
+  const root=path.posix.resolve(stagingRoot);
+  if(!path.posix.isAbsolute(stagingRoot)||root==='/')throw fail('website_hosting_restore_staging_unsafe');
+  const target=path.posix.join(root,operationId);
+  let metadata;
+  try{metadata=await lstat(target);}catch(error){if(error?.code==='ENOENT')return false;throw error;}
+  if(!metadata.isDirectory()||metadata.isSymbolicLink())throw fail('website_hosting_restore_staging_unsafe');
+  await rm(target,{recursive:true,force:true});
+  return true;
+ }
+ return Object.freeze({capture,assertSupported,restore,cleanupOperationStaging,configured:codec.configured});
 }

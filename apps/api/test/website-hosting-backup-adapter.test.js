@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash,randomUUID} from 'node:crypto';
-import {mkdtemp,readFile,writeFile,rm,mkdir,access} from 'node:fs/promises';
+import {mkdtemp,readFile,writeFile,rm,mkdir,access,symlink} from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {createNginxManager,createResticManager,createWebsiteRestoreReceiptStore,createWebsiteTrafficEnforcer} from '@yunpanel/host-runtime';
@@ -475,4 +475,30 @@ test('real Restic backup and restore round-trip preserves traffic-guarded Nginx 
   expectedPreviewDigest:restorePreview.previewDigest,confirmation:restorePreview.confirmation,include:['hosting'],operationId:randomUUID()});
  assert.equal(restored.status,'succeeded');
  assert.equal(await readFile(f.entry.configPath,'utf8'),original);
+});
+
+// T970: a finished restore operation owns `<stagingRoot>/<operationId>` and
+// must remove exactly that folder; other operations' folders stay.
+test('T970: cleanupOperationStaging removes only the finished restore operation staging folder',async t=>{
+ const f=await fixture(t);await f.adapter.capture(f.backupSet,f.entry);await f.change();
+ const finished=randomUUID(),other=randomUUID(),stagingRoot=path.join(f.root,'transactions');
+ await f.adapter.restore({backupSet:f.backupSet,include:f.select,operationId:finished});
+ await f.change();await f.adapter.restore({backupSet:f.backupSet,include:f.select,operationId:other});
+ const exists=async target=>access(target).then(()=>true,()=>false);
+ assert.equal(await exists(path.join(stagingRoot,finished,'apply',f.domain.id)),true);
+ const active=await readFile(f.entry.configPath,'utf8');
+
+ assert.equal(await f.adapter.cleanupOperationStaging(finished),true);
+ assert.equal(await exists(path.join(stagingRoot,finished)),false);
+ assert.equal(await exists(path.join(stagingRoot,other,'apply',f.domain.id)),true);
+ assert.equal(await readFile(f.entry.configPath,'utf8'),active);
+ assert.equal(await f.adapter.cleanupOperationStaging(finished),false);
+ await assert.rejects(f.adapter.cleanupOperationStaging('../active'),e=>e.code==='website_hosting_restore_operation_invalid');
+});
+test('T970: cleanupOperationStaging never follows a symlinked operation folder',async t=>{
+ const f=await fixture(t),stagingRoot=path.join(f.root,'transactions'),outside=path.join(f.root,'outside'),operationId=randomUUID();
+ await mkdir(outside);await writeFile(path.join(outside,'keep'),'keep');await mkdir(stagingRoot,{recursive:true});
+ await symlink(outside,path.join(stagingRoot,operationId));
+ await assert.rejects(f.adapter.cleanupOperationStaging(operationId),e=>e.code==='website_hosting_restore_staging_unsafe');
+ assert.equal(await readFile(path.join(outside,'keep'),'utf8'),'keep');
 });
