@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { lstat, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   nginxConfigFileName,
@@ -156,6 +156,7 @@ function createNginxManagerInstance({
   enableTrafficLimitGuard = false,
   mkdirFn = mkdir,
   readFileFn = readFile,
+  readdirFn = readdir,
   lstatFn = lstat,
   realpathFn = realpath,
   writeFileFn = writeFile,
@@ -897,6 +898,93 @@ function createNginxManagerInstance({
     return runLocked(() => rollbackDeactivationNow(input));
   }
 
+  async function regularFile(targetPath) {
+    let metadata;
+    try { metadata = await lstatFn(targetPath); }
+    catch (error) {
+      if (error?.code === 'ENOENT') return null;
+      throw new NginxManagerError('nginx_artifact_inspection_failed', 'Nginx artifact could not be inspected');
+    }
+    return metadata.isFile() && !metadata.isSymbolicLink();
+  }
+
+  async function retireOwnedReceipts(directory, { primaryDomain, configName }) {
+    let names;
+    try { names = await readdirFn(directory); }
+    catch (error) {
+      if (error?.code === 'ENOENT') return { removed: 0, kept: 0 };
+      throw new NginxManagerError('nginx_artifact_inspection_failed', 'Nginx receipt directory could not be inspected');
+    }
+    const prefix = `${configName}.`;
+    let removed = 0;
+    let kept = 0;
+    for (const name of names) {
+      if (!name.startsWith(prefix) || !name.endsWith('.json')) continue;
+      const checksum = name.slice(prefix.length, -'.json'.length);
+      if (!CHECKSUM_PATTERN.test(checksum)) continue;
+      const receiptPath = path.join(directory, name);
+      // Only a regular receipt that names this exact Domain and config is
+      // owned; symlinks, unreadable or foreign receipts stay for an operator.
+      if (await regularFile(receiptPath) !== true) { kept += 1; continue; }
+      let value;
+      try { value = JSON.parse(await readFileFn(receiptPath, 'utf8')); }
+      catch { kept += 1; continue; }
+      if (!value || typeof value !== 'object' || Array.isArray(value)
+        || value.primaryDomain !== primaryDomain || value.configName !== configName) {
+        kept += 1;
+        continue;
+      }
+      await rmFn(receiptPath, { force: true });
+      removed += 1;
+    }
+    return { removed, kept };
+  }
+
+  // Called only after a Domain removal has finalized its control-plane record.
+  // It never touches an active config: suspended Domains still need their
+  // deactivation receipt to resume, and an active file may belong to a newer
+  // Domain with the same name.
+  async function retireRemovedDomainArtifactsNow({ primaryDomain } = {}) {
+    const configName = configNameForDomain(primaryDomain);
+    const activePath = path.join(sitesDir, configName);
+    const active = await captureFile(activePath, 'nginx_artifact_inspection_failed');
+    if (active.exists) {
+      return Object.freeze({
+        retired: false,
+        reason: 'nginx_artifacts_active',
+        configName,
+        removed: Object.freeze({ staged: false, rollbackReceipts: 0, deactivationReceipts: 0 }),
+        kept: 0,
+      });
+    }
+    const stagePath = path.join(stagingDir, configName);
+    let staged = false;
+    let kept = 0;
+    const stagedIsFile = await regularFile(stagePath);
+    if (stagedIsFile === true) {
+      await rmFn(stagePath, { force: true });
+      staged = true;
+    } else if (stagedIsFile === false) {
+      kept += 1;
+    }
+    const rollback = await retireOwnedReceipts(rollbackDir, { primaryDomain, configName });
+    const deactivation = await retireOwnedReceipts(deactivationDir, { primaryDomain, configName });
+    return Object.freeze({
+      retired: true,
+      configName,
+      removed: Object.freeze({
+        staged,
+        rollbackReceipts: rollback.removed,
+        deactivationReceipts: deactivation.removed,
+      }),
+      kept: kept + rollback.kept + deactivation.kept,
+    });
+  }
+
+  function retireRemovedDomainArtifacts(input) {
+    return runLocked(() => retireRemovedDomainArtifactsNow(input));
+  }
+
   function reloadConfiguration() {
     return runLocked(async () => {
       await validateNginxConfig();
@@ -927,6 +1015,7 @@ function createNginxManagerInstance({
       enableTrafficLimitGuard,
       mkdirFn,
       readFileFn,
+      readdirFn,
       lstatFn,
       realpathFn,
       writeFileFn,
@@ -948,6 +1037,7 @@ function createNginxManagerInstance({
     deactivateDomain,
     inspectDomainDeactivationRollback,
     rollbackDomainDeactivation,
+    retireRemovedDomainArtifacts,
     reloadConfiguration,
     withConfigLock,
     renderOptions,

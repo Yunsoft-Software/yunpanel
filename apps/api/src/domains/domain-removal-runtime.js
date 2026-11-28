@@ -959,6 +959,7 @@ export function createDomainRemovalRuntime({
   roundcubeDomainMappingRegistry = null,
   roundcubeDomainMappingService = null,
   nginxManager = createNginxManager(),
+  certificateMaterialPurger = null,
   now = Date.now,
 } = {}) {
   if (!registry || typeof registry.init !== 'function' || typeof registry.create !== 'function'
@@ -986,6 +987,8 @@ export function createDomainRemovalRuntime({
       typeof certificateRegistry?.getCertificate !== 'function'
       || typeof certificateRegistry?.retireForDomainRemoval !== 'function'
     ))
+    || (certificateMaterialPurger !== null
+      && typeof certificateMaterialPurger?.purgeRetiredCertificate !== 'function')
     || (dnsHostingRegistry !== null && (
       typeof dnsHostingRegistry?.getZone !== 'function'
       || typeof dnsHostingRegistry?.deleteZone !== 'function'
@@ -1361,6 +1364,7 @@ export function createDomainRemovalRuntime({
           409,
         )));
       }
+      if (allowMutation) await purgeRetiredCertificateMaterial(intent.id);
       return publicOperation(await completeControlPlaneStep(
         operation,
         step,
@@ -1434,11 +1438,28 @@ export function createDomainRemovalRuntime({
         503,
       )));
     }
+    await purgeRetiredCertificateMaterial(intent.id);
     return publicOperation(await completeControlPlaneStep(
       operation,
       step,
       certificateRetirementEvidence(operation, intent, retired.certificate, suspensionId),
     ));
+  }
+
+  // T970: a certificate retired by this removal never comes back, so its
+  // certbot lineage (live/archive/renewal) or custom material is removed now
+  // instead of being renewed until the GC retention window ends. The purger
+  // keeps material shared with an active or bound certificate. Only explicit
+  // continuations purge; startup reconciliation never mutates the host. A
+  // purge failure leaves the material for the GC sweep and does not undo the
+  // verified registry retirement.
+  async function purgeRetiredCertificateMaterial(certificateId) {
+    if (!certificateMaterialPurger) return null;
+    try {
+      return await certificateMaterialPurger.purgeRetiredCertificate({ certificateId });
+    } catch {
+      return null;
+    }
   }
 
   async function discoverMailDomainOperation(operation, intent, runtime) {
@@ -1950,6 +1971,7 @@ export function createDomainRemovalRuntime({
           409,
         )));
       }
+      await retireRemovedNginxArtifacts(operation);
       return publicOperation(await completeControlPlaneStep(operation, step, evidence));
     }
     if (!exactSuspendedDomain(operation, domain, suspensionId)
@@ -1994,7 +2016,22 @@ export function createDomainRemovalRuntime({
         503,
       )));
     }
+    await retireRemovedNginxArtifacts(operation);
     return publicOperation(await completeControlPlaneStep(operation, step, evidence));
+  }
+
+  // T970: once the Domain record is finalized, its staged Nginx config and
+  // activation/deactivation receipts have no owner left. The manager refuses
+  // while a config with this name is enabled and keeps receipts it cannot
+  // prove belong to this exact Domain. Cleanup is hygiene after the verified
+  // post-condition, so an inspection error never reverts or blocks removal.
+  async function retireRemovedNginxArtifacts(operation) {
+    if (typeof nginxManager.retireRemovedDomainArtifacts !== 'function') return null;
+    try {
+      return await nginxManager.retireRemovedDomainArtifacts({ primaryDomain: operation.primaryDomain });
+    } catch {
+      return null;
+    }
   }
 
   async function dnsRetirementChild(operation, runtime) {

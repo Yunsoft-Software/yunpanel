@@ -38,6 +38,7 @@ export function createDomainRemovalProductionRuntime({
   roundcubeDomainMappingService,
   websiteCronImpactProvider = null,
   nginxManager,
+  certificateMaterialPurger = null,
   localServerId,
 } = {}) {
   const required = [
@@ -187,6 +188,7 @@ export function createDomainRemovalProductionRuntime({
     roundcubeDomainMappingRegistry,
     roundcubeDomainMappingService,
     ...(nginxManager !== undefined ? { nginxManager } : {}),
+    certificateMaterialPurger,
   });
 
   return Object.freeze({

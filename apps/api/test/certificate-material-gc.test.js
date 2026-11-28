@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
+import { createAcmeManager } from '@yunpanel/host-runtime';
+import { createCertificateMaterialManager } from '../src/certificates/certificate-material-manager.js';
 import {
   CertificateMaterialGcError,
   createCertificateMaterialGc,
@@ -306,4 +311,181 @@ test('sweep performs physical deletion, updates registry, and supports dryRun', 
   const thirdSweep = await gc.sweep({ dryRun: false });
   assert.equal(thirdSweep.sweptCount, 0);
   assert.equal(thirdSweep.alreadyPurgedCount, 2);
+});
+
+// T970: a certificate retired by Domain removal must not keep its certbot
+// lineage for the retention window, or the system certbot timer keeps
+// renewing it. Real material manager and ACME manager on a private
+// /etc/letsencrypt copy; certbot itself is the controlled host boundary.
+async function lineageFixture(t, { certbot = 'absent' } = {}) {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-cert-purge-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  async function lineage(name) {
+    await mkdir(path.join(root, 'live', name), { recursive: true });
+    await writeFile(path.join(root, 'live', name, 'cert.pem'), 'dummy');
+    await mkdir(path.join(root, 'archive', name), { recursive: true });
+    await writeFile(path.join(root, 'archive', name, 'cert1.pem'), 'dummy');
+    await mkdir(path.join(root, 'renewal'), { recursive: true });
+    await writeFile(path.join(root, 'renewal', `${name}.conf`), `# renewal for ${name}\n`);
+  }
+  const exists = async (target) => stat(target).then(() => true, () => false);
+  const lineageExists = async (name) => ({
+    live: await exists(path.join(root, 'live', name)),
+    archive: await exists(path.join(root, 'archive', name)),
+    renewal: await exists(path.join(root, 'renewal', `${name}.conf`)),
+  });
+  const certbotCalls = [];
+  const certbotPath = path.join(root, 'certbot');
+  if (certbot !== 'absent') await writeFile(certbotPath, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  const acmeManager = createAcmeManager({
+    certbotPaths: [certbotPath],
+    liveRoot: path.join(root, 'live'),
+    run: async (file, args) => {
+      certbotCalls.push([file, args]);
+      if (certbot === 'fails') throw Object.assign(new Error('certbot exploded'), { code: 1 });
+      return { stdout: '', stderr: '' };
+    },
+  });
+  const certificateMaterialManager = createCertificateMaterialManager({
+    acmeLiveRoot: path.join(root, 'live'),
+    customRoot: path.join(root, 'custom'),
+    getUid: () => 0,
+  });
+  return { root, lineage, lineageExists, certbotCalls, acmeManager, certificateMaterialManager };
+}
+
+function acmeCertificate(overrides = {}) {
+  return {
+    id: 'cert-retired',
+    domainId: 'd-removed',
+    serverId: 's-1',
+    certName: 'removed.example.com',
+    source: 'acme',
+    purpose: 'web',
+    state: 'retired',
+    staging: false,
+    retiredAt: '2026-11-28T00:00:00.000Z',
+    retirementOperationId: 'removal-operation-1',
+    materialPurgedAt: null,
+    materialDigest: null,
+    certificatePath: null,
+    fullchainPath: null,
+    privateKeyPath: null,
+    ...overrides,
+  };
+}
+
+test('purgeRetiredCertificate removes the retired certbot lineage at once and keeps other lineages', async (t) => {
+  const now = Date.parse('2026-11-28T00:05:00.000Z');
+  const f = await lineageFixture(t);
+  await f.lineage('removed.example.com');
+  await f.lineage('active.example.com');
+  const certificateRegistry = createMockCertificateRegistry([
+    acmeCertificate(),
+    acmeCertificate({ id: 'cert-active', domainId: 'd-active', certName: 'active.example.com', state: 'active', retiredAt: null }),
+  ]);
+  const gc = createCertificateMaterialGc({
+    certificateRegistry,
+    domainRegistry: createMockDomainRegistry([{ id: 'd-active', certificateId: 'cert-active' }]),
+    certificateMaterialManager: f.certificateMaterialManager,
+    acmeManager: f.acmeManager,
+    now: () => now,
+  });
+
+  const result = await gc.purgeRetiredCertificate({ certificateId: 'cert-retired' });
+  assert.equal(result.purged, true);
+  assert.deepEqual(result.purgedCertificateIds, ['cert-retired']);
+  assert.deepEqual(await f.lineageExists('removed.example.com'), { live: false, archive: false, renewal: false });
+  assert.deepEqual(await f.lineageExists('active.example.com'), { live: true, archive: true, renewal: true });
+  assert.equal((await certificateRegistry.getCertificate('cert-retired')).materialPurgedAt, new Date(now).toISOString());
+  assert.equal((await certificateRegistry.getCertificate('cert-active')).materialPurgedAt ?? null, null);
+
+  const repeated = await gc.purgeRetiredCertificate({ certificateId: 'cert-retired' });
+  assert.equal(repeated.purged, false);
+  assert.equal(repeated.reason, 'already_purged');
+});
+
+test('purgeRetiredCertificate runs certbot delete for a managed lineage and fails closed when it fails', async (t) => {
+  const f = await lineageFixture(t, { certbot: 'present' });
+  await f.lineage('removed.example.com');
+  const certificateRegistry = createMockCertificateRegistry([acmeCertificate()]);
+  const gc = createCertificateMaterialGc({
+    certificateRegistry,
+    certificateMaterialManager: f.certificateMaterialManager,
+    acmeManager: f.acmeManager,
+  });
+  const result = await gc.purgeRetiredCertificate({ certificateId: 'cert-retired' });
+  assert.equal(result.purged, true);
+  assert.deepEqual(f.certbotCalls.map(([, args]) => args),
+    [['delete', '--cert-name', 'removed.example.com', '--non-interactive']]);
+  // The controlled certbot boundary removed nothing, so the manager finished
+  // the exact lineage itself and proved it gone.
+  assert.deepEqual(await f.lineageExists('removed.example.com'), { live: false, archive: false, renewal: false });
+
+  const failing = await lineageFixture(t, { certbot: 'fails' });
+  await failing.lineage('removed.example.com');
+  const failingRegistry = createMockCertificateRegistry([acmeCertificate()]);
+  const failingGc = createCertificateMaterialGc({
+    certificateRegistry: failingRegistry,
+    certificateMaterialManager: failing.certificateMaterialManager,
+    acmeManager: failing.acmeManager,
+  });
+  await assert.rejects(failingGc.purgeRetiredCertificate({ certificateId: 'cert-retired' }),
+    (error) => error.code === 'certbot_failed');
+  assert.deepEqual(await failing.lineageExists('removed.example.com'), { live: true, archive: true, renewal: true });
+  assert.equal((await failingRegistry.getCertificate('cert-retired')).materialPurgedAt, null);
+});
+
+test('purgeRetiredCertificate never deletes a lineage shared with an active or bound certificate', async (t) => {
+  const f = await lineageFixture(t);
+  await f.lineage('shared.example.com');
+  const certificateRegistry = createMockCertificateRegistry([
+    acmeCertificate({ certName: 'shared.example.com' }),
+    acmeCertificate({ id: 'cert-replacement', domainId: 'd-new', certName: 'shared.example.com', state: 'active', retiredAt: null }),
+    acmeCertificate({ id: 'cert-bound', certName: 'bound.example.com' }),
+    acmeCertificate({ id: 'cert-active', state: 'active', retiredAt: null }),
+  ]);
+  const gc = createCertificateMaterialGc({
+    certificateRegistry,
+    domainRegistry: createMockDomainRegistry([{ id: 'd-other', certificateId: 'cert-bound' }]),
+    certificateMaterialManager: f.certificateMaterialManager,
+    acmeManager: f.acmeManager,
+  });
+  const shared = await gc.purgeRetiredCertificate({ certificateId: 'cert-retired' });
+  assert.equal(shared.purged, false);
+  assert.equal(shared.reason, 'shared_with_active_certificate');
+  assert.deepEqual(await f.lineageExists('shared.example.com'), { live: true, archive: true, renewal: true });
+  const bound = await gc.purgeRetiredCertificate({ certificateId: 'cert-bound' });
+  assert.equal(bound.purged, false);
+  assert.equal(bound.reason, 'referenced_by_domain');
+  const active = await gc.purgeRetiredCertificate({ certificateId: 'cert-active' });
+  assert.equal(active.purged, false);
+  assert.equal(active.reason, 'certificate_not_retired');
+});
+
+test('purgeRetiredCertificate marks retired siblings of the same deleted lineage as purged', async (t) => {
+  const now = Date.parse('2026-11-28T00:05:00.000Z');
+  const f = await lineageFixture(t);
+  await f.lineage('removed.example.com');
+  const certificateRegistry = createMockCertificateRegistry([
+    acmeCertificate(),
+    acmeCertificate({ id: 'cert-older', retiredAt: '2026-11-01T00:00:00.000Z' }),
+    acmeCertificate({ id: 'cert-staging', certName: 'staging.example.com', staging: true }),
+  ]);
+  const gc = createCertificateMaterialGc({
+    certificateRegistry,
+    certificateMaterialManager: f.certificateMaterialManager,
+    acmeManager: f.acmeManager,
+    now: () => now,
+  });
+  const result = await gc.purgeRetiredCertificate({ certificateId: 'cert-retired' });
+  assert.deepEqual(result.purgedCertificateIds, ['cert-retired', 'cert-older']);
+  assert.equal((await certificateRegistry.getCertificate('cert-older')).materialPurgedAt, new Date(now).toISOString());
+  // A staging (dry-run) certificate never had a lineage; it is only recorded.
+  const staging = await gc.purgeRetiredCertificate({ certificateId: 'cert-staging' });
+  assert.equal(staging.purged, true);
+  assert.equal(staging.lineageRemoved, false);
+  // A later GC sweep has nothing left to delete through certbot.
+  const sweep = await gc.sweep({ retentionDays: 0 });
+  assert.equal(sweep.sweptCount, 0);
 });

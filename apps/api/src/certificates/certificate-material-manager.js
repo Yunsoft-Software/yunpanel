@@ -176,6 +176,8 @@ async function readBounded(filePath, maxBytes, { allowSymlink, statFn, lstatFn, 
 export function createCertificateMaterialManager({
   customRoot = '/var/lib/yunpanel/control-plane/custom-certificates',
   acmeLiveRoot = '/etc/letsencrypt/live',
+  acmeArchiveRoot = null,
+  acmeRenewalRoot = null,
   now = () => Date.now(),
   getUid = () => process.getuid?.(),
   chmodFn = chmod,
@@ -190,6 +192,14 @@ export function createCertificateMaterialManager({
 } = {}) {
   const resolvedCustomRoot = safeRoot(customRoot, 'Custom certificate root');
   const resolvedAcmeRoot = safeRoot(acmeLiveRoot, 'ACME certificate root');
+  const resolvedAcmeArchiveRoot = safeRoot(
+    acmeArchiveRoot ?? path.join(path.dirname(resolvedAcmeRoot), 'archive'),
+    'ACME certificate archive root',
+  );
+  const resolvedAcmeRenewalRoot = safeRoot(
+    acmeRenewalRoot ?? path.join(path.dirname(resolvedAcmeRoot), 'renewal'),
+    'ACME certificate renewal root',
+  );
 
   function assertRoot() {
     if (getUid() !== 0) throw new CertificateMaterialError('certificate_root_required', 'Certificate material operations require the packaged root API', 503);
@@ -312,30 +322,77 @@ export function createCertificateMaterialManager({
     return true;
   }
 
-  async function removeAcme(certName) {
-    assertRoot();
-    let safeName;
+  function acmeName(certName) {
     try {
-      safeName = normalizeDomainSet(certName, []).primary;
+      return normalizeDomainSet(certName, []).primary;
     } catch {
       throw new CertificateMaterialError('certificate_material_identity_invalid', 'Certificate material identity is invalid', 400);
     }
-    const directory = path.join(resolvedAcmeRoot, safeName);
-    let entry;
-    try { entry = await lstatFn(directory); }
+  }
+
+  // A certbot lineage is live/<name>, archive/<name> and renewal/<name>.conf.
+  // Leaving archive/ or renewal/ behind keeps certbot renewing it (T970).
+  function acmeLineagePaths(safeName) {
+    return Object.freeze({
+      live: path.join(resolvedAcmeRoot, safeName),
+      archive: path.join(resolvedAcmeArchiveRoot, safeName),
+      renewal: path.join(resolvedAcmeRenewalRoot, `${safeName}.conf`),
+    });
+  }
+
+  async function lineageEntry(target) {
+    try { return await lstatFn(target); }
     catch (error) {
-      if (error?.code === 'ENOENT') return false;
-      throw new CertificateMaterialError('certificate_material_cleanup_failed', 'ACME certificate material could not be cleaned up', 503);
+      if (error?.code === 'ENOENT') return null;
+      throw new CertificateMaterialError('certificate_material_cleanup_failed', 'ACME certificate material could not be inspected', 503);
     }
-    if (!entry.isDirectory() && !entry.isSymbolicLink()) {
+  }
+
+  async function inspectAcmeLineage(certName) {
+    assertRoot();
+    const safeName = acmeName(certName);
+    const paths = acmeLineagePaths(safeName);
+    const [live, archive, renewal] = await Promise.all([
+      lineageEntry(paths.live), lineageEntry(paths.archive), lineageEntry(paths.renewal),
+    ]);
+    return {
+      certName: safeName,
+      live: live !== null,
+      archive: archive !== null,
+      renewal: renewal !== null,
+      exists: live !== null || archive !== null || renewal !== null,
+    };
+  }
+
+  async function removeAcme(certName) {
+    assertRoot();
+    const safeName = acmeName(certName);
+    const paths = acmeLineagePaths(safeName);
+    const live = await lineageEntry(paths.live);
+    const archive = await lineageEntry(paths.archive);
+    const renewal = await lineageEntry(paths.renewal);
+    // Check every entry before deleting any so an unsafe one stops the whole
+    // cleanup; symlinks in archive/ or renewal/ are never followed.
+    if ((live && !live.isDirectory() && !live.isSymbolicLink())
+      || (archive && (!archive.isDirectory() || archive.isSymbolicLink()))
+      || (renewal && (!renewal.isFile() || renewal.isSymbolicLink()))) {
       throw new CertificateMaterialError('certificate_material_root_unsafe', 'ACME certificate material path is unsafe', 503);
     }
-    try { await rmFn(directory, { recursive: true, force: true }); }
-    catch { throw new CertificateMaterialError('certificate_material_cleanup_failed', 'ACME certificate material could not be cleaned up', 503); }
+    if (!live && !archive && !renewal) return false;
+    try {
+      // Renewal config first: once it is gone certbot no longer renews.
+      if (renewal) await rmFn(paths.renewal, { force: true });
+      if (live) await rmFn(paths.live, { recursive: true, force: true });
+      if (archive) await rmFn(paths.archive, { recursive: true, force: true });
+    } catch {
+      throw new CertificateMaterialError('certificate_material_cleanup_failed', 'ACME certificate material could not be cleaned up', 503);
+    }
     return true;
   }
 
-  return Object.freeze({ inspectInput, installCustom, inspectStored, removeCustom, removeAcme, customPaths });
+  return Object.freeze({
+    inspectInput, installCustom, inspectStored, removeCustom, removeAcme, inspectAcmeLineage, customPaths,
+  });
 }
 
 export const certificateMaterialInternals = Object.freeze({

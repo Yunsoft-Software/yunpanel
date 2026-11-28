@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -99,5 +99,69 @@ test('removeAcme cleans up ACME live directory if present', async (t) => {
   const manager = createCertificateMaterialManager({ acmeLiveRoot, getUid: () => 0 });
   assert.equal(await manager.removeAcme('example.com'), true);
   assert.equal(await manager.removeAcme('example.com'), false);
+});
+
+// T970: a lineage left in archive/ and renewal/ keeps certbot renewing a
+// certificate the panel already retired.
+async function letsencryptFixture(t) {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-acme-lineage-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  async function lineage(name) {
+    await mkdir(path.join(root, 'live', name), { recursive: true });
+    await writeFile(path.join(root, 'live', name, 'cert.pem'), 'dummy');
+    await mkdir(path.join(root, 'archive', name), { recursive: true });
+    await writeFile(path.join(root, 'archive', name, 'cert1.pem'), 'dummy');
+    await mkdir(path.join(root, 'renewal'), { recursive: true });
+    await writeFile(path.join(root, 'renewal', `${name}.conf`), `# renewal for ${name}\n`);
+  }
+  const exists = async (target) => stat(target).then(() => true, () => false);
+  return {
+    root,
+    lineage,
+    exists,
+    manager: createCertificateMaterialManager({ acmeLiveRoot: path.join(root, 'live'), getUid: () => 0 }),
+  };
+}
+
+test('removeAcme removes the whole certbot lineage: live, archive and renewal config', async (t) => {
+  const f = await letsencryptFixture(t);
+  await f.lineage('gone.example.com');
+  await f.lineage('kept.example.com');
+  assert.deepEqual(await f.manager.inspectAcmeLineage('gone.example.com'), {
+    certName: 'gone.example.com', live: true, archive: true, renewal: true, exists: true,
+  });
+
+  assert.equal(await f.manager.removeAcme('gone.example.com'), true);
+  assert.equal(await f.exists(path.join(f.root, 'live', 'gone.example.com')), false);
+  assert.equal(await f.exists(path.join(f.root, 'archive', 'gone.example.com')), false);
+  assert.equal(await f.exists(path.join(f.root, 'renewal', 'gone.example.com.conf')), false);
+  assert.equal((await f.manager.inspectAcmeLineage('gone.example.com')).exists, false);
+  // Another lineage is untouched.
+  assert.equal(await f.exists(path.join(f.root, 'live', 'kept.example.com', 'cert.pem')), true);
+  assert.equal(await f.exists(path.join(f.root, 'archive', 'kept.example.com', 'cert1.pem')), true);
+  assert.equal(await f.exists(path.join(f.root, 'renewal', 'kept.example.com.conf')), true);
+  assert.equal(await f.manager.removeAcme('gone.example.com'), false);
+});
+
+test('removeAcme refuses a symlinked archive or renewal entry without deleting its target', async (t) => {
+  const f = await letsencryptFixture(t);
+  const outside = path.join(f.root, 'outside');
+  await mkdir(outside);
+  await writeFile(path.join(outside, 'keep.pem'), 'keep');
+  await mkdir(path.join(f.root, 'archive'), { recursive: true });
+  await symlink(outside, path.join(f.root, 'archive', 'link.example.com'));
+  await assert.rejects(
+    f.manager.removeAcme('link.example.com'),
+    (error) => error instanceof CertificateMaterialError && error.code === 'certificate_material_root_unsafe',
+  );
+  assert.equal(await readFile(path.join(outside, 'keep.pem'), 'utf8'), 'keep');
+
+  await mkdir(path.join(f.root, 'renewal'), { recursive: true });
+  await symlink(path.join(outside, 'keep.pem'), path.join(f.root, 'renewal', 'conf.example.com.conf'));
+  await assert.rejects(
+    f.manager.removeAcme('conf.example.com'),
+    (error) => error instanceof CertificateMaterialError && error.code === 'certificate_material_root_unsafe',
+  );
+  assert.equal(await readFile(path.join(outside, 'keep.pem'), 'utf8'), 'keep');
 });
 

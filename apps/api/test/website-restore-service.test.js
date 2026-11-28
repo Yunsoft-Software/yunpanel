@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
+import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
+import { createWebsiteHostingBackupAdapter } from '../src/backup/website-hosting-backup-adapter.js';
 import {
   WebsiteRestoreError,
   createWebsiteRestoreService,
@@ -19,7 +23,9 @@ function fixture({
   healthThrows = false,
   preRestoreFails = false,
   restoreExecutionFails = false,
+  rollbackFails = false,
   activeJobs = [],
+  hostingBackupAdapter = null,
 } = {}) {
   const calls = {
     listSnapshots: [],
@@ -103,6 +109,9 @@ function fixture({
         if (restoreExecutionFails && args.snapshotId === snapshotId) {
           throw new Error('Restic restore failed on corrupted pack file');
         }
+        if (rollbackFails && args.snapshotId === preRestoreSnapshotId) {
+          throw new Error('Restic rollback restore failed');
+        }
         return { stdout: 'restored' };
       },
     },
@@ -133,6 +142,7 @@ function fixture({
       },
     },
     receiptStore,
+    ...(hostingBackupAdapter ? { hostingBackupAdapter } : {}),
   });
 
   return { service, calls, website, repository, snapshots, backupSet, receipts, activeJobs };
@@ -482,4 +492,60 @@ test('WebsiteBackupOperationRegistry persists only allowlisted restore phase and
     message: 'İşlem tamamlanamadı',
   });
   assert.doesNotMatch(JSON.stringify(publicViewB), new RegExp(leakedSecret));
+});
+
+// T970: a restore that ends `succeeded` or `rolled_back` removes its own
+// `staging/website-hosting-restore/<operationId>` folder; a restore whose
+// rollback failed keeps it for recovery, and other operations' folders stay.
+async function hostingStaging(t) {
+  const root = await mkdtemp(path.join(os.tmpdir(), 't970-restore-staging-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const stagingRoot = path.join(root, 'website-hosting-restore');
+  const adapter = createWebsiteHostingBackupAdapter({
+    websiteRegistry: { getWebsite: async () => null },
+    domainRegistry: { getDomain: async () => null },
+    applicationRegistry: { getApplication: async () => null },
+    certificateRegistry: { getCertificate: async () => null },
+    runtimeBindingRegistry: { getBinding: async () => null },
+    dockerComposeProjectRegistry: { getProject: async () => null },
+    configRoot: path.join(root, 'sites'),
+    stagingRoot,
+  });
+  async function seed(operationId) {
+    const dir = path.join(stagingRoot, operationId, 'apply', 'domain-1');
+    await mkdir(path.join(dir, 'rollback'), { recursive: true });
+    await writeFile(path.join(dir, 'yunpanel-example.com.conf'), '# staged\n');
+    await writeFile(path.join(dir, 'rollback', 'receipt.json'), '{}\n');
+  }
+  const exists = async (operationId) => access(path.join(stagingRoot, operationId)).then(() => true, () => false);
+  return { adapter, seed, exists };
+}
+
+test('T970: finished restores remove only their own hosting restore staging folder', async (t) => {
+  const cases = [
+    { options: { healthSatisfied: true }, status: 'succeeded', kept: false },
+    { options: { healthSatisfied: false }, status: 'rolled_back', kept: false },
+    { options: { restoreExecutionFails: true }, status: 'rolled_back', kept: false },
+    { options: { restoreExecutionFails: true, rollbackFails: true }, status: 'restore_rollback_failed', kept: true },
+  ];
+  for (const [index, entry] of cases.entries()) {
+    const staging = await hostingStaging(t);
+    const operationId = `8edf95c0-72ae-4a31-bd4a-cb95d15a61f${index}`;
+    const otherId = `675f2b94-5d61-4c3b-b870-3a2c7b8491d${index}`;
+    await staging.seed(operationId);
+    await staging.seed(otherId);
+    const { service } = fixture({ ...entry.options, hostingBackupAdapter: staging.adapter });
+    const preview = await service.previewRestore({ websiteId, repositoryId, snapshotId });
+    const run = service.executeRestore({
+      websiteId, repositoryId, snapshotId, operationId,
+      expectedPreviewDigest: preview.previewDigest, confirmation: preview.confirmation,
+    });
+    if (entry.status === 'restore_rollback_failed') {
+      await assert.rejects(run, (error) => error.code === 'restore_rollback_failed');
+    } else {
+      assert.equal((await run).status, entry.status);
+    }
+    assert.equal(await staging.exists(operationId), entry.kept, entry.status);
+    assert.equal(await staging.exists(otherId), true);
+  }
 });

@@ -249,8 +249,105 @@ export function createCertificateMaterialGc({
     });
   }
 
+  function activeSharingReason(cert, certificates, domains) {
+    if (domains.some((domain) => domain.certificateId === cert.id)) return 'referenced_by_domain';
+    const certAcmeName = cert.source === 'acme' ? normalizeCertName(cert.certName) : null;
+    for (const active of certificates) {
+      if (active.state === 'retired' || active.id === cert.id) continue;
+      const sharesAcme = certAcmeName && active.source === 'acme' && normalizeCertName(active.certName) === certAcmeName;
+      const sharesDigest = cert.materialDigest && active.materialDigest === cert.materialDigest;
+      const sharesPath = (cert.certificatePath && [active.certificatePath, active.fullchainPath, active.privateKeyPath].includes(cert.certificatePath))
+        || (cert.fullchainPath && [active.certificatePath, active.fullchainPath, active.privateKeyPath].includes(cert.fullchainPath))
+        || (cert.privateKeyPath && [active.certificatePath, active.fullchainPath, active.privateKeyPath].includes(cert.privateKeyPath));
+      if (sharesAcme || sharesDigest || sharesPath) return 'shared_with_active_certificate';
+    }
+    return null;
+  }
+
+  async function removeAcmeLineage(safeName) {
+    const inspect = typeof certificateMaterialManager.inspectAcmeLineage === 'function'
+      ? (name) => certificateMaterialManager.inspectAcmeLineage(name)
+      : null;
+    const before = inspect ? await inspect(safeName) : null;
+    if (before && !before.exists) return false;
+    let certbotHandled = false;
+    // certbot only manages a lineage that still has its renewal config.
+    if ((!before || before.renewal) && acmeManager && typeof acmeManager.deleteCertificate === 'function') {
+      try {
+        await acmeManager.deleteCertificate({ certName: safeName });
+        certbotHandled = true;
+      } catch (error) {
+        if (error?.code !== 'certbot_not_installed') throw error;
+      }
+    }
+    const after = inspect ? await inspect(safeName) : null;
+    if ((!certbotHandled || after?.exists) && typeof certificateMaterialManager.removeAcme === 'function') {
+      await certificateMaterialManager.removeAcme(safeName);
+    }
+    if (inspect && (await inspect(safeName)).exists) {
+      throw new CertificateMaterialGcError(
+        'certificate_lineage_cleanup_unverified',
+        'ACME certificate lineage could not be removed',
+        503,
+      );
+    }
+    return true;
+  }
+
+  // T970: Domain removal retires a certificate for good, so its certbot
+  // lineage is removed right away instead of after the GC retention window;
+  // otherwise the system certbot timer keeps renewing it. Sharing checks are
+  // the same as the sweep: a lineage still used by an active or bound
+  // certificate stays. Errors (for example a failed certbot delete) propagate
+  // without marking the certificate purged.
+  async function purgeRetiredCertificate({ certificateId } = {}) {
+    if (typeof certificateId !== 'string' || !certificateId) {
+      throw new CertificateMaterialGcError('invalid_certificate_id', 'Certificate ID is required');
+    }
+    const certificates = await certificateRegistry.listCertificates();
+    const cert = certificates.find((candidate) => candidate.id === certificateId);
+    if (!cert) return Object.freeze({ purged: false, reason: 'certificate_not_found', certificateId });
+    if (cert.state !== 'retired') return Object.freeze({ purged: false, reason: 'certificate_not_retired', certificateId });
+    if (cert.materialPurgedAt != null) return Object.freeze({ purged: false, reason: 'already_purged', certificateId });
+    const domains = domainRegistry && typeof domainRegistry.listDomains === 'function'
+      ? await domainRegistry.listDomains()
+      : [];
+    const reason = activeSharingReason(cert, certificates, domains);
+    if (reason) return Object.freeze({ purged: false, reason, certificateId });
+
+    let lineageRemoved = false;
+    const purgedIds = [cert.id];
+    if (cert.source === 'custom') {
+      await certificateMaterialManager.removeCustom(cert.id);
+    } else if (cert.source === 'acme') {
+      const safeName = normalizeCertName(cert.certName);
+      if (safeName) {
+        lineageRemoved = await removeAcmeLineage(safeName);
+        // Other retired records of the same lineage lost their material too.
+        for (const sibling of certificates) {
+          if (sibling.id !== cert.id && sibling.state === 'retired' && sibling.materialPurgedAt == null
+            && sibling.source === 'acme' && normalizeCertName(sibling.certName) === safeName
+            && !activeSharingReason(sibling, certificates, domains)) {
+            purgedIds.push(sibling.id);
+          }
+        }
+      }
+    }
+    const currentTime = typeof now === 'function' ? now() : now;
+    const purgedAt = new Date(currentTime).toISOString();
+    for (const id of purgedIds) await certificateRegistry.markMaterialPurged(id, { purgedAt });
+    return Object.freeze({
+      purged: true,
+      certificateId,
+      lineageRemoved,
+      purgedAt,
+      purgedCertificateIds: Object.freeze(purgedIds),
+    });
+  }
+
   return Object.freeze({
     inspectGcCandidates,
     sweep,
+    purgeRetiredCertificate,
   });
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -1453,6 +1453,72 @@ test('explicit continuation detaches the bound certificate and retires its regis
   assert.equal(certificates.retireCalls(), 1);
   assert.equal(certificates.current().state, 'retired');
   assert.equal(certificates.current().retirementOperationId, operation.id);
+});
+
+// T970: the retired certificate's certbot lineage is purged by the
+// operation that retired it, after the registry proves the retirement.
+test('T970: explicit certificate retirement purges its retired material once and never fails removal on purge errors', async () => {
+  for (const purgeFails of [false, true]) {
+    const registry = createRegistry();
+    const preview = certificateRemovalPreview();
+    let operation = await completeRoutingStep(registry, preview);
+    const domains = domainRegistryFixture({ certificateId: 'certificate-1' });
+    const certificates = certificateRegistryFixture();
+    const purges = [];
+    const runtime = createDomainRemovalRuntime({
+      registry,
+      previewProvider: async () => preview,
+      suspensionRuntime: completedSuspensionRuntime(),
+      domainRegistry: domains.manager,
+      certificateRegistry: certificates.registry,
+      certificateMaterialPurger: {
+        async purgeRetiredCertificate(input) {
+          purges.push({ ...input, stateAtPurge: certificates.current().state });
+          if (purgeFails) throw Object.assign(new Error('certbot exploded'), { code: 'certbot_failed' });
+          return { purged: true };
+        },
+      },
+    });
+
+    operation = await runtime.continueStep({
+      domainId: operation.domainId,
+      operationId: operation.id,
+      expectedUpdatedAt: operation.updatedAt,
+      stepId: operation.steps[1].id,
+      checksum: operation.checksum,
+      confirmation: `continue-domain-remove-step:${operation.domainId}:${operation.id}:${operation.steps[1].id}:${operation.updatedAt}:${operation.checksum}`,
+    });
+
+    assert.equal(operation.steps[1].kind, 'certificate');
+    assert.equal(operation.steps[1].status, 'succeeded');
+    assert.deepEqual(purges, [{ certificateId: 'certificate-1', stateAtPurge: 'retired' }]);
+  }
+});
+
+test('T970: startup reconciliation of a retired certificate does not run host purge', async () => {
+  const registry = createRegistry();
+  let operation = await completeRoutingStep(registry, certificateRemovalPreview());
+  operation = await registry.markStepRunning(operation.id, operation.steps[1].id);
+  const certificates = certificateRegistryFixture({
+    state: 'retired',
+    updatedAt: '2026-09-18T21:00:00.000Z',
+    retirementOperationId: operation.id,
+    retiredAt: '2026-09-18T21:00:00.000Z',
+    retiredFromState: 'active',
+    retiredFromUpdatedAt: '2026-09-18T20:00:00.000Z',
+  });
+  let purges = 0;
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => { throw new Error('startup must not create a preview'); },
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domainRegistryFixture({ certificateId: null }).manager,
+    certificateRegistry: certificates.registry,
+    certificateMaterialPurger: { async purgeRetiredCertificate() { purges += 1; } },
+  });
+  const recovery = await runtime.init();
+  assert.equal(recovery[0].recovered, true);
+  assert.equal(purges, 0);
 });
 
 test('startup reconciles exact operation-owned certificate retirement without replaying mutation', async () => {
@@ -3106,4 +3172,206 @@ test('T966: one approval completes Webmail mapping removal after its Roundcube a
   assert.equal(result.stepStatuses.includes('blocked'), false);
   assert.equal(webmail.counts().beginCalls, 1);
   assert.equal(webmail.counts().continueCalls, 1);
+});
+
+// T970: a Domain removal that reaches `removed` must leave no enabled vhost
+// (regression for the 2–9 Nov leftovers fixed by T892) and must retire its own
+// staged config plus activation/deactivation receipts, while a foreign active
+// Domain keeps every artifact. Real Nginx manager files on a private disk;
+// nginx -t and systemctl reload are controlled host boundaries.
+async function removalNginxDisk(t) {
+  const root = await mkdtemp(path.join(os.tmpdir(), 't970-removal-nginx-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const sitesDir = path.join(root, 'sites');
+  const stagingDir = path.join(root, 'staging');
+  await mkdir(sitesDir);
+  const manager = createNginxManager({ sitesDir, stagingDir, execFn: async () => '' });
+  const specFor = (primaryDomain, upstreamPort) => ({
+    primaryDomain,
+    aliases: [],
+    targetType: 'proxy',
+    target: { upstreamHost: '127.0.0.1', upstreamPort, websocket: true },
+  });
+  async function activate(spec) {
+    const staged = await manager.stageDomain(spec);
+    await manager.activateDomain({ primaryDomain: spec.primaryDomain, checksum: staged.checksum });
+    return staged;
+  }
+  const list = async (dir) => {
+    try { return (await readdir(dir)).sort(); } catch (error) {
+      if (error?.code === 'ENOENT') return [];
+      throw error;
+    }
+  };
+  return { root, sitesDir, stagingDir, manager, specFor, activate, list };
+}
+
+function priorAppliedRemovalFixture({ appliedChecksum, nginxManager }) {
+  const base = leafRemovalPreview();
+  const preview = {
+    ...base,
+    domain: { ...base.domain, checksum: appliedChecksum },
+  };
+  let current = {
+    id: 'domain-1',
+    serverId: 'local',
+    primaryDomain: 'example.com',
+    websiteId: 'website-1',
+    certificateId: null,
+    parentDomainId: null,
+    state: 'staged',
+    desiredRevision: 4,
+    stagedRevision: 4,
+    appliedRevision: 3,
+    stagedChecksum: appliedChecksum,
+    appliedChecksum,
+    appliedPrimaryDomain: 'example.com',
+    suspendedChecksum: null,
+    suspensionOperationId: null,
+    lastError: null,
+  };
+  const registry = createRegistry();
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => preview,
+    nginxManager,
+    suspensionRuntime: {
+      listForDomain: async () => [],
+      get: async () => null,
+      start: async () => { throw new Error('suspension runtime must not run for a prior-applied Domain'); },
+      retrySuspend: async () => { throw new Error('unexpected retry'); },
+      preview: async () => ({
+        version: 1,
+        operation: 'domain_suspend',
+        domain: {
+          id: current.id,
+          serverId: current.serverId,
+          primaryDomain: current.primaryDomain,
+          desiredRevision: current.desiredRevision,
+          stagedRevision: current.stagedRevision,
+          appliedRevision: current.appliedRevision,
+          stagedChecksum: current.stagedChecksum,
+          state: current.state,
+        },
+        nginx: null,
+        activeJobs: [],
+        blockers: ['domain_active_state_required'],
+        readyToSuspend: false,
+        previewDigest: 'd'.repeat(64),
+        confirmation: null,
+        sideEffects: false,
+      }),
+    },
+    domainRegistry: {
+      getDomain: async () => (current ? { ...current } : null),
+      markSuspended: async (domainId, { expectedRevision, checksum: csum, operationId, allowPriorAppliedForRemoval }) => {
+        assert.equal(domainId, 'domain-1');
+        assert.equal(allowPriorAppliedForRemoval, true);
+        current = {
+          ...current,
+          state: 'suspended',
+          stagedRevision: expectedRevision,
+          appliedRevision: expectedRevision,
+          stagedChecksum: csum,
+          suspendedChecksum: csum,
+          suspensionOperationId: operationId,
+          suspendedAt: '2026-11-28T01:00:00.000Z',
+        };
+        return { ...current };
+      },
+      detachWebsiteForRemoval: async () => {
+        current = { ...current, websiteId: null };
+        return { changed: true, detachedWebsiteId: 'website-1', domain: { ...current } };
+      },
+      detachCertificateForRemoval: async () => { throw new Error('no certificate is bound'); },
+      finalizeDomainRemoval: async () => {
+        const removed = {
+          id: current.id,
+          serverId: current.serverId,
+          primaryDomain: current.primaryDomain,
+          desiredRevision: current.desiredRevision,
+          suspensionOperationId: current.suspensionOperationId,
+          suspendedChecksum: current.suspendedChecksum,
+        };
+        current = null;
+        return { removed: true, domain: removed };
+      },
+    },
+  });
+  return { runtime, preview };
+}
+
+async function continueUntilRemoved(runtime, operation) {
+  let current = operation;
+  for (let index = 0; index < 4 && current.status !== 'removed'; index += 1) {
+    const step = current.steps.find((candidate) => candidate.status !== 'succeeded');
+    current = await runtime.continueStep({
+      domainId: current.domainId,
+      operationId: current.id,
+      expectedUpdatedAt: current.updatedAt,
+      stepId: step.id,
+      checksum: current.checksum,
+      confirmation: current.actions.stepContinuationConfirmation,
+    });
+  }
+  return current;
+}
+
+test('T970: removed Domain leaves no enabled vhost and retires only its own Nginx staging artifacts', async (t) => {
+  const disk = await removalNginxDisk(t);
+  await disk.activate(disk.specFor('example.com', 3100));
+  const applied = await disk.activate(disk.specFor('example.com', 3101));
+  await disk.activate(disk.specFor('other.example.test', 3200));
+  const foreignStaging = await disk.list(disk.stagingDir);
+  const foreignRollback = (await disk.list(path.join(disk.stagingDir, 'rollback')))
+    .filter((name) => name.startsWith('yunpanel-other.example.test.conf.'));
+  assert.equal(foreignRollback.length, 1);
+
+  const { runtime, preview } = priorAppliedRemovalFixture({
+    appliedChecksum: applied.checksum,
+    nginxManager: disk.manager,
+  });
+  let operation = await runtime.start({
+    domainId: preview.domain.id,
+    previewDigest: preview.previewDigest,
+    confirmation: preview.confirmation,
+  });
+  assert.equal(operation.steps[0].status, 'succeeded');
+  // Routing suspension already removed the enabled vhost (T892 behaviour).
+  assert.deepEqual(await disk.list(disk.sitesDir), ['yunpanel-other.example.test.conf']);
+
+  operation = await continueUntilRemoved(runtime, operation);
+  assert.equal(operation.status, 'removed');
+  assert.deepEqual(await disk.list(disk.sitesDir), ['yunpanel-other.example.test.conf']);
+  // The shared receipt directories stay; only this Domain's files leave them.
+  assert.deepEqual(
+    await disk.list(disk.stagingDir),
+    [...foreignStaging.filter((name) => name !== 'yunpanel-example.com.conf'), 'deactivation'].sort(),
+  );
+  assert.deepEqual(await disk.list(path.join(disk.stagingDir, 'rollback')), foreignRollback);
+  assert.deepEqual(await disk.list(path.join(disk.stagingDir, 'deactivation')), []);
+});
+
+test('T970: removal finalization never retires artifacts of a still active config with the same name', async (t) => {
+  const disk = await removalNginxDisk(t);
+  const applied = await disk.activate(disk.specFor('example.com', 3100));
+  const { runtime, preview } = priorAppliedRemovalFixture({
+    appliedChecksum: applied.checksum,
+    nginxManager: disk.manager,
+  });
+  let operation = await runtime.start({
+    domainId: preview.domain.id,
+    previewDigest: preview.previewDigest,
+    confirmation: preview.confirmation,
+  });
+  // A newer Domain with the same name becomes active before finalization.
+  const newer = await disk.activate(disk.specFor('example.com', 3300));
+  const stagingBefore = await disk.list(disk.stagingDir);
+  const rollbackBefore = await disk.list(path.join(disk.stagingDir, 'rollback'));
+  operation = await continueUntilRemoved(runtime, operation);
+  assert.equal(operation.status, 'removed');
+  assert.deepEqual(await disk.list(disk.stagingDir), stagingBefore);
+  assert.deepEqual(await disk.list(path.join(disk.stagingDir, 'rollback')), rollbackBefore);
+  const active = await readFile(path.join(disk.sitesDir, 'yunpanel-example.com.conf'), 'utf8');
+  assert.equal(createHash('sha256').update(active).digest('hex'), newer.checksum);
 });
