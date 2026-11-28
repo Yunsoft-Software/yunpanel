@@ -77,9 +77,13 @@ export function createWebsiteRemovalCleanupAdapters({
     if (!website || website.id !== websiteId || website.applicationId !== applicationId) {
       unavailable('website_cleanup_identity_drift', 'Website/Application cleanup identity changed');
     }
-    if (allowExternalProxy && applicationId === null && website.runtimeType === 'proxy'
-      && !website.unixUser && !website.systemUser && website.documentRoot == null
-      && !website.dockerWorkloadId && !website.managedComposeBinding) {
+    // Application-free Websites: an external proxy, or a managed Compose binding whose
+    // project is retained. Their file cleanup only removes the backup resource folder.
+    if (allowExternalProxy && applicationId === null
+      && !website.unixUser && !website.systemUser && website.documentRoot == null && !website.dockerWorkloadId
+      && (website.runtimeType === 'proxy' && !website.managedComposeBinding
+        || website.runtimeType === 'docker' && website.managedComposeBinding
+          && typeof website.managedComposeBinding === 'object' && !Array.isArray(website.managedComposeBinding))) {
       return Object.freeze({ website, application: null });
     }
     const application = await applicationRegistry.getApplication(applicationId);
