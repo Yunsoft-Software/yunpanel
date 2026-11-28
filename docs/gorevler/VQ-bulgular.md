@@ -2203,27 +2203,29 @@
 
 ### T968 · Başka oturumda başlatılmış veritabanı kimlik bilgisi silme işi tamamlanamıyor
 - **Bağımlı:** —
-- **Dosyalar:** `apps/api/src/jobs/job-registry.js`, `apps/api/src/databases/database-credential-http.js`
+- **Dosyalar:** `apps/api/src/jobs/job-registry.js`, `apps/api/src/databases/database-credential-http.js`, `apps/api/src/databases/database-credential-apply-service.js`, ilgili testler
 - **Kaynak:** QA · 2026-11-28 01:33
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
     Bir Owner oturumu credential delete işini başlatıp sonlandırmadan (finalize) ayrılırsa, aynı Owner yeni oturumda aynı silmeyi başlatınca 409 job_authorization_conflict alıyor: idempotency anahtarı eski oturumun yetki kapsamına bağlı (job-registry.js assertSameWork, sessionId karşılaştırması). Sonuç: .28'de tdb04_a3_mvqgctuk, tdb04_a3_mw50g4j5, tdb04_a3_mw518gcu panelden silinemiyor; MariaDB kullanıcıları yok, şema/binding/credential kayıtları duruyor. Beklenen: aynı kullanıcı ve aynı iş için oturum farkı engel olmamalı ya da arayüz önceki başarılı işten sonlandırmayı sunmalı. Önce testle tekrar üret.
 
-- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+- **Senior notu (28 Kasım):** Aynı iş için yetki kapsamı kullanıcı, rol ve kaynakla eşleşmeli; yalnız oturum kimliği farkı aynı Owner'ın yarım kalan silmesini kilitlememeli. Başka kullanıcı veya başka kaynak için `job_authorization_conflict` aynen kalır (kiracı yalıtımı gevşetilmez). Alternatif olarak delete isteği, aynı kimlik bilgisi için daha önce başarıyla bitmiş işi sonlandırma için döndürebilir; hangisi daha dar ve güvenliyse o.
+- **Kabul:** Önce kırılan sonra geçen test: Owner oturum A'da silmeyi başlatır, iş biter, A kapanır; oturum B aynı silmeyi başlatıp sonlandırır. Başka kullanıcı/kaynak yine 409. `npm test`. `.28`'de kalan 3 `tdb04_a3_*` veritabanı panelin normal akışıyla silinir.
 
 ### T969 · Compose projesi kaldırılınca adlı volume'lar panelden yönetilemez kalıyor
 - **Bağımlı:** —
-- **Dosyalar:** `apps/api/src/docker`
+- **Dosyalar:** `apps/api/src/docker/docker-compose-removal.js`, `apps/api/src/docker/docker-compose-http.js`, `apps/api/src/docker/local-docker-compose-operation.js`, `apps/web/src/workspace/DockerLifecyclePanel.jsx`, `apps/web/src/workspace/docker-compose-client.js`, `apps/web/src/workspace/docker-compose-model.js`, ilgili testler
 - **Kaynak:** QA · 2026-11-28 01:33
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
     Docker Compose projesi panelden kaldırıldığında adlı volume'lar sunucuda kalıyor. Volume silme yalnız proje içinden (/docker/projects/:id/volumes/delete) yapılabildiği için proje gidince bu volume'lar panelde görünmüyor ve silinemiyor. .28'de 6 Kasım'da kaldırılan projelerden 16 volume kaldı (28 Kasım'da CLI ile silindi). Beklenen: kaldırma önizlemesi volume'ları açıkça listeleyip 'volume'ları da sil' seçeneği sunmalı ya da sahipsiz volume'lar panelde görünmeli.
 
-- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+- **Senior notu (28 Kasım):** Kaldırma önizlemesi projenin adlı volume'larını listeler. Owner aynı onaylı işlemde "kalıcı volume'ları da sil" seçebilir; varsayılan korur (veri kaybı yalnız açık seçimle). Seçim önizleme özetine (digest) girer. Arayüz merkezi tasarım sisteminden; native alert/prompt yok.
+- **Kabul:** Önce kırılan sonra geçen testler (seçimle volume'lar silinir; seçim yoksa korunur ve önizlemede listelenir). `npm test`. `.28`'de bir test projesi seçimli kaldırılır, `docker volume ls` boş.
 
 ### T970 · Nginx hazırlık dosyaları silinen sitelerden sonra birikiyor
 - **Bağımlı:** T892, T966
-- **Dosyalar:** `packages/host-runtime/src/nginx-manager.js`, `apps/api/src/domains/domain-removal-runtime.js`
+- **Dosyalar:** `packages/host-runtime/src/nginx-manager.js`, `apps/api/src/domains/domain-removal-runtime.js`, `apps/api/src/certificates/`, ilgili testler
 - **Kaynak:** QA · 2026-11-28 01:33
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
@@ -2231,14 +2233,16 @@
 
     Ek (28 Kasım, T883 incelemesi): aynı artık deseni `staging/website-hosting-restore` altındaki bitmiş geri yükleme klasörlerinde (38) ve panelin `retired` yaptığı sertifikaların certbot kayıtlarında (`/etc/letsencrypt/{live,archive,renewal}`, 5; yenileme zamanlayıcısı açık) da görüldü. Hepsi yedeklenip elle kaldırıldı (`docs/gorevler/kalinti-temizlik-20261128.md`).
 
-- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+- **Senior notu (28 Kasım):** Alan adı silme, kendi `staging/nginx` dosyasını (kök, `deactivation/`, `rollback/`) yalnız işlem kendi sahibi olduğu adla ve başarılı bitişte kaldırır; etkin olan veya başka alan adına ait dosyaya dokunmaz. Sertifika emekliye ayrılırken panelin yönettiği certbot kaydı (`live/archive/renewal`) da kaldırılır. Geri yükleme hazırlık klasörleri (`staging/website-hosting-restore/<op>`) işlem `succeeded`/`rolled_back` olunca temizlenir. Fail-closed kontroller gevşetilmez.
+- **Kabul:** Önce kırılan sonra geçen testler (her artık türü için). `npm test`. `.28`'de bir test sitesi kurulup silinir; `staging/nginx`, `sites-enabled`, `/etc/letsencrypt` ve geri yükleme hazırlığında o ada ait dosya kalmaz.
 
 ### T971 · Site silme yedek kaynak klasörünü bırakıyor
 - **Bağımlı:** —
-- **Dosyalar:** `apps/api/src/backup`, `apps/api/src/websites`
+- **Dosyalar:** `apps/api/src/backup`, `apps/api/src/websites`, ilgili testler
 - **Kaynak:** QA · 2026-11-28 02:41
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
     Silinen bir test sitesinin /var/lib/yunpanel/backups/resources/website/<websiteId> klasörü (veritabanı ön-geri-yükleme dökümleri, posta sanal eşlemesi, posta verisi) site silindikten sonra kaldı; .28'de 12 Kasım'dan kalan bir klasör 28 Kasım'da yedeklenip elle kaldırıldı. Beklenen: site silme kendi yedek kaynak klasörünü ya kaldırmalı ya da bilinçli tutuyorsa panelde görünür ve silinebilir olmalı. Önce mevcut sürümde tekrar üret.
 
-- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+- **Senior notu (28 Kasım):** Önce bu klasörü kimin, ne zaman yazdığını ve silmenin neden atladığını kanıtla. Site silme, siteye ait `backups/resources/website/<websiteId>` klasörünü kaldırmalı; Restic deposu ve snapshot'ları bu görevin kapsamı dışında (onlar ayrı ve bilinçli tutulur).
+- **Kabul:** Önce kırılan sonra geçen test. `npm test`. `.28`'de yedek/geri yükleme yapılmış bir test sitesi silinince klasör kalmaz.
