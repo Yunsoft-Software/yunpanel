@@ -286,6 +286,38 @@ test('compose lifecycle queue requires the preview digest and confirmation', asy
   });
 });
 
+test('compose removal preview and queue forward only an explicit boolean volume deletion choice', async () => {
+  const fx = mounted();
+  const previewRoute = route(fx, 'POST', '/operations/:action/preview');
+  const queueRoute = route(fx, 'POST', '/operations/:action');
+  const params = { dockerProjectId: projectId, action: 'remove' };
+  const preview = await invoke(previewRoute, { params, body: { deleteVolumes: true } });
+  assert.equal(preview.status, 200);
+  const queued = await invoke(queueRoute, {
+    params,
+    body: { expectedPreviewDigest: fx.operationPreview.previewDigest, confirmation: fx.operationPreview.confirmation, deleteVolumes: true },
+  });
+  assert.equal(queued.status, 202);
+  assert.deepEqual(fx.calls.filter(([name]) => name === 'operationPreview').at(-1)[1], { projectId, action: 'remove', deleteVolumes: true });
+  assert.deepEqual(fx.calls.find(([name]) => name === 'operationQueue')[1], {
+    projectId,
+    action: 'remove',
+    deleteVolumes: true,
+    expectedPreviewDigest: fx.operationPreview.previewDigest,
+    confirmation: fx.operationPreview.confirmation,
+  });
+  for (const body of [{ deleteVolumes: 'true' }, { deleteVolumes: true, extra: 1 }, { other: true }]) {
+    const rejected = await invoke(previewRoute, { params, body });
+    assert.equal(rejected.status, 400);
+    assert.equal(rejected.payload.error.code, 'docker_compose_input_invalid');
+  }
+  const badQueue = await invoke(queueRoute, {
+    params,
+    body: { expectedPreviewDigest: fx.operationPreview.previewDigest, confirmation: fx.operationPreview.confirmation, deleteVolumes: 1 },
+  });
+  assert.equal(badQueue.status, 400);
+});
+
 test('registry credential route returns public metadata only', async () => {
   const fx = mounted();
   const response = await invoke(route(fx, 'PUT', '/credentials'), {

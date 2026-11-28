@@ -53,6 +53,29 @@ const ok = (data) => new Response(JSON.stringify({ data }), { status: 200 });
   setSession(null);
 });
 
+test('Docker Compose removal sends the volume deletion choice only when chosen', async (t) => {
+  setSession({ csrfToken: 'csrf-docker' });
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    calls.push({ url, body: JSON.parse(options.body) });
+    const deleteVolumes = JSON.parse(options.body).deleteVolumes === true;
+    return ok({ previewDigest: (deleteVolumes ? 'd' : 'k').repeat(64), confirmation: 'docker-compose:remove:shop:x', deleteVolumes });
+  });
+  const keep = await previewDockerAction('project-1', 'remove');
+  await applyDockerAction('project-1', 'remove', keep);
+  const remove = await previewDockerAction('project-1', 'remove', { deleteVolumes: true });
+  await applyDockerAction('project-1', 'remove', remove);
+  assert.deepEqual(calls.map((call) => call.body), [
+    {},
+    { expectedPreviewDigest: 'k'.repeat(64), confirmation: 'docker-compose:remove:shop:x' },
+    { deleteVolumes: true },
+    { expectedPreviewDigest: 'd'.repeat(64), confirmation: 'docker-compose:remove:shop:x', deleteVolumes: true },
+  ]);
+  assert.throws(() => previewDockerAction('project-1', 'stop', { deleteVolumes: true }), /only for project removal/);
+  assert.throws(() => previewDockerAction('project-1', 'remove', { deleteVolumes: 'yes' }), /only for project removal/);
+  setSession(null);
+});
+
 test('Docker Compose client rejects invalid project identities and unsafe operation inputs before fetch', async (t) => {
   let calls = 0;
   t.mock.method(globalThis, 'fetch', async () => { calls += 1; return ok({}); });

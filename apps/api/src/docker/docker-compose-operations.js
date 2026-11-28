@@ -46,6 +46,29 @@ function credentialPins(value) {
   }).sort((left, right) => left.registryHost.localeCompare(right.registryHost));
 }
 
+// Public volume rows from the removal inspector; the shape is part of the digest.
+function removalVolumes(inspection, deleteVolumes) {
+  const raw = inspection?.volumes ?? [];
+  if (!Array.isArray(raw) || raw.length > 64 || raw.some((item) => !item || typeof item.volumeKey !== 'string'
+    || typeof item.volumeName !== 'string' || typeof item.deletable !== 'boolean'
+    || (item.deletable && (typeof item.fingerprint !== 'string' || !SHA256_PATTERN.test(item.fingerprint))))) {
+    throw new DockerComposeOperationsError('docker_compose_removal_volumes_invalid', 'Docker Compose volume inventory is invalid', 409);
+  }
+  const volumes = raw.map((item) => Object.freeze({
+    volumeKey: item.volumeKey,
+    volumeName: item.volumeName,
+    present: item.present === true ? true : item.present === false ? false : null,
+    deletable: item.deletable,
+    fingerprint: item.deletable ? item.fingerprint : null,
+    blockCode: typeof item.blockCode === 'string' ? item.blockCode : null,
+    blockReason: typeof item.blockReason === 'string' ? item.blockReason : null,
+  }));
+  if (deleteVolumes && !volumes.some((item) => item.deletable)) {
+    throw new DockerComposeOperationsError('docker_compose_removal_volumes_none', 'This project has no named volume that can be deleted', 409);
+  }
+  return Object.freeze({ volumes: Object.freeze(volumes) });
+}
+
 export function createDockerComposeOperationsService({
   projectRegistry,
   environmentRegistry,
@@ -104,8 +127,11 @@ export function createDockerComposeOperationsService({
       .map((job) => Object.freeze(structuredClone(job))));
   }
 
-  async function preview({ projectId, action: requestedAction } = {}) {
+  async function preview({ projectId, action: requestedAction, deleteVolumes = false } = {}) {
     const action = requireAction(requestedAction);
+    if (typeof deleteVolumes !== 'boolean' || (deleteVolumes && action !== 'remove')) {
+      throw new DockerComposeOperationsError('docker_compose_input_invalid', 'Volume deletion can be chosen only for project removal');
+    }
     const previousJobs = await assertIdle(projectId);
     let project;
     let environment;
@@ -126,7 +152,9 @@ export function createDockerComposeOperationsService({
       || !Number.isSafeInteger(environment.revision) || environment.revision < 0) {
       throw new DockerComposeOperationsError('docker_compose_desired_state_invalid', 'Docker Compose desired state is invalid', 409);
     }
-    if (action === 'remove') await inspectRemoval({ projectId, projectName: project.projectName, serverId: project.serverId });
+    const removal = action === 'remove'
+      ? removalVolumes(await inspectRemoval({ projectId, projectName: project.projectName, serverId: project.serverId }), deleteVolumes)
+      : null;
     const pins = credentialPins(credentials);
     const identity = Object.freeze({
       version: 1,
@@ -142,6 +170,8 @@ export function createDockerComposeOperationsService({
       // Repeated desired state is a new intent after a completed lifecycle
       // operation. A stopped project must not reuse its old succeeded start.
       executionRevision: previewDigest(previousJobs.map(job => [job.id, job.operation, job.status]).sort((a, b) => String(a[0]).localeCompare(String(b[0])))),
+      // Removal pins the listed named volumes and the explicit keep/delete choice.
+      ...(removal ? { volumes: removal.volumes, deleteVolumes } : {}),
     });
     const digest = previewDigest(identity);
     return Object.freeze({
@@ -152,12 +182,12 @@ export function createDockerComposeOperationsService({
     });
   }
 
-  async function queue({ projectId, action: requestedAction, expectedPreviewDigest, confirmation } = {}) {
+  async function queue({ projectId, action: requestedAction, expectedPreviewDigest, confirmation, deleteVolumes = false } = {}) {
     const action = requireAction(requestedAction);
     if (typeof expectedPreviewDigest !== 'string' || !SHA256_PATTERN.test(expectedPreviewDigest)) {
       throw new DockerComposeOperationsError('docker_compose_preview_digest_invalid', 'Docker Compose preview digest is invalid');
     }
-    const current = await preview({ projectId, action });
+    const current = await preview({ projectId, action, deleteVolumes });
     if (current.previewDigest !== expectedPreviewDigest) {
       throw new DockerComposeOperationsError('docker_compose_preview_stale', 'Docker Compose operation preview is stale', 409);
     }
@@ -175,6 +205,11 @@ export function createDockerComposeOperationsService({
         expectedEnvironmentRevision: current.environmentRevision,
         expectedComposeSha256: current.composeSha256,
         credentialRevisions: current.credentialRevisions.map((item) => ({ ...item })),
+        ...(current.deleteVolumes === true ? {
+          deleteVolumes: true,
+          volumes: current.volumes.filter((volume) => volume.deletable)
+            .map((volume) => ({ volumeKey: volume.volumeKey, volumeName: volume.volumeName, volumeFingerprint: volume.fingerprint })),
+        } : {}),
       },
       resourceType: 'docker_project',
       resourceId: projectId,

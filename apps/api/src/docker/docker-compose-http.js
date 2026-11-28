@@ -67,6 +67,31 @@ function optionalEmptyBody(body) {
   }
 }
 
+// Removal may carry an explicit boolean choice to delete the project's named
+// volumes; the operations service rejects it for any other action.
+function operationPreviewBody(body) {
+  if (body === undefined || body === null) return {};
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new DockerComposeHttpError('docker_compose_input_invalid', 'Request body must be empty or contain deleteVolumes');
+  }
+  const keys = Object.keys(body);
+  if (keys.length === 0) return {};
+  if (keys.length !== 1 || keys[0] !== 'deleteVolumes' || typeof body.deleteVolumes !== 'boolean') {
+    throw new DockerComposeHttpError('docker_compose_input_invalid', 'Request body must be empty or contain deleteVolumes');
+  }
+  return { deleteVolumes: body.deleteVolumes };
+}
+
+function operationQueueBody(body) {
+  const fields = ['expectedPreviewDigest', 'confirmation'];
+  const withChoice = body && typeof body === 'object' && !Array.isArray(body) && Object.hasOwn(body, 'deleteVolumes');
+  exactBody(body, withChoice ? [...fields, 'deleteVolumes'] : fields, 'Send expectedPreviewDigest and confirmation');
+  if (withChoice && typeof body.deleteVolumes !== 'boolean') {
+    throw new DockerComposeHttpError('docker_compose_input_invalid', 'deleteVolumes must be a boolean');
+  }
+  return withChoice ? { deleteVolumes: body.deleteVolumes } : {};
+}
+
 function logQuery(query) {
   const value = query ?? {};
   const keys = Object.keys(value);
@@ -422,25 +447,24 @@ export function mountDockerComposeRoutes(app, {
   }));
 
   app.post('/api/docker/projects/:dockerProjectId/operations/:action/preview', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
-    optionalEmptyBody(request.body);
+    const choice = operationPreviewBody(request.body);
     const project = await requireProject(dockerComposeProjectRegistry, request.params.dockerProjectId, localServerId);
     const preview = await safeCall(() => dockerComposeOperationsService.preview({
       projectId: project.id,
       action: request.params.action,
+      ...choice,
     }));
     return response.json({ data: preview, sideEffects: false });
   }));
 
   app.post('/api/docker/projects/:dockerProjectId/operations/:action', requirePanelRouteAccess, requireOwnerDockerAccess, asyncRoute(async (request, response) => {
-    const body = exactBody(
-      request.body,
-      ['expectedPreviewDigest', 'confirmation'],
-      'Send expectedPreviewDigest and confirmation',
-    );
+    const choice = operationQueueBody(request.body);
+    const body = request.body;
     const project = await requireProject(dockerComposeProjectRegistry, request.params.dockerProjectId, localServerId);
     const runQueue = () => safeCall(() => dockerComposeOperationsService.queue({
       projectId: project.id,
       action: request.params.action,
+      ...choice,
       expectedPreviewDigest: body.expectedPreviewDigest,
       confirmation: body.confirmation,
     }));
