@@ -271,9 +271,17 @@ export function getDockerLogs(projectId, { service = null, tail = 200 } = {}) {
   return panelRequest(`${projectPath(projectId)}/logs?${query}`);
 }
 
-export function previewDockerAction(projectId, requestedAction) {
+// Removal keeps named volumes unless deleteVolumes is chosen; the choice is
+// part of the preview digest, so apply repeats it from the confirmed preview.
+export function previewDockerAction(projectId, requestedAction, { deleteVolumes = false } = {}) {
   const selected = action(requestedAction);
-  return panelRequest(`${projectPath(projectId)}/operations/${selected}/preview`, { method: 'POST', body: {} });
+  if (typeof deleteVolumes !== 'boolean' || (deleteVolumes && selected !== 'remove')) {
+    throw new Error('Volume deletion can be chosen only for project removal');
+  }
+  return panelRequest(`${projectPath(projectId)}/operations/${selected}/preview`, {
+    method: 'POST',
+    body: deleteVolumes ? { deleteVolumes: true } : {},
+  });
 }
 
 export function applyDockerAction(projectId, requestedAction, preview) {
@@ -283,7 +291,11 @@ export function applyDockerAction(projectId, requestedAction, preview) {
   }
   return panelRequest(`${projectPath(projectId)}/operations/${selected}`, {
     method: 'POST',
-    body: { expectedPreviewDigest: preview.previewDigest, confirmation: preview.confirmation },
+    body: {
+      expectedPreviewDigest: preview.previewDigest,
+      confirmation: preview.confirmation,
+      ...(selected === 'remove' && preview.deleteVolumes === true ? { deleteVolumes: true } : {}),
+    },
   });
 }
 

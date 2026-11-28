@@ -10,9 +10,13 @@ const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const projectId = '0bb78242-03a6-429f-9d17-7725c521437c';
 const composeSha256 = 'a'.repeat(64);
 
-function fixture({ jobs = [], backupLocked = false, backupLockError = null } = {}) {
+function fixture({ jobs = [], backupLocked = false, backupLockError = null, removalVolumes = [] } = {}) {
   const enqueued = [];
   const service = createDockerComposeOperationsService({
+    async inspectRemoval(input) {
+      assert.deepEqual(input, { projectId, projectName: 'shop_app', serverId });
+      return { ready: true, volumes: structuredClone(removalVolumes) };
+    },
     projectRegistry: {
       async getProject(id) {
         return id === projectId ? {
@@ -179,4 +183,51 @@ test('compose history is sourced from durable jobs and excludes unrelated operat
   const history = await service.history({ projectId });
   assert.deepEqual(history, [newer, older]);
   assert.equal(JSON.stringify(history).includes('payload'), false);
+});
+
+// T969: the removal preview lists named volumes and the delete choice is part of
+// the digest and confirmation. Default removal keeps volumes.
+const removalVolumes = [
+  { volumeKey: 'data', volumeName: 'shop_app_data', present: true, deletable: true, fingerprint: 'c'.repeat(64), blockCode: null, blockReason: null },
+  { volumeKey: 'shared', volumeName: 'shared_uploads', present: null, deletable: false, fingerprint: null, blockCode: 'docker_volume_external_forbidden', blockReason: 'Harici veya özel adlı volume silinemez.' },
+];
+
+test('compose removal preview lists named volumes and binds the delete choice into the digest', async () => {
+  const { service } = fixture({ removalVolumes });
+  const keep = await service.preview({ projectId, action: 'remove' });
+  const remove = await service.preview({ projectId, action: 'remove', deleteVolumes: true });
+  assert.equal(keep.deleteVolumes, false);
+  assert.equal(remove.deleteVolumes, true);
+  assert.deepEqual(keep.volumes.map((volume) => [volume.volumeName, volume.deletable]), [['shop_app_data', true], ['shared_uploads', false]]);
+  assert.deepEqual(remove.volumes, keep.volumes);
+  assert.notEqual(keep.previewDigest, remove.previewDigest);
+  assert.notEqual(keep.confirmation, remove.confirmation);
+  assert.equal((await service.preview({ projectId, action: 'remove', deleteVolumes: false })).previewDigest, keep.previewDigest);
+});
+
+test('compose removal queue pins deletable volumes only after explicit opt-in', async () => {
+  const kept = fixture({ removalVolumes });
+  const keep = await kept.service.preview({ projectId, action: 'remove' });
+  await kept.service.queue({ projectId, action: 'remove', expectedPreviewDigest: keep.previewDigest, confirmation: keep.confirmation });
+  assert.equal(Object.hasOwn(kept.enqueued[0].payload, 'deleteVolumes'), false);
+  assert.equal(Object.hasOwn(kept.enqueued[0].payload, 'volumes'), false);
+
+  const opted = fixture({ removalVolumes });
+  const remove = await opted.service.preview({ projectId, action: 'remove', deleteVolumes: true });
+  await assert.rejects(
+    opted.service.queue({ projectId, action: 'remove', expectedPreviewDigest: remove.previewDigest, confirmation: remove.confirmation }),
+    { code: 'docker_compose_preview_stale' },
+  );
+  await opted.service.queue({ projectId, action: 'remove', deleteVolumes: true, expectedPreviewDigest: remove.previewDigest, confirmation: remove.confirmation });
+  assert.equal(opted.enqueued.length, 1);
+  assert.equal(opted.enqueued[0].payload.deleteVolumes, true);
+  assert.deepEqual(opted.enqueued[0].payload.volumes, [{ volumeKey: 'data', volumeName: 'shop_app_data', volumeFingerprint: 'c'.repeat(64) }]);
+  assert.notEqual(opted.enqueued[0].idempotencyKey, kept.enqueued[0].idempotencyKey);
+});
+
+test('compose volume deletion choice is rejected outside removal or without deletable volumes', async () => {
+  const { service } = fixture({ removalVolumes: [removalVolumes[1]] });
+  await assert.rejects(service.preview({ projectId, action: 'stop', deleteVolumes: true }), { code: 'docker_compose_input_invalid' });
+  await assert.rejects(service.preview({ projectId, action: 'remove', deleteVolumes: 'yes' }), { code: 'docker_compose_input_invalid' });
+  await assert.rejects(service.preview({ projectId, action: 'remove', deleteVolumes: true }), { code: 'docker_compose_removal_volumes_none' });
 });

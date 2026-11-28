@@ -202,9 +202,12 @@ export async function createDockerComposeRuntime({
     domainRegistry,
     jobRegistry,
     observer,
+    volumeManager,
+    validateDockerCompose,
+    siteMutationLock,
   });
   const operationsService = createDockerComposeOperationsService({
-    inspectRemoval: removal.inspect,
+    inspectRemoval: removal.preview,
     projectRegistry,
     environmentRegistry,
     credentialRegistry,
