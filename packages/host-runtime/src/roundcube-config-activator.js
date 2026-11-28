@@ -239,7 +239,7 @@ export function createRoundcubeConfigActivator({
     const content = cleandbDropIn();
     await mkdirFn(CLEANDB_DROPIN_DIRECTORY, { recursive: true, mode: SYSTEMD_DIRECTORY_MODE });
     const directory = await lstatFn(CLEANDB_DROPIN_DIRECTORY);
-    if (!directory.isDirectory() || directory.isSymbolicLink() || directory.uid !== ROOT_UID) {
+    if (!directory.isDirectory() || directory.isSymbolicLink() || directory.uid !== ROOT_UID || (directory.mode & 0o022) !== 0) {
       throw activationError('roundcube_cleandb_dropin_unsafe', 'Roundcube cleanup unit directory is unsafe');
     }
     let current = null;

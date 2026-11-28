@@ -113,7 +113,7 @@ function enoent() {
   return Object.assign(new Error('missing'), { code: 'ENOENT' });
 }
 
-function fixture({ existingDatabase = false, failFirstFpmValidation = false, failFirstNginxConflict = false, groups = 'yunpanel-roundcube www-data', curlFailures = 0, cleandbDropIn = null } = {}) {
+function fixture({ existingDatabase = false, failFirstFpmValidation = false, failFirstNginxConflict = false, groups = 'yunpanel-roundcube www-data', curlFailures = 0, cleandbDropIn = null, dropInDirectory = null } = {}) {
   const calls = [];
   const state = {
     databaseExists: existingDatabase,
@@ -188,6 +188,7 @@ function fixture({ existingDatabase = false, failFirstFpmValidation = false, fai
     if (target === '/var/lib/yunpanel/roundcube' || target === roundcubeTemplatePolicy.temporaryDirectory) {
       return directory({ uid: 2001, gid: 2001, mode: 0o700 });
     }
+    if (target === '/etc/systemd/system/roundcube-cleandb.service.d' && dropInDirectory) return dropInDirectory;
     if (target === '/etc/roundcube' || target === '/etc/php/8.3/fpm/pool.d' || target === '/etc/nginx/sites-enabled'
       || target === '/etc/systemd/system/roundcube-cleandb.service.d') {
       return directory();
@@ -350,4 +351,13 @@ test('an unchanged cleandb drop-in is not rewritten and systemd is not reloaded 
   await again.activator.activateConfiguration(preview(), { transactionId: TX });
   assert.equal(again.calls.some((entry) => entry[0] === 'write' && entry[1].startsWith(`${target}.`)), false);
   assert.equal(again.calls.some((entry) => entry[0] === 'run' && entry[1] === '/usr/bin/systemctl' && entry[2][0] === 'daemon-reload'), false);
+});
+
+test('an unsafe cleandb drop-in directory stops activation and restores the previous configuration (T973)', async () => {
+  for (const dropInDirectory of [directory({ mode: 0o777 }), directory({ uid: 2001 }), file()]) {
+    const fx = fixture({ existingDatabase: true, dropInDirectory });
+    await assert.rejects(fx.activator.activateConfiguration(preview(), { transactionId: TX }), { code: 'roundcube_cleandb_dropin_unsafe' });
+    assert.ok(fx.calls.some((entry) => entry[0] === 'restore'));
+    assert.equal(fx.calls.some((entry) => entry[0] === 'write' && entry[1].includes('yunpanel-runtime-user.conf')), false);
+  }
 });
