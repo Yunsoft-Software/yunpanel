@@ -1950,6 +1950,7 @@ export function createDomainRemovalRuntime({
           409,
         )));
       }
+      await retireRemovedNginxArtifacts(operation);
       return publicOperation(await completeControlPlaneStep(operation, step, evidence));
     }
     if (!exactSuspendedDomain(operation, domain, suspensionId)
@@ -1994,7 +1995,22 @@ export function createDomainRemovalRuntime({
         503,
       )));
     }
+    await retireRemovedNginxArtifacts(operation);
     return publicOperation(await completeControlPlaneStep(operation, step, evidence));
+  }
+
+  // T970: once the Domain record is finalized, its staged Nginx config and
+  // activation/deactivation receipts have no owner left. The manager refuses
+  // while a config with this name is enabled and keeps receipts it cannot
+  // prove belong to this exact Domain. Cleanup is hygiene after the verified
+  // post-condition, so an inspection error never reverts or blocks removal.
+  async function retireRemovedNginxArtifacts(operation) {
+    if (typeof nginxManager.retireRemovedDomainArtifacts !== 'function') return null;
+    try {
+      return await nginxManager.retireRemovedDomainArtifacts({ primaryDomain: operation.primaryDomain });
+    } catch {
+      return null;
+    }
   }
 
   async function dnsRetirementChild(operation, runtime) {
