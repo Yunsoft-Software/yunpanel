@@ -2246,3 +2246,13 @@
 
 - **Senior notu (28 Kasım):** Önce bu klasörü kimin, ne zaman yazdığını ve silmenin neden atladığını kanıtla. Site silme, siteye ait `backups/resources/website/<websiteId>` klasörünü kaldırmalı; Restic deposu ve snapshot'ları bu görevin kapsamı dışında (onlar ayrı ve bilinçli tutulur).
 - **Kabul:** Önce kırılan sonra geçen test. `npm test`. `.28`'de yedek/geri yükleme yapılmış bir test sitesi silinince klasör kalmaz.
+
+### T972 · Compose'a bağlı site silinince yedek kaynak klasörü kalıyor
+- **Bağımlı:** T971
+- **Dosyalar:** `apps/api/src/websites`, `apps/api/src/docker`
+- **Kaynak:** QA · 2026-11-28 03:34
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    T971 site silmede backups/resources/website/<websiteId> klasörünü file_cleanup adımında kaldırıyor; ancak yönetilen Docker Compose'a bağlı sitelerde silme planında file_cleanup adımı yok (apps/api/src/websites/website-removal-operation-registry.js ~209), bu yüzden bu sitelerin klasörü kalıyor. Beklenen: Compose'a bağlı site silmesi de kendi yedek kaynak klasörünü aynı güvenli kurallarla (lstat, tam kimlik, fail-closed) kaldırmalı.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
