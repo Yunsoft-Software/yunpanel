@@ -79,7 +79,8 @@ test('PHP retirement precedes file deletion and repeats before Unix identity cle
  const f=fixture({php:true});
  await f.adapters.fileCleanupHandler({websiteId,applicationId});
  assert.deepEqual(f.order.slice(0,3),['php','elfinder','files']);
- assert.equal(f.removed.length,4);
+ // Four canonical Application roots plus this Website's backup resource folder (T971).
+ assert.equal(f.removed.length,5);
  f.order.length=0;
  await f.adapters.unixIdentityCleanupHandler({websiteId,systemUser});
  assert.deepEqual(f.order,['php','elfinder','unix']);
@@ -103,7 +104,7 @@ test('pending or compensated SFTP, elFinder and PHP provisioning steps verify ho
  for(const sftpState of ['pending','compensated','failed','blocked']){
   const f=fixture({elfinderState:sftpState,elfinderRetireThrowsWithoutReceipt:true,php:true,phpState:'pending',withSftpJournal:true,sftpState,sftpRetireThrowsWithoutReceipt:true});
   await f.adapters.fileCleanupHandler({websiteId,applicationId});
-  assert.equal(f.removed.length,4);
+  assert.equal(f.removed.length,5);
   await f.adapters.unixIdentityCleanupHandler({websiteId,systemUser});
   assert.equal(f.compensated.length,1);
  }
@@ -121,16 +122,18 @@ test('PHP Application without its provisioning journal cannot delete files',asyn
  await assert.rejects(()=>f.adapters.fileCleanupHandler({websiteId,applicationId}),e=>e.code==='website_cleanup_php_evidence_invalid');
  assert.equal(f.removed.length,0);assert.equal(f.retirementCalls.length,0);
 });
-test('file cleanup touches only canonical Application direct-child roots and keeps backups out of scope',async()=>{
+test('file cleanup touches only canonical Application direct-child roots and this Website backup resource folder, keeping Restic backups out of scope',async()=>{
  const f=fixture();
- await f.adapters.fileCleanupHandler({websiteId,applicationId,retainedBackups:['backup-a']});
+ const result=await f.adapters.fileCleanupHandler({websiteId,applicationId,retainedBackups:['backup-a']});
  assert.deepEqual(f.removed.sort(),[
   '/var/lib/yunpanel/apps/'+applicationId,
+  '/var/lib/yunpanel/backups/resources/website/'+websiteId,
   '/var/lib/yunpanel/build/'+applicationId,
   '/var/lib/yunpanel/data/'+applicationId,
   '/var/www/yunpanel/apps/'+applicationId,
  ].sort());
- assert.equal(f.removed.some((path)=>path.includes('/backups/')),false);
+ assert.deepEqual(f.removed.filter((path)=>path.includes('/backups/')),['/var/lib/yunpanel/backups/resources/website/'+websiteId]);
+ assert.deepEqual(result.retainedBackups,['backup-a']);
 });
 test('file cleanup rejects a shared Application or symlink root before recursive deletion',async()=>{
  const shared=fixture({otherWebsite:true});await assert.rejects(()=>shared.adapters.fileCleanupHandler({websiteId,applicationId,retainedBackups:[]}),(e)=>e.code==='website_cleanup_application_shared');assert.equal(shared.removed.length,0);
