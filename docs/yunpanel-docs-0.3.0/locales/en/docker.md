@@ -20,6 +20,7 @@ Each Docker workload maps a **Konteyner portu** (Container port) to a loopback *
 
 - Use **Subdomain'e Docker Bağla** (Bind Docker to Subdomain) or a site's **Web Sunucusu & Nginx** panel to proxy a root domain, subdomain, or sub-path (such as `/api`) to a Docker stack.
 - The **Depolama** (Storage) section lists each service's persistent volumes and directory mounts. In **Kalıcı volume yönetimi** (Persistent volume management) you can delete one volume that belongs only to this project and is not attached to any container. Deletion needs explicit confirmation and shows a permanent data loss warning.
+- The **Projeyi kaldır** (Remove project) preview lists the project's named volumes. The default is **Volume'ları koru** (Keep volumes), which leaves them on the server. With **Volume'ları da sil** (Also delete volumes), only volumes that belong to this project and no other project are deleted in the same confirmed operation. The choice is part of the confirmation text; changing it refreshes the preview.
 
 ## Application Catalog (Ready-to-Deploy Apps)
 

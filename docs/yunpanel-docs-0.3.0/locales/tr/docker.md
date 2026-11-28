@@ -20,6 +20,7 @@ Her Docker servisi için **Konteyner portu** ile yerel **Sunucu portu** (`127.0.
 
 - **Subdomain'e Docker Bağla** veya site içi **Web Sunucusu & Nginx** ayarlarından bir Docker yığınını ana alan adına, alt alan adına veya belirli bir alt URL yoluna (`/api` gibi) ters vekil olarak bağlayabilirsiniz.
 - **Depolama** bölümü servislerin kalıcı disk (volume) ve dizin bağlantılarını gösterir. **Kalıcı volume yönetimi** bölümünden yalnız bu projeye ait ve hiçbir konteynere bağlı olmayan tek bir volume silinebilir. Silme açık onay ister ve veri kaybı uyarısı gösterir.
+- **Projeyi kaldır** önizlemesi projenin adlı volume'larını listeler. Varsayılan seçim **Volume'ları koru**'dur; volume'lar sunucuda kalır. **Volume'ları da sil** seçilirse yalnız bu projeye ait, başka projenin kullanmadığı volume'lar aynı onaylı işlemde silinir. Seçim onay metnine girer; seçim değişince önizleme yenilenir.
 
 ## Uygulama Marketi (Hazır Uygulamalar)
 

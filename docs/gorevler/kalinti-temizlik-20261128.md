@@ -72,3 +72,7 @@ T883 incelemesi, `.28`'de sertifika ve hazırlık dosyalarında `ypaudit-` artı
 - Silinmiş test sitesinin yedek kaynak klasörü (`backups/resources/website/e598f78e-…`): ayrı tar; bulgu T971.
 
 Son tarama: dosya sisteminde, MariaDB'de, PowerDNS'te, systemd/PHP-FPM'de ve Docker'da `ypaudit` adlı öğe yok. `nginx -t` başarılı, servisler aktif. SHA-256 değerleri `tasks/review/T883.md`'de.
+
+## T968–T971 sonrası (28 Kasım, gece)
+- T968 düzeltmesiyle kalan 3 `tdb04_a3_*` veritabanı panelden silindi; `tdb04_*` kalmadı.
+- Düzeltmelerden önceki koşulardan kalan test adlı 172 Let's Encrypt sertifikası (`tdev03`, `ttls0x`, `tweb`, `tdkr`, `ypt-e2e` vb.; hiçbiri canlı alan adı kaydında değil) `certbot delete` ile, 58 `tdev03`/`ttls01` hazırlık dosyası elle kaldırıldı. Yedekler `letsencrypt-tests-2.tar.gz` (`335398f2…e338a`), `letsencrypt-tests-3.tar.gz` (`e850ae09…7205`), `staging-tests-2.tar.gz` (`1e386daa…8366`). Kalan 8 sertifika ana sitelere ait; `nginx -t` başarılı, siteler 200.
