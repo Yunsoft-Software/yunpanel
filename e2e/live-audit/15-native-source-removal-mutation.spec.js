@@ -69,7 +69,8 @@ test('@mutation source one browser confirmation survives browser closure and com
  const done=await verifyRemoved(f,id);f.record('browser-closed.completed',{operationId:id,status:done.status,clientContinuationRequests:0,apiRestartTested:false});
 });
 
-const RESTART_RUNTIME_SOURCE='c0358499898af0c7e58f2778999d248afc63f081',RESTART_PACKAGE='0.3.0-2026112001';
+// The restart channel pins the exact installed runtime it is run against (T967); there is no stale default.
+const RESTART_RUNTIME_SOURCE=process.env.YUNPANEL_T883_RESTART_RUNTIME_SOURCE??'',RESTART_PACKAGE=process.env.YUNPANEL_T883_RESTART_PACKAGE??'';
 function restartTuple(stat){return[stat.dev,stat.ino,stat.mode,stat.uid,stat.gid,stat.nlink,stat.size,stat.mtimeMs,stat.ctimeMs];}
 function restartReadJson(filename){
  const before=fs.lstatSync(filename),fd=fs.openSync(filename,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW|fs.constants.O_NONBLOCK);
@@ -103,7 +104,7 @@ async function restartWaitReceipt(deadline){
 
 
 if(process.env.YUNPANEL_T883_RESTART_OPERATOR_SHA256)test('@mutation source one browser confirmation survives one actual root API restart and completes post-start work in the same owned journal',async({page})=>{
- test.setTimeout(300000);const operatorSha256=process.env.YUNPANEL_T883_RESTART_OPERATOR_SHA256;expect(operatorSha256,'HOLD: an actual reviewed root restart operator is required').toMatch(/^[a-f0-9]{64}$/);const fixtureKey=process.env.YUNPANEL_T883_RESTART_FIXTURE_KEY;expect(fixtureKey,'HOLD: ROOT must prearm one exact fresh restart fixture key').toMatch(/^t883-15-restart-[a-z0-9]+(?:-[a-z0-9]+)*$/);expect(fixtureKey.length).toBeLessThanOrEqual(44);expect(fs.existsSync(path.join(RUN_DIR,'owned-fixtures',fixtureKey+'.json')),'HOLD: restart proof requires a new ledger in this fresh run').toBe(false);
+ test.setTimeout(300000);const operatorSha256=process.env.YUNPANEL_T883_RESTART_OPERATOR_SHA256;expect(operatorSha256,'HOLD: an actual reviewed root restart operator is required').toMatch(/^[a-f0-9]{64}$/);const fixtureKey=process.env.YUNPANEL_T883_RESTART_FIXTURE_KEY;expect(fixtureKey,'HOLD: ROOT must prearm one exact fresh restart fixture key').toMatch(/^t883-15-restart-[a-z0-9]+(?:-[a-z0-9]+)*$/);expect(fixtureKey.length).toBeLessThanOrEqual(44);expect(RESTART_RUNTIME_SOURCE,'HOLD: pin the installed runtime commit').toMatch(/^[a-f0-9]{40}$/);expect(RESTART_PACKAGE,'HOLD: pin the installed package version').toMatch(/^\d+\.\d+\.\d+-\d{10}$/);expect(fs.existsSync(path.join(RUN_DIR,'owned-fixtures',fixtureKey+'.json')),'HOLD: restart proof requires a new ledger in this fresh run').toBe(false);
  expect(fs.existsSync(path.join(RUN_DIR,'api-restart-request.json'))).toBe(false);expect(fs.existsSync(path.join(RUN_DIR,'root-native-api-restart-receipt.json'))).toBe(false);
  const testSourceCommit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();expect(testSourceCommit).toMatch(/^[a-f0-9]{40}$/);const testFileSha256=createHash('sha256').update(fs.readFileSync(new URL(import.meta.url))).digest('hex');const deployment=await restartDeployment();
  restartAcceptanceHold=true;const f=await createOwnedFixture(owner,{key:fixtureKey,runtime:'static'});targets.push(f);await f.upload('index.html','T883-API-RESTART-'+f.ledger.runId);await verifyPhpSibling('before-actual-api-restart');
