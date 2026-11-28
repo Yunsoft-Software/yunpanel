@@ -80,3 +80,7 @@
 ## 2026-11-28 · T967 özel canlı kanallar için `.28` onayı
 - **Karar:** T967 kapsamında `.28` test sunucusuna ikinci bir PHP-FPM sürümü kurulur, `13.07` sürüm geçişi koşulur ve iş bitince ikinci sürüm kaldırılır (geri alma ve sağlık kaydıyla). `13.02` paylaşılan phpMyAdmin onarımı ve `15.02` gerçek API yeniden başlatması diğer koşular dururken, üç `.28` yuvası kilitliyken yapılır. Yalnız `.28`; `.44` ve Contabo sunucuları dahil değil.
 - **Onaylayan:** İNSAN (28-11-2026 sohbet: "onay veriyorum açık görevleri kapat")
+
+## 2026-11-28 · T969 Docker dokümanı için yunsoft.com yayın onayı
+- **Karar:** T969 Docker volume seçimi paragrafı (TR/EN `docker.md`) yunsoft.com'a yayımlanır. Kapsam T959 istisnasıyla aynı: yalnız senior, yalnız YunPanel `0.3.0` doküman dosyaları (`content/docs/yunpanel/0.3.0/`, `public/docs-assets/yunpanel/0.3.0/`, `registry.json` içindeki YunPanel kaydı). Önce yedek, sonra HTTP ve içerik doğrulaması. `.44`'te başka hiçbir şey değişmez.
+- **Onaylayan:** İNSAN (28-11-2026 sohbet: "dokümanı yunsoft.com'a yükle")

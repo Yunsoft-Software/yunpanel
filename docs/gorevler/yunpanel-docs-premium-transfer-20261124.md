@@ -128,3 +128,12 @@ Aşağıdaki tüm komutlar mock/stub olmadan gerçek SQLite, gerçek API, gerçe
 - **Doğrulama:** 22 sayfa (TR/EN) HTTP 200. Docker sayfası iki dilde yeni etiketleri gösteriyor, eski etiket yok, sayfa revizyonu `c1a84a51`. 34 görselin canlı SHA-256 değeri paketle aynı. YunCMS doküman sayfası ve ana sayfa 200.
 - **Docker görseli (aynı gün, kapandı):** Uyarının nedeni ekran görüntüsü ortamının Docker API yollarını kurmamasıydı (`/api/docker/projects` 404). `scripts/capture-docs-screenshots.mjs` artık Docker yollarını gerçek kayıtlarla kuruyor ve örnek `n8n_stack` Compose projesi gösteriyor (`677a2d5e`). Yalnız `12-docker-compose.png` (TR/EN, SHA-256 `9d5282e8…3738`) ve manifest özetleri değişti; arayüz kaynağı `c1a84a51` ile aynı olduğundan `sourceCommit` korunur.
 - **Yeniden yayın:** Paket SHA-256 `c5b18afefe8f658345451ba3025c78252d7c93c7050663e60e3f5b164e6a8a2a`. Önceki durum `…/docs-yunpanel-0.3.0-20261126/before-docker/` altında yedeklendi (4,4 MB). Sunucu doğrulayıcısı ve `import` hatasız; sahiplikler aynı. Doğrulama: 22 sayfa 200, 34 görselin canlı SHA-256 değeri paketle aynı, YunCMS ve ana sayfa 200.
+
+## 28 Kasım 2026 — Docker volume seçimi yayını (T969)
+
+- **Neden:** T969 ile **Projeyi kaldır** önizlemesine volume seçimi (**Volume'ları koru** / **Volume'ları da sil**) geldi; TR/EN `docker.md` paragrafı `adf0c3bb` commit'inde eklendi. Görsel ve manifest değişmedi.
+- **Onay:** İNSAN, 28-11-2026 ([DECISIONS](../orkestra/DECISIONS.md)); kapsam T959 istisnasıyla aynı, yalnız senior.
+- **Paket:** `yunpanel-docs-0.3.0-t969.tar.gz` SHA-256 `1df403a194402a87ec5d14898fff94996877aef65281617bace183e92ec21160`. Yerelde doğrulayıcı (11 sayfa, 22 kılavuz, 34 görsel, 50 iç bağlantı) ve `versioned-docs-package.test.js` 3/3 geçti.
+- **Yedek:** Önceki durum `/var/www/vhosts/yunsoft.com/.backups/docs-yunpanel-0.3.0-20261126/before-t969/` altında (4,4 MB).
+- **Yayın:** Sunucuda `docs-bundle.mjs validate` ve `import` hatasız, uyarı yok. Sahiplikler aynı (`yunsoft.com_qdablo7xeh9:psacln`, `registry.json` `root:root 644`). YunCMS 2.1.4 / 2.1.3 kayıtları korundu. Build veya servis değişmedi.
+- **Doğrulama:** TR `/tr/dokumanlar/yunpanel/0.3.0/<sayfa>` ve EN `/docs/yunpanel/0.3.0/<sayfa>` 22 sayfa 200. Docker sayfası TR'de yeni Türkçe paragrafı (`lang="tr"`), EN'de İngilizce paragrafı (`lang="en"`) gösteriyor. 34 görselin canlı SHA-256 değeri paketle aynı. Ana sayfa ve YunCMS doküman sayfası 200.
