@@ -205,8 +205,10 @@ export function createWebsiteRemovalOperationRegistry({
       add('runtime_cleanup', preview.website.applicationId ?? preview.website.id);
     }
 
-    // 6. File cleanup (data, apps directory)
-    if (!preview.plan.managedComposeBinding) add('file_cleanup', preview.website.applicationId ?? preview.website.id);
+    // 6. File cleanup (data, apps directory, this Website's backup resource folder).
+    // A managed Compose Website has no Application files; the step removes only its
+    // backup resource folder and the retained Compose project is never touched.
+    add('file_cleanup', preview.website.applicationId ?? preview.website.id);
 
     // 7. Unix identity cleanup
     if (preview.website.systemUser) {

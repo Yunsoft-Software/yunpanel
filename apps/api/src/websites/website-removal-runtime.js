@@ -330,7 +330,7 @@ export function createWebsiteRemovalRuntime({
     const plan = current?.plan;
     const missing = [];
     const require = (code, ...methods) => { if (methods.some((method) => typeof method !== 'function')) missing.push(code); };
-    if (!plan?.managedComposeBinding) require('file_cleanup_unavailable', fileCleanupHandler, fileCleanupInspector);
+    require('file_cleanup_unavailable', fileCleanupHandler, fileCleanupInspector);
     require('metadata_cleanup_unavailable', websiteRegistry?.getWebsite, websiteRegistry?.finalizeWebsiteRemoval, domainRegistry?.listDomains);
     if (plan?.applicationId) require('application_cleanup_unavailable',
       applicationRegistry?.getApplication, applicationRegistry?.deleteApplication,
@@ -356,7 +356,9 @@ export function createWebsiteRemovalRuntime({
       try { await databaseCleanupInspector({ websiteId: current.website.id, applicationId: plan.applicationId, serverId: current.website.serverId, systemUser: plan.systemUser, plan }); }
       catch { missing.push('database_cleanup_preflight_failed'); }
     }
-    if (typeof fileCleanupInspector === 'function' && current?.website?.id && plan?.applicationId) {
+    // Managed Compose Websites have no Application, but their backup resource
+    // folder is still checked before any Domain or metadata is removed.
+    if (typeof fileCleanupInspector === 'function' && current?.website?.id && (plan?.applicationId || plan?.managedComposeBinding)) {
       try { await fileCleanupInspector({ websiteId: current.website.id, applicationId: plan.applicationId }); }
       catch { missing.push('file_cleanup_preflight_failed'); }
     }
