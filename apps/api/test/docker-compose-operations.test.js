@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { OPERATIONS } from '@yunpanel/protocol';
+import { OPERATIONS, createOperationEnvelope } from '@yunpanel/protocol';
 import {
   createDockerComposeOperationsService,
   DockerComposeOperationsError,
@@ -223,6 +223,17 @@ test('compose removal queue pins deletable volumes only after explicit opt-in', 
   assert.equal(opted.enqueued[0].payload.deleteVolumes, true);
   assert.deepEqual(opted.enqueued[0].payload.volumes, [{ volumeKey: 'data', volumeName: 'shop_app_data', volumeFingerprint: 'c'.repeat(64) }]);
   assert.notEqual(opted.enqueued[0].idempotencyKey, kept.enqueued[0].idempotencyKey);
+});
+
+test('compose removal job payloads pass the real protocol envelope used by the job registry (T969)', async () => {
+  // The job registry validates every payload with createOperationEnvelope; a fake registry alone hid a mismatch.
+  for (const deleteVolumes of [false, true]) {
+    const { service, enqueued } = fixture({ removalVolumes });
+    const preview = await service.preview({ projectId, action: 'remove', deleteVolumes });
+    await service.queue({ projectId, action: 'remove', deleteVolumes, expectedPreviewDigest: preview.previewDigest, confirmation: preview.confirmation });
+    const envelope = createOperationEnvelope({ id: 'docker-remove-envelope', operation: enqueued[0].operation, payload: enqueued[0].payload });
+    assert.deepEqual(envelope.payload, enqueued[0].payload);
+  }
 });
 
 test('compose volume deletion choice is rejected outside removal or without deletable volumes', async () => {
