@@ -76,3 +76,7 @@
 ## 2026-11-26 · T958 `.28` kurulum onayı
 - **Karar:** Temizlik dalının (`26-11-2026`) paketi, `orchestrator.py verify` geçtikten sonra ayrıca onay beklemeden `.28` test sunucusuna kurulur ve T958 canlı testleri koşturulur. Yalnız `.28`; Contabo VPS'ler ve `.44` bu onaya dahil değil. Kurulum `docs/DEVIR.md` paket yöntemiyle yapılır, önceki paket geri dönüş için yerinde kalır.
 - **Onaylayan:** İNSAN (26-11-2026 sohbet: "testlerden sonra kur onayımı isteme")
+
+## 2026-11-28 · T967 özel canlı kanallar için `.28` onayı
+- **Karar:** T967 kapsamında `.28` test sunucusuna ikinci bir PHP-FPM sürümü kurulur, `13.07` sürüm geçişi koşulur ve iş bitince ikinci sürüm kaldırılır (geri alma ve sağlık kaydıyla). `13.02` paylaşılan phpMyAdmin onarımı ve `15.02` gerçek API yeniden başlatması diğer koşular dururken, üç `.28` yuvası kilitliyken yapılır. Yalnız `.28`; `.44` ve Contabo sunucuları dahil değil.
+- **Onaylayan:** İNSAN (28-11-2026 sohbet: "onay veriyorum açık görevleri kapat")
