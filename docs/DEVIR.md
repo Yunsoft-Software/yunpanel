@@ -56,7 +56,7 @@ Arka uç `apps/api/src` alan klasörleri (T957). Kökte yalnız systemd girişle
 - **Contabo test sunucuları:** Debian 12 (`.14`) ve Ubuntu 24.04 (`.212`) üzerinde `0.3.0-2026112104` kurulu. Çapraz işletim sistemi testleri için izinli. Kaynak kapalıyken dış yedekten kurtarma, iki yönlü geri yükleme, posta ve ikincil DNS kabulü 22 Kasım'da geçti.
 - **Linux hosting pilotu:** [Plan](../plan.md#20-kasım-2026--onaylanan-linux-hosting-pilotu-ve-plesk-geçişi). Kurtarma, posta, ikincil DNS, WAF ve trafik kotası kabulleri kapandı. Açık olanlar: yetkili gerçek Plesk dışa aktarımı ve son IMAP eşitlemesi, WordPress staging aktarımının yayın kabulü ([todo](../todo.md#linux-hosting-pilotu-ve-plesk-geçişi)).
 - **Testler:** Son toplu doğrulama (`orchestrator.py verify`) 28 Kasım'da `6001dc17`'de geçti ([LOG](orkestra/LOG.md)). 24 Kasım Debian 12 geçici çalışma alanında `npm test` 9.088 testten 9.086'sı geçti, 2'si belgeli atlama.
-- **Görevler:** `python3 orkestra/tasks.py status`. 28 Kasım'da T883, T966, T967 (inceleme), T968–T972 kapandı; hepsi `.28`'de canlı doğrulandı. Açık görev yok.
+- **Görevler:** `python3 orkestra/tasks.py status`. 28 Kasım'da T883, T966, T967, T968–T972 kabul edildi ve `.28`'de canlı doğrulandı. Açık: T973 (Debian `roundcube-cleandb` zamanlayıcısı YunPanel Roundcube kurulumunda her gün düşüyor; webmail etkilenmiyor).
 - **Ürün dokümanı:** TR/EN 0.3.0 paketi güncel arayüzle yunsoft.com'da yayında (26 Kasım, T959, [kayıt](gorevler/yunpanel-docs-premium-transfer-20261124.md#26-kasım-2026--yunsoftcom-yayını-t959)). Ekran görüntüleri `scripts/capture-docs-screenshots.mjs` ile yerel adayda alınır.
 
 ## 3. Son çalışmalar (10–26 Kasım)

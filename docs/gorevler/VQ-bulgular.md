@@ -2256,3 +2256,13 @@
     T971 site silmede backups/resources/website/<websiteId> klasörünü file_cleanup adımında kaldırıyor; ancak yönetilen Docker Compose'a bağlı sitelerde silme planında file_cleanup adımı yok (apps/api/src/websites/website-removal-operation-registry.js ~209), bu yüzden bu sitelerin klasörü kalıyor. Beklenen: Compose'a bağlı site silmesi de kendi yedek kaynak klasörünü aynı güvenli kurallarla (lstat, tam kimlik, fail-closed) kaldırmalı.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T973 · Debian roundcube-cleandb zamanlayıcısı YunPanel'in Roundcube kurulumunda her gün düşüyor
+- **Bağımlı:** —
+- **Dosyalar:** `packages/host-runtime/src`, `apps/api/src/mail`
+- **Kaynak:** QA · 2026-11-28 05:14
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    YunPanel Roundcube'u /etc/roundcube/config.inc.php (root:yunpanel-roundcube 0640) ile SQLite veritabanında (/var/lib/yunpanel/roundcube/roundcube.sqlite) çalıştırıyor. Debian paketinin roundcube-cleandb.service/timer'ı ise www-data olarak /usr/share/roundcube/bin/cleandb.sh çalıştırıyor; yapılandırmayı okuyamıyor ve .28'de en az 26 Kasım'dan beri her gün 'access denied' ile düşüyor. Webmail etkilenmiyor ama silinmiş kayıt temizliği hiç çalışmıyor ve systemd'de kalıcı başarısız birim görünüyor. Beklenen: YunPanel Roundcube'u yönetirken bu zamanlayıcıyı devre dışı bırakmalı ve aynı temizliği kendi kullanıcısıyla, kendi veritabanında çalıştırmalı (ya da Debian birimini drop-in ile doğru kullanıcıya bağlamalı). Önce tekrar üret ve teste çevir.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
