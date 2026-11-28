@@ -74,6 +74,28 @@ function validateCredentialRevisions(value, operation, errors) {
   }
 }
 
+function validateRemovalVolumes(payload, operation, errors) {
+  const volumes = payload.volumes;
+  if (payload.deleteVolumes !== true || !Array.isArray(volumes) || volumes.length < 1 || volumes.length > 64) {
+    errors.push(`${operation} volume deletion is invalid`);
+    return;
+  }
+  const seen = new Set();
+  for (const entry of volumes) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)
+      || Object.keys(entry).length !== 3
+      || typeof entry.volumeKey !== 'string' || !VOLUME_KEY_PATTERN.test(entry.volumeKey)
+      || typeof entry.volumeName !== 'string' || !VOLUME_NAME_PATTERN.test(entry.volumeName)
+      || entry.volumeName !== `${payload.projectName}_${entry.volumeKey}`
+      || typeof entry.volumeFingerprint !== 'string' || !SHA256_PATTERN.test(entry.volumeFingerprint)
+      || seen.has(entry.volumeKey)) {
+      errors.push(`${operation} volumes is invalid`);
+      return;
+    }
+    seen.add(entry.volumeKey);
+  }
+}
+
 function validateDockerComposeLifecycle(payload, operation, errors) {
   const allowed = new Set([
     'projectId', 'expectedProjectRevision', 'expectedEnvironmentRevision',
@@ -82,6 +104,12 @@ function validateDockerComposeLifecycle(payload, operation, errors) {
   if (operation === DOCKER_COMPOSE_REMOVE) {
     allowed.add('projectName');
     if (typeof payload.projectName !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,62}$/.test(payload.projectName)) errors.push(`${operation} projectName is invalid`);
+    // T969: named-volume deletion is an explicit, pinned opt-in carried together with its exact volume list.
+    if (Object.hasOwn(payload, 'deleteVolumes') || Object.hasOwn(payload, 'volumes')) {
+      allowed.add('deleteVolumes');
+      allowed.add('volumes');
+      validateRemovalVolumes(payload, operation, errors);
+    }
   }
   if (Object.keys(payload).length !== allowed.size || Object.keys(payload).some((key) => !allowed.has(key))) {
     errors.push(`${operation} contains unsupported arguments`);

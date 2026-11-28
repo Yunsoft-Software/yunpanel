@@ -47,6 +47,28 @@ test('compose removal requires a pinned project name and rejects shell or unrela
   }
 });
 
+test('compose removal accepts an explicit pinned named-volume deletion and rejects loose shapes (T969)', () => {
+  const base = { ...payload, projectName: 'owned-project' };
+  const volume = { volumeKey: 'data', volumeName: 'owned-project_data', volumeFingerprint: 'b'.repeat(64) };
+  const desired = { ...base, deleteVolumes: true, volumes: [volume] };
+  const envelope = createOperationEnvelope({ id: 'docker-remove-0002', operation: OPERATIONS.DOCKER_COMPOSE_REMOVE, payload: desired });
+  assert.equal(validateOperationEnvelope(envelope).ok, true);
+  assert.deepEqual(envelope.payload, desired);
+  for (const candidate of [
+    { ...base, deleteVolumes: true },
+    { ...base, volumes: [volume] },
+    { ...base, deleteVolumes: false, volumes: [volume] },
+    { ...base, deleteVolumes: true, volumes: [] },
+    { ...base, deleteVolumes: true, volumes: [{ ...volume, volumeName: 'foreign_data' }] },
+    { ...base, deleteVolumes: true, volumes: [{ ...volume, volumeFingerprint: 'bad' }] },
+    { ...base, deleteVolumes: true, volumes: [{ ...volume, extra: 1 }] },
+    { ...base, deleteVolumes: true, volumes: [volume, volume] },
+  ]) {
+    assert.throws(() => createOperationEnvelope({ id: 'docker-remove-0003', operation: OPERATIONS.DOCKER_COMPOSE_REMOVE, payload: candidate }));
+  }
+  assert.throws(() => createOperationEnvelope({ id: 'docker-stop-0001', operation: OPERATIONS.DOCKER_COMPOSE_STOP, payload: { ...payload, deleteVolumes: true, volumes: [volume] } }));
+});
+
 test('compose lifecycle payload rejects stale-shaped credentials and unsupported fields', () => {
   for (const candidate of [
     { ...payload, expectedProjectRevision: 0 },
