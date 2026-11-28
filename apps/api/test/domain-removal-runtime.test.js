@@ -1455,6 +1455,72 @@ test('explicit continuation detaches the bound certificate and retires its regis
   assert.equal(certificates.current().retirementOperationId, operation.id);
 });
 
+// T970: the retired certificate's certbot lineage is purged by the
+// operation that retired it, after the registry proves the retirement.
+test('T970: explicit certificate retirement purges its retired material once and never fails removal on purge errors', async () => {
+  for (const purgeFails of [false, true]) {
+    const registry = createRegistry();
+    const preview = certificateRemovalPreview();
+    let operation = await completeRoutingStep(registry, preview);
+    const domains = domainRegistryFixture({ certificateId: 'certificate-1' });
+    const certificates = certificateRegistryFixture();
+    const purges = [];
+    const runtime = createDomainRemovalRuntime({
+      registry,
+      previewProvider: async () => preview,
+      suspensionRuntime: completedSuspensionRuntime(),
+      domainRegistry: domains.manager,
+      certificateRegistry: certificates.registry,
+      certificateMaterialPurger: {
+        async purgeRetiredCertificate(input) {
+          purges.push({ ...input, stateAtPurge: certificates.current().state });
+          if (purgeFails) throw Object.assign(new Error('certbot exploded'), { code: 'certbot_failed' });
+          return { purged: true };
+        },
+      },
+    });
+
+    operation = await runtime.continueStep({
+      domainId: operation.domainId,
+      operationId: operation.id,
+      expectedUpdatedAt: operation.updatedAt,
+      stepId: operation.steps[1].id,
+      checksum: operation.checksum,
+      confirmation: `continue-domain-remove-step:${operation.domainId}:${operation.id}:${operation.steps[1].id}:${operation.updatedAt}:${operation.checksum}`,
+    });
+
+    assert.equal(operation.steps[1].kind, 'certificate');
+    assert.equal(operation.steps[1].status, 'succeeded');
+    assert.deepEqual(purges, [{ certificateId: 'certificate-1', stateAtPurge: 'retired' }]);
+  }
+});
+
+test('T970: startup reconciliation of a retired certificate does not run host purge', async () => {
+  const registry = createRegistry();
+  let operation = await completeRoutingStep(registry, certificateRemovalPreview());
+  operation = await registry.markStepRunning(operation.id, operation.steps[1].id);
+  const certificates = certificateRegistryFixture({
+    state: 'retired',
+    updatedAt: '2026-09-18T21:00:00.000Z',
+    retirementOperationId: operation.id,
+    retiredAt: '2026-09-18T21:00:00.000Z',
+    retiredFromState: 'active',
+    retiredFromUpdatedAt: '2026-09-18T20:00:00.000Z',
+  });
+  let purges = 0;
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => { throw new Error('startup must not create a preview'); },
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domainRegistryFixture({ certificateId: null }).manager,
+    certificateRegistry: certificates.registry,
+    certificateMaterialPurger: { async purgeRetiredCertificate() { purges += 1; } },
+  });
+  const recovery = await runtime.init();
+  assert.equal(recovery[0].recovered, true);
+  assert.equal(purges, 0);
+});
+
 test('startup reconciles exact operation-owned certificate retirement without replaying mutation', async () => {
   const registry = createRegistry();
   let operation = await completeRoutingStep(registry, certificateRemovalPreview());

@@ -1102,6 +1102,7 @@ const domainRemovalRuntimeBundle = localServerId && domainSuspensionRuntime && m
     roundcubeDomainMappingRegistry,
     roundcubeDomainMappingService,
     websiteCronImpactProvider,
+    certificateMaterialPurger: certificateMaterialGc,
     localServerId,
   })
   : null;

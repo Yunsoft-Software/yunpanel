@@ -290,3 +290,11 @@ test('domain-removal-production-runtime includes crons in preview impact and fai
   });
 });
 
+
+test('T970: index.js passes the certificate material GC to Domain removal as its retired-material purger', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const indexSource = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
+  const productionSource = await readFile(new URL('../src/domains/domain-removal-production-runtime.js', import.meta.url), 'utf8');
+  assert.match(indexSource, /createDomainRemovalProductionRuntime\(\{[\s\S]*?certificateMaterialPurger:\s*certificateMaterialGc,/);
+  assert.match(productionSource, /createDomainRemovalRuntime\(\{[\s\S]*?certificateMaterialPurger,\s*\}\);/);
+});
