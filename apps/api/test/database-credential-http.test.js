@@ -141,6 +141,152 @@ test('authenticated database metadata writes share the Application lock only for
   assert.deepEqual(stored.credentials.map((value) => value.databaseBindingId).sort(), [first.binding.id, second.binding.id].sort());
 });
 
+test('the same Owner finalizes a credential delete from a new session while other actors stay conflicted', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yp-db-credential-delete-session-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const servers = createServerRegistry({ filePath: path.join(directory, 'servers.json') });
+  const server = await servers.createLocalServer({ hostname: 'database-delete.example.test' });
+  const serverExists = async (id) => Boolean(await servers.getServer(id));
+  const applications = createApplicationRegistry({ filePath: path.join(directory, 'applications.json'), serverExists });
+  const websiteRegistry = createWebsiteRegistry({ filePath: path.join(directory, 'websites.json'), serverExists,
+    getApplication: applications.getApplication });
+  async function createSite(name) {
+    const application = await applications.createPhpApplication({ serverId: server.id, name });
+    return websiteRegistry.createWebsite({ serverId: server.id, name, applicationId: application.id, runtimeType: 'php' });
+  }
+  const site = await createSite('site.database-delete.example.test');
+  const otherSite = await createSite('other.database-delete.example.test');
+  const databaseBindingRegistry = createDatabaseBindingRegistry({
+    filePath: path.join(directory, 'bindings.json'), serverExists,
+    getWebsite: websiteRegistry.getWebsite, getApplication: applications.getApplication,
+  });
+  const databaseCredentialRegistry = createDatabaseCredentialRegistry({
+    filePath: path.join(directory, 'credentials.json'), masterKey: randomBytes(32).toString('hex'),
+    getDatabaseBinding: databaseBindingRegistry.getBinding,
+  });
+  const jobRegistry = createJobRegistry({ filePath: path.join(directory, 'jobs.json') });
+  const databaseCredentialApplyService = createDatabaseCredentialApplyService({ databaseBindingRegistry, databaseCredentialRegistry, jobRegistry });
+  const { withApplicationLock } = createSiteMutationLock({ root: path.join(directory, 'locks') });
+  const auth = createAuthStore({ filePath: path.join(directory, 'auth.sqlite'), websiteLookup: websiteRegistry.getWebsite });
+  t.after(() => auth.close());
+  const ownerPassword = randomBytes(32).toString('base64url');
+  await auth.completeSetup({ setupToken: auth.issueSetupToken().token, username: 'admin', password: ownerPassword });
+  const authorizeActor = (actor, websiteId) => {
+    const session = auth.getSessionById(actor.sessionId);
+    return session?.user.id === actor.userId && session.user.role === actor.role
+      && (actor.role === 'owner' || session.user.websiteIds.includes(websiteId));
+  };
+  const app = express();
+  app.use(express.json());
+  app.use(createSiteResourceBoundary({ websiteRegistry, databaseBindingRegistry, databaseCredentialRegistry, localServerId: server.id }));
+  mountDatabaseCredentialRoutes(app, { registry: servers, websiteRegistry, databaseBindingRegistry, databaseCredentialRegistry,
+    databaseCredentialApplyService, jobRegistry, ensureDatabaseIdle: databaseHttpInternals.ensureDatabaseIdle,
+    withApplicationLock, authorizeActor });
+  app.use((error, _request, response, _next) => response.status(error.status ?? 500).json({ error: { code: error.code } }));
+
+  const origin = 'https://panel.database-delete.example.test';
+  const listener = createAuthenticatedApi({ store: auth, publicOrigin: origin, ownerMfaRequired: false, createHandler: () => app });
+  const httpServer = http.createServer(listener).listen(0, '127.0.0.1');
+  await once(httpServer, 'listening');
+  t.after(() => new Promise((resolve) => { httpServer.close(resolve); httpServer.closeAllConnections(); }));
+  const base = `http://127.0.0.1:${httpServer.address().port}`;
+  async function send(url, { method = 'GET', body, headers = {} } = {}) {
+    const response = await fetch(base + url, { method, body: body === undefined ? undefined : JSON.stringify(body),
+      headers: { Origin: origin, 'Content-Type': 'application/json', ...headers } });
+    const text = await response.text();
+    return { status: response.status, ...(text ? JSON.parse(text) : {}) };
+  }
+  async function client(name, password) {
+    const login = await fetch(`${base}/api/auth/login`, { method: 'POST', body: JSON.stringify({ username: name, password }),
+      headers: { Origin: origin, 'Content-Type': 'application/json' } });
+    assert.equal(login.status, 200);
+    const cookie = login.headers.get('set-cookie').split(';')[0];
+    const session = await send('/api/auth/session', { headers: { cookie } });
+    assert.equal(session.status, 200);
+    return (url, method = 'GET', body = undefined) => send(url, { method, body,
+      headers: { cookie, 'x-csrf-token': session.data.csrfToken } });
+  }
+  async function manager(website, name) {
+    const password = randomBytes(32).toString('base64url');
+    await auth.users.createSiteManager({ username: name, password, websiteId: website.id });
+    return client(name, password);
+  }
+
+  const binding = await databaseBindingRegistry.bindDatabase({ serverId: server.id, websiteId: site.id, databaseName: 'site_db',
+    confirmation: `bind-database:${server.id}:site_db:${site.id}` });
+  const created = await databaseCredentialRegistry.createCredential({ databaseBindingId: binding.id, privileges: ['SELECT'],
+    confirmation: `create-database-credential:${binding.id}:${databaseCredentialRegistryInternals.usernameFor(binding.id)}` });
+  const credentialUrl = `/api/servers/${server.id}/database-credentials/${created.id}`;
+  async function deleteRequest(call) {
+    const preview = await call(`${credentialUrl}/delete-preview`);
+    assert.equal(preview.status, 200);
+    return {
+      preview: preview.data,
+      body: {
+        expectedCredentialRevision: preview.data.expectedCredentialRevision,
+        expectedBindingRevision: preview.data.expectedBindingRevision,
+        expectedDesiredStateSha256: preview.data.desiredStateSha256,
+        confirmation: preview.data.confirmation,
+      },
+    };
+  }
+
+  // Session A starts the host delete, the job succeeds, and A leaves before finalizing.
+  const sessionA = await client('admin', ownerPassword);
+  const first = await deleteRequest(sessionA);
+  const queued = await sessionA(`${credentialUrl}/delete`, 'POST', first.body);
+  assert.equal(queued.status, 202);
+  const claimed = await jobRegistry.claimNext(server.id);
+  assert.equal(claimed.job.id, queued.data.job.id);
+  const succeeded = await jobRegistry.complete({ serverId: server.id, jobId: queued.data.job.id, status: 'succeeded', result: {
+    version: 1,
+    databaseCredentialId: created.id,
+    databaseBindingId: binding.id,
+    credentialRevision: first.preview.expectedCredentialRevision,
+    bindingRevision: first.preview.expectedBindingRevision,
+    databaseName: binding.databaseName,
+    username: first.preview.username,
+    host: first.preview.host,
+    desiredStateSha256: first.preview.desiredStateSha256,
+    deleted: true,
+    sideEffects: true,
+  } });
+  assert.equal(succeeded.status, 'succeeded');
+  assert.equal((await sessionA('/api/auth/logout', 'POST')).status, 204);
+
+  // Another Owner, a site manager of the same Website and a manager of another Website cannot reuse the job.
+  const ownerTwoPassword = randomBytes(32).toString('base64url');
+  const sessionB = await client('admin', ownerPassword);
+  const ownerTwoCreated = await sessionB('/api/users', 'POST', { username: 'owner_two', password: ownerTwoPassword, role: 'owner' });
+  assert.equal(ownerTwoCreated.status, 201);
+  const ownerTwo = await client('owner_two', ownerTwoPassword);
+  const ownerTwoAttempt = await ownerTwo(`${credentialUrl}/delete`, 'POST', (await deleteRequest(ownerTwo)).body);
+  assert.equal(ownerTwoAttempt.status, 409);
+  assert.equal(ownerTwoAttempt.error.code, 'job_authorization_conflict');
+  const siteManager = await manager(site, 'site_manager_a');
+  const siteManagerAttempt = await siteManager(`${credentialUrl}/delete`, 'POST', (await deleteRequest(siteManager)).body);
+  assert.equal(siteManagerAttempt.status, 409);
+  assert.equal(siteManagerAttempt.error.code, 'job_authorization_conflict');
+  const otherManager = await manager(otherSite, 'site_manager_b');
+  assert.equal((await otherManager(`${credentialUrl}/delete`, 'POST', first.body)).status, 403);
+
+  // The same Owner in a new session receives the finished job and finalizes it.
+  const second = await deleteRequest(sessionB);
+  assert.deepEqual(second.body, first.body);
+  const resumed = await sessionB(`${credentialUrl}/delete`, 'POST', second.body);
+  assert.equal(resumed.status, 202, JSON.stringify(resumed.error ?? null));
+  assert.equal(resumed.data.job.id, queued.data.job.id);
+  assert.equal(resumed.data.job.status, 'succeeded');
+  const finalized = await sessionB(credentialUrl, 'DELETE', {
+    expectedRevision: first.preview.expectedCredentialRevision,
+    deleteJobId: resumed.data.job.id,
+    confirmation: `finalize-database-credential-delete:${created.id}:${first.preview.expectedCredentialRevision}:${resumed.data.job.id}`,
+  });
+  assert.equal(finalized.status, 200);
+  assert.equal(finalized.data.finalizedFromJobId, queued.data.job.id);
+  assert.equal(await databaseCredentialRegistry.getCredential(created.id), null);
+});
+
 function createFakeApp() {
   const routes = new Map();
   const register = (method) => (path, ...handlers) => routes.set(`${method} ${path}`, handlers.at(-1));

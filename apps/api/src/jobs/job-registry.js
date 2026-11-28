@@ -233,6 +233,18 @@ export function normalizeJobAuthorization(value, { optional = false } = {}) {
   return Object.freeze({ ...value });
 }
 
+// The same user, role and resource scope in a newer panel session; every other field must match exactly.
+function isSameActorInAnotherSession(existingAuth, requestAuth) {
+  if (!existingAuth || !requestAuth
+    || typeof existingAuth.sessionId !== 'string' || typeof requestAuth.sessionId !== 'string'
+    || typeof existingAuth.actorId !== 'string' || typeof existingAuth.role !== 'string') {
+    return false;
+  }
+  const { sessionId: _existingSession, ...existingScope } = existingAuth;
+  const { sessionId: _requestSession, ...requestScope } = requestAuth;
+  return JSON.stringify(existingScope) === JSON.stringify(requestScope);
+}
+
 function isAuthorizedActor(existingAuth, retryAuth) {
   if (!existingAuth) return true;
   if (!retryAuth) return false;
@@ -1520,7 +1532,8 @@ export function createJobRegistry({
         }
         const jobAuthorization = normalizeJobAuthorization(job.authorization, { optional: true });
         if (jobAuthorization && privateAuthorization
-          && JSON.stringify(jobAuthorization) !== JSON.stringify(privateAuthorization)) {
+          && JSON.stringify(jobAuthorization) !== JSON.stringify(privateAuthorization)
+          && !isSameActorInAnotherSession(jobAuthorization, privateAuthorization)) {
           throw new JobRegistryError(
             'job_authorization_conflict',
             'Job idempotency key is already bound to a different private authorization scope',
@@ -1591,6 +1604,10 @@ export function createJobRegistry({
 
             const failedAt = existing.finishedAt ? Date.parse(existing.finishedAt) : now();
 
+            // A retry by the same user from a newer session runs with that live session.
+            if (isSameActorInAnotherSession(existingAuthorization, privateAuthorization)) {
+              existing.authorization = privateAuthorization;
+            }
             existing.status = 'queued';
             existing.startedAt = null;
             existing.finishedAt = null;
